@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contact - VR Manager</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <nav>
+      <div class="logo">VR Manager</div>
+      <ul>
+        <li><a href="index.html">Accueil</a></li>
+        <li><a href="features.html">Fonctionnalités</a></li>
+        <li><a href="pricing.html">Tarifs</a></li>
+        <li><a href="contact.html" class="active">Contact</a></li>
+      </ul>
+    </nav>
+    <div class="hero hero-small">
+      <h1>Contact & Démo</h1>
+      <p>Demandez une démo ou contactez-nous pour un devis personnalisé.</p>
+    </div>
+  </header>
+  <main>
+    <section class="contact-section">
+      <form class="contact-form" id="contactForm">
+        <label for="name">Nom :</label>
+        <input type="text" id="name" name="name" required>
+        <label for="email">Email :</label>
+        <input type="email" id="email" name="email" required>
+        <label for="message">Message :</label>
+        <textarea id="message" name="message" rows="5" required></textarea>
+        <button type="submit">Envoyer</button>
+        <div id="formStatus"></div>
+      </form>
+    </section>
+  </main>
+  <footer>
+    <div class="footer-content">
+      <span>&copy; 2025 VR Manager. Tous droits réservés.</span>
+      <span><a href="contact.html">Contact</a> | <a href="mentions.html">Mentions légales</a></span>
+    </div>
+  </footer>
+  <script src="script.js"></script>
+</body>
+</html>
