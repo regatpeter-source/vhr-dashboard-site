@@ -86,11 +86,11 @@
     <script src="https://js.stripe.com/v3/"></script>
     <script>
       // Remplacez par votre clé publique Stripe (test ou live)
-      const stripe = Stripe('pk_test_XXXXXXXXXXXXXXXXXXXXXXXX');
+      const stripe = Stripe('pk_live_51SWgWn7g8FcyfmlJidzwt7Hu7BYa5CrL7zfjX9qUzzQFNwl8n8JbFhuwblkDjgi2ixGObTCYRwebOtVyI9zjoEng00OHmEBvWG');
 
       // Remplacez par vos IDs de prix Stripe (créés dans le dashboard Stripe)
-      const priceIdAbonnement = 'price_XXXXXXXXXXXXXX'; // Abonnement mensuel
-      const priceIdAchat = 'price_YYYYYYYYYYYYYY';     // Achat unique
+      const priceIdAbonnement = 'price_price_1SWhBW7g8FcyfmlJZ5rJGh6N'; // Abonnement mensuel
+      const priceIdAchat = 'price_1SWhPb7g8FcyfmlJzlquRicj';     // Achat unique
 
       document.getElementById('stripe-sub-btn').addEventListener('click', function() {
         stripe.redirectToCheckout({
