@@ -3,13 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Contact - VR Manager</title>
+  <meta name="description" content="Contactez l'équipe VHR Manager pour une démo, un devis ou toute question sur la gestion de casques VR." />
+  <title>Contact – VHR Manager</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header>
     <nav>
-      <div class="logo">VR Manager</div>
+      <div class="logo">VHR Manager</div>
       <ul>
         <li><a href="index.html">Accueil</a></li>
         <li><a href="features.html">Fonctionnalités</a></li>
@@ -38,10 +39,28 @@
   </main>
   <footer>
     <div class="footer-content">
-      <span>&copy; 2025 VR Manager. Tous droits réservés.</span>
+      <span>&copy; 2025 VHR Manager. Tous droits réservés.</span>
       <span><a href="contact.html">Contact</a> | <a href="mentions.html">Mentions légales</a></span>
     </div>
   </footer>
   <script src="script.js"></script>
+  <!-- Chatbot IA (Botpress Webchat) -->
+  <script>
+    window.botpressWebChat = {
+      botId: "01HXXXXXXX",
+      hostUrl: "https://cdn.botpress.cloud/webchat/v1",
+      messagingUrl: "https://messaging.botpress.cloud",
+      clientId: "01HXXXXXXX",
+      botName: "Assistant VHR Manager",
+      avatarUrl: "https://cdn-icons-png.flaticon.com/512/4712/4712035.png",
+      showPoweredBy: false,
+      enableTranscriptDownload: true,
+      stylesheet: '',
+      containerWidth: '400px',
+      layoutWidth: '400px',
+      enableReset: true
+    };
+  </script>
+  <script src="https://cdn.botpress.cloud/webchat/v1/inject.js"></script>
 </body>
 </html>
