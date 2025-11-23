@@ -1,3 +1,9 @@
+/* Centrage des descriptifs */
+.centered {
+  text-align: center;
+  margin-left: auto;
+  margin-right: auto;
+}
 /* Accessibilité : focus visible sur liens et boutons */
 a:focus, button:focus, .cta:focus, .cta-secondary:focus {
   outline: 2px solid #2196f3;
