@@ -142,7 +142,9 @@ const users = [
   {
     username: 'vhr',
     passwordHash: '$2b$10$Axa5JBDt22Wc2nZtTqeMBeVjyDYEl0tMyu0NDdUYiTcocI2bvqK46',
-    role: 'admin'
+    role: 'admin',
+    email: 'admin@example.local',
+    stripeCustomerId: null
   }
 ];
 
@@ -151,7 +153,13 @@ const JWT_EXPIRES = '2h';
 
 // --- Middleware de vérification du token ---
 function authMiddleware(req, res, next) {
-  const token = req.headers.authorization && req.headers.authorization.split(' ')[1];
+  // Accept token from Authorization header (Bearer) OR cookie 'vhr_token'
+  let token = null;
+  if (req.headers && req.headers.authorization && req.headers.authorization.split(' ')[1]) {
+    token = req.headers.authorization.split(' ')[1];
+  } else if (req.cookies && req.cookies.vhr_token) {
+    token = req.cookies.vhr_token;
+  }
   if (!token) return res.status(401).json({ ok: false, error: 'Token manquant' });
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
@@ -170,11 +178,20 @@ app.post('/api/login', async (req, res) => {
   const valid = await bcrypt.compare(password, user.passwordHash);
   if (!valid) return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
   const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-  res.json({ ok: true, token, username: user.username, role: user.role });
+  // Set cookie for better protection in browsers (httpOnly)
+  const cookieOptions = {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 2 * 60 * 60 * 1000 // 2h
+  };
+  res.cookie('vhr_token', token, cookieOptions);
+  res.json({ ok: true, token, username: user.username, role: user.role, email: user.email || null });
 });
 
 // --- Route de logout (optionnelle, côté client il suffit de supprimer le token) ---
 app.post('/api/logout', (req, res) => {
+  res.clearCookie('vhr_token');
   res.json({ ok: true });
 });
 
@@ -182,6 +199,45 @@ app.post('/api/logout', (req, res) => {
 app.get('/api/me', authMiddleware, (req, res) => {
   const user = { username: req.user.username, role: req.user.role };
   res.json({ ok: true, user });
+});
+
+// Update current user profile (username/email/password)
+app.patch('/api/me', authMiddleware, async (req, res) => {
+  const { username, email, oldPassword, newPassword } = req.body || {};
+  try {
+    const user = users.find(u => u.username === req.user.username);
+    if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
+    if (username && username !== user.username) {
+      // ensure unique
+      if (users.find(u => u.username === username)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
+      user.username = username;
+    }
+    if (email) user.email = email;
+    if (newPassword) {
+      if (!oldPassword) return res.status(400).json({ ok: false, error: 'Ancien mot de passe requis' });
+      const valid = await bcrypt.compare(oldPassword, user.passwordHash);
+      if (!valid) return res.status(401).json({ ok: false, error: 'Ancien mot de passe incorrect' });
+      user.passwordHash = await bcrypt.hash(newPassword, 10);
+    }
+    res.json({ ok: true, user: { username: user.username, role: user.role, email: user.email || null } });
+  } catch (e) {
+    console.error('[api] me patch:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Delete self account (development/demo only)
+app.delete('/api/users/self', authMiddleware, (req, res) => {
+  try {
+    const index = users.findIndex(u => u.username === req.user.username);
+    if (index === -1) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
+    users.splice(index, 1);
+    res.clearCookie('vhr_token');
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[api] delete self:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
 });
 
 // --- Exemple de route protégée ---
@@ -900,5 +956,63 @@ app.get('/stripe-check', async (req, res) => {
   } catch (err) {
     console.error('[Stripe] /stripe-check error:', err && err.message);
     res.status(500).json({ ok: false, error: 'Stripe key validation failed: ' + (err && err.message) });
+  }
+});
+
+// ---------- Stripe Customer helpers ----------
+async function ensureStripeCustomerForUser(user) {
+  if (!stripe) throw new Error('Stripe not configured');
+  if (user.stripeCustomerId) return user.stripeCustomerId;
+  // Create a new Stripe customer for this user
+  try {
+    const cust = await stripe.customers.create({ name: user.username || undefined, email: user.email || undefined, metadata: { username: user.username } });
+    user.stripeCustomerId = cust.id;
+    return cust.id;
+  } catch (e) {
+    console.error('[Stripe] create customer error', e && e.message);
+    throw e;
+  }
+}
+
+// Create a Portal session for the current user
+app.post('/api/billing/portal', authMiddleware, async (req, res) => {
+  try {
+    const user = users.find(u => u.username === req.user.username);
+    if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
+    const customerId = await ensureStripeCustomerForUser(user);
+    const origin = req.headers.origin || `http://localhost:${process.env.PORT || 3000}`;
+    const session = await stripe.billingPortal.sessions.create({ customer: customerId, return_url: `${origin}/account.html` });
+    res.json({ ok: true, url: session.url });
+  } catch (e) {
+    console.error('[Stripe] billing portal error', e && e.message);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// List invoices for current authenticated user
+app.get('/api/billing/invoices', authMiddleware, async (req, res) => {
+  try {
+    const user = users.find(u => u.username === req.user.username);
+    if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
+    if (!user.stripeCustomerId) return res.json({ ok: true, invoices: [] });
+    const invoices = await stripe.invoices.list({ customer: user.stripeCustomerId, limit: 30 });
+    res.json({ ok: true, invoices: invoices.data });
+  } catch (e) {
+    console.error('[Stripe] invoices error', e && e.message);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// List subscriptions for current authenticated user
+app.get('/api/billing/subscriptions', authMiddleware, async (req, res) => {
+  try {
+    const user = users.find(u => u.username === req.user.username);
+    if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
+    if (!user.stripeCustomerId) return res.json({ ok: true, subscriptions: [] });
+    const subs = await stripe.subscriptions.list({ customer: user.stripeCustomerId, limit: 30 });
+    res.json({ ok: true, subscriptions: subs.data });
+  } catch (e) {
+    console.error('[Stripe] subscriptions error', e && e.message);
+    res.status(500).json({ ok: false, error: String(e) });
   }
 });
