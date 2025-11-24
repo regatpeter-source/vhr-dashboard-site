@@ -598,6 +598,7 @@ app.post('/api/apps/:serial/launch', async (req, res) => {
       
       if (success) {
         console.log(`[launch] ✅ ${pkg} lancé`);
+        try { io.emit('app-launch', { serial, package: pkg, method: 'am_start', success: true, startedAt: Date.now() }); } catch (e) {}
         res.json({ ok: true, msg: `Jeu lancé: ${pkg}` });
         return;
       }
@@ -611,6 +612,7 @@ app.post('/api/apps/:serial/launch', async (req, res) => {
     
     if (monkeyResult.code === 0 || monkeyResult.stdout.includes('Events injected')) {
       console.log(`[launch] ✅ ${pkg} lancé via monkey`);
+      try { io.emit('app-launch', { serial, package: pkg, method: 'monkey', success: true, startedAt: Date.now() }); } catch (e) {}
       res.json({ ok: true, msg: `Jeu lancé: ${pkg}` });
       return;
     }
@@ -626,9 +628,11 @@ app.post('/api/apps/:serial/launch', async (req, res) => {
     
     if (success) {
       console.log(`[launch] ✅ ${pkg} lancé via am start`);
+      try { io.emit('app-launch', { serial, package: pkg, method: 'am_start_fallback', success: true, startedAt: Date.now() }); } catch (e) {}
       res.json({ ok: true, msg: `Jeu lancé: ${pkg}` });
     } else {
       console.log(`[launch] ⚠️ ${pkg} - Échec:\n${amResult.stdout}\n${amResult.stderr}`);
+      try { io.emit('app-launch', { serial, package: pkg, success: false, error: (amResult.stderr || 'Unknown') }); } catch(e) {}
       res.json({ ok: false, msg: 'Échec du lancement', details: amResult.stderr });
     }
   } catch (e) {
@@ -832,7 +836,7 @@ if (process.env.NO_ADB !== '1') {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`\n🚀 VR Manager Dashboard - Optimisé Anti-Scintillement`);
+  console.log(`\n🚀 VHR DASHBOARD - Optimisé Anti-Scintillement`);
   console.log(`📡 Server: http://localhost:${PORT}`);
   console.log(`\n📊 Profils disponibles (ADB screenrecord - stable):`);
   console.log(`   • ultra-low: 320p, 600K (WiFi faible)`);
