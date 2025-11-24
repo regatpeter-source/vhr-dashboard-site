@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: vhr-dashboard-backend
+    env: docker
+    branch: feat/dev-setup-pr
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    envVars:
+      - key: STRIPE_SECRET_KEY
+      - key: JWT_SECRET
+      - key: STRIPE_DEBUG_PRICES
+      - key: NO_ADB
+      - key: PORT
