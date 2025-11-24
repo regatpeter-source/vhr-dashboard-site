@@ -115,6 +115,10 @@ nav ul li a:hover {
   background: #e3f2fd;
   color: #1976d2;
 }
+.badge.playing {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
 
 /* Testimonials */
 .testimonials {
