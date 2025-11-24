@@ -19,6 +19,7 @@
         <li><a href="features.html">Fonctionnalités</a></li>
         <li><a href="pricing.html">Tarifs</a></li>
         <li><a href="contact.html">Contact</a></li>
+        <li><a href="developer-setup.html">Guide développeur</a></li>
       </ul>
     </nav>
     <div class="hero">
@@ -120,6 +121,7 @@
       <span>&copy; 2025 VHR DASHBOARD. Tous droits réservés.</span>
       <span>
         <a href="contact.html">Contact</a> |
+        <a href="developer-setup.html">Guide développeur</a> |
         <a href="mentions.html">Mentions légales</a> |
         <a href="downloads/VR-Manager-demo.zip" download aria-label="Télécharger la démo de VHR DASHBOARD depuis le footer">Télécharger</a>
       </span>
@@ -130,24 +132,9 @@
       </span>
     </div>
   </footer>
-  <script src="script.js"></script>
-  <!-- Chatbot IA (Botpress Webchat) -->
-  <script>
-    window.botpressWebChat = {
-      botId: "01HXXXXXXX", // Remplacez par l'ID de votre bot Botpress Cloud ou laissez pour démo
-      hostUrl: "https://cdn.botpress.cloud/webchat/v1",
-      messagingUrl: "https://messaging.botpress.cloud",
-      clientId: "01HXXXXXXX", // Remplacez par votre clientId si besoin
-      botName: "Assistant VHR DASHBOARD",
-      avatarUrl: "https://cdn-icons-png.flaticon.com/512/4712/4712035.png",
-      showPoweredBy: false,
-      enableTranscriptDownload: true,
-      stylesheet: '',
-      containerWidth: '400px',
-      layoutWidth: '400px',
-      enableReset: true
-    };
-  </script>
+  <script src="/js/script.js"></script>
+  <!-- Chatbot IA (Botpress Webchat) config (moved to external file to comply with CSP) -->
+  <script src="/js/botpress-config.js"></script>
   <script src="https://cdn.botpress.cloud/webchat/v1/inject.js"></script>
 </body>
 </html>
