@@ -23,11 +23,11 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", 'https://cdn.botpress.cloud'],
+      scriptSrc: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com'],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", 'data:', 'https://cdn-icons-png.flaticon.com', 'https://cdn.botpress.cloud'],
       connectSrc: ["'self'", 'https://api.stripe.com', 'https://messaging.botpress.cloud'],
-      frameSrc: ["'self'", 'https://messaging.botpress.cloud'],
+      frameSrc: ["'self'", 'https://messaging.botpress.cloud', 'https://checkout.stripe.com'],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
       formAction: ["'self'"]

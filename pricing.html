@@ -85,30 +85,52 @@
     <!-- Stripe Checkout - Paiement en ligne -->
     <script src="https://js.stripe.com/v3/"></script>
     <script>
-      // Remplacez par votre clé publique Stripe (test ou live)
-      const stripe = Stripe('pk_live_51SWgWn7g8FcyfmlJidzwt7Hu7BYa5CrL7zfjX9qUzzQFNwl8n8JbFhuwblkDjgi2ixGObTCYRwebOtVyI9zjoEng00OHmEBvWG');
+      // NOTE: Client-only Checkout is deprecated and may not be enabled on your Stripe account.
+      // We recommend using a server-side endpoint that creates a Checkout session using your
+      // Stripe secret key (sk_test_...) and returns a session URL which is more secure.
 
-      // Remplacez par vos IDs de prix Stripe (créés dans le dashboard Stripe)
+      // Replace these by your actual Stripe Price IDs configured in your Stripe Dashboard.
       const priceIdAbonnement = 'price_1SWhBW7g8FcyfmlJZ5rJGh6N'; // Abonnement mensuel
       const priceIdAchat = 'price_1SWhPb7g8FcyfmlJzlquRicj';     // Achat unique
 
+      async function createCheckoutSession(priceId, mode) {
+        try {
+          const res = await fetch('/create-checkout-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ priceId, mode })
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error('HTTP ' + res.status + ': ' + text);
+          }
+          const json = await res.json();
+          if (json && json.url) {
+            // Redirect the user to Checkout using the returned URL
+            window.location = json.url;
+          } else {
+            throw new Error('Réponse invalide du serveur');
+          }
+        } catch (e) {
+          console.error('[Stripe] createCheckoutSession error:', e);
+          alert('Erreur lors de la création de la session de paiement : ' + e.message);
+        }
+      }
+
       document.getElementById('stripe-sub-btn').addEventListener('click', function() {
-        stripe.redirectToCheckout({
-          lineItems: [{ price: priceIdAbonnement, quantity: 1 }],
-          mode: 'subscription',
-          successUrl: window.location.origin + '/pricing.html?success=1',
-          cancelUrl: window.location.origin + '/pricing.html?canceled=1',
-        });
+        createCheckoutSession(priceIdAbonnement, 'subscription');
       });
 
       document.getElementById('stripe-onetime-btn').addEventListener('click', function() {
-        stripe.redirectToCheckout({
-          lineItems: [{ price: priceIdAchat, quantity: 1 }],
-          mode: 'payment',
-          successUrl: window.location.origin + '/pricing.html?success=1',
-          cancelUrl: window.location.origin + '/pricing.html?canceled=1',
-        });
+        createCheckoutSession(priceIdAchat, 'payment');
       });
+
+      // Optional: Keep the direct client-only integration as a commented fallback.
+      /*
+      // Client-only deprecated flow (only if enabled in your Dashboard):
+      const stripe = Stripe('pk_test_...');
+      stripe.redirectToCheckout({ lineItems: [{ price: priceIdAbonnement, quantity: 1 }], mode: 'subscription', successUrl: window.location.origin + '/pricing.html?success=1', cancelUrl: window.location.origin + '/pricing.html?canceled=1' });
+      */
     </script>
   <script src="https://cdn.botpress.cloud/webchat/v1/inject.js"></script>
 </body>
