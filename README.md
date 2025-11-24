@@ -1,3 +1,17 @@
+Environment variables
+---------------------
+The server uses the following environment variables. Configure them in Render (or your host) or place them in a local `.env` for development.
+
+- STRIPE_SECRET_KEY: your stripe sk_test_... key (required for live Stripe features)
+- STRIPE_DEBUG_PRICES: set to `1` to enable `/stripe-check` debug route
+- NO_ADB: set to `1` if the host should skip ADB tracking (recommended for cloud)
+- JWT_SECRET: a secret for signing JWT tokens (change in production!)
+- PORT: the port to run the server on (defaults to 3000)
+
+Streaming notes & ADB
+---------------------
+The backend uses ADB and system tools like `ffmpeg`, `adb`, and `scrcpy` to drive streaming and native-screen capture. For production use of streaming features, the server must be on the same local network as the devices or able to reach them. Running the Node app in a remote cloud environment (Render, Heroku) usually prevents direct access to local devices — in such cases, set `NO_ADB=1` or use a local on-prem deployment (e.g., a machine inside the customer network) to support streaming/ADB features.
+
 # VHR Dashboard (VR Manager)
 
 This repository contains the VHR Dashboard project: a Node.js app for managing and streaming VR headsets and a static `site-vitrine` folder for the marketing website.
