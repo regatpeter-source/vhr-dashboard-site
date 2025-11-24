@@ -1,0 +1,8 @@
+node_modules
+npm-debug.log
+.env
+dist
+site-vitrine
+temp-devsetup
+.github
+public/broadway/public
