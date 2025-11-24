@@ -35,6 +35,7 @@ const grid = document.getElementById('deviceGrid');
 
 // ========== API Helper ========== 
 async function api(path, opts = {}) {
+  opts = Object.assign({ credentials: 'include' }, opts);
   try {
     const res = await fetch(path, opts);
     return await res.json();
