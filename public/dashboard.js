@@ -155,6 +155,112 @@ async function launchApp(serial, pkg) {
   }
 }
 
+// ========== STREAM CONTROL ========== 
+async function startStream(device, profile) {
+  const res = await api('/api/stream/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serial: device.serial, profile: profile || 'default' })
+  });
+  if (!res.ok) alert('Erreur démarrage stream: ' + (res.error || 'inconnue'));
+  setTimeout(loadDevices, 500); // Refresh state
+}
+
+async function stopStream(device) {
+  const res = await api('/api/stream/stop', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serial: device.serial })
+  });
+  if (!res.ok) alert('Erreur arrêt stream: ' + (res.error || 'inconnue'));
+  setTimeout(loadDevices, 500);
+}
+
+// ========== RENOMMAGE ========== 
+async function renameDevice(device) {
+  const name = prompt('Nouveau nom pour le casque', device.name);
+  if (!name || name === device.name) return;
+  const res = await api('/api/devices/rename', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serial: device.serial, name })
+  });
+  if (res.ok) loadDevices();
+  else alert('Erreur: ' + (res.error || 'inconnue'));
+}
+
+// ========== FAVORIS ========== 
+async function showFavoritesDialog(device) {
+  const res = await api('/api/favorites');
+  if (!res.ok) return alert('Erreur chargement favoris');
+  const favs = res.favorites || [];
+  let html = `<h3>Favoris</h3><ul>`;
+  favs.forEach(fav => { html += `<li>${fav.name} <button onclick="launchApp('${device.serial}','${fav.packageId}')">Lancer</button></li>`; });
+  html += '</ul>';
+  showModal(html);
+}
+
+// ========== STOCKAGE ========== 
+async function showStorageDialog(device) {
+  // Placeholder: could list files, storage info, etc.
+  alert('Fonction stockage à implémenter');
+}
+
+// ========== MODAL ========== 
+function showModal(html) {
+  let modal = document.getElementById('modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal';
+    modal.className = 'modal';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `<div class='modal-content'>${html}<br><button onclick="closeModal()">Fermer</button></div>`;
+  modal.style.display = 'block';
+}
+function closeModal() {
+  const modal = document.getElementById('modal');
+  if (modal) modal.style.display = 'none';
+}
+
+// ========== WIFI PAIRING ========== 
+async function connectWifi(device) {
+  try {
+    // First try automatic detection via server-side logic (no IP provided)
+    let res = await api('/api/adb/wifi-connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serial: device.serial })
+    });
+    if (res && res.ok) {
+      alert('Connexion WiFi réussie !' + (res.ip ? ' IP: ' + res.ip : ''));
+      setTimeout(loadDevices, 1000);
+      return;
+    }
+
+    // If server couldn't detect IP automatically, ask user to enter it
+    if (res && res.error && res.error.toLowerCase().includes('unable to detect device ip')) {
+      const ip = prompt('Adresse IP du casque (ex: 192.168.1.42)');
+      if (!ip) return;
+      const r2 = await api('/api/adb/wifi-connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serial: device.serial, ip })
+      });
+      if (r2 && r2.ok) alert('Connexion WiFi réussie !');
+      else alert('Erreur WiFi: ' + (r2 && r2.error ? r2.error : 'inconnue'));
+      setTimeout(loadDevices, 1000);
+      return;
+    }
+
+    // Any other error
+    alert('Erreur WiFi: ' + (res && res.error ? res.error : 'inconnue'));
+    setTimeout(loadDevices, 1000);
+  } catch (e) {
+    console.error('connectWifi', e);
+    alert('Erreur WiFi: ' + String(e));
+  }
+}
+
 // ========== SOCKET.IO EVENTS ========== 
 socket.on('devices-update', (data) => { devices = data; renderDevices(); });
 socket.on('games-update', (data) => { games = data; });

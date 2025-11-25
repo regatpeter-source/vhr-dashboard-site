@@ -35,6 +35,8 @@ app.use(helmet({
   }
 }));
 app.use(cors({ origin: true, credentials: true }));
+// Ensure webhook route receives raw body for Stripe signature verification
+app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -136,17 +138,45 @@ app.post('/create-checkout-session', async (req, res) => {
   }
 });
 
-// --- Utilisateurs (à remplacer par une vraie base de données) ---
-const users = [
-  // Admin user: vhr / 0409 (hash generated securely)
-  {
-    username: 'vhr',
-    passwordHash: '$2b$10$Axa5JBDt22Wc2nZtTqeMBeVjyDYEl0tMyu0NDdUYiTcocI2bvqK46',
-    role: 'admin',
-    email: 'admin@example.local',
-    stripeCustomerId: null
+// --- Utilisateurs (simple persistence JSON: replace with a proper DB in production) ---
+const USERS_FILE = path.join(__dirname, 'data', 'users.json');
+
+function ensureDataDir() {
+  try { fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true }); } catch (e) { }
+}
+
+function saveUsers() {
+  try {
+    ensureDataDir();
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
+    return true;
+  } catch (e) {
+    console.error('[users] save error', e && e.message);
+    return false;
   }
-];
+}
+
+function loadUsers() {
+  try {
+    ensureDataDir();
+    if (fs.existsSync(USERS_FILE)) {
+      let raw = fs.readFileSync(USERS_FILE, 'utf8');
+      // Remove BOM if present
+      raw = raw.replace(/^\uFEFF/, '').trim();
+      const parsed = JSON.parse(raw || '[]');
+      if (Array.isArray(parsed)) return parsed;
+      // If file contains a single user object, wrap it in array
+      if (parsed && typeof parsed === 'object') return [parsed];
+      return [];
+    }
+  } catch (e) {
+    console.error('[users] load error', e && e.message);
+  }
+  // Default fallback: admin user
+  return [{ username: 'vhr', passwordHash: '$2b$10$Axa5JBDt22Wc2nZtTqeMBeVjyDYEl0tMyu0NDdUYiTcocI2bvqK46', role: 'admin', email: 'admin@example.local', stripeCustomerId: null }];
+}
+
+let users = loadUsers();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change_this_secret';
 const JWT_EXPIRES = '2h';
@@ -219,7 +249,12 @@ app.patch('/api/me', authMiddleware, async (req, res) => {
       if (!valid) return res.status(401).json({ ok: false, error: 'Ancien mot de passe incorrect' });
       user.passwordHash = await bcrypt.hash(newPassword, 10);
     }
-    res.json({ ok: true, user: { username: user.username, role: user.role, email: user.email || null } });
+    // Persist changes
+    saveUsers();
+    // If username changed, reissue JWT and cookie
+    const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    res.cookie('vhr_token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 2 * 60 * 60 * 1000 });
+    res.json({ ok: true, token, user: { username: user.username, role: user.role, email: user.email || null } });
   } catch (e) {
     console.error('[api] me patch:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -232,6 +267,7 @@ app.delete('/api/users/self', authMiddleware, (req, res) => {
     const index = users.findIndex(u => u.username === req.user.username);
     if (index === -1) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
     users.splice(index, 1);
+    saveUsers();
     res.clearCookie('vhr_token');
     res.json({ ok: true });
   } catch (e) {
@@ -722,17 +758,62 @@ app.post('/api/devices/rename', (req, res) => {
 
 app.post('/api/adb/wifi-connect', async (req, res) => {
   const { serial, ip } = req.body || {};
-  if (!serial || !ip) {
-    return res.status(400).json({ ok: false, error: 'serial and ip required' });
+  if (!serial) {
+    return res.status(400).json({ ok: false, error: 'serial required' });
   }
 
   try {
+    let targetIp = ip;
+
+    // If no IP provided, try to auto-detect via adb
+    if (!targetIp) {
+      try {
+        // Try ip route: e.g. "default via 192.168.1.1 dev wlan0  proto dhcp  src 192.168.1.42"
+        const routeOut = await runAdbCommand(serial, ['shell', 'ip', 'route']);
+        const routeStdout = routeOut.stdout || '';
+        const match = routeStdout.match(/src\s+(\d+\.\d+\.\d+\.\d+)/);
+        if (match && match[1]) targetIp = match[1];
+      } catch (e) {
+        // ignore and try next
+      }
+    }
+
+    if (!targetIp) {
+      try {
+        // Try ip addr show wlan0 -> inet 192.168.x.y/24
+        const addrOut = await runAdbCommand(serial, ['shell', 'ip', '-4', 'addr', 'show', 'wlan0']);
+        const addrStdout = addrOut.stdout || '';
+        const match2 = addrStdout.match(/inet\s+(\d+\.\d+\.\d+\.\d+)\//);
+        if (match2 && match2[1]) targetIp = match2[1];
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    if (!targetIp) {
+      // Fallback: try dumpsys ip route or other methods
+      try {
+        const routeOut2 = await runAdbCommand(serial, ['shell', 'ip', 'route']);
+        const stdout2 = routeOut2.stdout || '';
+        const match3 = stdout2.match(/src\s+(\d+\.\d+\.\d+\.\d+)/);
+        if (match3 && match3[1]) targetIp = match3[1];
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    if (!targetIp) {
+      // If we still don't have an ip, return error to caller to enter IP manually
+      return res.status(400).json({ ok: false, error: 'Unable to detect device IP automatically. Please enter IP manually.' });
+    }
+
+    // Enable TCP on 5555 and connect
     await runAdbCommand(serial, ['shell', 'setprop', 'persist.adb.tcp.port', '5555']);
     await runAdbCommand(serial, ['tcpip', '5555']);
-    const r = await runAdbCommand(null, ['connect', ip]);
+    const r = await runAdbCommand(null, ['connect', targetIp]);
     const ok = r.stdout && /connected|already connected/i.test(r.stdout);
     refreshDevices().catch(() => { });
-    res.json({ ok, msg: r.stdout || r.stderr || 'done' });
+    res.json({ ok, ip: targetIp, msg: r.stdout || r.stderr || 'done' });
   } catch (e) {
     console.error('[api] wifi-connect:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -967,6 +1048,8 @@ async function ensureStripeCustomerForUser(user) {
   try {
     const cust = await stripe.customers.create({ name: user.username || undefined, email: user.email || undefined, metadata: { username: user.username } });
     user.stripeCustomerId = cust.id;
+    // Persist Stripe customer ID
+    try { saveUsers(); } catch (e) { console.error('[users] save after stripe create failed:', e && e.message); }
     return cust.id;
   } catch (e) {
     console.error('[Stripe] create customer error', e && e.message);
@@ -1015,4 +1098,56 @@ app.get('/api/billing/subscriptions', authMiddleware, async (req, res) => {
     console.error('[Stripe] subscriptions error', e && e.message);
     res.status(500).json({ ok: false, error: String(e) });
   }
+});
+
+// Stripe webhook endpoint: persist invoice and subscription events to user record
+const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET_DEV || null;
+app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+  try {
+    if (stripeWebhookSecret) {
+      // constructEvent expects raw body as string or Buffer
+      if (Buffer.isBuffer(req.body)) event = stripe.webhooks.constructEvent(req.body, sig, stripeWebhookSecret);
+      else event = stripe.webhooks.constructEvent(JSON.stringify(req.body), sig, stripeWebhookSecret);
+    } else {
+      // If no webhook secret set (dev), prefer already-parsed body or parse raw string
+      if (Buffer.isBuffer(req.body)) event = JSON.parse(req.body.toString());
+      else event = req.body;
+    }
+  } catch (e) {
+    console.error('[Stripe] webhook failed to parse/verify:', e && e.message);
+    return res.status(400).send(`Webhook error: ${e && e.message}`);
+  }
+
+  // Handle a subset of events and persist changes per user
+  try {
+    const obj = event.data && event.data.object ? event.data.object : null;
+    const type = event.type;
+    if (!obj) return res.json({ received: true });
+    const customerId = obj.customer || (obj.customer_id) || null;
+    if (!customerId) return res.json({ received: true });
+    const user = users.find(u => u.stripeCustomerId === customerId);
+    if (!user) return res.json({ received: true });
+
+    if (type === 'invoice.paid') {
+      user.latestInvoiceId = obj.id;
+      user.lastInvoicePaidAt = obj.status_transitions && obj.status_transitions.paid_at ? new Date(obj.status_transitions.paid_at * 1000).toISOString() : new Date().toISOString();
+    } else if (type === 'invoice.payment_failed') {
+      user.lastInvoiceFailedId = obj.id;
+      user.lastInvoiceFailedAt = new Date().toISOString();
+    } else if (type.startsWith('customer.subscription')) {
+      user.subscriptionStatus = obj.status || obj?.plan?.status || obj?.status || 'unknown';
+      user.subscriptionId = obj.id;
+    } else if (type === 'checkout.session.completed') {
+      // session completed often delivers: session.customer
+      if (obj.customer) user.stripeCustomerId = obj.customer;
+    }
+
+    saveUsers();
+  } catch (e) {
+    console.error('[Stripe webhook] error handling event', e && e.message);
+  }
+
+  res.json({ received: true });
 });

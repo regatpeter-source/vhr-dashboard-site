@@ -14,3 +14,6 @@ coverage/
 *.key
 tests/__snapshots__/
 public/broadway/public/
+data/
+*.bak
+public/.vscode/
