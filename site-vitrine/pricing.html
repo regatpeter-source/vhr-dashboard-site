@@ -34,7 +34,7 @@
             <li>Mises à jour & support</li>
             <li>Sans engagement, résiliable à tout moment</li>
           </ul>
-            <button class="cta" id="stripe-sub-btn" aria-label="Payer l'abonnement mensuel en ligne">Payer l'abonnement</button>
+            <button class="cta stripe-buy" id="stripe-sub-btn" data-price-id="price_1SWhBW7g8FcyfmlJZ5rJGh6N" data-mode="subscription" aria-label="Payer l'abonnement mensuel en ligne">Payer l'abonnement</button>
         </div>
         <div class="pricing-card">
           <h2>Achat définitif</h2>
@@ -44,7 +44,7 @@
             <li>Mises à jour 1 an incluses</li>
             <li>Support prioritaire 1 an</li>
           </ul>
-            <button class="cta-secondary" id="stripe-onetime-btn" aria-label="Acheter la licence définitive en ligne">Acheter la licence</button>
+            <button class="cta-secondary stripe-buy" id="stripe-onetime-btn" data-price-id="price_1SWhPb7g8FcyfmlJzlquRicj" data-mode="payment" aria-label="Acheter la licence définitive en ligne">Acheter la licence</button>
         </div>
       </div>
       <div class="payment-note">
@@ -64,7 +64,7 @@
       <span><a href="contact.html">Contact</a> | <a href="mentions.html">Mentions légales</a></span>
     </div>
   </footer>
-  <script src="/js/script.js"></script>
+  <script src="/script.js"></script>
   <!-- Chatbot IA (Botpress Webchat) config (moved to external file to comply with CSP) -->
   <script src="/js/botpress-config.js"></script>
   <!-- Stripe Checkout - via backend - externalized script to comply with CSP -->
