@@ -1227,3 +1227,25 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
 
   res.json({ received: true });
 });
+
+// --- Route de register / création de compte ---
+app.post('/api/register', async (req, res) => {
+  const { username, password, email } = req.body || {};
+  if (!username || !password) return res.status(400).json({ ok: false, error: 'username and password required' });
+  try {
+    // unique username
+    if (getUserByUsername(username)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
+    const passwordHash = await bcrypt.hash(password, 10);
+    const newUser = { username, passwordHash, role: 'user', email: email || null, stripeCustomerId: null };
+    // persist
+    persistUser(newUser);
+    // create token and set cookie
+    const token = jwt.sign({ username: newUser.username, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    const cookieOptions = { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 2 * 60 * 60 * 1000 };
+    res.cookie('vhr_token', token, cookieOptions);
+    res.json({ ok: true, token, username: newUser.username, role: newUser.role, email: newUser.email });
+  } catch (e) {
+    console.error('[api] register:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});

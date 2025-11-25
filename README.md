@@ -53,6 +53,11 @@ Optional: automatic redeploy from GitHub Actions
 Database & Stripe webhook setup (production)
 --------------------------------------------
  - To use SQLite in production, install `better-sqlite3` (e.g., `npm install better-sqlite3`) then set `DB_SQLITE_FILE` in your environment. The app will automatically create `data/vhr.db` and migrate existing `data/users.json` if present.
+ - A migration helper is available at `scripts/migrate-to-sqlite.js` to move `data/users.json` into SQLite. Run it after installing `better-sqlite3` with:
+   
+	 node scripts/migrate-to-sqlite.js
+   
+	 It will initialize the DB and migrate users from the JSON file into `data/vhr.db`.
  - To validate Stripe webhooks, set `STRIPE_WEBHOOK_SECRET` (from the Stripe dashboard) in your environment. The webhook endpoint `/webhook` uses this secret for signature verification.
  - For high-scale/production usage consider migrating to a proper RDBMS like Postgres and a robust migration strategy.
 
