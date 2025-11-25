@@ -66,23 +66,8 @@
     </div>
   </footer>
   <script src="/script.js"></script>
-  <!-- Chatbot IA (Botpress Webchat) -->
-  <script>
-    window.botpressWebChat = {
-      botId: "01HXXXXXXX",
-      hostUrl: "https://cdn.botpress.cloud/webchat/v1",
-      messagingUrl: "https://messaging.botpress.cloud",
-      clientId: "01HXXXXXXX",
-      botName: "Assistant VHR DASHBOARD",
-      avatarUrl: "https://cdn-icons-png.flaticon.com/512/4712/4712035.png",
-      showPoweredBy: false,
-      enableTranscriptDownload: true,
-      stylesheet: '',
-      containerWidth: '400px',
-      layoutWidth: '400px',
-      enableReset: true
-    };
-  </script>
+  <!-- Chatbot IA (Botpress Webchat) configuration loaded from external file to comply with CSP -->
+  <script src="/js/botpress-config.js"></script>
     <!-- Stripe Checkout - Paiement en ligne -->
     <script src="https://js.stripe.com/v3/"></script>
       <script src="/js/pricing-stripe.js"></script>
