@@ -65,7 +65,7 @@
       <span><a href="contact.html">Contact</a> | <a href="mentions.html">Mentions légales</a></span>
     </div>
   </footer>
-  <script src="script.js"></script>
+  <script src="/script.js"></script>
   <!-- Chatbot IA (Botpress Webchat) -->
   <script>
     window.botpressWebChat = {
@@ -85,54 +85,7 @@
   </script>
     <!-- Stripe Checkout - Paiement en ligne -->
     <script src="https://js.stripe.com/v3/"></script>
-    <script>
-      // NOTE: Client-only Checkout is deprecated and may not be enabled on your Stripe account.
-      // We recommend using a server-side endpoint that creates a Checkout session using your
-      // Stripe secret key (sk_test_...) and returns a session URL which is more secure.
-
-      // Replace these by your actual Stripe Price IDs configured in your Stripe Dashboard.
-      const priceIdAbonnement = 'price_1SWhBW7g8FcyfmlJZ5rJGh6N'; // Abonnement mensuel
-      const priceIdAchat = 'price_1SWhPb7g8FcyfmlJzlquRicj';     // Achat unique
-
-      async function createCheckoutSession(priceId, mode) {
-        try {
-          const res = await fetch('/create-checkout-session', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ priceId, mode })
-          });
-          if (!res.ok) {
-            const text = await res.text();
-            throw new Error('HTTP ' + res.status + ': ' + text);
-          }
-          const json = await res.json();
-          if (json && json.url) {
-            // Redirect the user to Checkout using the returned URL
-            window.location = json.url;
-          } else {
-            throw new Error('Réponse invalide du serveur');
-          }
-        } catch (e) {
-          console.error('[Stripe] createCheckoutSession error:', e);
-          alert('Erreur lors de la création de la session de paiement : ' + e.message);
-        }
-      }
-
-      document.getElementById('stripe-sub-btn').addEventListener('click', function() {
-        createCheckoutSession(priceIdAbonnement, 'subscription');
-      });
-
-      document.getElementById('stripe-onetime-btn').addEventListener('click', function() {
-        createCheckoutSession(priceIdAchat, 'payment');
-      });
-
-      // Optional: Keep the direct client-only integration as a commented fallback.
-      /*
-      // Client-only deprecated flow (only if enabled in your Dashboard):
-      const stripe = Stripe('pk_test_...');
-      stripe.redirectToCheckout({ lineItems: [{ price: priceIdAbonnement, quantity: 1 }], mode: 'subscription', successUrl: window.location.origin + '/pricing.html?success=1', cancelUrl: window.location.origin + '/pricing.html?canceled=1' });
-      */
-    </script>
+      <script src="/js/pricing-stripe.js"></script>
   <script src="https://cdn.botpress.cloud/webchat/v1/inject.js"></script>
 </body>
 </html>

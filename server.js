@@ -26,8 +26,8 @@ app.use(helmet({
       scriptSrc: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com'],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", 'data:', 'https://cdn-icons-png.flaticon.com', 'https://cdn.botpress.cloud'],
-      connectSrc: ["'self'", 'https://api.stripe.com', 'https://messaging.botpress.cloud'],
-      frameSrc: ["'self'", 'https://messaging.botpress.cloud', 'https://checkout.stripe.com'],
+      connectSrc: ["'self'", 'https://api.stripe.com', 'https://messaging.botpress.cloud', 'https://cdn.botpress.cloud'],
+      frameSrc: ["'self'", 'https://messaging.botpress.cloud', 'https://checkout.stripe.com', 'https://js.stripe.com'],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
       formAction: ["'self'"]
@@ -40,6 +40,9 @@ app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
+// Serve style and script root assets from public root as well (so /style.css and /script.js work)
+app.use('/style.css', express.static(path.join(__dirname, 'public', 'style.css')));
+app.use('/script.js', express.static(path.join(__dirname, 'public', 'script.js')));
 // Expose site-vitrine directory too for local tests
 app.use('/site-vitrine', express.static(path.join(__dirname, 'site-vitrine')));
 
