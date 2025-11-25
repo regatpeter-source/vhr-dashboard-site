@@ -1,0 +1,24 @@
+{
+  "name": "vhr-dashboard-site",
+  "version": "0.1.0",
+  "description": "VHR Dashboard - Server and site-vitrine",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:dev": "NO_ADB=1 node server.js"
+    ,"migrate:sqlite": "node scripts/migrate-to-sqlite.js"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.0",
+    "better-sqlite3": "^8.7.0",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "helmet": "^7.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "socket.io": "^4.7.2",
+    "stripe": "^12.11.0",
+    "ws": "^8.13.0"
+  }
+}

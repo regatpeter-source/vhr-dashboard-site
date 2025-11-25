@@ -24,12 +24,22 @@
     <h1>Mon compte</h1>
     <div id="accountBox">
       <div id="loggedOutBox">
-        <p>Connectez-vous pour accéder à votre espace client.</p>
-        <form id="loginForm">
-          <label>Nom d'utilisateur:<br><input type="text" id="username" required></label><br>
-          <label>Mot de passe:<br><input type="password" id="password" required></label><br>
-          <button type="submit" class="cta">Se connecter</button>
-        </form>
+        <p>Connectez-vous pour accéder à votre espace client ou créez un compte.</p>
+        <div id="authForms">
+          <form id="loginForm" style="margin-bottom:18px;">
+            <label>Nom d'utilisateur:<br><input type="text" id="username" required></label><br>
+            <label>Mot de passe:<br><input type="password" id="password" required></label><br>
+            <button type="submit" class="cta">Se connecter</button>
+          </form>
+          <form id="signupForm">
+            <h3>Créer un compte</h3>
+            <label>Nom d'utilisateur:<br><input type="text" id="signupUsername" required></label><br>
+            <label>Email:<br><input type="email" id="signupEmail"></label><br>
+            <label>Mot de passe:<br><input type="password" id="signupPassword" required></label><br>
+            <label>Confirmer le mot de passe:<br><input type="password" id="signupPasswordConfirm" required></label><br>
+            <button type="submit" class="cta-secondary">Créer un compte</button>
+          </form>
+        </div>
         <div id="loginMessage"></div>
       </div>
       <div id="loggedInBox" style="display:none;">
@@ -102,6 +112,21 @@
       loginMessage.textContent = 'Connexion...';
       const res = await api('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
       if (res && res.ok) { loginMessage.textContent = 'Connexion réussie'; await loadMe(); }
+      else { loginMessage.textContent = 'Erreur: ' + (res && res.error ? res.error : 'Erreur inconnue'); }
+    });
+    // Signup form
+    const signupForm = document.getElementById('signupForm');
+    if (signupForm) signupForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('signupUsername').value;
+      const email = document.getElementById('signupEmail').value;
+      const p1 = document.getElementById('signupPassword').value;
+      const p2 = document.getElementById('signupPasswordConfirm').value;
+      if (!username || !p1) return alert('Nom d\'utilisateur et mot de passe requis');
+      if (p1 !== p2) return alert('Les mots de passe ne correspondent pas');
+      loginMessage.textContent = 'Création du compte...';
+      const res = await api('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: p1, email }) });
+      if (res && res.ok) { loginMessage.textContent = 'Compte créé, connexion...'; await loadMe(); }
       else { loginMessage.textContent = 'Erreur: ' + (res && res.error ? res.error : 'Erreur inconnue'); }
     });
 
