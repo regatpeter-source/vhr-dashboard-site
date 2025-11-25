@@ -148,7 +148,19 @@ function ensureDataDir() {
 function saveUsers() {
   try {
     ensureDataDir();
-    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
+    // Sanitize users array to avoid circular references and functions in objects
+    const toSave = users.map(u => ({
+      username: u.username,
+      passwordHash: u.passwordHash || null,
+      role: u.role || null,
+      email: u.email || null,
+      stripeCustomerId: u.stripeCustomerId || null,
+      latestInvoiceId: u.latestInvoiceId || null,
+      lastInvoicePaidAt: u.lastInvoicePaidAt || null,
+      subscriptionStatus: u.subscriptionStatus || null,
+      subscriptionId: u.subscriptionId || null
+    }));
+    fs.writeFileSync(USERS_FILE, JSON.stringify(toSave, null, 2), 'utf8');
     return true;
   } catch (e) {
     console.error('[users] save error', e && e.message);
@@ -178,6 +190,71 @@ function loadUsers() {
 
 let users = loadUsers();
 
+// --- DB wrapper helpers (use SQLite adapter when enabled) ---
+let dbEnabled = false;
+try {
+  const dbFile = process.env.DB_SQLITE_FILE || path.join(__dirname, 'data', 'vhr.db');
+  dbEnabled = require('./db').initSqlite(dbFile);
+  if (dbEnabled) {
+    console.log('[db] SQLite adapter initialized, migrating JSON users into DB');
+    const db = require('./db');
+    // migrate existing in-memory users into DB
+    users.forEach(u => db.addOrUpdateUser(u));
+    // reload into memory simplified list for reads
+    users = db.getAllUsers();
+  }
+} catch (e) {
+  console.error('[db] init error:', e && e.message);
+}
+
+function getUserByUsername(username) {
+  if (dbEnabled) {
+    const u = require('./db').findUserByUsername(username);
+    return u || null;
+  }
+  return users.find(u => u.username === username);
+}
+
+function getUserByStripeCustomerId(customerId) {
+  if (dbEnabled) return require('./db').findUserByStripeCustomerId(customerId);
+  return users.find(u => u.stripeCustomerId === customerId);
+}
+
+function persistUser(user) {
+  if (dbEnabled) {
+    require('./db').addOrUpdateUser(user);
+    // keep in-memory list sync
+    users = require('./db').getAllUsers();
+    return true;
+  } else {
+    console.log('[users] persistUser: begin', user && user.username);
+    const idx = users.findIndex(u => u.username === user.username);
+    if (idx >= 0) users[idx] = user;
+    else users.push(user);
+    try {
+      console.log('[users] persistUser: saving users file (json fallback)');
+      saveUsers();
+      console.log('[users] persistUser: saved users file');
+    } catch (e) {
+      console.error('[users] saveUsers failed:', e && e.stack || e && e.message || e);
+      throw e;
+    }
+    console.log('[users] persistUser: end');
+    return true;
+  }
+}
+
+function removeUserByUsername(username) {
+  if (dbEnabled) {
+      const user = getUserByUsername(username);
+    users = require('./db').getAllUsers();
+  } else {
+    const idx = users.findIndex(u => u.username === username);
+    if (idx >= 0) users.splice(idx, 1);
+    saveUsers();
+  }
+}
+
 const JWT_SECRET = process.env.JWT_SECRET || 'change_this_secret';
 const JWT_EXPIRES = '2h';
 
@@ -203,7 +280,7 @@ function authMiddleware(req, res, next) {
 // --- Route de login ---
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
-  const user = users.find(u => u.username === username);
+  const user = getUserByUsername(username);
   if (!user) return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
   const valid = await bcrypt.compare(password, user.passwordHash);
   if (!valid) return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
@@ -235,11 +312,11 @@ app.get('/api/me', authMiddleware, (req, res) => {
 app.patch('/api/me', authMiddleware, async (req, res) => {
   const { username, email, oldPassword, newPassword } = req.body || {};
   try {
-    const user = users.find(u => u.username === req.user.username);
+    const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
     if (username && username !== user.username) {
       // ensure unique
-      if (users.find(u => u.username === username)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
+        if (getUserByUsername(username)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
       user.username = username;
     }
     if (email) user.email = email;
@@ -249,8 +326,8 @@ app.patch('/api/me', authMiddleware, async (req, res) => {
       if (!valid) return res.status(401).json({ ok: false, error: 'Ancien mot de passe incorrect' });
       user.passwordHash = await bcrypt.hash(newPassword, 10);
     }
-    // Persist changes
-    saveUsers();
+    // Persist changes via DB adapter or JSON
+    try { console.log('[users] about to persist user', user && user.username); persistUser(user); console.log('[users] persist successful'); } catch (e) { console.error('[users] persist error', e && (e.stack || e.message)); }
     // If username changed, reissue JWT and cookie
     const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
     res.cookie('vhr_token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 2 * 60 * 60 * 1000 });
@@ -264,10 +341,9 @@ app.patch('/api/me', authMiddleware, async (req, res) => {
 // Delete self account (development/demo only)
 app.delete('/api/users/self', authMiddleware, (req, res) => {
   try {
-    const index = users.findIndex(u => u.username === req.user.username);
-    if (index === -1) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
-    users.splice(index, 1);
-    saveUsers();
+    const u = getUserByUsername(req.user.username);
+    if (!u) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
+    removeUserByUsername(req.user.username);
     res.clearCookie('vhr_token');
     res.json({ ok: true });
   } catch (e) {
@@ -1048,8 +1124,8 @@ async function ensureStripeCustomerForUser(user) {
   try {
     const cust = await stripe.customers.create({ name: user.username || undefined, email: user.email || undefined, metadata: { username: user.username } });
     user.stripeCustomerId = cust.id;
-    // Persist Stripe customer ID
-    try { saveUsers(); } catch (e) { console.error('[users] save after stripe create failed:', e && e.message); }
+    // Persist Stripe customer ID via DB adapter if present
+    try { persistUser(user); } catch (e) { console.error('[users] save after stripe create failed:', e && e.message); }
     return cust.id;
   } catch (e) {
     console.error('[Stripe] create customer error', e && e.message);
@@ -1060,7 +1136,7 @@ async function ensureStripeCustomerForUser(user) {
 // Create a Portal session for the current user
 app.post('/api/billing/portal', authMiddleware, async (req, res) => {
   try {
-    const user = users.find(u => u.username === req.user.username);
+    const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
     const customerId = await ensureStripeCustomerForUser(user);
     const origin = req.headers.origin || `http://localhost:${process.env.PORT || 3000}`;
@@ -1075,7 +1151,7 @@ app.post('/api/billing/portal', authMiddleware, async (req, res) => {
 // List invoices for current authenticated user
 app.get('/api/billing/invoices', authMiddleware, async (req, res) => {
   try {
-    const user = users.find(u => u.username === req.user.username);
+    const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
     if (!user.stripeCustomerId) return res.json({ ok: true, invoices: [] });
     const invoices = await stripe.invoices.list({ customer: user.stripeCustomerId, limit: 30 });
@@ -1089,7 +1165,7 @@ app.get('/api/billing/invoices', authMiddleware, async (req, res) => {
 // List subscriptions for current authenticated user
 app.get('/api/billing/subscriptions', authMiddleware, async (req, res) => {
   try {
-    const user = users.find(u => u.username === req.user.username);
+    const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
     if (!user.stripeCustomerId) return res.json({ ok: true, subscriptions: [] });
     const subs = await stripe.subscriptions.list({ customer: user.stripeCustomerId, limit: 30 });
@@ -1127,7 +1203,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
     if (!obj) return res.json({ received: true });
     const customerId = obj.customer || (obj.customer_id) || null;
     if (!customerId) return res.json({ received: true });
-    const user = users.find(u => u.stripeCustomerId === customerId);
+    const user = getUserByStripeCustomerId(customerId);
     if (!user) return res.json({ received: true });
 
     if (type === 'invoice.paid') {

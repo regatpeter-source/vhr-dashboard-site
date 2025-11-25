@@ -7,6 +7,8 @@ The server uses the following environment variables. Configure them in Render (o
 - NO_ADB: set to `1` if the host should skip ADB tracking (recommended for cloud)
 - JWT_SECRET: a secret for signing JWT tokens (change in production!)
 - PORT: the port to run the server on (defaults to 3000)
+ - DB_SQLITE_FILE: path for the SQLite DB file (default `./data/vhr.db`). If set and `better-sqlite3` installed, the server will use SQLite to persist users.
+ - STRIPE_WEBHOOK_SECRET: set it with the webhook secret to validate Stripe webhooks in production.
 
 Streaming notes & ADB
 ---------------------
@@ -47,4 +49,10 @@ Optional: automatic redeploy from GitHub Actions
 1. Create and configure a Render Web Service as above.
 2. Add `RENDER_API_KEY` (your Render API key) and `RENDER_SERVICE_ID` (the service's id) to the repository secrets in GitHub.
 3. The included `.github/workflows/deploy-full-app.yml` will trigger a Render redeploy on pushes to `feat/dev-setup-pr`.
+
+Database & Stripe webhook setup (production)
+--------------------------------------------
+ - To use SQLite in production, install `better-sqlite3` (e.g., `npm install better-sqlite3`) then set `DB_SQLITE_FILE` in your environment. The app will automatically create `data/vhr.db` and migrate existing `data/users.json` if present.
+ - To validate Stripe webhooks, set `STRIPE_WEBHOOK_SECRET` (from the Stripe dashboard) in your environment. The webhook endpoint `/webhook` uses this secret for signature verification.
+ - For high-scale/production usage consider migrating to a proper RDBMS like Postgres and a robust migration strategy.
 
