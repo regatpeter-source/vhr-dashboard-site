@@ -66,78 +66,7 @@
       </div>
     </div>
   </main>
-  <script>
-    async function api(path, opts = {}) {
-      opts = Object.assign({ credentials: 'include' }, opts);
-      try { const res = await fetch(path, opts); return await res.json(); } catch(e){ return { ok: false, error: e.message }; }
-    }
-
-    const loginForm = document.getElementById('loginForm');
-    const loggedInBox = document.getElementById('loggedInBox');
-    const loggedOutBox = document.getElementById('loggedOutBox');
-    const loginMessage = document.getElementById('loginMessage');
-    const accountName = document.getElementById('accountName');
-    const accountRole = document.getElementById('accountRole');
-    const logoutBtn = document.getElementById('logoutBtn');
-
-    // We prefer to store JWT in httpOnly cookie set by server. For compatibility we still read the token returned by the login endpoint, but we don't persist it to localStorage for security.
-    function setToken(t) { /* no-op: server sets httpOnly cookie */ }
-    function getToken() { return null; }
-
-    async function loadMe() {
-      try {
-        const res = await api('/api/me');
-        if (!res || !res.ok) { showLoggedOut(); return; }
-        showLoggedIn(res.user);
-        loadBilling();
-      } catch (e) { showLoggedOut(); }
-    }
-
-    function showLoggedIn(user) {
-      loggedOutBox.style.display = 'none';
-      loggedInBox.style.display = 'block';
-      accountName.textContent = user.username || '(inconnu)';
-      accountRole.textContent = user.role || '(-- )';
-      // populate forms
-      document.getElementById('profileUsername').value = user.username || '';
-      document.getElementById('profileEmail').value = user.email || '';
-    }
-    function showLoggedOut() {
-      loggedOutBox.style.display = 'block';
-      loggedInBox.style.display = 'none';
-    }
-
-    loginForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const username = document.getElementById('username').value;
-      const password = document.getElementById('password').value;
-      loginMessage.textContent = 'Connexion...';
-      const res = await api('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
-      if (res && res.ok) { loginMessage.textContent = 'Connexion réussie'; await loadMe(); }
-      else { loginMessage.textContent = 'Erreur: ' + (res && res.error ? res.error : 'Erreur inconnue'); }
-    });
-
-    // Signup form handling
-    const signupForm = document.getElementById('signupForm');
-    if (signupForm) signupForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const username = document.getElementById('signupUsername').value;
-      const email = document.getElementById('signupEmail').value;
-      const p1 = document.getElementById('signupPassword').value;
-      const p2 = document.getElementById('signupPasswordConfirm').value;
-      if (!username || !p1) return alert('Nom d\'utilisateur et mot de passe requis');
-      if (p1 !== p2) return alert('Les mots de passe ne correspondent pas');
-      loginMessage.textContent = 'Création du compte...';
-      const res = await api('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: p1, email }) });
-      if (res && res.ok) { loginMessage.textContent = 'Compte créé, connexion...'; await loadMe(); }
-      else { loginMessage.textContent = 'Erreur: ' + (res && res.error ? res.error : 'Erreur inconnue'); }
-    });
-
-    logoutBtn.addEventListener('click', async () => { setToken(null); await api('/api/logout', { method: 'POST' }); showLoggedOut(); });
-
-    loadMe();
-
-    async function loadBilling() {
+  <script src="/js/account.js"></script>
       try {
         const invResp = await api('/api/billing/invoices');
         const subsResp = await api('/api/billing/subscriptions');
