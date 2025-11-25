@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Contactez l'équipe VHR DASHBOARD pour une démo, un devis ou toute question sur la gestion de casques VR." />
+  <title>Contact – VHR DASHBOARD</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <nav>
+      <div class="logo">VHR DASHBOARD</div>
+      <ul>
+        <li><a href="index.html">Accueil</a></li>
+        <li><a href="features.html">Fonctionnalités</a></li>
+        <li><a href="pricing.html">Tarifs</a></li>
+        <li><a href="contact.html" class="active">Contact</a></li>
+        <li><a href="account.html">Mon compte</a></li>
+      </ul>
+    </nav>
+    <div class="hero hero-small">
+      <h1>Contact & Démo</h1>
+      <p class="centered">Demandez une démo ou contactez-nous pour un devis personnalisé.</p>
+    </div>
+  </header>
+  <main>
+    <section class="contact-section">
+      <form class="contact-form centered" id="contactForm">
+        <label for="name">Nom :</label>
+        <input type="text" id="name" name="name" required>
+        <label for="email">Email :</label>
+        <input type="email" id="email" name="email" required>
+        <label for="message">Message :</label>
+        <textarea id="message" name="message" rows="5" required></textarea>
+        <button type="submit">Envoyer</button>
+        <div id="formStatus"></div>
+      </form>
+    </section>
+  </main>
+  <footer>
+    <div class="footer-content">
+      <span>&copy; 2025 VHR DASHBOARD. Tous droits réservés.</span>
+      <span><a href="contact.html">Contact</a> | <a href="mentions.html">Mentions légales</a></span>
+    </div>
+  </footer>
+  <script src="/js/script.js"></script>
+  <!-- Chatbot IA (Botpress Webchat) config (moved to external file to comply with CSP) -->
+  <script src="/js/botpress-config.js"></script>
+  <script src="https://cdn.botpress.cloud/webchat/v1/inject.js"></script>
+</body>
+</html>
