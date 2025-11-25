@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Mon compte — VHR DASHBOARD</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <nav>
+      <div class="logo">VHR DASHBOARD</div>
+      <ul>
+        <li><a href="index.html">Accueil</a></li>
+        <li><a href="features.html">Fonctionnalités</a></li>
+        <li><a href="pricing.html">Tarifs</a></li>
+        <li><a href="contact.html">Contact</a></li>
+        <li><a href="developer-setup.html">Guide développeur</a></li>
+        <li><a href="account.html" class="active">Mon compte</a></li>
+      </ul>
+    </nav>
+  </header>
+  <main style="max-width:900px;margin:36px auto;padding:18px;">
+    <h1>Mon compte</h1>
+    <div id="accountBox">
+      <div id="loggedOutBox">
+        <p>Connectez-vous pour accéder à votre espace client.</p>
+        <form id="loginForm">
+          <label>Nom d'utilisateur:<br><input type="text" id="username" required></label><br>
+          <label>Mot de passe:<br><input type="password" id="password" required></label><br>
+          <button type="submit" class="cta">Se connecter</button>
+        </form>
+        <div id="loginMessage"></div>
+      </div>
+      <div id="loggedInBox" style="display:none;">
+        <h2>Bienvenue, <span id="accountName"></span></h2>
+        <p>Rôle: <span id="accountRole"></span></p>
+        <p>Vous êtes connecté·e. Ici vous pourrez afficher vos abonnements, factures et paramètres.</p>
+        <section id="billingBox"></section>
+        <section id="profileBox">
+          <h3>Modifier mon profil</h3>
+          <form id="profileForm">
+            <label>Nom d'utilisateur:<br><input type="text" id="profileUsername"></label><br>
+            <label>Email:<br><input type="email" id="profileEmail"></label><br>
+            <button type="submit" class="cta">Mettre à jour</button>
+          </form>
+          <div id="profileMessage"></div>
+          <h3>Changer le mot de passe</h3>
+          <form id="passwordForm">
+            <label>Ancien mot de passe:<br><input type="password" id="oldPassword"></label><br>
+            <label>Nouveau mot de passe:<br><input type="password" id="newPassword"></label><br>
+            <button type="submit" class="cta">Changer le mot de passe</button>
+          </form>
+          <div id="passwordMessage"></div>
+        </section>
+        <p><button id="logoutBtn" class="cta-secondary">Se déconnecter</button></p>
+      </div>
+    </div>
+  </main>
+  <script>
+    async function api(path, opts = {}) {
+      opts = Object.assign({ credentials: 'include' }, opts);
+      try { const res = await fetch(path, opts); return await res.json(); } catch(e){ return { ok: false, error: e.message }; }
+    }
+
+    const loginForm = document.getElementById('loginForm');
+    const loggedInBox = document.getElementById('loggedInBox');
+    const loggedOutBox = document.getElementById('loggedOutBox');
+    const loginMessage = document.getElementById('loginMessage');
+    const accountName = document.getElementById('accountName');
+    const accountRole = document.getElementById('accountRole');
+    const logoutBtn = document.getElementById('logoutBtn');
+
+    function setToken(t) { /* no-op: httpOnly cookie is used */ }
+    function getToken() { return null; }
+
+    async function loadMe() {
+      // Use api helper (credentials include) to fetch current user with cookie-based auth
+      try {
+        const res = await api('/api/me');
+        if (!res || !res.ok) { showLoggedOut(); return; }
+        showLoggedIn(res.user);
+        loadBilling();
+      } catch (e) { showLoggedOut(); }
+    }
+
+    function showLoggedIn(user) {
+      loggedOutBox.style.display = 'none';
+      loggedInBox.style.display = 'block';
+      accountName.textContent = user.username || '(inconnu)';
+      accountRole.textContent = user.role || '(-- )';
+    }
+    function showLoggedOut() {
+      loggedOutBox.style.display = 'block';
+      loggedInBox.style.display = 'none';
+    }
+
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      loginMessage.textContent = 'Connexion...';
+      const res = await api('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+      if (res && res.ok) { loginMessage.textContent = 'Connexion réussie'; await loadMe(); }
+      else { loginMessage.textContent = 'Erreur: ' + (res && res.error ? res.error : 'Erreur inconnue'); }
+    });
+
+    logoutBtn.addEventListener('click', async () => { setToken(null); await api('/api/logout', { method: 'POST' }); showLoggedOut(); });
+
+    loadMe();
+    // Profile update
+    const profileForm = document.getElementById('profileForm');
+    const passwordForm = document.getElementById('passwordForm');
+    profileForm && profileForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('profileUsername').value;
+      const email = document.getElementById('profileEmail').value;
+      const res = await api('/api/me', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, email }) });
+      const msg = document.getElementById('profileMessage');
+      if (res && res.ok) { msg.textContent = 'Profil mis à jour'; await loadMe(); } else { msg.textContent = 'Erreur: ' + (res && res.error ? res.error : 'inconnue'); }
+    });
+    passwordForm && passwordForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const oldPassword = document.getElementById('oldPassword').value;
+      const newPassword = document.getElementById('newPassword').value;
+      const res = await api('/api/me', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldPassword, newPassword }) });
+      const msg = document.getElementById('passwordMessage');
+      if (res && res.ok) { msg.textContent = 'Mot de passe changé'; } else { msg.textContent = 'Erreur: ' + (res && res.error ? res.error : 'inconnue'); }
+    });
+  </script>
+</body>
+</html>
