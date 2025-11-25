@@ -75,15 +75,10 @@
     function getToken() { return null; }
 
     async function loadMe() {
-      const token = getToken();
-      // If cookie is present, the server will validate the request
       try {
-        const res = await fetch('/api/me');
-        if (!res.ok) { showLoggedOut(); return; }
-        const json = await res.json();
-        if (!json || !json.ok) { showLoggedOut(); return; }
-        showLoggedIn(json.user);
-        // load billing info
+        const res = await api('/api/me');
+        if (!res || !res.ok) { showLoggedOut(); return; }
+        showLoggedIn(res.user);
         loadBilling();
       } catch (e) { showLoggedOut(); }
     }
@@ -108,7 +103,7 @@
       const password = document.getElementById('password').value;
       loginMessage.textContent = 'Connexion...';
       const res = await api('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
-      if (res && res.ok && res.token) { loginMessage.textContent = 'Connexion réussie'; await loadMe(); }
+      if (res && res.ok) { loginMessage.textContent = 'Connexion réussie'; await loadMe(); }
       else { loginMessage.textContent = 'Erreur: ' + (res && res.error ? res.error : 'Erreur inconnue'); }
     });
 
