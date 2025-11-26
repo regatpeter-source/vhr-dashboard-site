@@ -61,7 +61,10 @@ exposedTopFiles.forEach(f => {
 app.get('/ping', (req, res) => res.json({ ok: true, message: 'pong' }));
 
 // --- Stripe Checkout ---
-const stripeKey = process.env.STRIPE_SECRET_KEY || 'sk_test_votre_cle_secrete';
+// Trim quotes and whitespace if an operator copy/pasted the key with surrounding quotes
+function cleanEnvValue(v) { if (!v) return v; return v.replace(/^['"]|['"]$/g, '').trim(); }
+const stripeKeyRaw = process.env.STRIPE_SECRET_KEY || 'sk_test_votre_cle_secrete';
+const stripeKey = cleanEnvValue(stripeKeyRaw);
 if (!stripeKey || stripeKey === 'sk_test_votre_cle_secrete') {
   console.warn('[Stripe] STRIPE_SECRET_KEY not set or using placeholder. Set STRIPE_SECRET_KEY=sk_test_xxx in your environment.');
 } else if (stripeKey.startsWith('pk_')) {
@@ -88,6 +91,19 @@ async function verifyStripeKeyAtStartup() {
     console.error('[Stripe] STRIPE_SECRET_KEY validation failed:', e && e.message);
     throw e;
   }
+}
+
+// Print masked key at server start to help debugging misconfigs (dev only when debug flag on)
+if (process.env.STRIPE_DEBUG_PRICES === '1') {
+  console.log('[Stripe] Stripe debug mode ON. Masked key:', maskKey(stripeKey));
+}
+
+// Helper for masked debug printing of secrets in dev
+function maskKey(k) {
+  if (!k || k.length < 8) return '***';
+  const start = k.substring(0, 6);
+  const end = k.substring(k.length - 4);
+  return `${start}...${end}`;
 }
 
 app.post('/create-checkout-session', async (req, res) => {
@@ -1040,21 +1056,32 @@ io.on('connection', socket => {
 });
 
 // ---------- Init ----------
-if (process.env.NO_ADB !== '1') {
-  (async function initServer() {
-    try {
-      await verifyStripeKeyAtStartup();
-    } catch (e) {
+// Run Stripe validation at startup; in dev mode (NO_ADB=1) it will only warn and continue,
+// but in production we abort if the provided key is invalid (to avoid silent failures).
+(async function globalInit() {
+  try {
+    await verifyStripeKeyAtStartup();
+  } catch (e) {
+    if (process.env.NO_ADB === '1') {
+      console.warn('[server] Stripe key validation failed, continuing in NO_ADB=1 (dev) mode. Fix STRIPE_SECRET_KEY for production.');
+    } else {
       console.error('[server] Stripe verification failed, aborting startup.');
       process.exit(1);
       return;
     }
-    refreshDevices();
-    startAdbTrack();
-  })();
-} else {
-  console.warn('[server] NO_ADB=1 set: skipping ADB device tracking & streaming features (good for dev/test).');
-}
+  }
+  // Init ADB tracking only when not skipping ADB
+  if (process.env.NO_ADB !== '1') {
+    (async function initServer() {
+      try {
+        refreshDevices();
+        startAdbTrack();
+      } catch (e) { console.error('[server] ADB init failed', e && e.message); }
+    })();
+  } else {
+    console.warn('[server] NO_ADB=1 set: skipping ADB device tracking & streaming features (good for dev/test).');
+  }
+})();
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
@@ -1251,4 +1278,13 @@ app.post('/api/register', async (req, res) => {
     console.error('[api] register:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
+});
+
+// Public config route: returns only non-sensitive public config values for client-side use
+app.get('/public-config', (req, res) => {
+  res.json({
+    ok: true,
+    stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY || null,
+    testPriceId: process.env.TEST_PRICE_ID || process.env.SMOKE_TEST_PRICE_ID || null,
+  });
 });
