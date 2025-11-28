@@ -1096,7 +1096,9 @@ function startServerOnPort(port) {
       process.exit(1);
     }
   });
-  server.listen(port, () => {
+  // Bind explicitly to 0.0.0.0 to satisfy hosting platforms that check for open ports
+  const host = process.env.HOST || '0.0.0.0';
+  server.listen(port, host, () => {
     console.log(`\n🚀 VHR Dashboard - Optimisé Anti-Scintillement`);
     console.log(`📡 Server: http://localhost:${port}`);
   console.log(`\n📊 Profils disponibles (ADB screenrecord - stable):`);
