@@ -1,0 +1,50 @@
+# Node modules
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+
+# Env files
+.env
+
+# Python http.server cache
+__pycache__/
+
+# VSCode
+.vscode/
+
+# Ignore test and temp files
+*.tmp
+*.temp
+
+# Ignore compiled files
+*.exe
+*.out
+*.class
+
+# Ignore site-vitrine local server artifacts
+site-vitrine/__pycache__/
+site-vitrine/*.bak
+site-vitrine/*.tmp
+node_modules/*.mp4
+*.mkv
+*.h264
+*.png
+*.bin
+tmp/# ignore tmp and test media
+tmp/
+*.h264
+*.mkv
+*.mp4
+*.png
