@@ -37,14 +37,17 @@ __pycache__/
 site-vitrine/__pycache__/
 site-vitrine/*.bak
 site-vitrine/*.tmp
-node_modules/*.mp4
+
+# Node modules artifacts
+node_modules/
+
+# Ignore test and temp media and binary outputs
+tmp/
+tmp/voice/
 *.mkv
+*.mp4
 *.h264
 *.png
 *.bin
-tmp/# ignore tmp and test media
-tmp/
-*.h264
-*.mkv
-*.mp4
-*.png
+*.wav
+*.webm
