@@ -7,6 +7,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   adb \
   ffmpeg \
   scrcpy \
+  build-essential \
+  python3 \
+  libsqlite3-dev \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
