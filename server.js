@@ -1245,3 +1245,16 @@ app.post('/api/adb/wifi-connect-auto', async (req, res) => {
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
+// Lightweight status endpoint for deploy diagnostics (does not expose secrets)
+app.get('/_status', async (req, res) => {
+  try {
+    const addr = server.address() || {};
+    const shortCommit = await (async () => {
+      try { const { stdout } = await execp('git rev-parse --short HEAD'); return stdout.trim(); } catch (e) { return null; }
+    })();
+    res.json({ ok: true, bind: { address: addr.address, port: addr.port }, env: { NODE_ENV: process.env.NODE_ENV || null, HOST: process.env.HOST || null, PORT: process.env.PORT || null }, commit: shortCommit });
+  } catch (e) {
+    res.json({ ok: false, error: String(e) });
+  }
+});

@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: vhr-dashboard-site
+    env: node
+    plan: free
+    branch: render-lite
+    buildCommand: "npm install"
+    startCommand: "npm start"
+    healthCheckPath: "/health"
+    env:
+      - key: HOST
+        value: "0.0.0.0"
+      - key: NO_ADB
+        value: "0"
