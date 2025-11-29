@@ -51,12 +51,24 @@ app.use('/site-vitrine', express.static(path.join(__dirname, 'site-vitrine')));
 app.get('/ping', (req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
+// Add a simple /health endpoint used by some hosting platforms and a root route to ensure '/'
+app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
 // Expose site-vitrine and top-level HTML files so they can be accessed via http://localhost:PORT/
 app.use('/site-vitrine', express.static(path.join(__dirname, 'site-vitrine')));
 // Serve top-level HTML files that are not in public
 const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact.html', 'developer-setup.html'];
 exposedTopFiles.forEach(f => {
   app.get(`/${f}`, (req, res) => res.sendFile(path.join(__dirname, f)));
+});
+
+// Ensure the root path '/' is served with public/index.html as a fallback so hosts pinging '/' get a valid response
+app.get('/', (req, res) => {
+  const indexPath = path.join(__dirname, 'public', 'index.html');
+  if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
+  // Fallback: if top-level index.html exists, serve it
+  const topIndex = path.join(__dirname, 'index.html');
+  if (fs.existsSync(topIndex)) return res.sendFile(topIndex);
+  res.status(404).send('Not Found');
 });
 // Simple ping route for health checks
 app.get('/ping', (req, res) => res.json({ ok: true, message: 'pong' }));
