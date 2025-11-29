@@ -15,7 +15,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /usr/src/app
 
 COPY package*.json ./
-RUN npm install --production --omit=dev --unsafe-perm
+# Try `npm ci` first for reproducible builds; if `npm ci` fails (lockfile mismatch),
+# fall back to `npm install --production` so build doesn't fail on Render where
+# package-lock.json may be out-of-sync. This avoids hard failures in CI builds.
+RUN npm ci --omit=dev || npm install --production --omit=dev --unsafe-perm
 
 COPY . .
 

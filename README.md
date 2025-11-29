@@ -50,6 +50,41 @@ Optional: automatic redeploy from GitHub Actions
 2. Add `RENDER_API_KEY` (your Render API key) and `RENDER_SERVICE_ID` (the service's id) to the repository secrets in GitHub.
 3. The included `.github/workflows/deploy-full-app.yml` will trigger a Render redeploy on pushes to `feat/dev-setup-pr`.
 
+Attention: erreur `npm ci` durant le build sur Render
+----------------------------------------------------
+Si Render renvoie une erreur similaire à : "`npm ci` ne peut installer de paquets que si vos fichiers package.json et package-lock.json sont synchronisés", le problème provient d'une désynchronisation entre `package.json` et `package-lock.json`.
+
+Remèdes possibles :
+- Re-générez `package-lock.json` dans un environnement Linux (WSL/Ubuntu, Docker builder) : `npm install` puis commitez `package-lock.json` sur la branche déployée. Cela rendra `npm ci` fiable et plus rapide.
+- Si vous ne pouvez pas régénérer tout de suite, basculez temporairement la branche Render sur `fix-docker-npm-install` (branche de test fournie). Cette branche contient un Dockerfile plus tolérant qui tente `npm ci` puis retombe sur `npm install` si nécessaire. Cela évite les erreurs de build dues à la désynchronisation.
+- Vérifiez si le Dockerfile contient l'installation des paquets système requis (ex: `build-essential`, `python3`, `libsqlite3-dev`) car `better-sqlite3` et autres modules natifs nécessitent ces dépendances pour se compiler.
+
+Étapes recommandées :
+1. Regénérez `package-lock.json` sur WSL/Ubuntu: `npm install` puis `git add package-lock.json && git commit -m "fix: regen lockfile" && git push`.
+2. Si vous ne pouvez pas regénérer immédiatement, mettez Render sur la branche `fix-docker-npm-install` le temps de résoudre le lockfile.
+3. Configurez Render pour utiliser la route de health `/health` et définissez `STRIPE_SECRET_KEY` sans guillemets.
+
+
+Contôler Render via API (scripts)
+----------------------------------
+Vous pouvez déclencher un déploiement manuel et récupérer les logs via l'API Render en utilisant deux scripts PowerShell fournis dans `scripts/`:
+
+- `scripts/render-deploy.ps1` — déclenche un deploy manuel. Il requiert deux variables d'environnement : `RENDER_API_KEY` et `RENDER_SERVICE_ID`.
+- `scripts/render-logs.ps1` — récupère les logs d'un déploiement (ou du déploiement le plus récent) via `RENDER_API_KEY` et `RENDER_SERVICE_ID`.
+
+Exemples d'utilisation (PowerShell):
+
+```powershell
+$env:RENDER_API_KEY = "<votre render api key>"
+$env:RENDER_SERVICE_ID = "srv-xxxxxxxxxxxxxxxx"
+# Trigger manual deploy
+.\scripts\render-deploy.ps1
+# Get latest logs
+.\scripts\render-logs.ps1
+```
+
+Conseil: vous pouvez stocker `RENDER_API_KEY` dans GitHub Secrets et l'utiliser pour GitHub Actions afin de déclencher un redeploy automatique sur les pushes.
+
 Database & Stripe webhook setup (production)
 --------------------------------------------
  - To use SQLite in production, install `better-sqlite3` (e.g., `npm install better-sqlite3`) then set `DB_SQLITE_FILE` in your environment. The app will automatically create `data/vhr.db` and migrate existing `data/users.json` if present.

@@ -12,3 +12,7 @@ services:
       - key: STRIPE_DEBUG_PRICES
       - key: NO_ADB
       - key: PORT
+    # Optional explicit settings to help Render detect service health
+    healthCheckPath: /health
+    # The Dockerfile has CMD ["node","server.js"] but make it explicit here
+    startCommand: node server.js
