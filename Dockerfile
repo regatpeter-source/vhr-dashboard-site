@@ -13,7 +13,8 @@ WORKDIR /usr/src/app
 
 COPY package*.json ./
 RUN node -v && npm -v
-RUN npm ci --only=production
+# Preferred: --omit=dev (newer npm). Fallback to --only=production for older npm to avoid EUSAGE errors
+RUN sh -lc 'npm ci --omit=dev || npm ci --only=production'
 
 COPY . .
 
