@@ -24,7 +24,12 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com'],
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      // CSP Level 3: script/style element-specific directives
+      scriptSrcElem: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com'],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      styleSrcElem: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      // Allow loading remote fonts (Google Fonts)
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:', 'https://cdn-icons-png.flaticon.com', 'https://cdn.botpress.cloud'],
       connectSrc: ["'self'", 'https://api.stripe.com', 'https://messaging.botpress.cloud', 'https://cdn.botpress.cloud'],
       frameSrc: ["'self'", 'https://messaging.botpress.cloud', 'https://checkout.stripe.com', 'https://js.stripe.com'],
