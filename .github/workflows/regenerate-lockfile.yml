@@ -1,0 +1,35 @@
+name: 'Regenerate package-lock on Linux'
+
+on:
+  workflow_dispatch:
+
+jobs:
+  regen-lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Use Node 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install dependencies and regenerate lockfile
+        run: |
+          npm ci --omit=dev || npm install --prefer-offline --no-audit --no-fund
+
+      - name: Commit package-lock.json if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- package-lock.json; then
+            git checkout -b fix-lockfile-regenerated || git checkout fix-lockfile-regenerated
+            git add package-lock.json
+            git commit -m "chore: regenerate package-lock.json on Linux (Actions)"
+            git push --set-upstream origin fix-lockfile-regenerated
+          else
+            echo "package-lock.json is up-to-date"
+          fi
