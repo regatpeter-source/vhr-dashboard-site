@@ -20,9 +20,9 @@
       </ul>
     </nav>
   </header>
-  <main style="max-width:1000px;margin:36px auto;padding:24px;">
-    <h1>Guide : activer le mode développeur & connecter votre casque (USB, puis Wi-Fi)</h1>
-    <p>Ce guide vous accompagne pas à pas pour préparer un casque VR pour fonctionner avec VHR DASHBOARD : activer le mode développeur, effectuer la première connexion par USB, puis activer ADB over Wi‑Fi pour les sessions ultérieures.</p>
+  <main style="max-width:900px;margin:36px auto;padding:24px;">
+    <h1>Guide simplifié — Préparer un casque VR pour VHR DASHBOARD</h1>
+    <p>Cette page présente la procédure minimale pour préparer un casque VR et tester le serveur VHR localement ou sur une plateforme (Render, autres).</p>
 
     <section>
       <h2>Prérequis</h2>
@@ -110,3 +110,65 @@ adb devices</code></pre>
   <script src="/js/script.js"></script>
 </body>
 </html>
+
+    <section>
+      <h2>Prérequis rapides</h2>
+      <ul>
+        <li>PC avec <b>adb</b> (Android Platform Tools) installé.</li>
+        <li>Câble USB et casque VR (Meta Quest, Pico etc.).</li>
+        <li>Node.js (v18+ recommandé) et dépendances : <code>npm ci</code>.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Commandes utiles (exemple rapide)</h2>
+      <ol>
+        <li>Vérifier adb et appareils : <code>adb version && adb devices</code></li>
+        <li>Lancer le serveur (mode développeur / test sans ADB) :
+          <pre><code># PowerShell (Windows)
+$Env:NO_ADB = '1'; $Env:PORT = '4000'; $Env:HOST='0.0.0.0'; npm start
+
+# Unix
+$ NO_ADB=1 PORT=4000 HOST=0.0.0.0 npm start</code></pre>
+        </li>
+        <li>Vérifier l'état du serveur : <code>curl http://localhost:4000/_status</code> (renvoie bind/env/commit).</li>
+        <li>Lancer healthcheck script (CI/Render) : <code>./scripts/render-healthcheck.sh</code></li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Activer ADB Wi‑Fi (rapide)</h2>
+      <p>Branchez le casque en USB une première fois, puis : </p>
+      <pre><code>adb tcpip 5555
+# récupérer l'IP du casque (wlan0) puis :
+adb connect 192.168.X.Y:5555
+adb devices</code></pre>
+    </section>
+
+    <section>
+      <h2>Points importants</h2>
+      <ul>
+        <li>Le serveur dispose d'un endpoint /_status pour les checks de plateforme et /ping pour healthcheck simple.</li>
+        <li>Pour la CI / Render : définissez <code>PORT</code> et (en option) <code>HOST=0.0.0.0</code> ; configurez le health check pour <code>/_status</code>.</li>
+        <li>Pour tests locaux rapides, utilisez <code>NO_ADB=1</code> si vous n'avez pas de casque branché.</li>
+        <li>Si vous utilisez Stripe, configurez <code>STRIPE_SECRET_KEY</code> et (optionnel) <code>STRIPE_WEBHOOK_SECRET</code> dans l'environnement de la plateforme.</li>
+        <li>Auto-WiFi depuis USB : activez <code>AUTO_WIFI_FROM_USB=1</code> pour tenter l'activation automatiquement quand un appareil USB est détecté.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Déploiement & conseils</h2>
+      <ul>
+        <li>Render : configurez la branche <code>feat/dev-setup-pr</code>, la variable <code>HOST</code> (0.0.0.0), le health check <code>/_status</code>.</li>
+        <li>Évitez de committer de gros fichiers (tmp/, tmp/voice, médias). Utilisez <code>.gitignore</code> pour éviter les fichiers LFS volumineux.</li>
+        <li>Si vous comptez activer SQLite en production, installez <code>better-sqlite3</code> dans l'image/prod.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Liens & doc</h2>
+      <ul>
+        <li><a href="https://developer.android.com/studio/releases/platform-tools" target="_blank" rel="noopener">Android Platform Tools</a></li>
+        <li>Références dans repository : README.md, render.yaml et scripts/render-healthcheck.sh</li>
+      </ul>
+    </section>
