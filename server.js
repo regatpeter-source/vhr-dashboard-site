@@ -24,8 +24,14 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", 'https://cdn.botpress.cloud'],
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      // Keep compatibility with inline styles if required; prefer style-src-elem + style-src-attr
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      // New CSP3 directives — ensure these are defined to avoid browser/platform warnings
+      styleSrcElem: ["'self'", 'https://fonts.googleapis.com'],
+      styleSrcAttr: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", 'data:', 'https://cdn-icons-png.flaticon.com', 'https://cdn.botpress.cloud'],
+      // Allow Google Fonts actual font files
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       connectSrc: ["'self'", 'https://api.stripe.com', 'https://messaging.botpress.cloud'],
       frameSrc: ["'self'", 'https://messaging.botpress.cloud'],
       objectSrc: ["'none'"],
@@ -1100,7 +1106,10 @@ function startServerOnPort(port) {
   const host = process.env.HOST || '0.0.0.0';
   server.listen(port, host, () => {
     console.log(`\n🚀 VHR Dashboard - Optimisé Anti-Scintillement`);
-    console.log(`📡 Server: http://localhost:${port}`);
+    const addr = server.address();
+    const boundHost = addr && addr.address ? addr.address : host;
+    const boundPort = addr && addr.port ? addr.port : port;
+    console.log(`📡 Server: http://${boundHost}:${boundPort} (bound)`);
   console.log(`\n📊 Profils disponibles (ADB screenrecord - stable):`);
   console.log(`   • ultra-low: 320p, 600K (WiFi faible)`);
   console.log(`   • low:       480p, 1.5M`);
