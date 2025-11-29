@@ -12,7 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /usr/src/app
 
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN node -v && npm -v
+RUN npm ci --only=production
 
 COPY . .
 
