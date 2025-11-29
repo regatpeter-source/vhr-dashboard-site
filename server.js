@@ -24,7 +24,12 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com'],
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      // New CSP3 style directives
+      styleSrcElem: ["'self'", 'https://fonts.googleapis.com'],
+      styleSrcAttr: ["'self'", "'unsafe-inline'"],
+      // Allow font loading
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:', 'https://cdn-icons-png.flaticon.com', 'https://cdn.botpress.cloud'],
       connectSrc: ["'self'", 'https://api.stripe.com', 'https://messaging.botpress.cloud'],
       frameSrc: ["'self'", 'https://messaging.botpress.cloud', 'https://checkout.stripe.com'],
@@ -54,8 +59,31 @@ const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact
 exposedTopFiles.forEach(f => {
   app.get(`/${f}`, (req, res) => res.sendFile(path.join(__dirname, f)));
 });
-// Simple ping route for health checks
+// Ensure the root path '/' is served with public/index.html as a fallback so hosts pinging '/' get a valid response
+app.get('/', (req, res) => {
+  const indexPath = path.join(__dirname, 'public', 'index.html');
+  if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
+  // Fallback: if top-level index.html exists, serve it
+  const topIndex = path.join(__dirname, 'index.html');
+  if (fs.existsSync(topIndex)) return res.sendFile(topIndex);
+  res.status(404).send('Not Found');
+});
+// Simple ping route for health checks and lifecycle/health endpoints
 app.get('/ping', (req, res) => res.json({ ok: true, message: 'pong' }));
+app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime(), time: new Date().toISOString() }));
+
+// Lightweight status endpoint for deploy diagnostics (does not expose secrets)
+app.get('/_status', async (req, res) => {
+  try {
+    const addr = server.address() || {};
+    const shortCommit = await (async () => {
+      try { const { stdout } = await execp('git rev-parse --short HEAD'); return stdout.trim(); } catch (e) { return null; }
+    })();
+    res.json({ ok: true, bind: { address: addr.address, port: addr.port }, env: { NODE_ENV: process.env.NODE_ENV || null, HOST: process.env.HOST || null, PORT: process.env.PORT || null }, commit: shortCommit });
+  } catch (e) {
+    res.json({ ok: false, error: String(e) });
+  }
+});
 
 // --- Stripe Checkout ---
 const stripeKey = process.env.STRIPE_SECRET_KEY || 'sk_test_votre_cle_secrete';
@@ -1053,10 +1081,14 @@ if (process.env.NO_ADB !== '1') {
   console.warn('[server] NO_ADB=1 set: skipping ADB device tracking & streaming features (good for dev/test).');
 }
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+const PORT = Number(process.env.PORT) || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
+server.listen(PORT, HOST, () => {
+  const addr = server.address() || {};
+  const boundHost = addr && addr.address ? addr.address : HOST;
+  const boundPort = addr && addr.port ? addr.port : PORT;
   console.log(`\n🚀 VHR DASHBOARD - Optimisé Anti-Scintillement`);
-  console.log(`📡 Server: http://localhost:${PORT}`);
+  console.log(`📡 Server: http://${boundHost}:${boundPort} (bound)`);
   console.log(`\n📊 Profils disponibles (ADB screenrecord - stable):`);
   console.log(`   • ultra-low: 320p, 600K (WiFi faible)`);
   console.log(`   • low:       480p, 1.5M`);
