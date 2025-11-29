@@ -26,8 +26,8 @@ app.use(helmet({
       scriptSrc: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com'],
       // CSP Level 3: script/style element-specific directives
       scriptSrcElem: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com'],
-      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-      styleSrcElem: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://www.gstatic.com'],
+      styleSrcElem: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://www.gstatic.com'],
       // Allow loading remote fonts (Google Fonts)
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:', 'https://cdn-icons-png.flaticon.com', 'https://cdn.botpress.cloud'],
@@ -39,6 +39,10 @@ app.use(helmet({
     }
   }
 }));
+// Set a friendlier referrer policy so third-party services (like Google Translate)
+// can load resources if they rely on an origin referrer. This avoids noisy logs
+// indicating Referrer Policy 'no-referrer' while keeping a modern default.
+app.use(helmet.referrerPolicy({ policy: 'strict-origin-when-cross-origin' }));
 app.use(cors({ origin: true, credentials: true }));
 // Ensure webhook route receives raw body for Stripe signature verification
 app.use('/webhook', express.raw({ type: 'application/json' }));
