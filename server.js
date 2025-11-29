@@ -376,11 +376,8 @@ app.delete('/api/users/self', authMiddleware, (req, res) => {
   }
 });
 
-// --- Exemple de route protégée ---
-app.get('/api/devices', authMiddleware, (req, res, next) => {
-  // On laisse la logique existante, mais on protège la route
-  next();
-});
+// Note: devices should be visible to unauthenticated clients (dashboard UI)
+// Keep a single public route providing devices: the public route is defined further below.
 
 // --- Exemple de route admin only ---
 app.get('/api/admin', authMiddleware, (req, res) => {
@@ -712,6 +709,18 @@ function stopStream(serial) {
 
 // ---------- API Endpoints ----------
 app.get('/api/devices', (req, res) => res.json({ ok: true, devices }));
+
+// Diagnostic endpoint for health checks and deploy status
+app.get('/_status', async (req, res) => {
+  try {
+    const addr = server.address() || {};
+    let shortCommit = null;
+    try { const { stdout } = await execp('git rev-parse --short HEAD'); shortCommit = stdout.trim(); } catch (e) { /* ignore if not available */ }
+    res.json({ ok: true, bind: { address: addr.address, port: addr.port }, env: { NODE_ENV: process.env.NODE_ENV || null, HOST: process.env.HOST || null, PORT: process.env.PORT || null }, commit: shortCommit });
+  } catch (e) {
+    res.json({ ok: false, error: String(e) });
+  }
+});
 
 app.post('/api/stream/start', async (req, res) => {
   const { serial, profile, cropLeftEye } = req.body || {};
