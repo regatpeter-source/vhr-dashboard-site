@@ -2,6 +2,8 @@ name: 'Regenerate package-lock on Linux'
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ fix-lockfile, fix-lockfile-regenerated ]
 
 jobs:
   regen-lockfile:
