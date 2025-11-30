@@ -66,6 +66,14 @@ const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact
 exposedTopFiles.forEach(f => {
   app.get(`/${f}`, (req, res) => res.sendFile(path.join(__dirname, f)));
 });
+
+// Serve the index on root so PaaS/load balancers that request '/' get the homepage
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// Optional catch-all for known client-side routes or health probes that may access non-existent paths
+app.get('/favicon.ico', (req, res) => res.sendFile(path.join(__dirname, 'site-vitrine', 'favicon.ico')));
 // Simple ping route for health checks
 app.get('/ping', (req, res) => res.json({ ok: true, message: 'pong' }));
 
