@@ -17,3 +17,4 @@ public/broadway/public/
 data/
 *.bak
 public/.vscode/
+tmp_*
