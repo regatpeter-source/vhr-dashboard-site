@@ -67,54 +67,5 @@
     </div>
   </main>
   <script src="/js/account.js"></script>
-      try {
-        const invResp = await api('/api/billing/invoices');
-        const subsResp = await api('/api/billing/subscriptions');
-        const billingBox = document.getElementById('billingBox');
-        if (!billingBox) return;
-        let html = '';
-        if (subsResp.ok && subsResp.subscriptions && subsResp.subscriptions.length) {
-          html += '<h3>Abonnements</h3><ul>';
-          subsResp.subscriptions.forEach(s => { html += `<li>${s.id} – ${s.status} – ${s.items?.data?.map(it => it.price.product || it.price.id).join(', ')}</li>`; });
-          html += '</ul>';
-        } else html += '<p>Aucun abonnement.</p>';
-        if (invResp.ok && invResp.invoices && invResp.invoices.length) {
-          html += '<h3>Factures</h3><ul>';
-          invResp.invoices.forEach(i => { html += `<li>${i.id} – ${i.status} – ${i.amount_paid/100} ${i.currency.toUpperCase()} – <a href="${i.invoice_pdf}" target="_blank">PDF</a></li>`; });
-          html += '</ul>';
-        } else html += '<p>Aucune facture.</p>';
-        html += '<p><button id="manageBillingBtn" class="cta-secondary">Gérer la facturation</button></p>';
-        billingBox.innerHTML = html;
-        const btn = document.getElementById('manageBillingBtn');
-        if (btn) btn.onclick = async () => {
-          const resp = await api('/api/billing/portal', { method: 'POST' });
-          if (resp.ok && resp.url) window.location = resp.url;
-          else alert('Impossible d\'ouvrir le portail de facturation. ' + (resp.error || ''));
-        }
-      } catch (e) {
-        console.error('billing load', e);
-      }
-    }
-
-    // Profile update
-    const profileForm = document.getElementById('profileForm');
-    const passwordForm = document.getElementById('passwordForm');
-    profileForm && profileForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const username = document.getElementById('profileUsername').value;
-      const email = document.getElementById('profileEmail').value;
-      const res = await api('/api/me', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, email }) });
-      const msg = document.getElementById('profileMessage');
-      if (res && res.ok) { msg.textContent = 'Profil mis à jour'; await loadMe(); } else { msg.textContent = 'Erreur: ' + (res && res.error ? res.error : 'inconnue'); }
-    });
-    passwordForm && passwordForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const oldPassword = document.getElementById('oldPassword').value;
-      const newPassword = document.getElementById('newPassword').value;
-      const res = await api('/api/me', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldPassword, newPassword }) });
-      const msg = document.getElementById('passwordMessage');
-      if (res && res.ok) { msg.textContent = 'Mot de passe changé'; } else { msg.textContent = 'Erreur: ' + (res && res.error ? res.error : 'inconnue'); }
-    });
-  </script>
 </body>
 </html>
