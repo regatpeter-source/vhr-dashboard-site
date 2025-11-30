@@ -19,4 +19,4 @@ RUN sh -lc 'npm ci --omit=dev || npm ci --only=production'
 COPY . .
 
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["npm", "start"]

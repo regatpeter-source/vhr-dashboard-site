@@ -4,6 +4,7 @@
   "description": "VHR Dashboard - Server and site-vitrine",
   "main": "server.js",
   "scripts": {
+    "prestart": "node scripts/strip-bom.js",
     "start": "node server.js",
     "start:dev": "NO_ADB=1 node server.js",
     "migrate:sqlite": "node scripts/migrate-to-sqlite.js",
