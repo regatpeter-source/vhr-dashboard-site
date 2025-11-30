@@ -53,8 +53,13 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/downloads', express.static(path.join(__dirname, 'downloads'), {
   setHeaders: (res, filePath) => {
     try {
-      if (filePath.endsWith('.zip') || filePath.endsWith('.apk')) {
+      if (filePath.endsWith('.zip')) {
         res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
+        res.setHeader('Content-Type', 'application/zip');
+      }
+      if (filePath.endsWith('.apk')) {
+        res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
+        res.setHeader('Content-Type', 'application/vnd.android.package-archive');
       }
     } catch (e) { /* ignore */ }
   }
