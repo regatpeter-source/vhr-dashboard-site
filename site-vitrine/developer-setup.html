@@ -45,6 +45,13 @@ adb devices</code></pre>
           <li><b>Installer la démo (facultatif)</b> :
             <p>Télécharger la démo : <a href="/downloads/vhr-dashboard-demo.zip">Télécharger la démo</a></p>
             <p><small>Note: l'archive contient un fichier <code>vhr-dashboard-demo.apk</code> placeholder pour les tests. Pour installer via ADB, extrayez la ZIP et connectez un appareil (ou démarrez un émulateur), puis exécutez : <code>adb devices</code> pour vérifier la connexion avant d'exécuter <code>adb install -r path\to\vhr-dashboard-demo.apk</code>. Si aucun appareil n'est connecté, ADB renverra "no devices/emulators found".</small></p>
+              <p><small>Note: l'archive contient un fichier <code>vhr-dashboard-demo.apk</code> placeholder pour les tests. Ce placeholder n'est pas un APK installable; si vous obtenez <code>INSTALL_PARSE_FAILED_UNEXPECTED_EXCEPTION</code>, c'est parce que l'APK est invalide. Pour installer depuis ADB :
+                <ol>
+                  <li>Extrayez la ZIP et vérifiez le fichier APK : <code>adb devices</code> pour confirmer qu'un appareil est connecté.</li>
+                  <li>Vérifiez que l'APK est valide avec la commande fournie (Node) : <code>npm run check-apk downloads/vhr-dashboard-demo.apk</code>.</li>
+                  <li>Si le check est vert, installez : <code>adb install -r path\to\vhr-dashboard-demo.apk</code>.</li>
+                </ol>
+                Pour des tests locaux, remplacez le placeholder par un APK de démo compilé (debug) ou une version signée de votre app.</small></p>
             <pre><code>adb install -r path\to\vhr-dashboard-demo.apk</code></pre>
           </li>
           <li><b>Auto‑WiFi (serveur)</b> : Si le serveur est configuré avec <code>AUTO_WIFI_FROM_USB=1</code>, il tentera automatiquement la bascule USB→Wi‑Fi après la détection USB. Le serveur exécute :
