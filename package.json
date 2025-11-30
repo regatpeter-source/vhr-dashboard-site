@@ -1,0 +1,35 @@
+{
+  "name": "vhr-dashboard-site",
+  "version": "0.1.0",
+  "description": "VHR Dashboard - Server and site-vitrine",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:dev": "NO_ADB=1 node server.js",
+    "migrate:sqlite": "node scripts/migrate-to-sqlite.js",
+    "stripe:list": "node scripts/stripe-list-prices.js",
+    "stripe:create-price": "node scripts/stripe-create-price.js",
+    "stripe:test-create": "node scripts/test-create-checkout.js",
+    "html:validate-labels": "node scripts/validate-labels.js",
+    "env:setup": "node scripts/create-env.js",
+    "env:show": "node -e \"const fs=require('fs'); if(!fs.existsSync('.env')){ console.error('.env not found'); process.exit(1);} console.log(require('fs').readFileSync('.env','utf8'))\"",
+    "stripe:create-and-test": "node scripts/stripe-create-and-test.js"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.0",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "helmet": "^7.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "node-fetch": "^2.7.0",
+    "socket.io": "^4.7.2",
+    "stripe": "^12.11.0",
+    "ws": "^8.13.0",
+    "yargs": "^17.7.2"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^8.7.0"
+  }
+}

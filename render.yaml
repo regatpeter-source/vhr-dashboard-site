@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: vhr-dashboard-backend
+    env: docker
+    branch: feat/dev-setup-pr
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    envVars:
+      - key: STRIPE_SECRET_KEY
+      - key: JWT_SECRET
+      - key: STRIPE_DEBUG_PRICES
+      - key: NO_ADB
+      - key: PORT
+      - key: HOST
+      - key: HEALTH_CHECK_PATH
+        value: "/_status"
+    # Optional: Health check path used by Render or CI to confirm server is alive.
+    # For Render, you may configure the health check to use HTTP /_status path and expect a JSON response.
