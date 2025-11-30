@@ -63,7 +63,15 @@ app.use('/downloads', express.static(path.join(__dirname, 'downloads'), {
 app.use('/style.css', express.static(path.join(__dirname, 'public', 'style.css')));
 app.use('/script.js', express.static(path.join(__dirname, 'public', 'script.js')));
 // Expose site-vitrine directory too for local tests
-app.use('/site-vitrine', express.static(path.join(__dirname, 'site-vitrine')));
+app.use('/site-vitrine', express.static(path.join(__dirname, 'site-vitrine'), {
+  setHeaders: (res, filePath) => {
+    try {
+      if (filePath.endsWith('.html')) {
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      }
+    } catch (e) {}
+  }
+}));
 
 // Health check endpoint for local debugging
 app.get('/ping', (req, res) => {
@@ -74,12 +82,21 @@ app.use('/site-vitrine', express.static(path.join(__dirname, 'site-vitrine')));
 // Serve top-level HTML files that are not in public
 const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact.html', 'account.html'];
 exposedTopFiles.forEach(f => {
-  app.get(`/${f}`, (req, res) => res.sendFile(path.join(__dirname, f)));
+  app.get(`/${f}`, (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.sendFile(path.join(__dirname, f));
+  });
 });
 
 // Serve the index on root so PaaS/load balancers that request '/' get the homepage
 app.get('/', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// Support old links: redirect root developer guide to canonical site-vitrine page
+app.get('/developer-setup.html', (req, res) => {
+  res.redirect(302, '/site-vitrine/developer-setup.html');
 });
 
 // Optional catch-all for known client-side routes or health probes that may access non-existent paths
