@@ -48,7 +48,6 @@ app.use(cors({ origin: true, credentials: true }));
 app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, 'public')));
 // Serve downloads folder (demo APK/ZIP). Force attachment on ZIP/APK to prompt download.
 app.use('/downloads', express.static(path.join(__dirname, 'downloads'), {
   setHeaders: (res, filePath) => {
@@ -64,6 +63,7 @@ app.use('/downloads', express.static(path.join(__dirname, 'downloads'), {
     } catch (e) { /* ignore */ }
   }
 }));
+app.use(express.static(path.join(__dirname, 'public')));
 // Serve style and script root assets from public root as well (so /style.css and /script.js work)
 app.use('/style.css', express.static(path.join(__dirname, 'public', 'style.css')));
 app.use('/script.js', express.static(path.join(__dirname, 'public', 'script.js')));
