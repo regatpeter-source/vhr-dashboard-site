@@ -49,7 +49,6 @@ app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(cookieParser());
 // Serve downloads folder (demo APK/ZIP). Force attachment on ZIP/APK to prompt download.
-app.use('/downloads', express.static(path.join(__dirname, 'downloads'), {
   setHeaders: (res, filePath) => {
     try {
       if (filePath.endsWith('.zip')) {
@@ -62,7 +61,24 @@ app.use('/downloads', express.static(path.join(__dirname, 'downloads'), {
       }
     } catch (e) { /* ignore */ }
   }
+app.use('/downloads', express.static(path.join(__dirname, 'downloads'), {
 }));
+// Convenience route: direct APK download at root path (no subfolder) for ease of use
+app.get('/vhr-dashboard-demo.apk', (req, res) => {
+  // Prefer serving from downloads/, fallback to public/ (for static hosting environments)
+  const apkCandidate1 = path.join(__dirname, 'downloads', 'vhr-dashboard-demo.apk');
+  const apkCandidate2 = path.join(__dirname, 'public', 'vhr-dashboard-demo.apk');
+  const apkPath = fs.existsSync(apkCandidate1) ? apkCandidate1 : (fs.existsSync(apkCandidate2) ? apkCandidate2 : null);
+  try {
+    if (!apkPath) return res.status(404).send('APK not found');
+    res.setHeader('Content-Disposition', `attachment; filename="${path.basename(apkPath)}"`);
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    return res.sendFile(apkPath);
+  } catch (e) {
+    console.error('[downloads] /vhr-dashboard-demo.apk error:', e && e.message);
+    return res.status(500).send('Server error');
+  }
+});
 app.use(express.static(path.join(__dirname, 'public')));
 // Serve style and script root assets from public root as well (so /style.css and /script.js work)
 app.use('/style.css', express.static(path.join(__dirname, 'public', 'style.css')));
