@@ -86,14 +86,42 @@
     if (res && res.ok) { msg.textContent = 'Mot de passe changé'; } else { msg.textContent = 'Erreur: ' + (res && res.error ? res.error : 'inconnue'); }
   });
 
-  // Billing section
+  // Billing section: list subscriptions and invoices, and show billing portal button
   async function loadBilling(){
     try {
-      const r = await api('/api/billing/invoices');
-      const invoices = (r && r.invoices) || [];
-      const box = document.getElementById('billingBox');
-      box.innerHTML = '<h3>Factures</h3>' + (invoices.length ? '<ul>' + invoices.map(i=>`<li>Invoice ${i.id} - ${i.amount_due/100} ${i.currency}</li>`).join('') + '</ul>' : '<p>Aucune facture</p>');
-    } catch(e) {}
+      const invResp = await api('/api/billing/invoices');
+      const subsResp = await api('/api/billing/subscriptions');
+      const billingBox = document.getElementById('billingBox');
+      if (!billingBox) return;
+      let html = '';
+      if (subsResp && subsResp.ok && Array.isArray(subsResp.subscriptions) && subsResp.subscriptions.length) {
+        html += '<h3>Abonnements</h3>';
+        subsResp.subscriptions.forEach(s => {
+          const items = (s.items && Array.isArray(s.items.data)) ? s.items.data.map(it => (it.price && (it.price.product || it.price.id)) || '').join(', ') : '';
+          html += `<div>${s.id} – ${s.status} – ${items}</div>`;
+        });
+      } else html += '<p>Aucun abonnement.</p>';
+
+      if (invResp && invResp.ok && Array.isArray(invResp.invoices) && invResp.invoices.length) {
+        html += '<h3>Factures</h3><ul>';
+        invResp.invoices.forEach(i => {
+          html += `<li>${i.id} – ${i.status} – ${Number(i.amount_paid||i.amount_due||0)/100} ${String(i.currency||'').toUpperCase()}</li>`;
+        });
+        html += '</ul>';
+      } else html += '<p>Aucune facture.</p>';
+
+      html += '<p><button id="manageBillingBtn" class="cta-secondary">Gérer la facturation</button></p>';
+      billingBox.innerHTML = html;
+
+      const btn = document.getElementById('manageBillingBtn');
+      if (btn) btn.addEventListener('click', async () => {
+        const resp = await api('/api/billing/portal', { method: 'POST' });
+        if (resp && resp.ok && resp.url) window.location = resp.url;
+        else alert('Impossible d\'ouvrir le portail de facturation. ' + (resp && resp.error ? resp.error : ''));
+      });
+    } catch (e) {
+      console.error('billing load', e);
+    }
   }
 
   // Load user information on start
