@@ -16,6 +16,7 @@
     "env:setup": "node scripts/create-env.js",
     "env:show": "node -e \"const fs=require('fs'); if(!fs.existsSync('.env')){ console.error('.env not found'); process.exit(1);} console.log(require('fs').readFileSync('.env','utf8'))\"",
     "stripe:create-and-test": "node scripts/stripe-create-and-test.js"
+    ,"check-apk": "node scripts/check-apk.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.0",
