@@ -49,6 +49,16 @@ app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
+// Serve downloads folder (demo APK/ZIP). Force attachment on ZIP/APK to prompt download.
+app.use('/downloads', express.static(path.join(__dirname, 'downloads'), {
+  setHeaders: (res, filePath) => {
+    try {
+      if (filePath.endsWith('.zip') || filePath.endsWith('.apk')) {
+        res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
+      }
+    } catch (e) { /* ignore */ }
+  }
+}));
 // Serve style and script root assets from public root as well (so /style.css and /script.js work)
 app.use('/style.css', express.static(path.join(__dirname, 'public', 'style.css')));
 app.use('/script.js', express.static(path.join(__dirname, 'public', 'script.js')));
