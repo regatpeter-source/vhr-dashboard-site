@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Guide : activer le mode d├®veloppeur, connecter le casque en USB, puis activer ADB over WiFi pour VR Manager">
-  <title>Guide d'installation - Mode d├®veloppeur & ADB WiFi</title>
+  <meta name="description" content="Guide : activer le mode développeur, connecter le casque en USB, puis activer ADB over WiFi pour VR Manager">
+  <title>Guide d'installation - Mode développeur & ADB WiFi</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -22,13 +22,13 @@
     </nav>
   </header>
   <main style="max-width:1000px;margin:36px auto;padding:24px;">
-      <h1>Guide D├®veloppeur ÔÇö Mise en route & AutoÔÇæWiFi</h1>
-      <p>Instructions essentielles pour pr├®parer un casque, et utiliser la fonctionnalit├® AutoÔÇæWiFi du serveur (bascule USB ÔåÆ ADB over WiÔÇæFi automatique).</p>
+      <h1>Guide Développeur – Mise en route & Auto‑WiFi</h1>
+      <p>Instructions essentielles pour préparer un casque, et utiliser la fonctionnalité Auto‑WiFi du serveur (bascule USB → ADB over Wi‑Fi automatique).</p>
 
     <section>
-      <h2>Pr├®requis</h2>
+      <h2>Prérequis</h2>
       <ul>
-          <li>ADB (Android Platform Tools) install├® et dans le PATH. <a href="https://developer.android.com/studio/releases/platform-tools" target="_blank" rel="noopener noreferrer">T├®l├®charger</a>.</li>
+          <li>ADB (Android Platform Tools) installé et dans le PATH. <a href="https://developer.android.com/studio/releases/platform-tools" target="_blank" rel="noopener noreferrer">Télécharger</a>.</li>
           <li>C├óble USB et casque VR (Meta/Pico/Autre).</li>
           <li>Activer le mode d├®veloppeur depuis l'app mobile du casque si requis (ex. Meta).</li>
       </ul>
@@ -41,12 +41,12 @@
             <pre><code>adb version
 adb devices</code></pre>
           </li>
-          <li><b>Activer le mode d├®veloppeur</b> et accepter le d├®bogage USB au branchement du casque.</li>
+          <li><b>Activer le mode développeur</b> et accepter le débogage USB au branchement du casque.</li>
           <li><b>Installer la d├®mo (facultatif)</b> :
-            <p>T├®l├®charger la d├®mo : <a href="/downloads/VR-Manager-demo.zip">T├®l├®charger la d├®mo</a></p>
+            <p>Télécharger la démo : <a href="/downloads/VR-Manager-demo.zip">Télécharger la démo</a></p>
             <pre><code>adb install -r path\to\VR-Manager-demo.apk</code></pre>
           </li>
-          <li><b>AutoÔÇæWiFi (serveur)</b> : Si le serveur est configur├® avec <code>AUTO_WIFI_FROM_USB=1</code>, il tentera automatiquement la bascule USBÔåÆWiÔÇæFi apr├¿s la d├®tection USB. Le serveur ex├®cute :
+          <li><b>Auto‑WiFi (serveur)</b> : Si le serveur est configuré avec <code>AUTO_WIFI_FROM_USB=1</code>, il tentera automatiquement la bascule USB→Wi‑Fi après la détection USB. Le serveur exécute :
             <pre><code>adb tcpip 5555
 adb shell ip addr show wlan0
 adb connect 192.168.X.Y:5555
@@ -54,23 +54,23 @@ adb devices</code></pre>
             <p>API (manuelle) : <code>POST /api/adb/wifi-connect</code> (body: <code>{ "serial": "deviceSerial" }</code>) pour demander explicitement la bascule.</p>
           </li>
       </ol>
-      <p>Pour tout probl├¿me, utilisez la page <a href="contact.html">Contact</a> ou consultez la FAQ.</p>
+      <p>Pour tout problème, utilisez la page <a href="contact.html">Contact</a> ou consultez la FAQ.</p>
     </section>
 
     <section>
       <h2>Utiliser VHR DASHBOARD</h2>
-        <p>Apr├¿s connexion du casque (USB ou WiÔÇæFi), le tableau de bord d├®tecte lÔÇÖappareil et vous permet :</p>
+        <p>Après connexion du casque (USB ou Wi‑Fi), le tableau de bord détecte l'appareil et vous permet :</p>
         <ul>
-          <li>de lancer le streaming dÔÇÖ├®cran (ADB screenrecord ou via FFmpeg),</li>
-          <li>de lancer/arr├¬ter des apps distantes,</li>
-          <li>de g├®rer les profils (qualit├®/latence) et lÔÇÖenregistrement local.</li>
+          <li>de lancer le streaming d'écran (ADB screenrecord ou via FFmpeg),</li>
+          <li>de lancer/arrêter des apps distantes,</li>
+          <li>de gérer les profils (qualité/latence) et l'enregistrement local.</li>
         </ul>
-        <p>Pour tout dysfonctionnement, consultez la page <a href="/site-vitrine/contact.html">Contact</a> ou signalez le probl├¿me via la page de support.</p>
+        <p>Pour tout dysfonctionnement, consultez la page <a href="/site-vitrine/contact.html">Contact</a> ou signalez le problème via la page de support.</p>
     </section>
 
   </main>
-  <footer style="text-align:center;padding:36px 24px;">
-    <small>┬® 2025 VHR DASHBOARD ÔÇö Guide d'installation & mode d├®veloppeur</small>
+    <footer style="text-align:center;padding:36px 24px;">
+    <small>© 2025 VHR DASHBOARD – Guide d'installation & mode développeur</small>
   </footer>
   <script src="/js/script.js"></script>
 </body>
