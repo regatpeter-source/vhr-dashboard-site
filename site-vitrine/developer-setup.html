@@ -22,55 +22,52 @@
     </nav>
   </header>
   <main style="max-width:1000px;margin:36px auto;padding:24px;">
-    <h1>Guide : activer le mode développeur & connecter votre casque (USB, puis Wi-Fi)</h1>
-    <p>Ce guide vous accompagne pas à pas pour préparer un casque VR pour fonctionner avec VHR DASHBOARD : activer le mode développeur, effectuer la première connexion par USB, puis activer ADB over Wi‑Fi pour les sessions ultérieures.</p>
+      <h1>Guide Développeur - Mise en route rapide</h1>
+      <p>Instructions essentielles pour préparer un casque, connecter via USB puis basculer en ADB over Wi‑Fi, et utiliser VHR DASHBOARD.</p>
 
     <section>
       <h2>Prérequis</h2>
       <ul>
-        <li>Un PC (Windows, macOS ou Linux) avec le <b>SDK Platform Tools</b> (adb) installé. Téléchargement officiel : <a href="https://developer.android.com/studio/releases/platform-tools" target="_blank" rel="noopener noreferrer">Android Platform Tools</a>.</li>
-        <li>Le casque VR (Meta Quest / Pico / autre casque Android) et le câble USB pour le connecter au PC.</li>
-        <li>L'application mobile ou le compte développeur (pour certains casques comme Meta Quest, il faut créer une organisation sur <a href="https://developer.oculus.com" target="_blank" rel="noopener noreferrer">developer.oculus.com</a> et activer le mode développeur dans l'app mobile).</li>
-        <li>Le fichier d'installation (APK) fourni lors du téléchargement de la démo : <code>downloads/VR-Manager-demo.zip</code>.</li>
+          <li>ADB (Android Platform Tools) installé et dans le PATH. <a href="https://developer.android.com/studio/releases/platform-tools" target="_blank" rel="noopener noreferrer">Télécharger</a>.</li>
+          <li>Câble USB et casque VR (Meta/Pico/Autre).</li>
+          <li>Activer le mode développeur depuis l'app mobile du casque si requis (ex. Meta).</li>
       </ul>
     </section>
 
     <section>
       <h2>Étapes rapides</h2>
       <ol>
-        <li>
-          <h3>Installer adb</h3>
-          <p>Téléchargez <b>Android Platform Tools</b> (adb) et ajoutez le dossier à votre PATH. Vérifiez :</p>
-          <pre><code>adb version
-adb devices</code></pre>
-        </li>
-        <li>
-          <h3>Activer le mode développeur</h3>
-          <p>Activez le mode développeur depuis l'app mobile du casque et acceptez le débogage USB à la première connexion.</p>
-        </li>
-        <li>
-          <h3>Install & test</h3>
-          <p>Installez la démo si nécessaire : <code>adb install -r path\to\VR-Manager-demo.apk</code></p>
-          <p>Vérifiez la présence : <code>adb devices</code></p>
-        </li>
-        <li>
-          <h3>Auto‑WiFi (nouvelle fonctionnalité)</h3>
-          <p>Si votre serveur VHR DASHBOARD a l'option Auto‑WiFi activée (via <code>AUTO_WIFI_FROM_USB</code>), il peut automatiquement activer <code>adb tcpip 5555</code> et tenter une connexion Wi‑Fi lorsque le casque est détecté en USB. Utilisez les commandes habituelles si vous devez le faire manuellement :</p>
-          <pre><code>adb tcpip 5555
-adb shell ip addr show wlan0
-adb connect 192.168.X.Y:5555
-adb devices</code></pre>
-          <p>Vous pouvez aussi appeler le endpoint serveur :</p>
-          <pre><code>POST /api/adb/wifi-connect (body: { serial: 'deviceSerial' })</code></pre>
-        </li>
+          <li><b>Installer et vérifier adb</b> :
+            <pre><code>adb version
+  adb devices</code></pre>
+          </li>
+          <li><b>Activer le mode développeur</b> et accepter le débogage USB au branchement du casque.</li>
+          <li><b>Installer la démo (facultatif)</b> :
+            <pre><code>adb install -r path\to\VR-Manager-demo.apk</code></pre>
+          </li>
+          <li><b>Passer en Wi‑Fi (optionnel)</b> :
+            <pre><code>adb tcpip 5555
+  adb shell ip addr show wlan0
+  adb connect 192.168.X.Y:5555
+  adb devices</code></pre>
+          </li>
+          <li><b>Auto‑WiFi via le serveur</b> : si Auto‑WiFi est activé, le serveur peut tenter automatiquement la bascule USB→Wi‑Fi ; sinon utilisez :
+            <pre><code>POST /api/adb/wifi-connect
+  Body: { "serial": "deviceSerial" }</code></pre>
+          </li>
       </ol>
       <p>Pour tout problème, utilisez la page <a href="contact.html">Contact</a> ou consultez la FAQ.</p>
     </section>
 
     <section>
       <h2>Utiliser VHR DASHBOARD</h2>
-      <p>Après avoir mis en place ADB via USB ou Wi‑Fi, lancez VHR DASHBOARD sur votre PC et utilisez la fonctionnalité de <b>détection des appareils</b> pour lister et gérer les casques. Pour tout problème de connexion, consultez notre FAQ ou contactez le support via la page <a href="contact.html">Contact</a>.</p>
-      <p><a href="/downloads/VR-Manager-demo.zip" class="cta">Télécharger la démo</a></p>
+        <p>Après connexion du casque (USB ou Wi‑Fi), le tableau de bord détecte l’appareil et vous permet :</p>
+        <ul>
+          <li>de lancer le streaming d’écran (ADB screenrecord ou via FFmpeg),</li>
+          <li>de lancer/arrêter des apps distantes,</li>
+          <li>de gérer les profils (qualité/latence) et l’enregistrement local.</li>
+        </ul>
+        <p>Pour tout dysfonctionnement, consultez la page <a href="/site-vitrine/contact.html">Contact</a> ou signalez le problème via la page de support.</p>
     </section>
 
   </main>
