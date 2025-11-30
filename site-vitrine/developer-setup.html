@@ -36,66 +36,35 @@
     </section>
 
     <section>
-      <h2>Étapes détaillées</h2>
+      <h2>Étapes rapides</h2>
       <ol>
         <li>
-          <h3>Installer adb sur votre PC</h3>
-          <p>Décompressez <b>platform-tools</b>, puis vérifiez que <code>adb</code> est accessible dans votre terminal / PowerShell :</p>
+          <h3>Installer adb</h3>
+          <p>Téléchargez <b>Android Platform Tools</b> (adb) et ajoutez le dossier à votre PATH. Vérifiez :</p>
           <pre><code>adb version
 adb devices</code></pre>
-          <p>Si vous êtes sous Windows, utilisez PowerShell pour exécuter ces commandes. Ajoutez <code>platform-tools</code> à votre PATH pour ne pas taper le chemin complet.</p>
         </li>
-
         <li>
-          <h3>Activer le mode développeur sur le casque</h3>
-          <p>Ouvrez l'application mobile du fabricant (ex. : application Meta/Oculus), sélectionnez votre casque, puis activez <b>Developer Mode</b> (Mode développeur). Cette opération nécessite un compte développeur/organisation pour certains casques.</p>
-          <p>Note : les menus peuvent varier selon le modèle (Quest, Pico...). Consultez la documentation fabricant si besoin.</p>
+          <h3>Activer le mode développeur</h3>
+          <p>Activez le mode développeur depuis l'app mobile du casque et acceptez le débogage USB à la première connexion.</p>
         </li>
-
         <li>
-          <h3>Première connexion : brancher le casque en USB</h3>
-          <p>Branchez le casque en USB à votre PC. Depuis votre terminal :</p>
-          <pre><code>adb devices</code></pre>
-          <p>Une popup apparaitra dans le casque demandant d'autoriser le débogage USB. Acceptez la connexion et cochez « Toujours autoriser » si vous faites confiance à ce PC.</p>
+          <h3>Install & test</h3>
+          <p>Installez la démo si nécessaire : <code>adb install -r path\to\VR-Manager-demo.apk</code></p>
+          <p>Vérifiez la présence : <code>adb devices</code></p>
         </li>
-
         <li>
-          <h3>Installer l'application (démo)</h3>
-          <p>Si vous avez téléchargé la démo APK, installez-la via adb :</p>
-          <pre><code>adb install -r path\to\VR-Manager-demo.apk</code></pre>
-          <p>Vous pouvez vérifier la présence de l'application avec :</p>
-          <pre><code>adb shell pm list packages | findstr VR-Manager</code></pre>
-        </li>
-
-        <li>
-          <h3>Activer ADB over Wi‑Fi (pour sessions sans USB)</h3>
-          <p>Une fois la connexion USB réussie, vous pouvez passer le casque en mode ADB Wi‑Fi :</p>
+          <h3>Auto‑WiFi (nouvelle fonctionnalité)</h3>
+          <p>Si votre serveur VHR DASHBOARD a l'option Auto‑WiFi activée (via <code>AUTO_WIFI_FROM_USB</code>), il peut automatiquement activer <code>adb tcpip 5555</code> et tenter une connexion Wi‑Fi lorsque le casque est détecté en USB. Utilisez les commandes habituelles si vous devez le faire manuellement :</p>
           <pre><code>adb tcpip 5555
-# Récupérez l'IP du casque (connecté au même réseau Wi‑Fi que votre PC)
 adb shell ip addr show wlan0
-# ou utilisez la sortie de la commande suivante pour Quest:
-adb shell ip route | awk '{print $9}'
-# puis connectez
 adb connect 192.168.X.Y:5555
 adb devices</code></pre>
-          <p>Si la connexion est établie, vous verrez le casque apparaître comme <code>192.168.x.y:5555</code> dans la liste <code>adb devices</code>.</p>
-        </li>
-
-        <li>
-          <h3>Déconnecter le câble USB</h3>
-          <p>Après la connexion Wi‑Fi, vous pouvez débrancher le câble USB et continuer à utiliser adb via Wi‑Fi. Pour revenir au mode USB si nécessaire :</p>
-          <pre><code>adb usb</code></pre>
-        </li>
-
-        <li>
-          <h3>Bonne pratique & sécurité</h3>
-          <ul>
-            <li>Activez le mode développeur uniquement sur des casques de test ou des casques dédiés à la gestion (ne pas activer sur un casque consistentiel pour utilisateurs non-tech).</li>
-            <li>Si vous perdez la connexion Wi‑Fi, branchez à nouveau via USB et vérifiez l'adresse IP.</li>
-            <li>Sur certains réseaux, le pare-feu/routeur bloque la découverte ; assurez-vous que PC et casque sont sur le même réseau et que le Wi‑Fi autorise la communication entre clients.</li>
-          </ul>
+          <p>Vous pouvez aussi appeler le endpoint serveur :</p>
+          <pre><code>POST /api/adb/wifi-connect (body: { serial: 'deviceSerial' })</code></pre>
         </li>
       </ol>
+      <p>Pour tout problème, utilisez la page <a href="contact.html">Contact</a> ou consultez la FAQ.</p>
     </section>
 
     <section>

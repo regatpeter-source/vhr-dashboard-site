@@ -94,8 +94,10 @@
       const billingBox = document.getElementById('billingBox');
       if (!billingBox) return;
       let html = '';
+      let hasBillingVisible = false;
       if (subsResp && subsResp.ok && Array.isArray(subsResp.subscriptions) && subsResp.subscriptions.length) {
         html += '<h3>Abonnements</h3>';
+        hasBillingVisible = true;
         subsResp.subscriptions.forEach(s => {
           const items = (s.items && Array.isArray(s.items.data)) ? s.items.data.map(it => (it.price && (it.price.product || it.price.id)) || '').join(', ') : '';
           html += `<div>${s.id} – ${s.status} – ${items}</div>`;
@@ -104,14 +106,21 @@
 
       if (invResp && invResp.ok && Array.isArray(invResp.invoices) && invResp.invoices.length) {
         html += '<h3>Factures</h3><ul>';
+        hasBillingVisible = true;
         invResp.invoices.forEach(i => {
           html += `<li>${i.id} – ${i.status} – ${Number(i.amount_paid||i.amount_due||0)/100} ${String(i.currency||'').toUpperCase()}</li>`;
         });
         html += '</ul>';
       } else html += '<p>Aucune facture.</p>';
 
-      html += '<p><button id="manageBillingBtn" class="cta-secondary">Gérer la facturation</button></p>';
-      billingBox.innerHTML = html;
+      // If no subscriptions and no invoices, show a small hint instead of an empty box
+      if (!hasBillingVisible) {
+        billingBox.style.display = 'none';
+      } else {
+        html += '<p><button id="manageBillingBtn" class="cta-secondary">Gérer la facturation</button></p>';
+        billingBox.innerHTML = html;
+        billingBox.style.display = '';
+      }
 
       const btn = document.getElementById('manageBillingBtn');
       if (btn) btn.addEventListener('click', async () => {
