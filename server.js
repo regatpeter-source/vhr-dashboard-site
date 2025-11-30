@@ -326,7 +326,7 @@ function removeUserByUsername(username) {
 const JWT_SECRET = process.env.JWT_SECRET || 'change_this_secret';
 const JWT_EXPIRES = '2h';
 
-// --- Middleware de v├®rification du token ---
+// --- Middleware de vérification du token ---
 function authMiddleware(req, res, next) {
   // Accept token from Authorization header (Bearer) OR cookie 'vhr_token'
   let token = null;
@@ -364,7 +364,7 @@ app.post('/api/login', async (req, res) => {
   res.json({ ok: true, token, username: user.username, role: user.role, email: user.email || null });
 });
 
-// --- Route de logout (optionnelle, c├┤t├® client il suffit de supprimer le token) ---
+// --- Route de logout (optionnelle, côté client il suffit de supprimer le token) ---
 app.post('/api/logout', (req, res) => {
   res.clearCookie('vhr_token');
   res.json({ ok: true });
@@ -591,7 +591,7 @@ async function startStream(serial, opts = {}) {
     throw new Error('already streaming');
   }
 
-  // Profils stables : r├®solution et bitrate
+  // Profils stables : résolution et bitrate
   let size = '854x480', bitrate = '2M';
   if (opts.profile === 'ultra-low') {
     size = '426x240'; bitrate = '800K';
@@ -855,7 +855,7 @@ app.post('/api/apps/:serial/launch', async (req, res) => {
       }
     }
     
-    // Fallback: M├®thode monkey
+    // Fallback: Méthode monkey
     console.log(`[launch] ­ƒöä Fallback monkey...`);
     const monkeyResult = await runAdbCommand(serial, [
       'shell', 'monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1'
@@ -882,9 +882,9 @@ app.post('/api/apps/:serial/launch', async (req, res) => {
       try { io.emit('app-launch', { serial, package: pkg, method: 'am_start_fallback', success: true, startedAt: Date.now() }); } catch (e) {}
       res.json({ ok: true, msg: `Jeu lancé: ${pkg}` });
     } else {
-      console.log(`[launch] ÔÜá´©Å ${pkg} - ├ëchec:\n${amResult.stdout}\n${amResult.stderr}`);
+      console.log(`[launch] ${pkg} - échec:\n${amResult.stdout}\n${amResult.stderr}`);
       try { io.emit('app-launch', { serial, package: pkg, success: false, error: (amResult.stderr || 'Unknown') }); } catch(e) {}
-      res.json({ ok: false, msg: '├ëchec du lancement', details: amResult.stderr });
+      res.json({ ok: false, msg: 'Échec du lancement', details: amResult.stderr });
     }
   } catch (e) {
     console.error('[api] launch:', e);
@@ -1143,32 +1143,32 @@ io.on('connection', socket => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`\n­ƒÜÇ VHR DASHBOARD - Optimis├® Anti-Scintillement`);
+  console.log(`\nVHR DASHBOARD - Optimisé Anti-Scintillement`);
   console.log(`­ƒôí Server: http://localhost:${PORT}`);
   console.log(`\n­ƒôè Profils disponibles (ADB screenrecord - stable):`);
-  console.log(`   ÔÇó ultra-low: 320p, 600K (WiFi faible)`);
-  console.log(`   ÔÇó low:       480p, 1.5M`);
-  console.log(`   ÔÇó wifi:      640p, 2M (WiFi optimis├®)`);
-  console.log(`   ÔÇó default:   720p, 3M`);
-  console.log(`   ÔÇó high:      1280p, 8M (USB)`);
-  console.log(`   ÔÇó ultra:     1920p, 12M (USB uniquement)`);
+  console.log(`   · ultra-low: 320p, 600K (WiFi faible)`);
+  console.log(`   · low:       480p, 1.5M`);
+  console.log(`   • wifi:      640p, 2M (WiFi optimisé)`);
+  console.log(`   · default:   720p, 3M`);
+  console.log(`   · high:      1280p, 8M (USB)`);
+  console.log(`   · ultra:     1920p, 12M (USB uniquement)`);
   console.log(`   Ô£à Pas de scintillement avec ADB natif`);
-  console.log(`\n­ƒæü´©Å  Crop ┼ôil gauche activ├® par d├®faut\n`);
+  console.log(`\nCrop œil gauche activé par défaut\n`);
 });
 
 // Handler de fermeture propre
 process.on('SIGINT', () => {
-  console.log('\n­ƒøæ Arr├¬t du serveur...');
+  console.log('\nArrêt du serveur...');
   
   // Tuer tous les streams actifs
   for (const [serial, stream] of streams) {
     try {
       if (stream.adbProc) {
-        console.log(`­ƒº╣ Arr├¬t adb: ${serial}`);
+        console.log(`Arrêt adb: ${serial}`);
         spawn('taskkill', ['/F', '/T', '/PID', String(stream.adbProc.pid)]);
       }
       if (stream.ffplayProc) {
-        console.log(`­ƒº╣ Arr├¬t ffplay: ${serial}`);
+        console.log(`Arrêt ffplay: ${serial}`);
         spawn('taskkill', ['/F', '/T', '/PID', String(stream.ffplayProc.pid)]);
       }
     } catch (e) {}
@@ -1316,7 +1316,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   res.json({ received: true });
 });
 
-// --- Route de register / cr├®ation de compte ---
+// --- Route de register / création de compte ---
 app.post('/api/register', async (req, res) => {
   const { username, password, email } = req.body || {};
   if (!username || !password) return res.status(400).json({ ok: false, error: 'username and password required' });
