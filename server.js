@@ -99,6 +99,20 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+// Convenience route: direct APK download at root path (no subfolder) for ease of use
+app.get('/vhr-dashboard-demo.apk', (req, res) => {
+  const apkPath = path.join(__dirname, 'downloads', 'vhr-dashboard-demo.apk');
+  try {
+    if (!fs.existsSync(apkPath)) return res.status(404).send('APK not found');
+    res.setHeader('Content-Disposition', `attachment; filename="${path.basename(apkPath)}"`);
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    return res.sendFile(apkPath);
+  } catch (e) {
+    console.error('[downloads] /vhr-dashboard-demo.apk error:', e && e.message);
+    return res.status(500).send('Server error');
+  }
+});
+
 // Support old links: redirect root developer guide to canonical site-vitrine page
 app.get('/developer-setup.html', (req, res) => {
   res.redirect(302, '/site-vitrine/developer-setup.html');
