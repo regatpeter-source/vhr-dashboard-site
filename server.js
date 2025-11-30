@@ -384,7 +384,7 @@ app.patch('/api/me', authMiddleware, async (req, res) => {
     if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
     if (username && username !== user.username) {
       // ensure unique
-        if (getUserByUsername(username)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur d├®j├á utilis├®' });
+        if (getUserByUsername(username)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
       user.username = username;
     }
     if (email) user.email = email;
@@ -425,7 +425,7 @@ app.delete('/api/users/self', authMiddleware, (req, res) => {
 
 // --- Exemple de route admin only ---
 app.get('/api/admin', authMiddleware, (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Acc├¿s refus├®' });
+  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
   res.json({ ok: true, message: 'Bienvenue admin !' });
 });
 
@@ -435,7 +435,7 @@ app.post('/api/scrcpy-gui', async (req, res) => {
   if (!serial) return res.status(400).json({ ok: false, error: 'serial requis' });
   try {
     // Lancer scrcpy en mode GUI natif (pas de redirection stdout)
-    // Taille de fen├¬tre r├®duite (ex: 640x360)
+    // Taille de fenêtre réduite (ex: 640x360)
     const proc = spawn('scrcpy', ['-s', serial, '--window-width', '640', '--window-height', '360'], {
       detached: true,
       stdio: 'ignore'
@@ -611,14 +611,14 @@ async function startStream(serial, opts = {}) {
   console.log(`[server] ­ƒÄ¼ ADB screenrecord stream: ${serial}`);
   console.log(`[server] ­ƒô║ ${size} @ ${bitrate}`);
   
-  // Calculer la position de la fen├¬tre (empilement vertical)
+  // Calculer la position de la fenêtre (empilement vertical)
   const streamCount = Array.from(streams.values()).filter(s => s.ffplayProc).length;
   const windowWidth = 640;
   const windowHeight = 360;
   const windowX = 0;
   const windowY = streamCount * windowHeight;
 
-  // R├®cup├®rer le nom personnalis├® du device
+  // Récupérer le nom personnalisé du device
   const deviceName = nameMap[serial] || serial;
   const windowTitle = `Quest 2 - ${deviceName}`;
 
@@ -718,7 +718,7 @@ function stopStream(serial) {
   
   if (entry.checkInterval) clearInterval(entry.checkInterval);
   
-  // Forcer l'arr├¬t des processus avec taskkill (Windows)
+  // Forcer l'arrêt des processus avec taskkill (Windows)
   try { 
     if (entry.adbProc && entry.adbProc.pid) {
       spawn('taskkill', ['/F', '/T', '/PID', entry.adbProc.pid.toString()]);
@@ -781,7 +781,7 @@ app.post('/api/stream/start', async (req, res) => {
     await startStream(serial, { 
       profile: finalProfile, 
       autoReconnect: true,
-      cropLeftEye: false  // D├®sactiver le crop par d├®faut
+      cropLeftEye: false  // Désactiver le crop par défaut
     });
     res.json({ ok: true });
   } catch (e) {
@@ -821,24 +821,24 @@ app.post('/api/apps/:serial/launch', async (req, res) => {
   }
 
   try {
-    // R├®veiller le casque
+    // Réveiller le casque
     await runAdbCommand(serial, ['shell', 'input', 'keyevent', 'KEYCODE_WAKEUP']);
     await new Promise(r => setTimeout(r, 500));
     
     console.log(`[launch] ­ƒÄ« Tentative de lancement: ${pkg}`);
     
-    // ├ëtape 1: D├®couvrir l'activit├® principale
+    // Étape 1: Découvrir l'activité principale
     const dumpsysResult = await runAdbCommand(serial, [
       'shell', 'dumpsys', 'package', pkg
     ]);
     
-    // Chercher l'activit├® avec android.intent.action.MAIN
+    // Chercher l'activité avec android.intent.action.MAIN
     const activityMatch = dumpsysResult.stdout.match(new RegExp(`${pkg.replace(/\./g, '\\.')}/(\\S+)\\s+filter`, 'm'));
     const mainActivity = activityMatch ? activityMatch[1] : null;
     
     if (mainActivity) {
       // Lancer avec le composant complet
-      console.log(`[launch] ­ƒô▒ Activit├® trouv├®e: ${mainActivity}`);
+      console.log(`[launch] Activité trouvée: ${mainActivity}`);
       const launchResult = await runAdbCommand(serial, [
         'shell', 'am', 'start', '-n', `${pkg}/${mainActivity}`
       ]);
@@ -848,9 +848,9 @@ app.post('/api/apps/:serial/launch', async (req, res) => {
                       launchResult.stdout.includes('Activity');
       
       if (success) {
-        console.log(`[launch] Ô£à ${pkg} lanc├®`);
+        console.log(`[launch] ${pkg} lancé`);
         try { io.emit('app-launch', { serial, package: pkg, method: 'am_start', success: true, startedAt: Date.now() }); } catch (e) {}
-        res.json({ ok: true, msg: `Jeu lanc├®: ${pkg}` });
+        res.json({ ok: true, msg: `Jeu lancé: ${pkg}` });
         return;
       }
     }
@@ -862,9 +862,9 @@ app.post('/api/apps/:serial/launch', async (req, res) => {
     ]);
     
     if (monkeyResult.code === 0 || monkeyResult.stdout.includes('Events injected')) {
-      console.log(`[launch] Ô£à ${pkg} lanc├® via monkey`);
+      console.log(`[launch] ${pkg} lancé via monkey`);
       try { io.emit('app-launch', { serial, package: pkg, method: 'monkey', success: true, startedAt: Date.now() }); } catch (e) {}
-      res.json({ ok: true, msg: `Jeu lanc├®: ${pkg}` });
+      res.json({ ok: true, msg: `Jeu lancé: ${pkg}` });
       return;
     }
     
@@ -878,9 +878,9 @@ app.post('/api/apps/:serial/launch', async (req, res) => {
                     amResult.stdout.includes('Activity');
     
     if (success) {
-      console.log(`[launch] Ô£à ${pkg} lanc├® via am start`);
+      console.log(`[launch] ${pkg} lancé via am start`);
       try { io.emit('app-launch', { serial, package: pkg, method: 'am_start_fallback', success: true, startedAt: Date.now() }); } catch (e) {}
-      res.json({ ok: true, msg: `Jeu lanc├®: ${pkg}` });
+      res.json({ ok: true, msg: `Jeu lancé: ${pkg}` });
     } else {
       console.log(`[launch] ÔÜá´©Å ${pkg} - ├ëchec:\n${amResult.stdout}\n${amResult.stderr}`);
       try { io.emit('app-launch', { serial, package: pkg, success: false, error: (amResult.stderr || 'Unknown') }); } catch(e) {}
