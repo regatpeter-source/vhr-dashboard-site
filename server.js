@@ -1322,7 +1322,7 @@ app.post('/api/register', async (req, res) => {
   if (!username || !password) return res.status(400).json({ ok: false, error: 'username and password required' });
   try {
     // unique username
-    if (getUserByUsername(username)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur d├®j├á utilis├®' });
+    if (getUserByUsername(username)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
     const passwordHash = await bcrypt.hash(password, 10);
     const newUser = { username, passwordHash, role: 'user', email: email || null, stripeCustomerId: null };
     // persist
