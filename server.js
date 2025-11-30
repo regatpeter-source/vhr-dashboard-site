@@ -101,9 +101,12 @@ app.get('/', (req, res) => {
 
 // Convenience route: direct APK download at root path (no subfolder) for ease of use
 app.get('/vhr-dashboard-demo.apk', (req, res) => {
-  const apkPath = path.join(__dirname, 'downloads', 'vhr-dashboard-demo.apk');
+  // Prefer serving from downloads/, fallback to public/ (for static hosting environments)
+  const apkCandidate1 = path.join(__dirname, 'downloads', 'vhr-dashboard-demo.apk');
+  const apkCandidate2 = path.join(__dirname, 'public', 'vhr-dashboard-demo.apk');
+  const apkPath = fs.existsSync(apkCandidate1) ? apkCandidate1 : (fs.existsSync(apkCandidate2) ? apkCandidate2 : null);
   try {
-    if (!fs.existsSync(apkPath)) return res.status(404).send('APK not found');
+    if (!apkPath) return res.status(404).send('APK not found');
     res.setHeader('Content-Disposition', `attachment; filename="${path.basename(apkPath)}"`);
     res.setHeader('Content-Type', 'application/vnd.android.package-archive');
     return res.sendFile(apkPath);
