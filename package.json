@@ -7,6 +7,7 @@
     "prestart": "node scripts/strip-bom.js",
     "start": "node server.js",
     "start:dev": "NO_ADB=1 node server.js",
+    "fixenc": "node scripts/fix-encodings.js",
     "migrate:sqlite": "node scripts/migrate-to-sqlite.js",
     "stripe:list": "node scripts/stripe-list-prices.js",
     "stripe:create-price": "node scripts/stripe-create-price.js",

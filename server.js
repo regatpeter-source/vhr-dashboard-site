@@ -1,4 +1,4 @@
-// ========== IMPORTS & INIT ========== 
+﻿// ========== IMPORTS & INIT ========== 
 
 require('dotenv').config();
 const express = require('express');
@@ -86,6 +86,28 @@ app.get('/', (req, res) => {
 app.get('/favicon.ico', (req, res) => res.sendFile(path.join(__dirname, 'site-vitrine', 'favicon.ico')));
 // Simple ping route for health checks
 app.get('/ping', (req, res) => res.json({ ok: true, message: 'pong' }));
+
+// Ensure HTML responses have charset set to UTF-8 so browsers render accents correctly
+app.use((req, res, next) => {
+  const accept = (req.headers['accept'] || '').toLowerCase();
+  if (req.path.endsWith('.html') || accept.includes('text/html') || req.path === '/') {
+    // Only set charset for HTML responses
+    try {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    } catch (e) { /* ignore */ }
+  }
+  next();
+});
+
+// Middleware to block ADB/streaming endpoints on PaaS or hosts where ADB is disabled
+function requireADB(req, res, next) {
+  if (process.env.NO_ADB === '1') {
+    return res.status(501).json({ ok: false, error: 'ADB disabled on this host via NO_ADB=1' });
+  }
+  next();
+}
+// Apply to common ADB & streaming endpoints to make it obvious in logs that the feature is disabled
+app.use(['/api/adb', '/api/adb/*', '/api/stream', '/api/stream/*', '/api/apps', '/api/apps/*', '/api/battery', '/api/battery/*'], requireADB);
 
 // --- Stripe Checkout ---
 // Trim quotes and whitespace if an operator copy/pasted the key with surrounding quotes

@@ -11,6 +11,7 @@ services:
       - key: JWT_SECRET
       - key: STRIPE_DEBUG_PRICES
       - key: NO_ADB
+        value: '1'
       - key: PORT
       - key: HOST
       - key: HEALTH_CHECK_PATH
