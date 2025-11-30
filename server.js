@@ -72,7 +72,7 @@ app.get('/ping', (req, res) => {
 // Expose site-vitrine and top-level HTML files so they can be accessed via http://localhost:PORT/
 app.use('/site-vitrine', express.static(path.join(__dirname, 'site-vitrine')));
 // Serve top-level HTML files that are not in public
-const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact.html', 'developer-setup.html', 'account.html'];
+const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact.html', 'account.html'];
 exposedTopFiles.forEach(f => {
   app.get(`/${f}`, (req, res) => res.sendFile(path.join(__dirname, f)));
 });
