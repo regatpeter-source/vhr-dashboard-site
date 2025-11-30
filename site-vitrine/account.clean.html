@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Mon compte – VHR DASHBOARD</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <nav>
+      <div class="logo">VHR DASHBOARD</div>
+      <ul>
+        <li><a href="index.html">Accueil</a></li>
+        <li><a href="features.html">Fonctionnalités</a></li>
+        <li><a href="pricing.html">Tarifs</a></li>
+        <li><a href="contact.html">Contact</a></li>
+        <li><a href="developer-setup.html">Guide développeur</a></li>
+        <li><a href="account.html" class="active">Mon compte</a></li>
+      </ul>
+    </nav>
+  </header>
+  <main style="max-width:900px;margin:36px auto;padding:18px;">
+    <h1>Mon compte</h1>
+    <div id="accountBox">
+      <div id="loggedOutBox">
+        <p>Connectez-vous pour accéder à votre espace client ou créez un compte.</p>
+        <div id="authForms">
+          <form id="loginForm" style="margin-bottom:18px;">
+            <label>Nom d'utilisateur:<br><input type="text" id="username" required></label><br>
+            <label>Mot de passe:<br><input type="password" id="password" required></label><br>
+            <button type="submit" class="cta">Se connecter</button>
+          </form>
+          <form id="signupForm">
+            <h3>Créer un compte</h3>
+            <label>Nom d'utilisateur:<br><input type="text" id="signupUsername" required></label><br>
+            <label>Email:<br><input type="email" id="signupEmail"></label><br>
+            <label>Mot de passe:<br><input type="password" id="signupPassword" required></label><br>
+            <label>Confirmer le mot de passe:<br><input type="password" id="signupPasswordConfirm" required></label><br>
+            <button type="submit" class="cta-secondary">Créer un compte</button>
+          </form>
+        </div>
+        <div id="loginMessage"></div>
+      </div>
+      <div id="loggedInBox" style="display:none;">
+        <h2>Bienvenue, <span id="accountName"></span></h2>
+        <p>Rôle: <span id="accountRole"></span></p>
+        <p>Vous êtes connecté·e. Ici vous pourrez afficher vos abonnements, factures et paramètres.</p>
+        <section id="billingBox"></section>
+        <section id="profileBox">
+          <h3>Modifier mon profil</h3>
+          <form id="profileForm">
+            <label>Nom d'utilisateur:<br><input type="text" id="profileUsername"></label><br>
+            <label>Email:<br><input type="email" id="profileEmail"></label><br>
+            <button type="submit" class="cta">Mettre à jour</button>
+          </form>
+          <div id="profileMessage"></div>
+          <h3>Changer le mot de passe</h3>
+          <form id="passwordForm">
+            <label>Ancien mot de passe:<br><input type="password" id="oldPassword"></label><br>
+            <label>Nouveau mot de passe:<br><input type="password" id="newPassword"></label><br>
+            <button type="submit" class="cta">Changer le mot de passe</button>
+          </form>
+          <div id="passwordMessage"></div>
+        </section>
+        <p><button id="logoutBtn" class="cta-secondary">Se déconnecter</button></p>
+      </div>
+    </div>
+  </main>
+  <script src="/js/account.js"></script>
+</body>
+</html>
