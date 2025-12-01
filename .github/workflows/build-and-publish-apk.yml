@@ -17,7 +17,7 @@ jobs:
       - name: Checkout sample HelloWorld project
         uses: actions/checkout@v4
         with:
-          repository: saket/Hello-World-Android
+          repository: android/sunflower
           path: sample-android
           fetch-depth: 1
 
@@ -50,6 +50,14 @@ jobs:
           cd downloads
           if [ -f vhr-dashboard-demo.zip ]; then rm vhr-dashboard-demo.zip; fi
           zip -r vhr-dashboard-demo.zip ./vhr-dashboard-demo.apk ./demo_readme.txt || true
+
+      - name: Upload APK and ZIP as workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vhr-dashboard-demo-artifacts
+          path: |
+            sample-android/app/build/outputs/apk/debug/app-debug.apk
+            public/downloads/vhr-dashboard-demo.zip
 
       - name: Commit & push APK into repository
         env:
