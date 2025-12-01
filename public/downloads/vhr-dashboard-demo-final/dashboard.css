@@ -1,0 +1,38 @@
+/* Dashboard CSS for public/dashboard UI */
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background: #f7f8fa;
+  color: #23272f;
+  text-align: center;
+}
+
+.device-card, .section, header, footer, main {
+  text-align: center;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 18px;
+  padding: 18px;
+}
+
+.device-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  padding: 14px;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 0.9em;
+  padding: 4px 10px;
+  border-radius: 8px;
+  margin-top: 10px;
+  background: #e3f2fd;
+  color: #2196f3;
+  font-weight: bold;
+}
+
+.badge.playing { background: #e8f5e9; color: #2e7d32; }

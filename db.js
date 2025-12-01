@@ -26,6 +26,37 @@ function initSqlite(dbFile) {
       subscriptionId TEXT,
       createdAt TEXT
     )`).run();
+    // Create subscriptions table
+    db.prepare(`CREATE TABLE IF NOT EXISTS subscriptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId INTEGER,
+      username TEXT,
+      email TEXT,
+      stripeSubscriptionId TEXT UNIQUE,
+      stripePriceId TEXT,
+      status TEXT,
+      planName TEXT,
+      startDate TEXT,
+      endDate TEXT,
+      cancelledAt TEXT,
+      createdAt TEXT,
+      updatedAt TEXT,
+      FOREIGN KEY(userId) REFERENCES users(id)
+    )`).run();
+    // Create messages table
+    db.prepare(`CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      email TEXT,
+      subject TEXT,
+      message TEXT,
+      status TEXT,
+      createdAt TEXT,
+      readAt TEXT,
+      respondedAt TEXT,
+      response TEXT,
+      respondedBy TEXT
+    )`).run();
     enabled = true;
     return true;
   } catch (e) {
@@ -82,4 +113,78 @@ function deleteUserByUsername(username) {
   return true;
 }
 
-module.exports = { initSqlite, isEnabled, addOrUpdateUser, getAllUsers, findUserByUsername, updateUserFields, deleteUserByUsername };
+// ===== Messages =====
+function addMessage(messageData) {
+  if (!enabled) return null;
+  const { name, email, subject, message } = messageData;
+  const stmt = db.prepare(`INSERT INTO messages (name, email, subject, message, status, createdAt) VALUES (?, ?, ?, ?, ?, ?)`);
+  const result = stmt.run(name, email, subject, message, 'unread', new Date().toISOString());
+  return result.lastInsertRowid;
+}
+
+function getAllMessages() {
+  if (!enabled) return [];
+  return db.prepare('SELECT * FROM messages ORDER BY createdAt DESC').all();
+}
+
+function getUnreadMessages() {
+  if (!enabled) return [];
+  return db.prepare('SELECT * FROM messages WHERE status = ? ORDER BY createdAt DESC', ['unread']).all();
+}
+
+function updateMessage(messageId, updates) {
+  if (!enabled) return false;
+  const allowed = ['status', 'readAt', 'respondedAt', 'response', 'respondedBy'];
+  const updateFields = Object.keys(updates).filter(k => allowed.includes(k)).map(k => `${k} = @${k}`);
+  if (updateFields.length === 0) return false;
+  const setSql = updateFields.join(', ');
+  const stmt = db.prepare(`UPDATE messages SET ${setSql} WHERE id = @id`);
+  const params = Object.assign({}, updates, { id: messageId });
+  stmt.run(params);
+  return true;
+}
+
+function deleteMessage(messageId) {
+  if (!enabled) return false;
+  db.prepare('DELETE FROM messages WHERE id = ?').run(messageId);
+  return true;
+}
+
+// ===== Subscriptions =====
+function addSubscription(subscriptionData) {
+  if (!enabled) return null;
+  const { userId, username, email, stripeSubscriptionId, stripePriceId, status, planName, startDate, endDate } = subscriptionData;
+  const stmt = db.prepare(`INSERT INTO subscriptions (userId, username, email, stripeSubscriptionId, stripePriceId, status, planName, startDate, endDate, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const now = new Date().toISOString();
+  const result = stmt.run(userId, username, email, stripeSubscriptionId, stripePriceId, status, planName, startDate, endDate, now, now);
+  return result.lastInsertRowid;
+}
+
+function getAllSubscriptions() {
+  if (!enabled) return [];
+  return db.prepare('SELECT * FROM subscriptions ORDER BY createdAt DESC').all();
+}
+
+function getActiveSubscriptions() {
+  if (!enabled) return [];
+  return db.prepare('SELECT * FROM subscriptions WHERE status = ? ORDER BY createdAt DESC', ['active']).all();
+}
+
+function updateSubscription(subscriptionId, updates) {
+  if (!enabled) return false;
+  const allowed = ['status', 'planName', 'startDate', 'endDate', 'cancelledAt'];
+  const updateFields = Object.keys(updates).filter(k => allowed.includes(k)).map(k => `${k} = @${k}`);
+  if (updateFields.length === 0) return false;
+  const setSql = updateFields.join(', ');
+  const stmt = db.prepare(`UPDATE subscriptions SET ${setSql}, updatedAt = @updatedAt WHERE id = @id`);
+  const params = Object.assign({}, updates, { id: subscriptionId, updatedAt: new Date().toISOString() });
+  stmt.run(params);
+  return true;
+}
+
+function findSubscriptionByStripeId(stripeId) {
+  if (!enabled) return null;
+  return db.prepare('SELECT * FROM subscriptions WHERE stripeSubscriptionId = ?').get(stripeId);
+}
+
+module.exports = { initSqlite, isEnabled, addOrUpdateUser, getAllUsers, findUserByUsername, updateUserFields, deleteUserByUsername, addMessage, getAllMessages, getUnreadMessages, updateMessage, deleteMessage, addSubscription, getAllSubscriptions, getActiveSubscriptions, updateSubscription, findSubscriptionByStripeId, findUserByStripeCustomerId };

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Tarifs et abonnements VHR DASHBOARD : location mensuelle ou achat définitif pour la gestion de vos casques VR." />
+  <title>Tarifs – VHR DASHBOARD</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <nav>
+      <div class="logo">VHR DASHBOARD</div>
+      <ul>
+        <li><a href="index.html">Accueil</a></li>
+        <li><a href="features.html">Fonctionnalités</a></li>
+        <li><a href="pricing.html" class="active">Tarifs</a></li>
+        <li><a href="contact.html">Contact</a></li>
+      </ul>
+    </nav>
+    <div class="hero hero-small">
+      <h1>Tarifs & Abonnement</h1>
+      <p class="centered">Choisissez la formule adaptée à vos besoins : location mensuelle ou achat définitif.</p>
+    </div>
+  </header>
+  <main>
+    <section class="pricing-section">
+      <div class="pricing-cards">
+        <div class="pricing-card best">
+          <h2>Location mensuelle</h2>
+          <div class="price">29€<span>/mois</span></div>
+          <ul>
+            <li>Toutes les fonctionnalités incluses</li>
+            <li>Mises à jour & support</li>
+            <li>Sans engagement, résiliable à tout moment</li>
+          </ul>
+            <button class="cta stripe-buy" id="stripe-sub-btn" data-price-id="price_1SWhBW7g8FcyfmlJZ5rJGh6N" data-mode="subscription" aria-label="Payer l'abonnement mensuel en ligne">Payer l'abonnement</button>
+        </div>
+        <div class="pricing-card">
+          <h2>Achat définitif</h2>
+          <div class="price">499€<span>HT</span></div>
+          <ul>
+            <li>Licence perpétuelle</li>
+            <li>Mises à jour 1 an incluses</li>
+            <li>Support prioritaire 1 an</li>
+          </ul>
+            <button class="cta-secondary stripe-buy" id="stripe-onetime-btn" data-price-id="price_1SWhPb7g8FcyfmlJzlquRicj" data-mode="payment" aria-label="Acheter la licence définitive en ligne">Acheter la licence</button>
+        </div>
+      </div>
+      <div class="payment-note">
+        <p class="centered"><b>Paiement sécurisé</b> par carte bancaire (Stripe) ou PayPal. Facture fournie. <br>Pour un devis personnalisé ou une offre entreprise, <a href="contact.html">contactez-nous</a>.</p>
+      </div>
+    </section>
+    <section class="faq-section">
+      <h2 class="centered">FAQ</h2>
+      <div class="faq-item centered"><b class="centered">Comment fonctionne la location ?</b><br>Vous payez chaque mois, sans engagement. Vous pouvez arrêter à tout moment.</div>
+      <div class="faq-item centered"><b class="centered">Comment installer le logiciel ?</b><br>Vous recevez un lien de téléchargement et une clé d’activation après paiement.</div>
+      <div class="faq-item centered"><b class="centered">Peut-on migrer de la location à l’achat ?</b><br>Oui, le montant d’un mois de location est déduit du prix d’achat si vous basculez.</div>
+    </section>
+  </main>
+  <footer>
+    <div class="footer-content">
+      <span>&copy; 2025 VHR DASHBOARD. Tous droits réservés.</span>
+      <span><a href="contact.html">Contact</a> | <a href="mentions.html">Mentions légales</a></span>
+    </div>
+  </footer>
+  <script src="script.js"></script>
+  <!-- Chatbot IA (Botpress Webchat) config (moved to external file to comply with CSP) -->
+  <script src="js/botpress-config.js"></script>
+  <!-- Stripe Checkout - via backend - externalized script to comply with CSP -->
+  <script src="js/pricing-stripe.js"></script>
+  <script src="https://cdn.botpress.cloud/webchat/v1/inject.js"></script>
+</body>
+</html>
