@@ -51,6 +51,7 @@ app.use(cookieParser());
 
 // ========== DEMO/TRIAL MANAGEMENT ==========
 const demoConfig = require('./config/demo.config');
+const subscriptionConfig = require('./config/subscription.config');
 
 // Ajouter un champ demoStartDate lors de l'inscription
 function initializeDemoForUser(user) {
@@ -581,6 +582,124 @@ app.get('/api/demo/status', authMiddleware, (req, res) => {
     });
   } catch (e) {
     console.error('[demo] status error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+// ========== SUBSCRIPTION MANAGEMENT ==========
+
+// Get available subscription plans
+app.get('/api/subscriptions/plans', (req, res) => {
+  try {
+    const plans = Object.values(subscriptionConfig.PLANS).map(plan => ({
+      id: plan.id,
+      name: plan.name,
+      description: plan.description,
+      price: plan.price,
+      currency: plan.currency,
+      billingPeriod: plan.billingPeriod,
+      features: plan.features,
+      limits: plan.limits
+    }));
+    res.json({ ok: true, plans, billingOptions: subscriptionConfig.BILLING_OPTIONS });
+  } catch (e) {
+    console.error('[subscriptions] plans error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+// Get current user's subscription status
+app.get('/api/subscriptions/my-subscription', authMiddleware, (req, res) => {
+  try {
+    const user = getUserByUsername(req.user.username);
+    if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+
+    const subscription = subscriptions.find(s => s.userId === user.id || s.username === user.username);
+    const isActive = user.subscriptionStatus === 'active';
+    
+    // Trouver le plan correspondant
+    let currentPlan = null;
+    if (subscription) {
+      for (const [key, plan] of Object.entries(subscriptionConfig.PLANS)) {
+        if (plan.stripePriceId === subscription.stripePriceId) {
+          currentPlan = { ...plan, id: key };
+          break;
+        }
+      }
+    }
+
+    res.json({
+      ok: true,
+      subscription: {
+        isActive: isActive,
+        status: user.subscriptionStatus || 'inactive',
+        currentPlan: currentPlan,
+        subscriptionId: user.subscriptionId || null,
+        startDate: subscription?.startDate || null,
+        endDate: subscription?.endDate || null,
+        nextBillingDate: subscription?.endDate || null,
+        cancelledAt: subscription?.cancelledAt || null,
+        daysUntilRenewal: subscription?.endDate ? Math.ceil((new Date(subscription.endDate) - new Date()) / (24 * 60 * 60 * 1000)) : null
+      }
+    });
+  } catch (e) {
+    console.error('[subscriptions] my-subscription error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+// Get subscription history
+app.get('/api/subscriptions/history', authMiddleware, (req, res) => {
+  try {
+    const user = getUserByUsername(req.user.username);
+    if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+
+    const userSubs = subscriptions.filter(s => s.username === user.username || s.userId === user.id);
+    
+    res.json({
+      ok: true,
+      history: userSubs.map(s => ({
+        id: s.id,
+        planName: s.planName,
+        status: s.status,
+        startDate: s.startDate,
+        endDate: s.endDate,
+        cancelledAt: s.cancelledAt,
+        totalPaid: s.totalPaid || 0
+      }))
+    });
+  } catch (e) {
+    console.error('[subscriptions] history error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+// Cancel subscription
+app.post('/api/subscriptions/cancel', authMiddleware, async (req, res) => {
+  try {
+    const user = getUserByUsername(req.user.username);
+    if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+
+    // Chercher l'abonnement actif
+    const subIdx = subscriptions.findIndex(s => s.username === user.username && s.status === 'active');
+    if (subIdx === -1) return res.status(400).json({ ok: false, error: 'No active subscription found' });
+
+    const sub = subscriptions[subIdx];
+    sub.status = 'cancelled';
+    sub.cancelledAt = new Date().toISOString();
+    
+    // Mettre à jour l'utilisateur
+    user.subscriptionStatus = 'cancelled';
+    persistUser(user);
+    saveSubscriptions();
+
+    res.json({ 
+      ok: true, 
+      message: 'Subscription cancelled successfully',
+      subscription: sub
+    });
+  } catch (e) {
+    console.error('[subscriptions] cancel error:', e);
     res.status(500).json({ ok: false, error: 'Server error' });
   }
 });
