@@ -31,7 +31,50 @@ How to use:
 
 Notes:
 - This workflow publishes only the static site in `site-vitrine`; the backend (Express server) is not deployed in this preview.
+
+Demo APK
+--------
+- A GitHub Actions workflow builds a small debug APK (Hello World) and publishes it to `public/downloads/vhr-dashboard-demo.apk` on pushes to `feat/dev-setup-pr`. This ensures the demo APK is a valid Android package and can be installed directly via ADB.
+ - A GitHub Actions workflow builds a small debug APK (Hello World) and publishes it to `public/downloads/vhr-dashboard-demo.apk` on pushes to `feat/dev-setup-pr` and uploads the APK/ZIP as workflow artifacts for easy download from the Actions run.
 - For dynamic preview (backend), consider using platforms such as Heroku, Render, or Vercel and set up environment variables accordingly.
+
+Build local demo APK
+--------------------
+If you prefer to build the demo APK locally (instead of relying on CI), you can use the provided helper scripts under `scripts/`:
+
+- `scripts/build-demo-apk.ps1` - PowerShell script that clones the `saket/Hello-World-Android` sample, builds it (assembleDebug), copies the APK into `downloads/` and `public/`, and recreates `downloads/vhr-dashboard-demo.zip`.
+- `scripts/build-demo-apk.sh` - Bash equivalent for Linux/macOS.
+
+Prerequisites:
+- Java 17+ (JDK) installed and on `PATH`.
+- Android SDK and build tools installed (Android Studio recommended) for a full build.
+- Git CLI installed.
+
+Usage (PowerShell):
+
+```powershell
+cd <repository-root>
+.\scripts\build-demo-apk.ps1
+```
+
+Usage (bash):
+
+```bash
+cd <repository-root>
+./scripts/build-demo-apk.sh
+```
+
+After completion the demo APK will be available at `downloads/vhr-dashboard-demo.apk` and `public/vhr-dashboard-demo.apk`, and the ZIP `downloads/vhr-dashboard-demo.zip` will contain the APK and `demo_readme.txt`. You can then run `node server.js` and navigate to `/vhr-dashboard-demo.apk` or `/downloads/vhr-dashboard-demo.zip` to download it.
+
+Download APK via CI
+-------------------
+The workflow `Build and publish demo APK` now uploads the built APK and ZIP as workflow artifacts, so you can download the real APK directly from GitHub Actions. Steps:
+
+1. Open your repository on GitHub and go to the `Actions` tab.
+2. Select the `Build and publish demo APK` workflow and choose the run you want (triggered by a push to `feat/dev-setup-pr` or run manually via `Run workflow`).
+3. When the job finishes, expand the `Artifacts` section on the workflow run page and download `vhr-dashboard-demo-artifacts`. It contains the built `app-debug.apk` and `vhr-dashboard-demo.zip`.
+
+Note: The workflow uses a public sample Android project (`android/sunflower`) to build the APK. If you prefer a different sample, update `.github/workflows/build-and-publish-apk.yml` with the desired repository.
 
 Full deployment (backend + frontend) with Render
 -----------------------------------------------
