@@ -52,6 +52,11 @@ app.use(cookieParser());
 // ========== DEMO/TRIAL MANAGEMENT ==========
 const demoConfig = require('./config/demo.config');
 const subscriptionConfig = require('./config/subscription.config');
+const purchaseConfig = require('./config/purchase.config');
+const emailService = require('./services/emailService');
+
+// Initialize email service
+emailService.initEmailTransporter();
 
 // Ajouter un champ demoStartDate lors de l'inscription
 function initializeDemoForUser(user) {
@@ -703,6 +708,99 @@ app.post('/api/subscriptions/cancel', authMiddleware, async (req, res) => {
     res.status(500).json({ ok: false, error: 'Server error' });
   }
 });
+
+// ========== PURCHASE/ONE-TIME PAYMENT MANAGEMENT ==========
+
+// Get available purchase options (one-time payments)
+app.get('/api/purchases/options', (req, res) => {
+  try {
+    const options = Object.values(purchaseConfig.PURCHASE_OPTIONS).map(opt => ({
+      id: opt.id,
+      name: opt.name,
+      description: opt.description,
+      price: opt.price,
+      currency: opt.currency,
+      billingPeriod: opt.billingPeriod,
+      features: opt.features,
+      limits: opt.limits,
+      license: opt.license
+    }));
+    res.json({ ok: true, options });
+  } catch (e) {
+    console.error('[purchases] options error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+// Create checkout session for one-time purchase
+app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
+  try {
+    const { purchaseId } = req.body || {};
+    if (!purchaseId) return res.status(400).json({ ok: false, error: 'purchaseId required' });
+
+    const purchase = purchaseConfig.PURCHASE_OPTIONS[purchaseId];
+    if (!purchase) return res.status(400).json({ ok: false, error: 'Purchase option not found' });
+
+    const user = getUserByUsername(req.user.username);
+    if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          price: purchase.stripePriceId,
+          quantity: 1,
+        },
+      ],
+      mode: 'payment', // Mode one-time payment
+      customer_email: user.email,
+      success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/account.html?purchase=success`,
+      cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/pricing.html?purchase=canceled`,
+      metadata: {
+        userId: user.id || user.username,
+        username: user.username,
+        purchaseId: purchaseId,
+        purchaseName: purchase.name
+      }
+    });
+
+    console.log('[purchases] checkout session created:', { id: session.id, user: user.username, purchase: purchaseId });
+    res.json({ ok: true, sessionId: session.id, url: session.url });
+  } catch (e) {
+    console.error('[purchases] create-checkout error:', e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Get user's purchases history
+app.get('/api/purchases/history', authMiddleware, (req, res) => {
+  try {
+    const user = getUserByUsername(req.user.username);
+    if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+
+    // Chercher les achats dans les subscriptions (achetés comme payment)
+    const purchases = subscriptions.filter(s => 
+      (s.username === user.username || s.userId === user.id) && 
+      s.billingPeriod === 'once'
+    );
+
+    res.json({
+      ok: true,
+      purchases: purchases.map(p => ({
+        id: p.id,
+        name: p.planName,
+        purchaseDate: p.startDate,
+        price: p.price,
+        licenseKey: p.licenseKey,
+        license: p.license
+      }))
+    });
+  } catch (e) {
+    console.error('[purchases] history error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
 
 // Update current user profile (username/email/password)
 app.patch('/api/me', authMiddleware, async (req, res) => {
@@ -1739,7 +1837,7 @@ app.get('/api/billing/subscriptions', authMiddleware, async (req, res) => {
 
 // Stripe webhook endpoint: persist invoice and subscription events to user record
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET_DEV || null;
-app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
   try {
@@ -1779,6 +1877,39 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
     } else if (type === 'checkout.session.completed') {
       // session completed often delivers: session.customer
       if (obj.customer) user.stripeCustomerId = obj.customer;
+      
+      // Envoyer un email de confirmation pour un achat/abonnement
+      if (obj.mode === 'payment') {
+        // One-time payment - Achat définitif
+        const purchaseId = obj.metadata?.purchaseId;
+        const purchase = purchaseId ? purchaseConfig.PURCHASE_OPTIONS[purchaseId] : null;
+        
+        if (purchase && user.email) {
+          const purchaseData = {
+            planName: purchase.name,
+            orderId: obj.id,
+            price: (obj.amount_total / 100).toFixed(2),
+            licenseDuration: purchase.license.duration === 'perpetual' ? 'Perpétuel' : '1 an',
+            updatesUntil: purchase.license.duration === 'perpetual' ? 'À jamais' : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toLocaleDateString()
+          };
+          
+          const emailResult = await emailService.sendPurchaseSuccessEmail(user, purchaseData);
+          console.log('[webhook] Purchase success email sent:', emailResult);
+        }
+      } else if (obj.mode === 'subscription') {
+        // Subscription - Abonnement mensuel
+        if (user.email) {
+          const subscriptionData = {
+            planName: obj.metadata?.purchaseName || 'Professional',
+            billingPeriod: 'month',
+            price: (obj.amount_total / 100).toFixed(2),
+            subscriptionId: obj.subscription
+          };
+          
+          const emailResult = await emailService.sendSubscriptionSuccessEmail(user, subscriptionData);
+          console.log('[webhook] Subscription success email sent:', emailResult);
+        }
+      }
     }
 
     saveUsers();
