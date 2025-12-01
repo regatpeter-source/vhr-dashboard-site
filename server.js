@@ -102,7 +102,7 @@ app.get('/ping', (req, res) => {
 // Expose site-vitrine and top-level HTML files so they can be accessed via http://localhost:PORT/
 app.use('/site-vitrine', express.static(path.join(__dirname, 'site-vitrine')));
 // Serve top-level HTML files that are not in public
-const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact.html', 'account.html'];
+const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact.html', 'account.html', 'START-HERE.html', 'developer-setup.html', 'mentions.html', 'admin-dashboard.html'];
 exposedTopFiles.forEach(f => {
   app.get(`/${f}`, (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -490,7 +490,147 @@ app.get('/api/admin', authMiddleware, (req, res) => {
   res.json({ ok: true, message: 'Bienvenue admin !' });
 });
 
-// ========== SCRCPY GUI LAUNCH ========== 
+// --- Admin Routes for Dashboard ---
+// Get all users
+app.get('/api/admin/users', authMiddleware, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  try {
+    const users = dbEnabled ? require('./db').getAllUsers() : users;
+    res.json({ ok: true, users });
+  } catch (e) {
+    console.error('[api] admin/users:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Get all subscriptions
+app.get('/api/admin/subscriptions', authMiddleware, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  try {
+    const subscriptions = dbEnabled ? require('./db').getAllSubscriptions() : [];
+    res.json({ ok: true, subscriptions });
+  } catch (e) {
+    console.error('[api] admin/subscriptions:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Get active subscriptions only
+app.get('/api/admin/subscriptions/active', authMiddleware, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  try {
+    const subscriptions = dbEnabled ? require('./db').getActiveSubscriptions() : [];
+    res.json({ ok: true, subscriptions });
+  } catch (e) {
+    console.error('[api] admin/subscriptions/active:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Get all messages
+app.get('/api/admin/messages', authMiddleware, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  try {
+    const messages = dbEnabled ? require('./db').getAllMessages() : [];
+    res.json({ ok: true, messages });
+  } catch (e) {
+    console.error('[api] admin/messages:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Get unread messages only
+app.get('/api/admin/messages/unread', authMiddleware, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  try {
+    const messages = dbEnabled ? require('./db').getUnreadMessages() : [];
+    res.json({ ok: true, messages });
+  } catch (e) {
+    console.error('[api] admin/messages/unread:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Mark message as read and optionally respond
+app.patch('/api/admin/messages/:id', authMiddleware, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  try {
+    const messageId = req.params.id;
+    const { status, response } = req.body || {};
+    const updates = {};
+    if (status) updates.status = status;
+    if (response) {
+      updates.response = response;
+      updates.respondedAt = new Date().toISOString();
+      updates.respondedBy = req.user.username;
+    } else if (status === 'read') {
+      updates.readAt = new Date().toISOString();
+    }
+    if (Object.keys(updates).length === 0) return res.status(400).json({ ok: false, error: 'No updates provided' });
+    
+    if (dbEnabled) {
+      require('./db').updateMessage(messageId, updates);
+    }
+    res.json({ ok: true, message: 'Message updated' });
+  } catch (e) {
+    console.error('[api] admin/messages/:id:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Delete a message
+app.delete('/api/admin/messages/:id', authMiddleware, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  try {
+    const messageId = req.params.id;
+    if (dbEnabled) {
+      require('./db').deleteMessage(messageId);
+    }
+    res.json({ ok: true, message: 'Message deleted' });
+  } catch (e) {
+    console.error('[api] admin/messages/:id (delete):', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Get dashboard stats
+app.get('/api/admin/stats', authMiddleware, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  try {
+    if (!dbEnabled) return res.json({ ok: true, stats: { totalUsers: 0, activeSubscriptions: 0, unreadMessages: 0 } });
+    
+    const db = require('./db');
+    const totalUsers = db.getAllUsers().length;
+    const activeSubscriptions = db.getActiveSubscriptions().length;
+    const unreadMessages = db.getUnreadMessages().length;
+    
+    res.json({ ok: true, stats: { totalUsers, activeSubscriptions, unreadMessages } });
+  } catch (e) {
+    console.error('[api] admin/stats:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Submit contact form message (public endpoint, no auth required)
+app.post('/api/contact', (req, res) => {
+  try {
+    const { name, email, subject, message } = req.body || {};
+    if (!name || !email || !subject || !message) {
+      return res.status(400).json({ ok: false, error: 'Tous les champs sont requis' });
+    }
+    
+    if (dbEnabled) {
+      require('./db').addMessage({ name, email, subject, message });
+    }
+    
+    res.json({ ok: true, message: 'Message reçu. Nous vous répondrons bientôt.' });
+  } catch (e) {
+    console.error('[api] contact:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// ========== SCRCPY GUI LAUNCH ============ 
 app.post('/api/scrcpy-gui', async (req, res) => {
   const { serial } = req.body || {};
   if (!serial) return res.status(400).json({ ok: false, error: 'serial requis' });

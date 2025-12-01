@@ -31,8 +31,6 @@
         <input type="text" id="name" name="name" required>
         <label for="email">Email :</label>
         <input type="email" id="email" name="email" required>
-        <label for="subject">Sujet :</label>
-        <input type="text" id="subject" name="subject" placeholder="Ex: Demande de démo, Question technique..." required>
         <label for="message">Message :</label>
         <textarea id="message" name="message" rows="5" required></textarea>
         <button type="submit">Envoyer</button>
@@ -46,49 +44,9 @@
       <span><a href="contact.html">Contact</a> | <a href="mentions.html">Mentions légales</a></span>
     </div>
   </footer>
-  <script src="/js/script.js"></script>
+  <script src="js/script.js"></script>
   <!-- Chatbot IA (Botpress Webchat) config (moved to external file to comply with CSP) -->
-  <script src="/js/botpress-config.js"></script>
+  <script src="js/botpress-config.js"></script>
   <script src="https://cdn.botpress.cloud/webchat/v1/inject.js"></script>
-  <script>
-    // Handle contact form submission
-    document.getElementById('contactForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const form = e.target;
-      const formStatus = document.getElementById('formStatus');
-      
-      const name = document.getElementById('name').value.trim();
-      const email = document.getElementById('email').value.trim();
-      const subject = document.getElementById('subject').value.trim();
-      const message = document.getElementById('message').value.trim();
-      
-      if (!name || !email || !subject || !message) {
-        formStatus.innerHTML = '<p style="color: red;">Tous les champs sont requis.</p>';
-        return;
-      }
-      
-      try {
-        const response = await fetch('/api/contact', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ name, email, subject, message })
-        });
-        
-        const data = await response.json();
-        
-        if (data.ok) {
-          formStatus.innerHTML = '<p style="color: green; font-weight: bold;">Message reçu! Nous vous répondrons bientôt.</p>';
-          form.reset();
-        } else {
-          formStatus.innerHTML = `<p style="color: red;">Erreur: ${data.error}</p>`;
-        }
-      } catch (error) {
-        console.error('Error:', error);
-        formStatus.innerHTML = '<p style="color: red;">Erreur lors de l\'envoi du message.</p>';
-      }
-    });
-  </script>
 </body>
 </html>
