@@ -48,6 +48,46 @@ app.use(cors({ origin: true, credentials: true }));
 app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(cookieParser());
+
+// ========== DEMO/TRIAL MANAGEMENT ==========
+const demoConfig = require('./config/demo.config');
+
+// Ajouter un champ demoStartDate lors de l'inscription
+function initializeDemoForUser(user) {
+  if (!user.demoStartDate && demoConfig.MODE === 'database') {
+    user.demoStartDate = new Date().toISOString();
+  }
+  return user;
+}
+
+// Vérifier si la démo est expirée pour un utilisateur
+function isDemoExpired(user) {
+  if (!user || !user.demoStartDate || user.subscriptionStatus === 'active') {
+    return false; // Pas de limite si abonnement actif
+  }
+  
+  const startDate = new Date(user.demoStartDate);
+  const expirationDate = new Date(startDate.getTime() + demoConfig.DEMO_DURATION_MS);
+  const now = new Date();
+  
+  return now > expirationDate;
+}
+
+// Obtenir les jours restants pour la démo
+function getDemoRemainingDays(user) {
+  if (!user || !user.demoStartDate) {
+    return demoConfig.DEMO_DAYS;
+  }
+  
+  const startDate = new Date(user.demoStartDate);
+  const expirationDate = new Date(startDate.getTime() + demoConfig.DEMO_DURATION_MS);
+  const now = new Date();
+  const remainingMs = expirationDate.getTime() - now.getTime();
+  const remainingDays = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
+  
+  return Math.max(0, remainingDays);
+}
+
 // Serve downloads folder (demo APK/ZIP). Force attachment on ZIP/APK to prompt download.
 app.use('/downloads', express.static(path.join(__dirname, 'downloads'), {
   setHeaders: (res, filePath) => {
@@ -512,6 +552,37 @@ app.post('/api/logout', (req, res) => {
 app.get('/api/me', authMiddleware, (req, res) => {
   const user = { username: req.user.username, role: req.user.role };
   res.json({ ok: true, user });
+});
+
+// Get demo/trial status
+app.get('/api/demo/status', authMiddleware, (req, res) => {
+  try {
+    const user = getUserByUsername(req.user.username);
+    if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+    
+    const hasActiveSubscription = user.subscriptionStatus === 'active';
+    const demoExpired = isDemoExpired(user);
+    const remainingDays = getDemoRemainingDays(user);
+    const expirationDate = user.demoStartDate ? 
+      new Date(new Date(user.demoStartDate).getTime() + demoConfig.DEMO_DURATION_MS).toISOString() : 
+      null;
+    
+    res.json({
+      ok: true,
+      demo: {
+        demoStartDate: user.demoStartDate || null,
+        demoExpired: demoExpired,
+        remainingDays: remainingDays,
+        totalDays: demoConfig.DEMO_DAYS,
+        expirationDate: expirationDate,
+        hasActiveSubscription: hasActiveSubscription,
+        daysUntilWarning: demoConfig.WARNING_DAYS_BEFORE
+      }
+    });
+  } catch (e) {
+    console.error('[demo] status error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
 });
 
 // Update current user profile (username/email/password)
@@ -1607,7 +1678,14 @@ app.post('/api/register', async (req, res) => {
     // unique username
     if (getUserByUsername(username)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
     const passwordHash = await bcrypt.hash(password, 10);
-    const newUser = { username, passwordHash, role: 'user', email: email || null, stripeCustomerId: null };
+    const newUser = { 
+      username, 
+      passwordHash, 
+      role: 'user', 
+      email: email || null, 
+      stripeCustomerId: null,
+      demoStartDate: new Date().toISOString() // Initialize demo start date
+    };
     // persist
     persistUser(newUser);
     // create token and set cookie
