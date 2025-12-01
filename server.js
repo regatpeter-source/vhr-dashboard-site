@@ -319,6 +319,83 @@ function loadUsers() {
 
 let users = loadUsers();
 
+// --- Messages & Subscriptions (in-memory storage with JSON persistence) ---
+const MESSAGES_FILE = path.join(__dirname, 'data', 'messages.json');
+const SUBSCRIPTIONS_FILE = path.join(__dirname, 'data', 'subscriptions.json');
+
+let messages = [];
+let subscriptions = [];
+let messageIdCounter = 1;
+let subscriptionIdCounter = 1;
+
+function loadMessages() {
+  try {
+    ensureDataDir();
+    if (fs.existsSync(MESSAGES_FILE)) {
+      let raw = fs.readFileSync(MESSAGES_FILE, 'utf8');
+      raw = raw.replace(/^\uFEFF/, '').trim();
+      const parsed = JSON.parse(raw || '[]');
+      if (Array.isArray(parsed)) {
+        messages = parsed;
+        if (messages.length > 0) {
+          messageIdCounter = Math.max(...messages.map(m => m.id || 0)) + 1;
+        }
+        return messages;
+      }
+    }
+  } catch (e) {
+    console.error('[messages] load error', e && e.message);
+  }
+  return [];
+}
+
+function saveMessages() {
+  try {
+    ensureDataDir();
+    fs.writeFileSync(MESSAGES_FILE, JSON.stringify(messages, null, 2), 'utf8');
+    return true;
+  } catch (e) {
+    console.error('[messages] save error', e && e.message);
+    return false;
+  }
+}
+
+function loadSubscriptions() {
+  try {
+    ensureDataDir();
+    if (fs.existsSync(SUBSCRIPTIONS_FILE)) {
+      let raw = fs.readFileSync(SUBSCRIPTIONS_FILE, 'utf8');
+      raw = raw.replace(/^\uFEFF/, '').trim();
+      const parsed = JSON.parse(raw || '[]');
+      if (Array.isArray(parsed)) {
+        subscriptions = parsed;
+        if (subscriptions.length > 0) {
+          subscriptionIdCounter = Math.max(...subscriptions.map(s => s.id || 0)) + 1;
+        }
+        return subscriptions;
+      }
+    }
+  } catch (e) {
+    console.error('[subscriptions] load error', e && e.message);
+  }
+  return [];
+}
+
+function saveSubscriptions() {
+  try {
+    ensureDataDir();
+    fs.writeFileSync(SUBSCRIPTIONS_FILE, JSON.stringify(subscriptions, null, 2), 'utf8');
+    return true;
+  } catch (e) {
+    console.error('[subscriptions] save error', e && e.message);
+    return false;
+  }
+}
+
+// Load all data at startup
+messages = loadMessages();
+subscriptions = loadSubscriptions();
+
 // --- DB wrapper helpers (use SQLite adapter when enabled) ---
 let dbEnabled = false;
 try {
@@ -495,7 +572,6 @@ app.get('/api/admin', authMiddleware, (req, res) => {
 app.get('/api/admin/users', authMiddleware, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
   try {
-    const users = dbEnabled ? require('./db').getAllUsers() : users;
     res.json({ ok: true, users });
   } catch (e) {
     console.error('[api] admin/users:', e);
@@ -507,7 +583,6 @@ app.get('/api/admin/users', authMiddleware, (req, res) => {
 app.get('/api/admin/subscriptions', authMiddleware, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
   try {
-    const subscriptions = dbEnabled ? require('./db').getAllSubscriptions() : [];
     res.json({ ok: true, subscriptions });
   } catch (e) {
     console.error('[api] admin/subscriptions:', e);
@@ -531,7 +606,6 @@ app.get('/api/admin/subscriptions/active', authMiddleware, (req, res) => {
 app.get('/api/admin/messages', authMiddleware, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
   try {
-    const messages = dbEnabled ? require('./db').getAllMessages() : [];
     res.json({ ok: true, messages });
   } catch (e) {
     console.error('[api] admin/messages:', e);
@@ -543,8 +617,8 @@ app.get('/api/admin/messages', authMiddleware, (req, res) => {
 app.get('/api/admin/messages/unread', authMiddleware, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
   try {
-    const messages = dbEnabled ? require('./db').getUnreadMessages() : [];
-    res.json({ ok: true, messages });
+    const unread = messages.filter(m => m.status === 'unread');
+    res.json({ ok: true, messages: unread });
   } catch (e) {
     console.error('[api] admin/messages/unread:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -555,22 +629,20 @@ app.get('/api/admin/messages/unread', authMiddleware, (req, res) => {
 app.patch('/api/admin/messages/:id', authMiddleware, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
   try {
-    const messageId = req.params.id;
+    const messageId = parseInt(req.params.id);
     const { status, response } = req.body || {};
-    const updates = {};
-    if (status) updates.status = status;
-    if (response) {
-      updates.response = response;
-      updates.respondedAt = new Date().toISOString();
-      updates.respondedBy = req.user.username;
-    } else if (status === 'read') {
-      updates.readAt = new Date().toISOString();
-    }
-    if (Object.keys(updates).length === 0) return res.status(400).json({ ok: false, error: 'No updates provided' });
+    const msg = messages.find(m => m.id === messageId);
+    if (!msg) return res.status(404).json({ ok: false, error: 'Message not found' });
     
-    if (dbEnabled) {
-      require('./db').updateMessage(messageId, updates);
+    if (status) msg.status = status;
+    if (response) {
+      msg.response = response;
+      msg.respondedAt = new Date().toISOString();
+      msg.respondedBy = req.user.username;
+    } else if (status === 'read') {
+      msg.readAt = new Date().toISOString();
     }
+    saveMessages();
     res.json({ ok: true, message: 'Message updated' });
   } catch (e) {
     console.error('[api] admin/messages/:id:', e);
@@ -582,10 +654,11 @@ app.patch('/api/admin/messages/:id', authMiddleware, (req, res) => {
 app.delete('/api/admin/messages/:id', authMiddleware, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
   try {
-    const messageId = req.params.id;
-    if (dbEnabled) {
-      require('./db').deleteMessage(messageId);
-    }
+    const messageId = parseInt(req.params.id);
+    const idx = messages.findIndex(m => m.id === messageId);
+    if (idx < 0) return res.status(404).json({ ok: false, error: 'Message not found' });
+    messages.splice(idx, 1);
+    saveMessages();
     res.json({ ok: true, message: 'Message deleted' });
   } catch (e) {
     console.error('[api] admin/messages/:id (delete):', e);
@@ -619,9 +692,18 @@ app.post('/api/contact', (req, res) => {
       return res.status(400).json({ ok: false, error: 'Tous les champs sont requis' });
     }
     
-    if (dbEnabled) {
-      require('./db').addMessage({ name, email, subject, message });
-    }
+    // Add to in-memory messages
+    const msg = {
+      id: messageIdCounter++,
+      name,
+      email,
+      subject,
+      message,
+      status: 'unread',
+      createdAt: new Date().toISOString()
+    };
+    messages.push(msg);
+    saveMessages();
     
     res.json({ ok: true, message: 'Message reçu. Nous vous répondrons bientôt.' });
   } catch (e) {

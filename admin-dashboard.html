@@ -467,21 +467,31 @@
 
   <script>
     const API_BASE = '/api';
-    let token = localStorage.getItem('vhr_token');
     let currentUser = null;
+
+    // Helper to make authenticated fetch requests with cookies
+    async function authFetch(url, options = {}) {
+      return fetch(url, {
+        ...options,
+        credentials: 'include',  // Important: send cookies with each request
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers
+        }
+      });
+    }
 
     // Check auth
     async function checkAuth() {
       try {
-        const res = await fetch(`${API_BASE}/me`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await authFetch(`${API_BASE}/me`);
         if (!res.ok) throw new Error('Not authenticated');
         const data = await res.json();
         if (data.user.role !== 'admin') throw new Error('Not an admin');
         currentUser = data.user;
         document.getElementById('userDisplay').textContent = `${data.user.username} (Admin)`;
       } catch (e) {
+        console.error('Auth error:', e);
         alert('Not authenticated or not an admin. Redirecting to login.');
         window.location.href = '/account.html';
       }
@@ -490,9 +500,7 @@
     // Load stats
     async function loadStats() {
       try {
-        const res = await fetch(`${API_BASE}/admin/stats`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await authFetch(`${API_BASE}/admin/stats`);
         const data = await res.json();
         if (data.ok) {
           document.getElementById('totalUsers').textContent = data.stats.totalUsers;
@@ -507,9 +515,7 @@
     // Load users
     async function loadUsers() {
       try {
-        const res = await fetch(`${API_BASE}/admin/users`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await authFetch(`${API_BASE}/admin/users`);
         const data = await res.json();
         if (data.ok && data.users.length > 0) {
           const tbody = document.getElementById('usersList');
@@ -536,9 +542,7 @@
     // Load subscriptions
     async function loadSubscriptions() {
       try {
-        const res = await fetch(`${API_BASE}/admin/subscriptions`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await authFetch(`${API_BASE}/admin/subscriptions`);
         const data = await res.json();
         if (data.ok && data.subscriptions.length > 0) {
           const tbody = document.getElementById('subscriptionsList');
@@ -568,9 +572,7 @@
     // Load messages
     async function loadMessages() {
       try {
-        const res = await fetch(`${API_BASE}/admin/messages`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await authFetch(`${API_BASE}/admin/messages`);
         const data = await res.json();
         if (data.ok && data.messages.length > 0) {
           const tbody = document.getElementById('messagesList');
@@ -602,9 +604,7 @@
     // View message detail
     async function viewMessage(messageId) {
       try {
-        const res = await fetch(`${API_BASE}/admin/messages`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await authFetch(`${API_BASE}/admin/messages`);
         const data = await res.json();
         const msg = data.messages.find(m => m.id == messageId);
         if (msg) {
@@ -641,12 +641,8 @@
         return;
       }
       try {
-        const res = await fetch(`${API_BASE}/admin/messages/${messageId}`, {
+        const res = await authFetch(`${API_BASE}/admin/messages/${messageId}`, {
           method: 'PATCH',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
           body: JSON.stringify({ status: 'responded', response })
         });
         const data = await res.json();
@@ -666,9 +662,8 @@
     async function deleteMessage(messageId) {
       if (!confirm('Are you sure you want to delete this message?')) return;
       try {
-        const res = await fetch(`${API_BASE}/admin/messages/${messageId}`, {
-          method: 'DELETE',
-          headers: { 'Authorization': `Bearer ${token}` }
+        const res = await authFetch(`${API_BASE}/admin/messages/${messageId}`, {
+          method: 'DELETE'
         });
         const data = await res.json();
         if (data.ok) {
@@ -703,8 +698,8 @@
     });
 
     // Logout
-    document.getElementById('logoutBtn').addEventListener('click', () => {
-      localStorage.removeItem('vhr_token');
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      await authFetch(`${API_BASE}/logout`, { method: 'POST' });
       window.location.href = '/account.html';
     });
 
