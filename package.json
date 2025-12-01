@@ -15,9 +15,11 @@
     "html:validate-labels": "node scripts/validate-labels.js",
     "env:setup": "node scripts/create-env.js",
     "env:show": "node -e \"const fs=require('fs'); if(!fs.existsSync('.env')){ console.error('.env not found'); process.exit(1);} console.log(require('fs').readFileSync('.env','utf8'))\"",
-    "stripe:create-and-test": "node scripts/stripe-create-and-test.js"
-    ,"check-apk": "node scripts/check-apk.js",
-    "build-demo-apk": "node -e \"const os=require('os'); if(os.platform()==='win32'){ require('child_process').spawnSync('powershell',['-ExecutionPolicy','Bypass','-File','scripts/build-demo-apk.ps1'],{stdio:'inherit'});} else { require('child_process').spawnSync('bash',['scripts/build-demo-apk.sh'],{stdio:'inherit'}); }\""
+    "stripe:create-and-test": "node scripts/stripe-create-and-test.js",
+    "check-apk": "node scripts/check-apk.js",
+    "build-demo-apk": "node -e \"const os=require('os'); if(os.platform()==='win32'){ require('child_process').spawnSync('powershell',['-ExecutionPolicy','Bypass','-File','scripts/build-demo-apk.ps1'],{stdio:'inherit'});} else { require('child_process').spawnSync('bash',['scripts/build-demo-apk.sh'],{stdio:'inherit'}); }\"",
+    "build:demo": "node scripts/package-demo.js",
+    "build:demo:zip": "node scripts/package-demo.js zip"
   },
   "dependencies": {
     "bcrypt": "^5.1.0",
@@ -35,5 +37,10 @@
   },
   "optionalDependencies": {
     "better-sqlite3": "^8.7.0"
+  }
+  ,
+  "devDependencies": {
+    "archiver": "^5.3.1",
+    "fs-extra": "^11.1.1"
   }
 }

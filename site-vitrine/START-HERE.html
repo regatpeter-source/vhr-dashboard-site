@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VHR DASHBOARD - Démo Interactive</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      max-width: 600px;
+      width: 100%;
+      padding: 40px;
+      text-align: center;
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 28px;
+    }
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+      font-size: 14px;
+    }
+    .step {
+      text-align: left;
+      margin-bottom: 25px;
+      padding: 20px;
+      background: #f8f9fa;
+      border-left: 4px solid #667eea;
+      border-radius: 6px;
+    }
+    .step-number {
+      display: inline-block;
+      background: #667eea;
+      color: white;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      line-height: 32px;
+      font-weight: bold;
+      margin-right: 10px;
+      font-size: 14px;
+    }
+    .step-title {
+      font-weight: bold;
+      color: #333;
+      margin-bottom: 8px;
+      display: inline-block;
+    }
+    .step-desc {
+      color: #666;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .cta-button {
+      display: inline-block;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 14px 28px;
+      border-radius: 6px;
+      font-weight: bold;
+      text-decoration: none;
+      font-size: 16px;
+      border: none;
+      cursor: pointer;
+      margin-top: 10px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .cta-button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+    }
+    .start-btn {
+      width: 100%;
+      padding: 16px;
+      font-size: 18px;
+      margin-top: 30px;
+    }
+    .file-icon {
+      font-size: 48px;
+      margin: 15px 0;
+    }
+    .note {
+      background: #fff3cd;
+      border-left: 4px solid #ffc107;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      color: #856404;
+      text-align: left;
+      margin-top: 15px;
+    }
+    .success-msg {
+      display: none;
+      background: #d4edda;
+      border-left: 4px solid #28a745;
+      padding: 12px;
+      border-radius: 6px;
+      color: #155724;
+      margin-top: 15px;
+      text-align: left;
+    }
+    .os-instructions {
+      display: none;
+      background: #e7f3ff;
+      border-left: 4px solid #0066cc;
+      padding: 15px;
+      border-radius: 6px;
+      text-align: left;
+      margin-top: 15px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #004085;
+    }
+    .os-instructions code {
+      background: #f5f5f5;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+    }
+    code {
+      background: #f5f5f5;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+      color: #d73a49;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🚀 VHR DASHBOARD</h1>
+    <p class="subtitle">Démo Interactive — Prête en 2 minutes !</p>
+
+    <div class="step">
+      <span class="step-number">1</span>
+      <div class="step-title">Télécharger la démo</div>
+      <p class="step-desc">Cliquez sur le bouton ci-dessous pour télécharger le fichier <code>vhr-dashboard-demo.zip</code></p>
+      <a href="/vhr-dashboard-demo.zip" class="cta-button" download>📥 Télécharger la démo (ZIP)</a>
+      <div id="osInstructions" class="os-instructions"></div>
+    </div>
+
+    <div class="step">
+      <span class="step-number">2</span>
+      <div class="step-title">Extraire le ZIP</div>
+      <p class="step-desc">Une fois téléchargé, extrayez le fichier <code>vhr-dashboard-demo.zip</code> dans un dossier.</p>
+      <div id="extractInstructions" class="os-instructions"></div>
+    </div>
+
+    <div class="step">
+      <span class="step-number">3</span>
+      <div class="step-title">Ouvrir la démo</div>
+      <p class="step-desc">Ouvrez simplement le fichier <code>index.html</code> dans votre navigateur (double-clic).</p>
+      <div class="file-icon">📄</div>
+      <button class="cta-button" id="openDemoBtn" style="display: none;">▶️ Ouvrir la démo</button>
+      <div id="openInstructions" class="os-instructions"></div>
+    </div>
+
+    <div class="step">
+      <span class="step-number">4</span>
+      <div class="step-title">Explorer &amp; Tester</div>
+      <p class="step-desc">
+        ✨ <strong>C'est tout !</strong> La démo est maintenant prête à explorer. Testez la navigation, les formulaires, et tous les éléments interactifs.
+      </p>
+      <div class="note">
+        💡 <strong>Conseil :</strong> Essayez de vous connecter avec <code>vhr</code> / <code>demo123</code> pour voir le tableau de bord.
+      </div>
+    </div>
+
+    <div class="success-msg" id="successMsg">
+      ✅ <strong>Prêt !</strong> Vous pouvez maintenant explorer la démo. Aucun serveur ni installation n'est nécessaire.
+    </div>
+
+    <button class="cta-button start-btn" id="quickStart">🎬 Commencer maintenant</button>
+  </div>
+
+  <script>
+    const userAgent = navigator.userAgent.toLowerCase();
+    const isMac = /macintosh|mac os x/.test(userAgent);
+    const isWindows = /windows|win32/.test(userAgent);
+    const isLinux = /linux/.test(userAgent);
+
+    function getOS() {
+      if (isMac) return 'mac';
+      if (isWindows) return 'windows';
+      if (isLinux) return 'linux';
+      return 'unknown';
+    }
+
+    function setupInstructions() {
+      const os = getOS();
+      const extractInstructions = document.getElementById('extractInstructions');
+      const openInstructions = document.getElementById('openInstructions');
+      const osInstructions = document.getElementById('osInstructions');
+
+      if (os === 'windows') {
+        osInstructions.style.display = 'block';
+        osInstructions.innerHTML = '<strong>💻 Sur Windows :</strong> Cliquez sur le bouton ci-dessus. Le fichier se téléchargera dans votre dossier <code>Téléchargements</code>.';
+        
+        extractInstructions.style.display = 'block';
+        extractInstructions.innerHTML = '<strong>💻 Sur Windows :</strong><br>1. Ouvrez l\'explorateur de fichiers<br>2. Allez dans le dossier <code>Téléchargements</code><br>3. Clic droit sur <code>vhr-dashboard-demo.zip</code><br>4. Sélectionnez <code>Extraire tout...</code><br>5. Choisissez un dossier de destination et cliquez <code>Extraire</code>';
+        
+        openInstructions.style.display = 'block';
+        openInstructions.innerHTML = '<strong>💻 Sur Windows :</strong><br>1. Ouvrez le dossier extrait<br>2. Double-cliquez sur <code>index.html</code><br>3. Votre navigateur s\'ouvrira automatiquement avec la démo !';
+      } else if (os === 'mac') {
+        osInstructions.style.display = 'block';
+        osInstructions.innerHTML = '<strong>🍎 Sur Mac :</strong> Cliquez sur le bouton ci-dessus. Le fichier se téléchargera dans votre dossier <code>Téléchargements</code>.';
+        
+        extractInstructions.style.display = 'block';
+        extractInstructions.innerHTML = '<strong>🍎 Sur Mac :</strong><br>1. Ouvrez le Finder<br>2. Allez dans <code>Téléchargements</code><br>3. Double-cliquez sur <code>vhr-dashboard-demo.zip</code><br>4. Le dossier s\'extraira automatiquement';
+        
+        openInstructions.style.display = 'block';
+        openInstructions.innerHTML = '<strong>🍎 Sur Mac :</strong><br>1. Ouvrez le dossier extrait<br>2. Double-cliquez sur <code>index.html</code><br>3. Safari ou Chrome s\'ouvrira avec la démo !';
+      } else if (os === 'linux') {
+        osInstructions.style.display = 'block';
+        osInstructions.innerHTML = '<strong>🐧 Sur Linux :</strong> Cliquez sur le bouton ci-dessus pour télécharger le fichier.';
+        
+        extractInstructions.style.display = 'block';
+        extractInstructions.innerHTML = '<strong>🐧 Sur Linux :</strong><br>1. Ouvrez votre gestionnaire de fichiers<br>2. Allez dans le dossier de téléchargement<br>3. Clic droit sur <code>vhr-dashboard-demo.zip</code><br>4. Sélectionnez <code>Extraire ici</code> ou utilisez: <code>unzip vhr-dashboard-demo.zip</code>';
+        
+        openInstructions.style.display = 'block';
+        openInstructions.innerHTML = '<strong>🐧 Sur Linux :</strong><br>1. Ouvrez le dossier extrait<br>2. Double-cliquez sur <code>index.html</code><br>3. Votre navigateur par défaut s\'ouvrira avec la démo !';
+      }
+    }
+
+    document.getElementById('quickStart').addEventListener('click', () => {
+      document.getElementById('successMsg').style.display = 'block';
+      window.scrollTo(0, 0);
+    });
+
+    // Si l'utilisateur est sur un fichier local (file:// protocol), montrer le message de succès
+    if (window.location.protocol === 'file:') {
+      document.getElementById('successMsg').style.display = 'block';
+      document.getElementById('quickStart').textContent = '✨ Vous êtes en mode local — Explorez la démo !';
+    }
+
+    setupInstructions();
+  </script>
+</body>
+</html>
