@@ -3,13 +3,25 @@
  * Gère l'envoi des emails de confirmation de paiement et notifications
  */
 
-const nodemailer = require('nodemailer');
+let nodemailer = null;
+try {
+  nodemailer = require('nodemailer');
+} catch (e) {
+  console.warn('[email] nodemailer not installed: email service disabled');
+  nodemailer = null;
+}
+
 const purchaseConfig = require('../config/purchase.config');
 
 // Créer le transporteur de mail
 let transporter = null;
 
 function initEmailTransporter() {
+  if (!nodemailer) {
+    console.warn('[email] Email service disabled: nodemailer not installed');
+    return null;
+  }
+
   if (!purchaseConfig.EMAIL.ENABLED) {
     console.log('[email] Email service disabled (EMAIL_ENABLED=false)');
     return null;
