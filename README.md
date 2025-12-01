@@ -14,7 +14,7 @@ Streaming notes & ADB
 ---------------------
 The backend uses ADB and system tools like `ffmpeg`, `adb`, and `scrcpy` to drive streaming and native-screen capture. For production use of streaming features, the server must be on the same local network as the devices or able to reach them. Running the Node app in a remote cloud environment (Render, Heroku) usually prevents direct access to local devices — in such cases, set `NO_ADB=1` or use a local on-prem deployment (e.g., a machine inside the customer network) to support streaming/ADB features.
 
-# VHR Dashboard (VR Manager)
+# VHR Dashboard
 
 This repository contains the VHR Dashboard project: a Node.js app for managing and streaming VR headsets and a static `site-vitrine` folder for the marketing website.
 
