@@ -14,61 +14,34 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Checkout sample HelloWorld project
-        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          repository: android/sunflower
-          path: sample-android
-          fetch-depth: 1
+          node-version: '18'
 
-      - name: Setup JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
+      - name: Install npm dependencies
+        run: npm ci
 
-      - name: Install Android SDK tools
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 30
-          arch: x86_64
-          target: default
+      - name: Build interactive web demo ZIP
+        run: npm run build:demo:zip
 
-      - name: Build sample APK
-        run: |
-          cd sample-android
-          chmod +x ./gradlew
-          ./gradlew assembleDebug
-
-      - name: Copy built APK into repo public/downloads
-        run: |
-          mkdir -p public/downloads
-          cp sample-android/app/build/outputs/apk/debug/app-debug.apk public/downloads/vhr-dashboard-demo.apk
-
-      - name: Update ZIP with the new APK
-        run: |
-          cd downloads
-          if [ -f vhr-dashboard-demo.zip ]; then rm vhr-dashboard-demo.zip; fi
-          zip -r vhr-dashboard-demo.zip ./vhr-dashboard-demo.apk ./demo_readme.txt || true
-
-      - name: Upload APK and ZIP as workflow artifacts
+      - name: Upload web demo ZIP as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vhr-dashboard-demo-artifacts
-          path: |
-            sample-android/app/build/outputs/apk/debug/app-debug.apk
-            downloads/vhr-dashboard-demo.zip
+          name: vhr-dashboard-demo
+          path: downloads/vhr-dashboard-demo.zip
+
       - name: Copy ZIP to public/downloads for convenient hosting
         run: |
           mkdir -p public/downloads
           cp downloads/vhr-dashboard-demo.zip public/downloads/vhr-dashboard-demo.zip || true
 
-      - name: Commit & push APK into repository
+      - name: Commit & push demo ZIP into repository
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add public/downloads/vhr-dashboard-demo.apk downloads/vhr-dashboard-demo.zip
-          git commit -m "ci: add built demo APK and ZIP (ci)" || echo "No changes to commit"
+          git add public/downloads/vhr-dashboard-demo.zip downloads/vhr-dashboard-demo.zip
+          git commit -m "ci: update web demo ZIP (ci)" || echo "No changes to commit"
           git push origin HEAD:feat/dev-setup-pr

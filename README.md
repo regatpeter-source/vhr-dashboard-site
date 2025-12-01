@@ -66,6 +66,22 @@ cd <repository-root>
 
 After completion the demo APK will be available at `downloads/vhr-dashboard-demo.apk` and `public/vhr-dashboard-demo.apk`, and the ZIP `downloads/vhr-dashboard-demo.zip` will contain the APK and `demo_readme.txt`. You can then run `node server.js` and navigate to `/vhr-dashboard-demo.apk` or `/downloads/vhr-dashboard-demo.zip` to download it.
 
+Build a static downloadable demo (no PowerShell)
+-----------------------------------------------
+If you just want a ready-to-download demo ZIP (web site + demo APK), you can use the new Node script: it does not call PowerShell and runs cross-platform.
+
+Prerequisites: Node.js installed (v16+ recommended).
+
+Examples:
+```bash
+npm ci
+npm run build:demo   # prepares dist/demo folder with site + assets
+npm run build:demo:zip  # creates downloads/vhr-dashboard-demo-final.zip
+```
+
+The generated zip includes `index.html`, all public assets, and the demo APK in the package root. Simply unzip and open `index.html` in any browser or distribute the zip.
+
+
 Download APK via CI
 -------------------
 The workflow `Build and publish demo APK` now uploads the built APK and ZIP as workflow artifacts, so you can download the real APK directly from GitHub Actions. Steps:
