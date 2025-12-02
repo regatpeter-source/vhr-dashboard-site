@@ -86,4 +86,3 @@ document.addEventListener('DOMContentLoaded', function() {
     demoBtnFooter.addEventListener('click', handleDemoDownload);
   }
 });
-}
