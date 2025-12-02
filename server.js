@@ -39,10 +39,9 @@ app.use(helmet({
     }
   }
 }));
-// Set a friendlier referrer policy so third-party services (like Google Translate)
-// can load resources if they rely on an origin referrer. This avoids noisy logs
-// indicating Referrer Policy 'no-referrer' while keeping a modern default.
-app.use(helmet.referrerPolicy({ policy: 'strict-origin-when-cross-origin' }));
+// Set a friendlier referrer policy - allows third-party services like Google Translate
+// to work without CSP warnings
+app.use(helmet.referrerPolicy({ policy: 'no-referrer-when-downgrade' }));
 app.use(cors({ origin: true, credentials: true }));
 // Ensure webhook route receives raw body for Stripe signature verification
 app.use('/webhook', express.raw({ type: 'application/json' }));
