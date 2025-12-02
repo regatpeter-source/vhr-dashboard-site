@@ -624,11 +624,12 @@ app.get('/api/subscriptions/plans', (req, res) => {
 });
 
 // Get current user's subscription status
-app.get('/api/subscriptions/my-subscription', authMiddleware, (req, res) => {
+app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) => {
   try {
     const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
 
+    // D'abord chercher dans le stockage local
     const subscription = subscriptions.find(s => s.userId === user.id || s.username === user.username);
     const isActive = user.subscriptionStatus === 'active';
     
@@ -640,6 +641,50 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, (req, res) => {
           currentPlan = { ...plan, id: key };
           break;
         }
+      }
+    }
+
+    // Si pas d'abonnement local mais l'utilisateur a un stripeCustomerId, chercher via Stripe API
+    if (!subscription && user.stripeCustomerId && process.env.STRIPE_SECRET_KEY) {
+      try {
+        const stripeSubs = await stripe.subscriptions.list({
+          customer: user.stripeCustomerId,
+          status: 'active',
+          limit: 1
+        });
+        
+        if (stripeSubs.data && stripeSubs.data.length > 0) {
+          const stripeSub = stripeSubs.data[0];
+          console.log('[subscriptions] found active Stripe subscription for', user.username, 'id:', stripeSub.id);
+          
+          // Synchroniser avec la base locale
+          const item = stripeSub.items.data[0];
+          const priceId = item.price.id;
+          
+          for (const [key, plan] of Object.entries(subscriptionConfig.PLANS)) {
+            if (plan.stripePriceId === priceId) {
+              currentPlan = { ...plan, id: key };
+              break;
+            }
+          }
+          
+          return res.json({
+            ok: true,
+            subscription: {
+              isActive: stripeSub.status === 'active',
+              status: stripeSub.status,
+              currentPlan: currentPlan,
+              subscriptionId: stripeSub.id,
+              startDate: new Date(stripeSub.current_period_start * 1000),
+              endDate: new Date(stripeSub.current_period_end * 1000),
+              nextBillingDate: new Date(stripeSub.current_period_end * 1000),
+              cancelledAt: stripeSub.canceled_at ? new Date(stripeSub.canceled_at * 1000) : null,
+              daysUntilRenewal: Math.ceil((new Date(stripeSub.current_period_end * 1000) - new Date()) / (24 * 60 * 60 * 1000))
+            }
+          });
+        }
+      } catch (stripeErr) {
+        console.error('[subscriptions] error checking Stripe:', stripeErr.message);
       }
     }
 

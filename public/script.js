@@ -36,18 +36,37 @@ function handleDemoDownload(event) {
   
   // Vérifier si l'utilisateur a un token (connecté)
   // Chercher dans localStorage ou cookies
-  const token = localStorage.getItem('vhr_token') || getCookie('vhr_token');
+  let token = localStorage.getItem('vhr_token') || getCookie('vhr_token');
   
-  console.log('[demo] token found:', !!token);
+  console.log('[demo] token from storage/cookie:', !!token);
   
+  // Si pas de token, vérifier auprès du serveur si l'utilisateur est authentifié
   if (!token) {
-    // Utilisateur non authentifié - rediriger vers la page de compte avec paramètre
-    console.log('[demo] no token, redirecting to account');
-    window.location.href = '/account.html?action=demo_required';
+    fetch('/api/me', { credentials: 'include' })
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok && data.user) {
+          console.log('[demo] user authenticated via /api/me:', data.user.username);
+          // Utilisateur authentifié - télécharger la démo
+          downloadDemo();
+        } else {
+          console.log('[demo] user not authenticated');
+          // Utilisateur non authentifié - rediriger vers la page de compte
+          window.location.href = '/account.html?action=demo_required';
+        }
+      })
+      .catch(err => {
+        console.error('[demo] error checking auth:', err);
+        window.location.href = '/account.html?action=demo_required';
+      });
     return;
   }
   
   // Utilisateur authentifié - télécharger la démo
+  downloadDemo();
+}
+
+function downloadDemo() {
   console.log('[demo] downloading demo zip');
   const link = document.createElement('a');
   link.href = '/vhr-dashboard-demo.zip';
