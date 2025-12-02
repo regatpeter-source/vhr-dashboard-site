@@ -134,9 +134,22 @@
     } catch(e) {}
   }
 
+  // Check URL parameters for specific actions
+  const urlParams = new URLSearchParams(window.location.search);
+  const action = urlParams.get('action');
+
   // Load user information on start
   document.addEventListener('DOMContentLoaded', () => {
     loadMe();
+    
+    // Show message based on action parameter
+    if (action === 'demo_required') {
+      const msg = document.getElementById('loginMessage');
+      msg.innerHTML = '<div style="background: #e3f2fd; border: 1px solid #2196F3; color: #0d47a1; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>📥 Créez un compte pour accéder à la démo</strong><br>Vous pouvez vous inscrire gratuitement et accéder à une démo gratuite de 7 jours !</div>';
+    } else if (action === 'subscription_required') {
+      const msg = document.getElementById('loginMessage');
+      msg.innerHTML = '<div style="background: #e8f5e9; border: 1px solid #4CAF50; color: #1b5e20; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>🔒 Créez un compte pour gérer vos abonnements</strong><br>Connexion sécurisée requise pour accéder à votre espace client.</div>';
+    }
   });
 
 })();

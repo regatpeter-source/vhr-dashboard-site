@@ -9,6 +9,13 @@
   <title>VHR DASHBOARD – Solution de gestion de casques VR</title>
   <link rel="stylesheet" href="style.css">
   <link rel="icon" href="site-vitrine/favicon.ico">
+  <script>
+    // Si c'est la première visite de la démo locale, afficher l'écran de bienvenue
+    if (!localStorage.getItem('demo_visited')) {
+      localStorage.setItem('demo_visited', 'true');
+      window.location.href = 'START.html';
+    }
+  </script>
 </head>
 <body>
   <header>
