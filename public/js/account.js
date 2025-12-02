@@ -2,7 +2,18 @@
 (function(){
   async function api(path, opts = {}) {
     opts = Object.assign({ credentials: 'include' }, opts);
-    try { const res = await fetch(path, opts); return await res.json(); } catch(e){ return { ok: false, error: e.message }; }
+    try { 
+      const res = await fetch(path, opts); 
+      if (!res.ok) {
+        console.warn(`[API ${path}] Response status: ${res.status}`);
+      }
+      const data = await res.json();
+      console.log(`[API ${path}] Response:`, data);
+      return data;
+    } catch(e){ 
+      console.error(`[API ${path}] Error:`, e);
+      return { ok: false, error: e.message }; 
+    }
   }
 
   const loginForm = document.getElementById('loginForm');
@@ -41,12 +52,39 @@
 
   if (loginForm) loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const username = document.getElementById('username').value;
-    const password = document.getElementById('password').value;
-    loginMessage.textContent = 'Connexion...';
-    const res = await api('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
-    if (res && res.ok) { loginMessage.textContent = 'Connexion réussie'; await loadMe(); }
-    else { loginMessage.textContent = 'Erreur: ' + (res && res.error ? res.error : 'Erreur inconnue'); }
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value.trim();
+    
+    if (!username || !password) {
+      loginMessage.textContent = 'Erreur: Veuillez remplir tous les champs';
+      return;
+    }
+    
+    loginMessage.textContent = 'Connexion en cours...';
+    console.log('[LOGIN] Attempting login for:', username);
+    
+    try {
+      const res = await api('/api/login', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ username, password }) 
+      });
+      
+      console.log('[LOGIN] Response:', res);
+      
+      if (res && res.ok) { 
+        loginMessage.textContent = 'Connexion réussie ✓'; 
+        await new Promise(r => setTimeout(r, 500));
+        await loadMe(); 
+      } else { 
+        const errorMsg = res && res.error ? res.error : 'Erreur inconnue';
+        console.error('[LOGIN] Error:', errorMsg);
+        loginMessage.textContent = 'Erreur: ' + errorMsg; 
+      }
+    } catch (err) {
+      console.error('[LOGIN] Exception:', err);
+      loginMessage.textContent = 'Erreur: ' + err.message;
+    }
   });
 
   const signupForm = document.getElementById('signupForm');
