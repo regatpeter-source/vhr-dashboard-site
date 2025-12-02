@@ -433,7 +433,7 @@ function loadUsers() {
   }
   // Default fallback: admin user
   console.log('[users] using default fallback admin user');
-  return [{ username: 'vhr', passwordHash: '$2b$10$Axa5JBDt22Wc2nZtTqeMBeVjyDYEl0tMyu0NDdUYiTcocI2bvqK46', role: 'admin', email: 'admin@example.local', stripeCustomerId: null }];
+  return [{ username: 'vhr', passwordHash: '$2b$10$ov9F32cIWWXhvNumETtB1urvsdD5Y4Wl6wXlSHoCy.f4f03kRGcf2', role: 'admin', email: 'admin@example.local', stripeCustomerId: null }];
 }
 
 let users = loadUsers();
@@ -525,7 +525,7 @@ function ensureDefaultUsers() {
     console.log('[users] adding default admin user');
     users.push({
       username: 'vhr',
-      passwordHash: '$2b$10$.M2Mlq/GahBLj.JTggaUv.BwlBm/9CbRUJi/cCHkfQ217LnqNigaO', // password: 0409
+      passwordHash: '$2b$10$ov9F32cIWWXhvNumETtB1urvsdD5Y4Wl6wXlSHoCy.f4f03kRGcf2', // password: [REDACTED]
       role: 'admin',
       email: 'admin@example.local',
       stripeCustomerId: null,
