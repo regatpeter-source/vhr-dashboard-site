@@ -8,7 +8,7 @@
   <meta name="referrer" content="no-referrer-when-downgrade">
   <title>VHR DASHBOARD – Application</title>
   <link rel="stylesheet" href="/style.css">
-  <link rel="stylesheet" href="/public/dashboard.css">
+  <link rel="stylesheet" href="/dashboard.css">
   <style>
     * {
       margin: 0;
@@ -232,11 +232,11 @@
           <input id="loginPass" type="password" placeholder="Entrez votre mot de passe" autocomplete="current-password">
         </div>
         
-        <button class="btn btn-primary" onclick="handleLogin()">Connexion</button>
-        <button class="btn btn-secondary" onclick="switchToRegister()">Créer un compte</button>
+        <button class="btn btn-primary" id="btnLogin">Connexion</button>
+        <button class="btn btn-secondary" id="btnSwitchToRegister">Créer un compte</button>
         
         <div class="auth-toggle">
-          <p>Pas de compte? <a onclick="switchToRegister()">S'inscrire</a></p>
+          <p>Pas de compte? <a id="linkToRegister" href="#">S'inscrire</a></p>
         </div>
       </div>
       
@@ -264,11 +264,11 @@
           <input id="regPass2" type="password" placeholder="Confirmez votre mot de passe" autocomplete="new-password">
         </div>
         
-        <button class="btn btn-primary" onclick="handleRegister()">S'inscrire</button>
-        <button class="btn btn-secondary" onclick="switchToLogin()">Retour à la connexion</button>
+        <button class="btn btn-primary" id="btnRegister">S'inscrire</button>
+        <button class="btn btn-secondary" id="btnSwitchToLogin">Retour à la connexion</button>
         
         <div class="auth-toggle">
-          <p>Vous avez un compte? <a onclick="switchToLogin()">Se connecter</a></p>
+          <p>Vous avez un compte? <a id="linkToLogin" href="#">Se connecter</a></p>
         </div>
       </div>
     </div>
@@ -284,7 +284,7 @@
         <div>
           <span class="user-badge">👤 <span id="currentUsername"></span></span>
         </div>
-        <button class="btn-logout" onclick="handleLogout()">Déconnexion</button>
+        <button class="btn-logout" id="btnLogout">Déconnexion</button>
       </div>
     </div>
 
@@ -304,10 +304,26 @@
   <script src="/socket.io/socket.io.js"></script>
   
   <!-- Dashboard functionality -->
-  <script src="/public/dashboard.js"></script>
+  <script src="/dashboard.js"></script>
 
   <script>
     // ========== AUTHENTICATION SYSTEM ==========
+    
+    // Event listeners setup (CSP compliant - no inline onclick)
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('btnLogin')?.addEventListener('click', handleLogin);
+      document.getElementById('btnRegister')?.addEventListener('click', handleRegister);
+      document.getElementById('btnSwitchToRegister')?.addEventListener('click', switchToRegister);
+      document.getElementById('btnSwitchToLogin')?.addEventListener('click', switchToLogin);
+      document.getElementById('linkToRegister')?.addEventListener('click', (e) => { e.preventDefault(); switchToRegister(); });
+      document.getElementById('linkToLogin')?.addEventListener('click', (e) => { e.preventDefault(); switchToLogin(); });
+      document.getElementById('btnLogout')?.addEventListener('click', handleLogout);
+      
+      // Enter key on login
+      document.getElementById('loginPass')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handleLogin();
+      });
+    });
     
     async function handleLogin() {
       const username = document.getElementById('loginUser').value.trim();
