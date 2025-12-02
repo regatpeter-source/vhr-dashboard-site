@@ -1,4 +1,4 @@
-﻿// ========== IMPORTS & INIT ========== 
+// ========== IMPORTS & INIT ========== 
 
 require('dotenv').config();
 const express = require('express');
@@ -459,6 +459,15 @@ try {
   console.error('[db] init error:', e && e.message);
 }
 
+function reloadUsers() {
+  // Reload users from file (useful when users.json is modified externally)
+  if (!dbEnabled) {
+    users = loadUsers();
+  } else {
+    users = require('./db').getAllUsers();
+  }
+}
+
 function getUserByUsername(username) {
   if (dbEnabled) {
     const u = require('./db').findUserByUsername(username);
@@ -531,6 +540,7 @@ function authMiddleware(req, res, next) {
 
 // --- Route de login ---
 app.post('/api/login', async (req, res) => {
+  reloadUsers(); // Reload users from file in case they were modified externally
   const { username, password } = req.body;
   const user = getUserByUsername(username);
   if (!user) return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
