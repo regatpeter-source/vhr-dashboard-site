@@ -94,6 +94,51 @@ function getDemoRemainingDays(user) {
   return Math.max(0, remainingDays);
 }
 
+// Statut global de la démo (pour les téléchargements sans compte)
+const DEMO_STATUS_FILE = path.join(__dirname, 'data', 'demo-status.json');
+
+function getDemoStatus() {
+  try {
+    ensureDataDir();
+    if (!fs.existsSync(DEMO_STATUS_FILE)) {
+      // Première fois - créer l'enregistrement
+      const status = {
+        firstDownloadedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + demoConfig.DEMO_DURATION_MS).toISOString()
+      };
+      fs.writeFileSync(DEMO_STATUS_FILE, JSON.stringify(status, null, 2));
+      return { 
+        isExpired: false, 
+        daysRemaining: demoConfig.DEMO_DAYS,
+        expiresAt: status.expiresAt,
+        firstDownload: true
+      };
+    }
+    
+    const status = JSON.parse(fs.readFileSync(DEMO_STATUS_FILE, 'utf8'));
+    const expiresAt = new Date(status.expiresAt);
+    const now = new Date();
+    const isExpired = now > expiresAt;
+    const remainingMs = expiresAt.getTime() - now.getTime();
+    const daysRemaining = Math.max(0, Math.ceil(remainingMs / (24 * 60 * 60 * 1000)));
+    
+    return {
+      isExpired,
+      daysRemaining,
+      expiresAt: status.expiresAt,
+      firstDownload: false
+    };
+  } catch (e) {
+    console.error('[demo] error reading status:', e);
+    return {
+      isExpired: false,
+      daysRemaining: demoConfig.DEMO_DAYS,
+      expiresAt: new Date(Date.now() + demoConfig.DEMO_DURATION_MS).toISOString(),
+      error: true
+    };
+  }
+}
+
 // Serve downloads folder (demo APK/ZIP). Force attachment on ZIP/APK to prompt download.
 app.use('/downloads', express.static(path.join(__dirname, 'downloads'), {
   setHeaders: (res, filePath) => {
@@ -175,12 +220,27 @@ app.get('/downloads/vhr-dashboard-demo.zip', (req, res) => {
 
 // Also provide a top-level route for the zip: /vhr-dashboard-demo.zip
 app.get('/vhr-dashboard-demo.zip', (req, res) => {
+  // Vérifier ou créer l'enregistrement de téléchargement de démo (7 jours)
+  const demoStatus = getDemoStatus();
+  
+  if (demoStatus.isExpired) {
+    return res.status(403).json({ 
+      ok: false, 
+      error: 'Demo period has expired (7 days)', 
+      daysRemaining: 0,
+      expiresAt: demoStatus.expiresAt
+    });
+  }
+  
+  // Télécharger le ZIP si la période de démo est valide
   const zip1 = path.join(__dirname, 'downloads', 'vhr-dashboard-demo.zip');
   const zip2 = path.join(__dirname, 'downloads', 'vhr-dashboard-demo-final.zip');
   const candidate = fs.existsSync(zip1) ? zip1 : (fs.existsSync(zip2) ? zip2 : null);
   if (!candidate) return res.status(404).send('ZIP not found');
+  
   res.setHeader('Content-Disposition', `attachment; filename="${path.basename(candidate)}"`);
   res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('X-Demo-Days-Remaining', demoStatus.daysRemaining);
   return res.sendFile(candidate);
 });
 
@@ -599,6 +659,17 @@ app.get('/api/demo/status', authMiddleware, (req, res) => {
     console.error('[demo] status error:', e);
     res.status(500).json({ ok: false, error: 'Server error' });
   }
+});
+
+// Vérifier le statut de la démo globale (sans authentification)
+app.get('/api/demo/check-download', (req, res) => {
+  const status = getDemoStatus();
+  res.json({
+    ok: !status.isExpired,
+    daysRemaining: status.daysRemaining,
+    expiresAt: status.expiresAt,
+    isExpired: status.isExpired
+  });
 });
 
 // ========== SUBSCRIPTION MANAGEMENT ==========

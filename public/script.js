@@ -30,40 +30,26 @@ function getCookie(name) {
   return null;
 }
 
-// Vérifier l'authentification pour le téléchargement de la démo
+// Télécharger la démo - simple et direct
 function handleDemoDownload(event) {
   event.preventDefault();
   
-  // Vérifier si l'utilisateur a un token (connecté)
-  // Chercher dans localStorage ou cookies
-  let token = localStorage.getItem('vhr_token') || getCookie('vhr_token');
-  
-  console.log('[demo] token from storage/cookie:', !!token);
-  
-  // Si pas de token, vérifier auprès du serveur si l'utilisateur est authentifié
-  if (!token) {
-    fetch('/api/me', { credentials: 'include' })
-      .then(r => r.json())
-      .then(data => {
-        if (data.ok && data.user) {
-          console.log('[demo] user authenticated via /api/me:', data.user.username);
-          // Utilisateur authentifié - télécharger la démo
-          downloadDemo();
-        } else {
-          console.log('[demo] user not authenticated');
-          // Utilisateur non authentifié - rediriger vers la page de compte
-          window.location.href = '/account.html?action=demo_required';
-        }
-      })
-      .catch(err => {
-        console.error('[demo] error checking auth:', err);
-        window.location.href = '/account.html?action=demo_required';
-      });
-    return;
-  }
-  
-  // Utilisateur authentifié - télécharger la démo
-  downloadDemo();
+  // Vérifier le statut de la démo (7 jours)
+  fetch('/api/demo/check-download')
+    .then(r => r.json())
+    .then(data => {
+      if (data.isExpired) {
+        alert(`❌ Période de démo expirée!\n\nVotre démo gratuite de 7 jours s'est terminée le ${new Date(data.expiresAt).toLocaleDateString()}.\n\nPour continuer à utiliser VHR Dashboard, veuillez:\n• Vous abonner mensuellement\n• Acheter une licence définitive`);
+        return;
+      }
+      
+      console.log(`[demo] ${data.daysRemaining} jours restants avant expiration`);
+      downloadDemo();
+    })
+    .catch(err => {
+      console.error('[demo] error checking status:', err);
+      downloadDemo(); // Télécharger quand même en cas d'erreur
+    });
 }
 
 function downloadDemo() {
