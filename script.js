@@ -66,16 +66,14 @@ function handleSubscriptionClick(event) {
 }
 
 // Initialize subscription button listeners (CSP-compliant)
-if (typeof document !== 'undefined') {
-  document.addEventListener('DOMContentLoaded', function() {
-    const subBtn = document.getElementById('stripe-sub-btn');
-    const oneTimeBtn = document.getElementById('stripe-onetime-btn');
-    
-    if (subBtn) {
-      subBtn.addEventListener('click', handleSubscriptionClick);
-    }
-    if (oneTimeBtn) {
-      oneTimeBtn.addEventListener('click', handleSubscriptionClick);
-    }
-  });
-}
+document.addEventListener('DOMContentLoaded', function() {
+  const subBtn = document.getElementById('stripe-sub-btn');
+  const oneTimeBtn = document.getElementById('stripe-onetime-btn');
+  
+  if (subBtn) {
+    subBtn.addEventListener('click', handleSubscriptionClick);
+  }
+  if (oneTimeBtn) {
+    oneTimeBtn.addEventListener('click', handleSubscriptionClick);
+  }
+});
