@@ -404,22 +404,35 @@ function saveUsers() {
 }
 
 function loadUsers() {
+  console.log(`[users] attempting to load from ${USERS_FILE}`);
   try {
     ensureDataDir();
     if (fs.existsSync(USERS_FILE)) {
+      console.log(`[users] file exists`);
       let raw = fs.readFileSync(USERS_FILE, 'utf8');
       // Remove BOM if present
       raw = raw.replace(/^\uFEFF/, '').trim();
+      console.log(`[users] file content length: ${raw.length} chars`);
       const parsed = JSON.parse(raw || '[]');
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        console.log(`[users] loaded ${parsed.length} users from file`);
+        return parsed;
+      }
       // If file contains a single user object, wrap it in array
-      if (parsed && typeof parsed === 'object') return [parsed];
+      if (parsed && typeof parsed === 'object') {
+        console.log('[users] loaded 1 user from file (single object)');
+        return [parsed];
+      }
+      console.log('[users] empty file, using fallback');
       return [];
+    } else {
+      console.log(`[users] USERS_FILE not found at ${USERS_FILE}, using fallback`);
     }
   } catch (e) {
     console.error('[users] load error', e && e.message);
   }
   // Default fallback: admin user
+  console.log('[users] using default fallback admin user');
   return [{ username: 'vhr', passwordHash: '$2b$10$Axa5JBDt22Wc2nZtTqeMBeVjyDYEl0tMyu0NDdUYiTcocI2bvqK46', role: 'admin', email: 'admin@example.local', stripeCustomerId: null }];
 }
 
@@ -501,6 +514,8 @@ function saveSubscriptions() {
 // Load all data at startup
 messages = loadMessages();
 subscriptions = loadSubscriptions();
+users = loadUsers();
+console.log(`[server] ✓ ${users.length} users loaded at startup`);
 
 // --- DB wrapper helpers (use SQLite adapter when enabled) ---
 let dbEnabled = false;
