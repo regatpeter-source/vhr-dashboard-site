@@ -58,6 +58,19 @@ nav ul li a:hover {
   background: #2196f3;
 }
 
+nav ul li a.cta-nav {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 8px 16px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+nav ul li a.cta-nav:hover {
+  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+  transform: translateY(-1px);
+}
+
 .hero {
   text-align: center;
   padding: 60px 20px 30px 20px;
