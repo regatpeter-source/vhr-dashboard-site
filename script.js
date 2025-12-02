@@ -37,14 +37,23 @@ function handleDemoDownload(event) {
   // Chercher dans localStorage ou cookies
   const token = localStorage.getItem('vhr_token') || getCookie('vhr_token');
   
+  console.log('[demo] token found:', !!token);
+  
   if (!token) {
     // Utilisateur non authentifié - rediriger vers la page de compte avec paramètre
+    console.log('[demo] no token, redirecting to account');
     window.location.href = '/account.html?action=demo_required';
     return;
   }
   
   // Utilisateur authentifié - télécharger la démo
-  window.location.href = '/vhr-dashboard-demo.zip';
+  console.log('[demo] downloading demo zip');
+  const link = document.createElement('a');
+  link.href = '/vhr-dashboard-demo.zip';
+  link.download = 'vhr-dashboard-demo.zip';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 // Vérifier l'authentification pour l'abonnement
