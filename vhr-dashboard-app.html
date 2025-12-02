@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VHR DASHBOARD – Application</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="public/dashboard.css">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #f5f7fa;
+    }
+    
+    /* Login Page */
+    .auth-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 20px;
+    }
+    .auth-box {
+      background: white;
+      border-radius: 12px;
+      padding: 40px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      max-width: 400px;
+      width: 100%;
+    }
+    .auth-box h1 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 1.8em;
+    }
+    .auth-box .subtitle {
+      color: #999;
+      margin-bottom: 30px;
+      font-size: 0.9em;
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      color: #333;
+      font-weight: 500;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 1em;
+      transition: border-color 0.3s;
+    }
+    .form-group input:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+    .btn {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 1em;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      margin-bottom: 10px;
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+    }
+    .btn-secondary {
+      background: #f0f0f0;
+      color: #333;
+      border: 1px solid #ddd;
+    }
+    .btn-secondary:hover {
+      background: #e8e8e8;
+    }
+    .error-message {
+      background: #ffebee;
+      color: #c62828;
+      padding: 12px;
+      border-radius: 6px;
+      margin-bottom: 20px;
+      display: none;
+    }
+    .success-message {
+      background: #e8f5e9;
+      color: #2e7d32;
+      padding: 12px;
+      border-radius: 6px;
+      margin-bottom: 20px;
+      display: none;
+    }
+    .auth-toggle {
+      text-align: center;
+      margin-top: 20px;
+      color: #666;
+    }
+    .auth-toggle a {
+      color: #667eea;
+      text-decoration: none;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .auth-toggle a:hover {
+      text-decoration: underline;
+    }
+    
+    /* Demo Info Banner */
+    .demo-banner {
+      background: #fff3e0;
+      border: 1px solid #ffb74d;
+      color: #e65100;
+      padding: 12px 16px;
+      border-radius: 6px;
+      margin-bottom: 20px;
+      display: none;
+    }
+    .demo-banner.warning {
+      background: #ffebee;
+      border-color: #ef5350;
+      color: #c62828;
+    }
+    
+    /* Dashboard Header */
+    .dashboard-header {
+      background: white;
+      padding: 16px 24px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .dashboard-header .logo {
+      font-size: 20px;
+      font-weight: bold;
+      color: #667eea;
+    }
+    .dashboard-header .user-info {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+    .user-badge {
+      background: #f0f0f0;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 0.9em;
+      color: #333;
+    }
+    .subscription-badge {
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 0.85em;
+      font-weight: 600;
+    }
+    .subscription-badge.active {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+    .subscription-badge.trial {
+      background: #fff3e0;
+      color: #e65100;
+    }
+    .subscription-badge.expired {
+      background: #ffebee;
+      color: #c62828;
+    }
+    .btn-logout {
+      padding: 8px 16px;
+      background: #f0f0f0;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9em;
+      transition: all 0.3s;
+    }
+    .btn-logout:hover {
+      background: #ddd;
+    }
+    
+    /* Main Content */
+    .dashboard-main {
+      display: none;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Auth Container -->
+  <div id="authContainer" class="auth-container">
+    <div class="auth-box">
+      <h1>VHR DASHBOARD</h1>
+      <p class="subtitle">Gestion des casques VR</p>
+      
+      <div id="loginMode">
+        <div id="errorMessage" class="error-message"></div>
+        <div id="successMessage" class="success-message"></div>
+        <div id="demoBanner" class="demo-banner"></div>
+        
+        <div class="form-group">
+          <label for="loginUser">Nom d'utilisateur</label>
+          <input id="loginUser" type="text" placeholder="Entrez votre nom d'utilisateur" autocomplete="username">
+        </div>
+        
+        <div class="form-group">
+          <label for="loginPass">Mot de passe</label>
+          <input id="loginPass" type="password" placeholder="Entrez votre mot de passe" autocomplete="current-password">
+        </div>
+        
+        <button class="btn btn-primary" onclick="handleLogin()">Connexion</button>
+        <button class="btn btn-secondary" onclick="switchToRegister()">Créer un compte</button>
+        
+        <div class="auth-toggle">
+          <p>Pas de compte? <a onclick="switchToRegister()">S'inscrire</a></p>
+        </div>
+      </div>
+      
+      <div id="registerMode" style="display: none;">
+        <div id="regErrorMessage" class="error-message"></div>
+        <div id="regSuccessMessage" class="success-message"></div>
+        
+        <div class="form-group">
+          <label for="regUser">Nom d'utilisateur</label>
+          <input id="regUser" type="text" placeholder="Choisissez un nom d'utilisateur" autocomplete="username">
+        </div>
+        
+        <div class="form-group">
+          <label for="regEmail">Email</label>
+          <input id="regEmail" type="email" placeholder="Votre email">
+        </div>
+        
+        <div class="form-group">
+          <label for="regPass">Mot de passe</label>
+          <input id="regPass" type="password" placeholder="Choisissez un mot de passe" autocomplete="new-password">
+        </div>
+        
+        <div class="form-group">
+          <label for="regPass2">Confirmez le mot de passe</label>
+          <input id="regPass2" type="password" placeholder="Confirmez votre mot de passe" autocomplete="new-password">
+        </div>
+        
+        <button class="btn btn-primary" onclick="handleRegister()">S'inscrire</button>
+        <button class="btn btn-secondary" onclick="switchToLogin()">Retour à la connexion</button>
+        
+        <div class="auth-toggle">
+          <p>Vous avez un compte? <a onclick="switchToLogin()">Se connecter</a></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dashboard Container -->
+  <div id="dashboardContainer" style="display: none;">
+    <div class="dashboard-header">
+      <div class="logo">VHR DASHBOARD</div>
+      <div class="user-info">
+        <span id="demoStatus"></span>
+        <span id="subscriptionStatus" class="subscription-badge"></span>
+        <div>
+          <span class="user-badge">👤 <span id="currentUsername"></span></span>
+        </div>
+        <button class="btn-logout" onclick="handleLogout()">Déconnexion</button>
+      </div>
+    </div>
+
+    <div style="max-width: 1400px; margin: 0 auto; padding: 24px;">
+      <div id="demoWarningBanner" class="demo-banner" style="display: none; margin-bottom: 20px;">
+        ⚠️ Votre période d'essai expire bientôt! <strong id="daysUntilExpiry"></strong> jours restants.
+      </div>
+      <div id="demoExpiredBanner" class="demo-banner warning" style="display: none; margin-bottom: 20px;">
+        ❌ Votre période d'essai a expiré. Veuillez vous abonner pour continuer à utiliser VHR Dashboard.
+      </div>
+      
+      <div id="deviceGrid"></div>
+    </div>
+  </div>
+
+  <!-- Socket.io for real-time updates -->
+  <script src="/socket.io/socket.io.js"></script>
+  
+  <!-- Dashboard functionality -->
+  <script src="public/dashboard.js"></script>
+
+  <script>
+    // ========== AUTHENTICATION SYSTEM ==========
+    
+    async function handleLogin() {
+      const username = document.getElementById('loginUser').value.trim();
+      const password = document.getElementById('loginPass').value;
+      const errorEl = document.getElementById('errorMessage');
+      
+      if (!username || !password) {
+        errorEl.textContent = 'Veuillez remplir tous les champs';
+        errorEl.style.display = 'block';
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ username, password })
+        });
+        
+        const data = await response.json();
+        
+        if (data.ok) {
+          console.log('[auth] login success:', data.username);
+          errorEl.style.display = 'none';
+          document.getElementById('loginUser').value = '';
+          document.getElementById('loginPass').value = '';
+          
+          // Save user info and show dashboard
+          localStorage.setItem('vhr_user', data.username);
+          showDashboard();
+          checkDemoStatus();
+          checkSubscriptionStatus();
+        } else {
+          errorEl.textContent = data.error || 'Erreur de connexion';
+          errorEl.style.display = 'block';
+        }
+      } catch (e) {
+        console.error('[auth] login error:', e);
+        errorEl.textContent = 'Erreur réseau: ' + e.message;
+        errorEl.style.display = 'block';
+      }
+    }
+    
+    async function handleRegister() {
+      const username = document.getElementById('regUser').value.trim();
+      const email = document.getElementById('regEmail').value.trim();
+      const password = document.getElementById('regPass').value;
+      const password2 = document.getElementById('regPass2').value;
+      const errorEl = document.getElementById('regErrorMessage');
+      const successEl = document.getElementById('regSuccessMessage');
+      
+      if (!username || !email || !password || !password2) {
+        errorEl.textContent = 'Veuillez remplir tous les champs';
+        errorEl.style.display = 'block';
+        return;
+      }
+      
+      if (password !== password2) {
+        errorEl.textContent = 'Les mots de passe ne correspondent pas';
+        errorEl.style.display = 'block';
+        return;
+      }
+      
+      if (password.length < 6) {
+        errorEl.textContent = 'Le mot de passe doit contenir au moins 6 caractères';
+        errorEl.style.display = 'block';
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ username, email, password })
+        });
+        
+        const data = await response.json();
+        
+        if (data.ok) {
+          console.log('[auth] register success:', data.username);
+          errorEl.style.display = 'none';
+          successEl.textContent = '✅ Inscription réussie! Vous êtes connecté.';
+          successEl.style.display = 'block';
+          
+          setTimeout(() => {
+            localStorage.setItem('vhr_user', data.username);
+            showDashboard();
+            checkDemoStatus();
+            checkSubscriptionStatus();
+          }, 1000);
+        } else {
+          errorEl.textContent = data.error || 'Erreur lors de l\'inscription';
+          errorEl.style.display = 'block';
+          successEl.style.display = 'none';
+        }
+      } catch (e) {
+        console.error('[auth] register error:', e);
+        errorEl.textContent = 'Erreur réseau: ' + e.message;
+        errorEl.style.display = 'block';
+      }
+    }
+    
+    function handleLogout() {
+      localStorage.removeItem('vhr_user');
+      document.getElementById('dashboardContainer').style.display = 'none';
+      document.getElementById('authContainer').style.display = 'flex';
+      document.getElementById('loginUser').value = '';
+      document.getElementById('loginPass').value = '';
+      switchToLogin();
+    }
+    
+    function switchToLogin() {
+      document.getElementById('loginMode').style.display = 'block';
+      document.getElementById('registerMode').style.display = 'none';
+      document.getElementById('errorMessage').style.display = 'none';
+      document.getElementById('successMessage').style.display = 'none';
+    }
+    
+    function switchToRegister() {
+      document.getElementById('loginMode').style.display = 'none';
+      document.getElementById('registerMode').style.display = 'block';
+      document.getElementById('regErrorMessage').style.display = 'none';
+      document.getElementById('regSuccessMessage').style.display = 'none';
+    }
+    
+    function showDashboard() {
+      document.getElementById('authContainer').style.display = 'none';
+      document.getElementById('dashboardContainer').style.display = 'block';
+      
+      const username = localStorage.getItem('vhr_user');
+      document.getElementById('currentUsername').textContent = username;
+      
+      loadDevices();
+    }
+    
+    async function checkDemoStatus() {
+      try {
+        const response = await fetch('/api/demo/status', {
+          credentials: 'include'
+        });
+        const data = await response.json();
+        
+        if (data.ok) {
+          const daysRemaining = data.demo.remainingDays;
+          const warningBanner = document.getElementById('demoWarningBanner');
+          const expiredBanner = document.getElementById('demoExpiredBanner');
+          const demoStatus = document.getElementById('demoStatus');
+          
+          if (data.demo.hasActiveSubscription) {
+            demoStatus.innerHTML = '✅ <strong>Abonné</strong>';
+            warningBanner.style.display = 'none';
+            expiredBanner.style.display = 'none';
+          } else if (data.demo.demoExpired) {
+            demoStatus.innerHTML = '❌ <strong>Essai expiré</strong>';
+            expiredBanner.style.display = 'block';
+            warningBanner.style.display = 'none';
+          } else {
+            demoStatus.innerHTML = `⏱️ <strong>Essai: ${daysRemaining}j</strong>`;
+            if (daysRemaining <= 3) {
+              warningBanner.style.display = 'block';
+              document.getElementById('daysUntilExpiry').textContent = daysRemaining;
+            } else {
+              warningBanner.style.display = 'none';
+            }
+            expiredBanner.style.display = 'none';
+          }
+        }
+      } catch (e) {
+        console.error('[demo] status check error:', e);
+      }
+    }
+    
+    async function checkSubscriptionStatus() {
+      try {
+        const response = await fetch('/api/subscriptions/my-subscription', {
+          credentials: 'include'
+        });
+        const data = response.json();
+        
+        if (data.ok) {
+          const badge = document.getElementById('subscriptionStatus');
+          if (data.subscription.isActive) {
+            badge.textContent = '💳 ' + (data.subscription.currentPlan?.name || 'Abonné');
+            badge.className = 'subscription-badge active';
+          } else {
+            badge.textContent = '📋 Essai';
+            badge.className = 'subscription-badge trial';
+          }
+        }
+      } catch (e) {
+        console.error('[subscription] check error:', e);
+      }
+    }
+    
+    // Check if already logged in
+    window.addEventListener('load', () => {
+      const savedUser = localStorage.getItem('vhr_user');
+      if (savedUser) {
+        showDashboard();
+        checkDemoStatus();
+        checkSubscriptionStatus();
+      }
+    });
+    
+    // Refresh demo status every minute
+    setInterval(checkDemoStatus, 60000);
+  </script>
+</body>
+</html>
