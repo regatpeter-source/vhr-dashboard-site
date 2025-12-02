@@ -35,16 +35,49 @@ function handleDemoDownload(event) {
   event.preventDefault();
   
   // Vérifier si l'utilisateur a un token (connecté)
+  // Chercher dans localStorage ou cookies
   const token = localStorage.getItem('vhr_token') || getCookie('vhr_token');
   
   if (!token) {
-    // Utilisateur non authentifié - afficher message
-    alert('⚠️ Vous devez créer un compte pour télécharger la démo.\n\nVous pouvez vous inscrire gratuitement pour accéder à la démo et profiter de 7 jours d\'essai gratuits !');
-    // Rediriger vers la page de création de compte ou connexion
-    window.location.href = '/account.html';
+    // Utilisateur non authentifié - rediriger vers la page de compte avec paramètre
+    window.location.href = '/account.html?action=demo_required';
     return;
   }
   
   // Utilisateur authentifié - télécharger la démo
   window.location.href = '/vhr-dashboard-demo.zip';
+}
+
+// Vérifier l'authentification pour l'abonnement
+function handleSubscriptionClick(event) {
+  event.preventDefault();
+  
+  // Vérifier si l'utilisateur a un token (connecté)
+  const token = localStorage.getItem('vhr_token') || getCookie('vhr_token');
+  
+  if (!token) {
+    // Utilisateur non authentifié - rediriger vers la page de compte
+    window.location.href = '/account.html?action=subscription_required';
+    return;
+  }
+  
+  // Utilisateur authentifié - continuer avec le paiement
+  // Laisser le gestionnaire Stripe par défaut prendre le relais
+  return true;
+}
+
+// Initialize subscription button listeners (CSP-compliant)
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', function() {
+    const subBtn = document.getElementById('stripe-sub-btn');
+    const oneTimeBtn = document.getElementById('stripe-onetime-btn');
+    
+    if (subBtn) {
+      subBtn.addEventListener('click', handleSubscriptionClick);
+    }
+    if (oneTimeBtn) {
+      oneTimeBtn.addEventListener('click', handleSubscriptionClick);
+    }
+  });
+}
 }
