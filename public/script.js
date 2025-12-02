@@ -22,13 +22,20 @@ if (form) {
   });
 }
 
+// Utilitaire pour lire un cookie
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(';').shift();
+  return null;
+}
+
 // Vérifier l'authentification pour le téléchargement de la démo
 function handleDemoDownload(event) {
   event.preventDefault();
   
   // Vérifier si l'utilisateur a un token (connecté)
-  const token = localStorage.getItem('vhr_token') || 
-                (typeof getCookie === 'function' ? getCookie('vhr_token') : null);
+  const token = localStorage.getItem('vhr_token') || getCookie('vhr_token');
   
   if (!token) {
     // Utilisateur non authentifié - afficher message
