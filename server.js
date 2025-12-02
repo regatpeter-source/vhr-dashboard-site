@@ -515,6 +515,53 @@ function saveSubscriptions() {
 messages = loadMessages();
 subscriptions = loadSubscriptions();
 users = loadUsers();
+
+// Ensure default users exist (important for Render where filesystem is ephemeral)
+function ensureDefaultUsers() {
+  const hasAdmin = users.some(u => u.username === 'vhr');
+  const hasDemo = users.some(u => u.username === 'VhrDashboard');
+  
+  if (!hasAdmin) {
+    console.log('[users] adding default admin user');
+    users.push({
+      username: 'vhr',
+      passwordHash: '$2b$10$.M2Mlq/GahBLj.JTggaUv.BwlBm/9CbRUJi/cCHkfQ217LnqNigaO', // password: 0409
+      role: 'admin',
+      email: 'admin@example.local',
+      stripeCustomerId: null,
+      latestInvoiceId: null,
+      lastInvoicePaidAt: null,
+      subscriptionStatus: null,
+      subscriptionId: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+  }
+  
+  if (!hasDemo) {
+    console.log('[users] adding default demo user');
+    users.push({
+      username: 'VhrDashboard',
+      passwordHash: '$2b$10$XtU3hKSETcFgyx9w.KfL5unRFQ7H2Q26vBKXXjQ05Kz47mZbvrdQS', // password: VhrDashboard@2025
+      role: 'user',
+      email: 'regatpeter@hotmail.fr',
+      stripeCustomerId: null,
+      latestInvoiceId: null,
+      lastInvoicePaidAt: null,
+      subscriptionStatus: null,
+      subscriptionId: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+  }
+  
+  // Save to file if users were added
+  if (!hasAdmin || !hasDemo) {
+    saveUsers();
+  }
+}
+
+ensureDefaultUsers();
 console.log(`[server] ✓ ${users.length} users loaded at startup`);
 
 // --- DB wrapper helpers (use SQLite adapter when enabled) ---
@@ -615,12 +662,21 @@ function authMiddleware(req, res, next) {
 
 // --- Route de login ---
 app.post('/api/login', async (req, res) => {
+  console.log('[api/login] request received:', req.body);
   reloadUsers(); // Reload users from file in case they were modified externally
   const { username, password } = req.body;
+  console.log('[api/login] attempting login for:', username);
   const user = getUserByUsername(username);
-  if (!user) return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
+  if (!user) {
+    console.log('[api/login] user not found');
+    return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
+  }
   const valid = await bcrypt.compare(password, user.passwordHash);
-  if (!valid) return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
+  if (!valid) {
+    console.log('[api/login] password mismatch');
+    return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
+  }
+  console.log('[api/login] login successful for:', username);
   const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
   // Set cookie for better protection in browsers (httpOnly)
   const cookieOptions = {
