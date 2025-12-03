@@ -17,8 +17,6 @@ const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
-const crypto = require('crypto');
-const nodemailer = require('nodemailer');
 
 
 const app = express();
