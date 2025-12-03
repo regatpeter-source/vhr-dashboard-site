@@ -32,8 +32,8 @@ REM Attendre que le serveur démarre
 timeout /t 3 /nobreak >nul
 
 REM Ouvrir le navigateur
-echo Ouverture du dashboard...
-start http://localhost:3000/vhr-dashboard-app.html
+echo Ouverture du dashboard PRO...
+start http://localhost:3000/vhr-dashboard-pro.html
 
 echo.
 echo ========================================
