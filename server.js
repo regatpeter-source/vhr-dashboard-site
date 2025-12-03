@@ -1186,6 +1186,68 @@ async function sendLicenseEmail(email, licenseKey, username) {
 
 // ========== LICENSE VERIFICATION API ==========
 
+// TEST ROUTE: Generate a test license (only in development)
+app.get('/api/test/generate-license', async (req, res) => {
+  try {
+    const testUser = {
+      username: 'testuser',
+      email: 'test@example.com'
+    };
+    
+    const license = addLicense(testUser.username, testUser.email, 'perpetual_pro');
+    
+    console.log('[TEST] License generated:', license.key);
+    
+    // Try to send email if configured
+    let emailSent = false;
+    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+      emailSent = await sendLicenseEmail(testUser.email, license.key, testUser.username);
+    }
+    
+    res.json({ 
+      ok: true, 
+      license: license.key,
+      email: testUser.email,
+      emailSent: emailSent,
+      message: 'Test license generated successfully',
+      instructions: 'Copy this key and paste it in the dashboard unlock modal'
+    });
+  } catch (e) {
+    console.error('[TEST] Generate license error:', e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// TEST ROUTE: Validate email configuration
+app.get('/api/test/email-config', async (req, res) => {
+  try {
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      return res.json({ 
+        ok: false, 
+        configured: false,
+        message: 'Email not configured. Add EMAIL_USER and EMAIL_PASS to .env' 
+      });
+    }
+    
+    await emailTransporter.verify();
+    res.json({ 
+      ok: true, 
+      configured: true,
+      host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+      user: process.env.EMAIL_USER,
+      message: 'Email configuration is valid' 
+    });
+  } catch (e) {
+    console.error('[TEST] Email config error:', e);
+    res.status(500).json({ 
+      ok: false, 
+      configured: true,
+      error: e.message,
+      message: 'Email configured but connection failed. Check credentials.' 
+    });
+  }
+});
+
 // Check license or demo status at dashboard startup
 app.post('/api/license/check', async (req, res) => {
   try {
