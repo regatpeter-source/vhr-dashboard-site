@@ -481,8 +481,6 @@ app.get('/download/dashboard', (req, res) => {
     return res.status(500).json({ ok: false, error: 'Server error' });
   }
 });
-  return res.sendFile(portableZip);
-});
 
 // Support old links: redirect root developer guide to canonical site-vitrine page
 app.get('/developer-setup.html', (req, res) => {
