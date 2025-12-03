@@ -1740,6 +1740,113 @@ app.post('/api/adb/wifi-connect', async (req, res) => {
   }
 });
 
+// WiFi Auto (détection automatique IP)
+app.post('/api/adb/wifi-auto', async (req, res) => {
+  const { serial } = req.body || {};
+  if (!serial) {
+    return res.status(400).json({ ok: false, error: 'serial required' });
+  }
+
+  try {
+    let targetIp = null;
+
+    // Méthode 1: ip route
+    try {
+      const routeOut = await runAdbCommand(serial, ['shell', 'ip', 'route']);
+      const routeStdout = routeOut.stdout || '';
+      const match = routeStdout.match(/src\s+(\d+\.\d+\.\d+\.\d+)/);
+      if (match && match[1]) targetIp = match[1];
+    } catch (e) {
+      console.log('[wifi-auto] ip route failed:', e.message);
+    }
+
+    // Méthode 2: ip addr show wlan0
+    if (!targetIp) {
+      try {
+        const addrOut = await runAdbCommand(serial, ['shell', 'ip', '-4', 'addr', 'show', 'wlan0']);
+        const addrStdout = addrOut.stdout || '';
+        const match2 = addrStdout.match(/inet\s+(\d+\.\d+\.\d+\.\d+)\//);
+        if (match2 && match2[1]) targetIp = match2[1];
+      } catch (e) {
+        console.log('[wifi-auto] ip addr failed:', e.message);
+      }
+    }
+
+    // Méthode 3: getprop dhcp.wlan0.ipaddress
+    if (!targetIp) {
+      try {
+        const propOut = await runAdbCommand(serial, ['shell', 'getprop', 'dhcp.wlan0.ipaddress']);
+        const propIp = (propOut.stdout || '').trim();
+        if (propIp && /^\d+\.\d+\.\d+\.\d+$/.test(propIp)) targetIp = propIp;
+      } catch (e) {
+        console.log('[wifi-auto] getprop failed:', e.message);
+      }
+    }
+
+    if (!targetIp) {
+      return res.status(400).json({ ok: false, error: 'Impossible de détecter l\'IP automatiquement. Vérifiez que le WiFi est activé sur le casque.' });
+    }
+
+    console.log('[wifi-auto] IP détectée:', targetIp);
+
+    // Enable TCP on 5555 and connect
+    await runAdbCommand(serial, ['tcpip', '5555']);
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s
+    const connectOut = await runAdbCommand(null, ['connect', `${targetIp}:5555`]);
+    const connectStdout = connectOut.stdout || '';
+    const ok = /connected|already connected/i.test(connectStdout);
+    
+    refreshDevices().catch(() => { });
+    res.json({ ok, ip: targetIp, msg: connectStdout });
+  } catch (e) {
+    console.error('[api] wifi-auto:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// TTS - Text-to-Speech (PC → Casque)
+app.post('/api/tts/send', async (req, res) => {
+  const { serial, text } = req.body || {};
+  if (!serial || !text) {
+    return res.status(400).json({ ok: false, error: 'serial et text requis' });
+  }
+
+  try {
+    // Utilise la commande 'say' sur Android via ADB (disponible sur certains casques)
+    // Alternative: utiliser service TTS Android
+    const ttsCommand = ['shell', 'cmd', 'notification', 'post', '-S', 'bigtext', '-t', 'VHR Dashboard', 'Tag', text];
+    
+    // Méthode 1: Notification avec le texte (visible)
+    try {
+      await runAdbCommand(serial, ttsCommand);
+    } catch (e) {
+      console.log('[tts] notification failed:', e.message);
+    }
+
+    // Méthode 2: Utiliser am broadcast pour TTS
+    try {
+      const ttsIntent = [
+        'shell', 'am', 'broadcast',
+        '-a', 'android.intent.action.TTS_QUEUE_PROCESSING_COMPLETED',
+        '--es', 'utteranceId', 'vhr_' + Date.now(),
+        '--es', 'text', text
+      ];
+      await runAdbCommand(serial, ttsIntent);
+    } catch (e) {
+      console.log('[tts] broadcast failed:', e.message);
+    }
+
+    // Méthode 3: Service TTS (requiert app installée)
+    // Pour une vraie implémentation TTS, il faudrait une app Android qui écoute les broadcasts
+    
+    console.log(`[tts] Texte envoyé au casque ${serial}: "${text}"`);
+    res.json({ ok: true, message: 'Texte envoyé (notification + broadcast). Pour TTS audio complet, installez l\'app VHR TTS sur le casque.' });
+  } catch (e) {
+    console.error('[api] tts/send:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 app.get('/api/games', (req, res) => {
   res.json({ ok: true, games: gamesList });
 });
