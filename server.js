@@ -206,7 +206,7 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Fallback: serve the canonical zip path at /downloads/vhr-dashboard-demo.zip
+// Fallback: serve the canonical zip path at /downloads/vhr-dashboard-demo.zip (SANS RESTRICTION)
 app.get('/downloads/vhr-dashboard-demo.zip', (req, res) => {
   const zip1 = path.join(__dirname, 'downloads', 'vhr-dashboard-demo.zip');
   const zip2 = path.join(__dirname, 'downloads', 'vhr-dashboard-demo-final.zip');
@@ -214,6 +214,7 @@ app.get('/downloads/vhr-dashboard-demo.zip', (req, res) => {
   if (!candidate) return res.status(404).send('ZIP not found');
   res.setHeader('Content-Disposition', `attachment; filename="${path.basename(candidate)}"`);
   res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Cache-Control', 'no-cache');
   return res.sendFile(candidate);
 });
 
@@ -241,6 +242,47 @@ app.get('/vhr-dashboard-demo.zip', (req, res) => {
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('X-Demo-Days-Remaining', demoStatus.daysRemaining);
   return res.sendFile(candidate);
+});
+
+// Route pour le dashboard portable (VHR-Dashboard-Portable.zip) - SANS RESTRICTION
+app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
+  const portableZip = path.join(__dirname, 'VHR-Dashboard-Portable.zip');
+  
+  if (!fs.existsSync(portableZip)) {
+    return res.status(404).json({ 
+      ok: false, 
+      error: 'VHR Dashboard Portable not found. Please run: npm run package:dashboard' 
+    });
+  }
+  
+  res.setHeader('Content-Disposition', 'attachment; filename="VHR-Dashboard-Portable.zip"');
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Cache-Control', 'no-cache');
+  return res.sendFile(portableZip);
+});
+
+// Route générique pour tous les téléchargements du dashboard (sans restriction de démo)
+app.get('/download/dashboard', (req, res) => {
+  const portableZip = path.join(__dirname, 'VHR-Dashboard-Portable.zip');
+  
+  if (!fs.existsSync(portableZip)) {
+    // Fallback vers le ZIP de démo final si le portable n'existe pas
+    const demoZip = path.join(__dirname, 'downloads', 'vhr-dashboard-demo-final.zip');
+    if (fs.existsSync(demoZip)) {
+      res.setHeader('Content-Disposition', 'attachment; filename="vhr-dashboard-demo-final.zip"');
+      res.setHeader('Content-Type', 'application/zip');
+      return res.sendFile(demoZip);
+    }
+    return res.status(404).json({ 
+      ok: false, 
+      error: 'Dashboard package not found' 
+    });
+  }
+  
+  res.setHeader('Content-Disposition', 'attachment; filename="VHR-Dashboard-Portable.zip"');
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Cache-Control', 'no-cache');
+  return res.sendFile(portableZip);
 });
 
 // Support old links: redirect root developer guide to canonical site-vitrine page
@@ -1214,6 +1256,52 @@ app.post('/api/scrcpy-gui', async (req, res) => {
     return res.status(500).json({ ok: false, error: e.message });
   }
 });
+
+// ========== PACKAGE DASHBOARD (génération à la demande) ============
+app.post('/api/package-dashboard', async (req, res) => {
+  try {
+    console.log('[package] Génération du package VHR-Dashboard-Portable...');
+    
+    // Vérifier si le package existe déjà
+    const packagePath = path.join(__dirname, 'VHR-Dashboard-Portable.zip');
+    if (fs.existsSync(packagePath)) {
+      const stats = fs.statSync(packagePath);
+      const ageMs = Date.now() - stats.mtime.getTime();
+      const ageHours = ageMs / (1000 * 60 * 60);
+      
+      // Si le package a moins de 24h, on ne le regénère pas
+      if (ageHours < 24) {
+        console.log('[package] Package récent trouvé, pas de regénération nécessaire');
+        return res.json({ ok: true, cached: true, age: Math.round(ageHours) + 'h' });
+      }
+    }
+    
+    // Générer le package via le script
+    const scriptPath = path.join(__dirname, 'scripts', 'package-dashboard.js');
+    if (!fs.existsSync(scriptPath)) {
+      console.error('[package] Script de packaging introuvable');
+      return res.status(404).json({ ok: false, error: 'Script de packaging introuvable' });
+    }
+    
+    // Exécuter le script en arrière-plan
+    const { exec } = require('child_process');
+    exec('node scripts/package-dashboard.js', (error, stdout, stderr) => {
+      if (error) {
+        console.error('[package] Erreur génération:', error);
+      } else {
+        console.log('[package] Package généré avec succès');
+      }
+    });
+    
+    // Répondre immédiatement (le packaging continue en arrière-plan)
+    return res.json({ ok: true, message: 'Packaging en cours...', cached: false });
+    
+  } catch (e) {
+    console.error('[api] package-dashboard:', e);
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // Run an adb command for a given serial, return { stdout, stderr }
 const runAdbCommand = (serial, args) => {
   return new Promise((resolve, reject) => {
