@@ -1206,15 +1206,47 @@ window.closeUnlockModal = function() {
 };
 
 window.subscribePro = async function() {
-	showToast('🔄 Redirection vers le paiement...', 'info');
-	// Redirect to pricing page for subscription
-	window.location.href = '/pricing.html?plan=professional';
+	showToast('🔄 Création de la session de paiement...', 'info');
+	
+	try {
+		// Create Stripe Checkout session for subscription
+		const res = await api('/api/subscriptions/create-checkout', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ planId: 'professional' })
+		});
+		
+		if (res.ok && res.url) {
+			window.location.href = res.url;
+		} else {
+			showToast('❌ Erreur: ' + (res.error || 'Session non créée'), 'error');
+		}
+	} catch (e) {
+		console.error('[subscribe] error:', e);
+		showToast('❌ Erreur lors de la création de la session', 'error');
+	}
 };
 
 window.purchasePro = async function() {
-	showToast('🔄 Redirection vers le paiement...', 'info');
-	// Redirect to pricing page for one-time purchase
-	window.location.href = '/pricing.html?plan=perpetual';
+	showToast('🔄 Création de la session de paiement...', 'info');
+	
+	try {
+		// Create Stripe Checkout session for one-time purchase
+		const res = await api('/api/purchases/create-checkout', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ purchaseId: 'perpetual_pro' })
+		});
+		
+		if (res.ok && res.url) {
+			window.location.href = res.url;
+		} else {
+			showToast('❌ Erreur: ' + (res.error || 'Session non créée'), 'error');
+		}
+	} catch (e) {
+		console.error('[purchase] error:', e);
+		showToast('❌ Erreur lors de la création de la session', 'error');
+	}
 };
 
 window.activateLicense = async function() {
