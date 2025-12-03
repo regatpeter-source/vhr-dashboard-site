@@ -102,13 +102,29 @@ const LICENSES_FILE = path.join(__dirname, 'data', 'licenses.json');
 // ========== EMAIL CONFIGURATION ==========
 const emailTransporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-  port: process.env.EMAIL_PORT || 587,
-  secure: false,
+  port: parseInt(process.env.EMAIL_PORT) || 587,
+  secure: process.env.EMAIL_SECURE === 'true' ? true : false,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
-  }
+  },
+  logger: true,  // Enable logging
+  debug: true    // Show debug info
 });
+
+// Verify email configuration at startup
+if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+  emailTransporter.verify((err, success) => {
+    if (err) {
+      console.error('[email] Configuration error - SMTP verification failed:', err.message);
+      console.error('[email] Check EMAIL_USER, EMAIL_PASS, EMAIL_HOST, EMAIL_PORT in .env');
+    } else if (success) {
+      console.log('[email] ✓ SMTP configuration verified - emails can be sent');
+    }
+  });
+} else {
+  console.warn('[email] EMAIL_USER or EMAIL_PASS not configured - contact notifications disabled');
+}
 
 // ========== LICENSE SYSTEM ==========
 const LICENSE_SECRET = process.env.LICENSE_SECRET || 'vhr-dashboard-secret-key-2025';
@@ -166,21 +182,21 @@ function findActiveLicenseByUsername(username) {
 async function sendContactMessageToAdmin(msg) {
   const adminEmail = process.env.EMAIL_USER;
   if (!adminEmail) {
-    console.error('[email] EMAIL_USER not configured in .env, cannot send contact notification');
+    console.error('[email] EMAIL_USER not configured, cannot send contact notification');
     return false;
   }
   
   if (!process.env.EMAIL_PASS) {
-    console.error('[email] EMAIL_PASS not configured in .env, cannot send contact notification');
+    console.error('[email] EMAIL_PASS not configured, cannot send contact notification');
     return false;
   }
   
-  console.log('[email] Sending contact message to:', adminEmail, 'from:', msg.email);
+  console.log('[email] Preparing contact message to:', adminEmail, 'from:', msg.email);
   
   const mailOptions = {
     from: adminEmail,
     to: adminEmail,
-    replyTo: msg.email, // Reply directly to the sender
+    replyTo: msg.email,
     subject: `📩 [VHR Contact] ${msg.subject}`,
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #0d0f14; color: #ecf0f1; border-radius: 10px;">
@@ -207,11 +223,16 @@ async function sendContactMessageToAdmin(msg) {
   };
   
   try {
-    await emailTransporter.sendMail(mailOptions);
-    console.log('[email] Contact message forwarded to admin:', adminEmail);
+    console.log('[email] Sending via SMTP:', process.env.EMAIL_HOST || 'smtp.gmail.com', 'port:', process.env.EMAIL_PORT || 587);
+    const info = await emailTransporter.sendMail(mailOptions);
+    console.log('[email] ✓ Contact message sent successfully');
+    console.log('[email] Response ID:', info.response);
     return true;
   } catch (e) {
-    console.error('[email] Failed to send contact message:', e);
+    console.error('[email] ✗ Failed to send contact message');
+    console.error('[email] Error:', e.message);
+    console.error('[email] Code:', e.code);
+    if (e.response) console.error('[email] SMTP Response:', e.response);
     return false;
   }
 }
