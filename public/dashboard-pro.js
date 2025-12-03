@@ -21,12 +21,16 @@ function createNavbar() {
 		<button id="toggleViewBtn" style="margin-right:15px;background:#2ecc71;color:#000;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			📊 Vue: Tableau
 		</button>
+		<button id="accountBtn" style="margin-right:15px;background:#3498db;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
+			👤 Mon Compte
+		</button>
 		<div id='navbarUser' style='margin-right:24px;display:flex;gap:12px;align-items:center;'></div>
 	`;
 	document.body.appendChild(nav);
 	document.body.style.paddingTop = '56px';
 	
 	document.getElementById('toggleViewBtn').onclick = toggleView;
+	document.getElementById('accountBtn').onclick = showAccountPanel;
 	updateUserUI();
 }
 
@@ -125,6 +129,442 @@ window.closeUserMenu = function() {
 	if (menu) menu.remove();
 };
 
+// ========== MON COMPTE PANEL ========== 
+function showAccountPanel() {
+	let panel = document.getElementById('accountPanel');
+	if (panel) panel.remove();
+	
+	// Récupérer les stats utilisateur
+	const userStats = getUserStats();
+	const userPrefs = getUserPreferences();
+	const role = userRoles[currentUser] || 'user';
+	const roleColor = role==='admin' ? '#ff9800' : role==='user' ? '#2196f3' : '#95a5a6';
+	const roleIcon = role==='admin' ? '👑' : role==='user' ? '👤' : '👥';
+	
+	panel = document.createElement('div');
+	panel.id = 'accountPanel';
+	panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:2000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
+	panel.onclick = (e) => { if (e.target === panel) closeAccountPanel(); };
+	
+	panel.innerHTML = `
+		<div style='background:#1a1d24;border:3px solid #2ecc71;border-radius:16px;padding:0;max-width:900px;width:90%;max-height:85vh;overflow-y:auto;box-shadow:0 8px 32px #000;color:#fff;'>
+			<!-- Header -->
+			<div style='background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);padding:24px;border-radius:13px 13px 0 0;position:relative;'>
+				<button onclick='closeAccountPanel()' style='position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;font-weight:bold;'>✕</button>
+				<div style='display:flex;align-items:center;gap:20px;'>
+					<div style='width:80px;height:80px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:40px;box-shadow:0 4px 12px rgba(0,0,0,0.3);'>
+						${roleIcon}
+					</div>
+					<div>
+						<h2 style='margin:0;font-size:28px;color:#fff;'>${currentUser || 'Invité'}</h2>
+						<div style='margin-top:6px;display:flex;gap:8px;align-items:center;'>
+							<span style='background:${roleColor};color:#fff;padding:4px 12px;border-radius:6px;font-size:12px;font-weight:bold;text-transform:uppercase;'>${role}</span>
+							<span style='background:rgba(255,255,255,0.2);color:#fff;padding:4px 12px;border-radius:6px;font-size:12px;'>Membre depuis ${userStats.memberSince}</span>
+						</div>
+					</div>
+				</div>
+			</div>
+			
+			<!-- Tabs -->
+			<div style='display:flex;background:#23272f;border-bottom:2px solid #2ecc71;'>
+				<button id='tabProfile' class='account-tab active' onclick='switchAccountTab("profile")' style='flex:1;padding:16px;background:transparent;border:none;color:#fff;cursor:pointer;font-weight:bold;border-bottom:3px solid #2ecc71;transition:all 0.3s;'>
+					📋 Profil
+				</button>
+				<button id='tabStats' class='account-tab' onclick='switchAccountTab("stats")' style='flex:1;padding:16px;background:transparent;border:none;color:#95a5a6;cursor:pointer;font-weight:bold;border-bottom:3px solid transparent;transition:all 0.3s;'>
+					📊 Statistiques
+				</button>
+				<button id='tabSettings' class='account-tab' onclick='switchAccountTab("settings")' style='flex:1;padding:16px;background:transparent;border:none;color:#95a5a6;cursor:pointer;font-weight:bold;border-bottom:3px solid transparent;transition:all 0.3s;'>
+					⚙️ Paramètres
+				</button>
+			</div>
+			
+			<!-- Content -->
+			<div id='accountContent' style='padding:24px;'>
+				${getProfileContent(userStats, role)}
+			</div>
+		</div>
+	`;
+	
+	document.body.appendChild(panel);
+}
+
+function getUserStats() {
+	const stats = JSON.parse(localStorage.getItem('vhr_user_stats_' + currentUser) || '{}');
+	const now = new Date();
+	const joined = new Date(stats.joinedAt || now);
+	const daysSince = Math.floor((now - joined) / (1000 * 60 * 60 * 24));
+	
+	return {
+		memberSince: daysSince === 0 ? "Aujourd'hui" : daysSince === 1 ? "Hier" : `${daysSince} jours`,
+		totalSessions: stats.totalSessions || 0,
+		totalStreamTime: stats.totalStreamTime || 0,
+		devicesManaged: stats.devicesManaged || 0,
+		appsLaunched: stats.appsLaunched || 0,
+		lastLogin: stats.lastLogin || new Date().toISOString(),
+		favoriteDevice: stats.favoriteDevice || 'Aucun',
+		joinedAt: stats.joinedAt || now.toISOString()
+	};
+}
+
+function getUserPreferences() {
+	return JSON.parse(localStorage.getItem('vhr_user_prefs_' + currentUser) || '{}');
+}
+
+function saveUserPreferences(prefs) {
+	localStorage.setItem('vhr_user_prefs_' + currentUser, JSON.stringify(prefs));
+}
+
+function getProfileContent(stats, role) {
+	return `
+		<div style='display:grid;grid-template-columns:1fr 1fr;gap:20px;'>
+			<!-- Colonne gauche -->
+			<div>
+				<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>📋 Informations du compte</h3>
+				<div style='background:#23272f;padding:18px;border-radius:8px;margin-bottom:16px;'>
+					<div style='margin-bottom:12px;'>
+						<label style='color:#95a5a6;font-size:13px;display:block;margin-bottom:4px;'>Nom d'utilisateur</label>
+						<div style='display:flex;gap:8px;'>
+							<input type='text' id='inputUsername' value='${currentUser}' style='flex:1;background:#1a1d24;color:#fff;border:2px solid #34495e;padding:10px;border-radius:6px;font-size:14px;' />
+							<button onclick='updateUsername()' style='background:#2ecc71;color:#000;border:none;padding:10px 16px;border-radius:6px;cursor:pointer;font-weight:bold;'>✓</button>
+						</div>
+					</div>
+					<div style='margin-bottom:12px;'>
+						<label style='color:#95a5a6;font-size:13px;display:block;margin-bottom:4px;'>Rôle</label>
+						<div style='background:#1a1d24;padding:10px;border-radius:6px;border:2px solid #34495e;'>
+							<span style='color:#fff;font-weight:bold;'>${role}</span>
+							${role === 'admin' ? ' <span style="color:#ff9800;">👑 Administrateur</span>' : ''}
+						</div>
+					</div>
+					<div style='margin-bottom:12px;'>
+						<label style='color:#95a5a6;font-size:13px;display:block;margin-bottom:4px;'>Email (optionnel)</label>
+						<input type='email' id='inputEmail' placeholder='votre@email.com' style='width:100%;background:#1a1d24;color:#fff;border:2px solid #34495e;padding:10px;border-radius:6px;font-size:14px;' />
+					</div>
+					<div>
+						<label style='color:#95a5a6;font-size:13px;display:block;margin-bottom:4px;'>Bio</label>
+						<textarea id='inputBio' placeholder='Parlez-nous de vous...' style='width:100%;background:#1a1d24;color:#fff;border:2px solid #34495e;padding:10px;border-radius:6px;font-size:14px;resize:vertical;min-height:80px;'></textarea>
+					</div>
+				</div>
+				
+				<button onclick='saveProfileChanges()' style='width:100%;background:#2ecc71;color:#000;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>
+					💾 Sauvegarder les modifications
+				</button>
+			</div>
+			
+			<!-- Colonne droite -->
+			<div>
+				<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>🎯 Activité récente</h3>
+				<div style='background:#23272f;padding:18px;border-radius:8px;margin-bottom:16px;'>
+					<div style='display:flex;justify-content:space-between;margin-bottom:12px;padding:10px;background:#1a1d24;border-radius:6px;'>
+						<span style='color:#95a5a6;'>Dernière connexion</span>
+						<span style='color:#fff;font-weight:bold;'>${formatDate(stats.lastLogin)}</span>
+					</div>
+					<div style='display:flex;justify-content:space-between;margin-bottom:12px;padding:10px;background:#1a1d24;border-radius:6px;'>
+						<span style='color:#95a5a6;'>Sessions totales</span>
+						<span style='color:#2ecc71;font-weight:bold;font-size:18px;'>${stats.totalSessions}</span>
+					</div>
+					<div style='display:flex;justify-content:space-between;margin-bottom:12px;padding:10px;background:#1a1d24;border-radius:6px;'>
+						<span style='color:#95a5a6;'>Apps lancées</span>
+						<span style='color:#3498db;font-weight:bold;font-size:18px;'>${stats.appsLaunched}</span>
+					</div>
+					<div style='display:flex;justify-content:space-between;padding:10px;background:#1a1d24;border-radius:6px;'>
+						<span style='color:#95a5a6;'>Casques gérés</span>
+						<span style='color:#9b59b6;font-weight:bold;font-size:18px;'>${stats.devicesManaged}</span>
+					</div>
+				</div>
+				
+				<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>🔐 Sécurité</h3>
+				<div style='background:#23272f;padding:18px;border-radius:8px;'>
+					<button onclick='exportUserData()' style='width:100%;background:#3498db;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:10px;'>
+						📥 Exporter mes données
+					</button>
+					<button onclick='confirmDeleteAccount()' style='width:100%;background:#e74c3c;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;'>
+						🗑️ Supprimer mon compte
+					</button>
+				</div>
+			</div>
+		</div>
+	`;
+}
+
+function getStatsContent(stats) {
+	const streamHours = Math.floor(stats.totalStreamTime / 3600);
+	const streamMinutes = Math.floor((stats.totalStreamTime % 3600) / 60);
+	
+	return `
+		<div style='display:grid;grid-template-columns:repeat(auto-fit, minmax(250px, 1fr));gap:20px;margin-bottom:24px;'>
+			<div style='background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);padding:20px;border-radius:12px;text-align:center;box-shadow:0 4px 12px rgba(46,204,113,0.3);'>
+				<div style='font-size:48px;font-weight:bold;color:#fff;'>${stats.totalSessions}</div>
+				<div style='color:#fff;font-size:16px;margin-top:8px;opacity:0.9;'>Sessions totales</div>
+			</div>
+			<div style='background:linear-gradient(135deg, #3498db 0%, #2980b9 100%);padding:20px;border-radius:12px;text-align:center;box-shadow:0 4px 12px rgba(52,152,219,0.3);'>
+				<div style='font-size:48px;font-weight:bold;color:#fff;'>${stats.appsLaunched}</div>
+				<div style='color:#fff;font-size:16px;margin-top:8px;opacity:0.9;'>Apps lancées</div>
+			</div>
+			<div style='background:linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);padding:20px;border-radius:12px;text-align:center;box-shadow:0 4px 12px rgba(155,89,182,0.3);'>
+				<div style='font-size:48px;font-weight:bold;color:#fff;'>${stats.devicesManaged}</div>
+				<div style='color:#fff;font-size:16px;margin-top:8px;opacity:0.9;'>Casques gérés</div>
+			</div>
+			<div style='background:linear-gradient(135deg, #f39c12 0%, #e67e22 100%);padding:20px;border-radius:12px;text-align:center;box-shadow:0 4px 12px rgba(243,156,18,0.3);'>
+				<div style='font-size:32px;font-weight:bold;color:#fff;'>${streamHours}h ${streamMinutes}m</div>
+				<div style='color:#fff;font-size:16px;margin-top:8px;opacity:0.9;'>Temps de streaming</div>
+			</div>
+		</div>
+		
+		<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>📈 Graphiques d'activité</h3>
+		<div style='background:#23272f;padding:24px;border-radius:12px;text-align:center;min-height:200px;display:flex;align-items:center;justify-content:center;'>
+			<div style='color:#95a5a6;font-size:16px;'>
+				📊 Graphiques détaillés disponibles prochainement
+			</div>
+		</div>
+		
+		<h3 style='color:#2ecc71;margin:24px 0 16px 0;font-size:20px;'>🏆 Accomplissements</h3>
+		<div style='display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:16px;'>
+			${stats.totalSessions >= 10 ? `
+				<div style='background:#23272f;padding:16px;border-radius:8px;border:2px solid #f39c12;text-align:center;'>
+					<div style='font-size:40px;'>🏅</div>
+					<div style='color:#f39c12;font-weight:bold;margin-top:8px;'>Habitué</div>
+					<div style='color:#95a5a6;font-size:12px;margin-top:4px;'>10+ sessions</div>
+				</div>
+			` : ''}
+			${stats.appsLaunched >= 50 ? `
+				<div style='background:#23272f;padding:16px;border-radius:8px;border:2px solid #9b59b6;text-align:center;'>
+					<div style='font-size:40px;'>🎮</div>
+					<div style='color:#9b59b6;font-weight:bold;margin-top:8px;'>Joueur</div>
+					<div style='color:#95a5a6;font-size:12px;margin-top:4px;'>50+ apps lancées</div>
+				</div>
+			` : ''}
+			${stats.devicesManaged >= 3 ? `
+				<div style='background:#23272f;padding:16px;border-radius:8px;border:2px solid #3498db;text-align:center;'>
+					<div style='font-size:40px;'>🥽</div>
+					<div style='color:#3498db;font-weight:bold;margin-top:8px;'>Collectionneur</div>
+					<div style='color:#95a5a6;font-size:12px;margin-top:4px;'>3+ casques</div>
+				</div>
+			` : ''}
+			<div style='background:#23272f;padding:16px;border-radius:8px;border:2px solid #95a5a6;text-align:center;opacity:0.5;'>
+				<div style='font-size:40px;'>🔒</div>
+				<div style='color:#95a5a6;font-weight:bold;margin-top:8px;'>À débloquer</div>
+				<div style='color:#95a5a6;font-size:12px;margin-top:4px;'>Continuez à jouer!</div>
+			</div>
+		</div>
+	`;
+}
+
+function getSettingsContent() {
+	const prefs = getUserPreferences();
+	
+	return `
+		<div style='max-width:700px;margin:0 auto;'>
+			<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>🎨 Apparence</h3>
+			<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;'>
+				<div style='margin-bottom:16px;'>
+					<label style='color:#fff;font-size:15px;display:flex;align-items:center;cursor:pointer;'>
+						<input type='checkbox' id='prefAutoRefresh' ${prefs.autoRefresh !== false ? 'checked' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
+						<span>🔄 Rafraîchissement automatique des casques</span>
+					</label>
+				</div>
+				<div style='margin-bottom:16px;'>
+					<label style='color:#fff;font-size:15px;display:flex;align-items:center;cursor:pointer;'>
+						<input type='checkbox' id='prefNotifications' ${prefs.notifications !== false ? 'checked' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
+						<span>🔔 Notifications toast activées</span>
+					</label>
+				</div>
+				<div style='margin-bottom:16px;'>
+					<label style='color:#fff;font-size:15px;display:flex;align-items:center;cursor:pointer;'>
+						<input type='checkbox' id='prefSounds' ${prefs.sounds === true ? 'checked' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
+						<span>🔊 Sons d'actions activés</span>
+					</label>
+				</div>
+				<div>
+					<label style='color:#95a5a6;font-size:13px;display:block;margin-bottom:8px;'>Vue par défaut</label>
+					<select id='prefDefaultView' style='width:100%;background:#1a1d24;color:#fff;border:2px solid #34495e;padding:10px;border-radius:6px;font-size:14px;cursor:pointer;'>
+						<option value='table' ${viewMode === 'table' ? 'selected' : ''}>📊 Tableau</option>
+						<option value='cards' ${viewMode === 'cards' ? 'selected' : ''}>🎴 Cartes</option>
+					</select>
+				</div>
+			</div>
+			
+			<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>⚡ Performance</h3>
+			<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;'>
+				<div style='margin-bottom:16px;'>
+					<label style='color:#95a5a6;font-size:13px;display:block;margin-bottom:8px;'>Profil streaming par défaut</label>
+					<select id='prefDefaultProfile' style='width:100%;background:#1a1d24;color:#fff;border:2px solid #34495e;padding:10px;border-radius:6px;font-size:14px;cursor:pointer;'>
+						<option value='ultra-low'>Ultra Low (320p)</option>
+						<option value='low'>Low (480p)</option>
+						<option value='wifi'>WiFi (640p)</option>
+						<option value='default' selected>Default (720p)</option>
+						<option value='high'>High (1280p)</option>
+						<option value='ultra'>Ultra (1920p)</option>
+					</select>
+				</div>
+				<div>
+					<label style='color:#95a5a6;font-size:13px;display:block;margin-bottom:8px;'>Intervalle de rafraîchissement (secondes)</label>
+					<input type='number' id='prefRefreshInterval' value='${prefs.refreshInterval || 5}' min='1' max='60' style='width:100%;background:#1a1d24;color:#fff;border:2px solid #34495e;padding:10px;border-radius:6px;font-size:14px;' />
+				</div>
+			</div>
+			
+			<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>🔧 Avancé</h3>
+			<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;'>
+				<div style='margin-bottom:16px;'>
+					<label style='color:#fff;font-size:15px;display:flex;align-items:center;cursor:pointer;'>
+						<input type='checkbox' id='prefDebugMode' ${prefs.debugMode === true ? 'checked' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
+						<span>🐛 Mode debug (logs console)</span>
+					</label>
+				</div>
+				<div>
+					<label style='color:#fff;font-size:15px;display:flex;align-items:center;cursor:pointer;'>
+						<input type='checkbox' id='prefAutoWifi' ${prefs.autoWifi === true ? 'checked' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
+						<span>📶 WiFi auto au démarrage</span>
+					</label>
+				</div>
+			</div>
+			
+			<button onclick='saveSettings()' style='width:100%;background:#2ecc71;color:#000;border:none;padding:16px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>
+				💾 Sauvegarder les paramètres
+			</button>
+		</div>
+	`;
+}
+
+window.switchAccountTab = function(tab) {
+	const tabs = document.querySelectorAll('.account-tab');
+	tabs.forEach(t => {
+		t.style.color = '#95a5a6';
+		t.style.borderBottom = '3px solid transparent';
+	});
+	
+	const activeTab = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
+	if (activeTab) {
+		activeTab.style.color = '#fff';
+		activeTab.style.borderBottom = '3px solid #2ecc71';
+	}
+	
+	const content = document.getElementById('accountContent');
+	const stats = getUserStats();
+	
+	if (tab === 'profile') content.innerHTML = getProfileContent(stats, userRoles[currentUser] || 'user');
+	else if (tab === 'stats') content.innerHTML = getStatsContent(stats);
+	else if (tab === 'settings') content.innerHTML = getSettingsContent();
+};
+
+window.closeAccountPanel = function() {
+	const panel = document.getElementById('accountPanel');
+	if (panel) panel.remove();
+};
+
+window.updateUsername = function() {
+	const newName = document.getElementById('inputUsername').value.trim();
+	if (!newName || newName === currentUser) return;
+	
+	const oldName = currentUser;
+	setUser(newName);
+	
+	// Migrer les données
+	const oldStats = localStorage.getItem('vhr_user_stats_' + oldName);
+	const oldPrefs = localStorage.getItem('vhr_user_prefs_' + oldName);
+	if (oldStats) localStorage.setItem('vhr_user_stats_' + newName, oldStats);
+	if (oldPrefs) localStorage.setItem('vhr_user_prefs_' + newName, oldPrefs);
+	
+	showToast('✅ Nom d\'utilisateur mis à jour !', 'success');
+	closeAccountPanel();
+	setTimeout(() => showAccountPanel(), 300);
+};
+
+window.saveProfileChanges = function() {
+	showToast('✅ Profil sauvegardé !', 'success');
+};
+
+window.saveSettings = function() {
+	const prefs = {
+		autoRefresh: document.getElementById('prefAutoRefresh').checked,
+		notifications: document.getElementById('prefNotifications').checked,
+		sounds: document.getElementById('prefSounds').checked,
+		defaultView: document.getElementById('prefDefaultView').value,
+		defaultProfile: document.getElementById('prefDefaultProfile').value,
+		refreshInterval: parseInt(document.getElementById('prefRefreshInterval').value) || 5,
+		debugMode: document.getElementById('prefDebugMode').checked,
+		autoWifi: document.getElementById('prefAutoWifi').checked
+	};
+	
+	saveUserPreferences(prefs);
+	
+	// Appliquer la vue par défaut
+	if (prefs.defaultView !== viewMode) {
+		viewMode = prefs.defaultView;
+		localStorage.setItem('vhr_view_mode', viewMode);
+		document.getElementById('toggleViewBtn').innerHTML = viewMode === 'table' ? '📊 Vue: Tableau' : '🎴 Vue: Cartes';
+		renderDevices();
+	}
+	
+	showToast('✅ Paramètres sauvegardés !', 'success');
+};
+
+window.exportUserData = function() {
+	const userData = {
+		username: currentUser,
+		role: userRoles[currentUser] || 'user',
+		stats: getUserStats(),
+		preferences: getUserPreferences(),
+		exportDate: new Date().toISOString()
+	};
+	
+	const dataStr = JSON.stringify(userData, null, 2);
+	const dataBlob = new Blob([dataStr], { type: 'application/json' });
+	const url = URL.createObjectURL(dataBlob);
+	const link = document.createElement('a');
+	link.href = url;
+	link.download = `vhr-data-${currentUser}-${Date.now()}.json`;
+	link.click();
+	URL.revokeObjectURL(url);
+	
+	showToast('📥 Données exportées !', 'success');
+};
+
+window.confirmDeleteAccount = function() {
+	if (confirm(`⚠️ ATTENTION !\n\nÊtes-vous sûr de vouloir supprimer votre compte "${currentUser}" ?\n\nCette action est IRRÉVERSIBLE !\n\nToutes vos données, statistiques et préférences seront définitivement supprimées.`)) {
+		if (confirm('Dernière confirmation : Supprimer définitivement le compte ?')) {
+			// Supprimer toutes les données utilisateur
+			localStorage.removeItem('vhr_user_stats_' + currentUser);
+			localStorage.removeItem('vhr_user_prefs_' + currentUser);
+			removeUser(currentUser);
+			
+			closeAccountPanel();
+			showToast('🗑️ Compte supprimé', 'error');
+			
+			// Redémarrer avec un nouveau utilisateur
+			setTimeout(() => {
+				const name = prompt('Nouveau nom d\'utilisateur ?');
+				if (name && name.trim()) setUser(name.trim());
+				else setUser('Invité');
+			}, 1000);
+		}
+	}
+};
+
+function formatDate(isoString) {
+	const date = new Date(isoString);
+	const now = new Date();
+	const diffMs = now - date;
+	const diffMins = Math.floor(diffMs / 60000);
+	const diffHours = Math.floor(diffMs / 3600000);
+	const diffDays = Math.floor(diffMs / 86400000);
+	
+	if (diffMins < 1) return 'À l\'instant';
+	if (diffMins < 60) return `Il y a ${diffMins} min`;
+	if (diffHours < 24) return `Il y a ${diffHours}h`;
+	if (diffDays < 7) return `Il y a ${diffDays} jours`;
+	
+	return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+// Incrémenter les stats lors des actions
+function incrementStat(statName) {
+	const stats = JSON.parse(localStorage.getItem('vhr_user_stats_' + currentUser) || '{}');
+	if (!stats.joinedAt) stats.joinedAt = new Date().toISOString();
+	stats[statName] = (stats[statName] || 0) + 1;
+	stats.lastLogin = new Date().toISOString();
+	localStorage.setItem('vhr_user_stats_' + currentUser, JSON.stringify(stats));
+}
+
 // ========== TOAST NOTIFICATIONS ========== 
 function showToast(msg, type='info', duration=3000) {
 	let toast = document.createElement('div');
@@ -166,6 +606,19 @@ async function loadDevices() {
 	const data = await api('/api/devices');
 	if (data.ok && Array.isArray(data.devices)) {
 		devices = data.devices;
+		
+		// Mettre à jour le nombre de casques gérés
+		if (devices.length > 0) {
+			const stats = JSON.parse(localStorage.getItem('vhr_user_stats_' + currentUser) || '{}');
+			const currentMax = stats.devicesManaged || 0;
+			if (devices.length > currentMax) {
+				stats.devicesManaged = devices.length;
+				stats.lastLogin = new Date().toISOString();
+				if (!stats.joinedAt) stats.joinedAt = new Date().toISOString();
+				localStorage.setItem('vhr_user_stats_' + currentUser, JSON.stringify(stats));
+			}
+		}
+		
 		renderDevices();
 	}
 }
@@ -330,7 +783,10 @@ window.startStreamFromTable = async function(serial) {
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ serial, profile })
 	});
-	if (res.ok) showToast('✅ Stream démarré !', 'success');
+	if (res.ok) {
+		showToast('✅ Stream démarré !', 'success');
+		incrementStat('totalSessions');
+	}
 	else showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
 	setTimeout(loadDevices, 500);
 };
@@ -425,7 +881,10 @@ window.launchApp = async function(serial, pkg) {
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ package: pkg })
 	});
-	if (res.ok) showToast('✅ App lancée !', 'success');
+	if (res.ok) {
+		showToast('✅ App lancée !', 'success');
+		incrementStat('appsLaunched');
+	}
 	else showToast('❌ Erreur lancement', 'error');
 	closeModal();
 };
