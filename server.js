@@ -1887,8 +1887,8 @@ io.on('connection', socket => {
   try {
     await verifyStripeKeyAtStartup();
   } catch (e) {
-    if (process.env.NO_ADB === '1') {
-      console.warn('[server] Stripe key validation failed, continuing in NO_ADB=1 (dev) mode. Fix STRIPE_SECRET_KEY for production.');
+    if (process.env.NODE_ENV === 'development' || process.env.NO_ADB === '1') {
+      console.warn('[server] Stripe key validation failed, continuing in development mode. Fix STRIPE_SECRET_KEY for production.');
     } else {
       console.error('[server] Stripe verification failed, aborting startup.');
       process.exit(1);
