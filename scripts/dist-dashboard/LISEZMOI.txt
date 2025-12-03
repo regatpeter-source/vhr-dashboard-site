@@ -1,0 +1,44 @@
+# VHR Dashboard - Gestionnaire de Casques VR
+
+## Installation
+
+1. **Installer Node.js** (si pas déjà installé)
+   - Télécharger sur: https://nodejs.org
+   - Version recommandée: LTS (Long Term Support)
+
+2. **Installer les dépendances**
+   - Double-cliquez sur: `INSTALLER.bat`
+   - Ou en ligne de commande: `npm install`
+
+## Lancement
+
+Double-cliquez sur: **VHR Dashboard.bat**
+
+Le dashboard s'ouvrira automatiquement dans votre navigateur sur:
+http://localhost:3000/vhr-dashboard-app.html
+
+## Connexion
+
+**Utilisateur admin:**
+- Username: `vhr`
+- Password: `0409`
+
+**Utilisateur demo:**
+- Username: `VhrDashboard`
+- Password: `VhrDashboard@2025`
+
+## Configuration
+
+Renommez `.env.example` en `.env` et configurez:
+- PORT (par défaut: 3000)
+- JWT_SECRET
+- Clés Stripe (si nécessaire)
+
+## Support
+
+Pour toute question: [votre email de support]
+
+## Version
+
+Version: 1.0.0
+Date: 2025-12-03
