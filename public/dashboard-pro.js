@@ -1206,6 +1206,15 @@ window.closeUnlockModal = function() {
 };
 
 window.subscribePro = async function() {
+	// Vérifier que l'utilisateur est connecté
+	if (!currentUser || currentUser === 'Invité') {
+		showToast('⚠️ Vous devez créer un compte pour vous abonner', 'error');
+		setTimeout(() => {
+			window.location.href = '/account.html?action=register';
+		}, 2000);
+		return;
+	}
+	
 	showToast('🔄 Création de la session de paiement...', 'info');
 	
 	try {
@@ -1218,6 +1227,11 @@ window.subscribePro = async function() {
 		
 		if (res.ok && res.url) {
 			window.location.href = res.url;
+		} else if (res.error && res.error.includes('authentication')) {
+			showToast('⚠️ Vous devez vous connecter', 'error');
+			setTimeout(() => {
+				window.location.href = '/account.html?action=login';
+			}, 2000);
 		} else {
 			showToast('❌ Erreur: ' + (res.error || 'Session non créée'), 'error');
 		}
@@ -1228,6 +1242,15 @@ window.subscribePro = async function() {
 };
 
 window.purchasePro = async function() {
+	// Vérifier que l'utilisateur est connecté
+	if (!currentUser || currentUser === 'Invité') {
+		showToast('⚠️ Vous devez créer un compte pour acheter la licence', 'error');
+		setTimeout(() => {
+			window.location.href = '/account.html?action=register';
+		}, 2000);
+		return;
+	}
+	
 	showToast('🔄 Création de la session de paiement...', 'info');
 	
 	try {
@@ -1240,6 +1263,11 @@ window.purchasePro = async function() {
 		
 		if (res.ok && res.url) {
 			window.location.href = res.url;
+		} else if (res.error && res.error.includes('authentication')) {
+			showToast('⚠️ Vous devez vous connecter', 'error');
+			setTimeout(() => {
+				window.location.href = '/account.html?action=login';
+			}, 2000);
 		} else {
 			showToast('❌ Erreur: ' + (res.error || 'Session non créée'), 'error');
 		}

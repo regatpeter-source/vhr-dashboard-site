@@ -156,6 +156,59 @@ function addLicense(username, email, purchaseId) {
   return license;
 }
 
+function findActiveLicenseByUsername(username) {
+  if (!username) return null;
+  const licenses = loadLicenses();
+  return licenses.find(l => l.username === username && l.status === 'active');
+}
+
+// Send contact message to admin email
+async function sendContactMessageToAdmin(msg) {
+  const adminEmail = process.env.EMAIL_USER;
+  if (!adminEmail) {
+    console.warn('[email] EMAIL_USER not configured, cannot send contact notification');
+    return false;
+  }
+  
+  const mailOptions = {
+    from: adminEmail,
+    to: adminEmail,
+    replyTo: msg.email, // Reply directly to the sender
+    subject: `📩 [VHR Contact] ${msg.subject}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #0d0f14; color: #ecf0f1; border-radius: 10px;">
+        <h1 style="color: #3498db; text-align: center;">📩 Nouveau Message de Contact</h1>
+        
+        <div style="background: #1a1d24; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <p style="margin: 8px 0;"><strong style="color: #2ecc71;">👤 Nom:</strong> ${msg.name}</p>
+          <p style="margin: 8px 0;"><strong style="color: #2ecc71;">📧 Email:</strong> <a href="mailto:${msg.email}" style="color: #3498db;">${msg.email}</a></p>
+          <p style="margin: 8px 0;"><strong style="color: #2ecc71;">📋 Sujet:</strong> ${msg.subject}</p>
+          <p style="margin: 8px 0;"><strong style="color: #2ecc71;">📅 Date:</strong> ${new Date(msg.createdAt).toLocaleString('fr-FR')}</p>
+        </div>
+        
+        <div style="background: #2c3e50; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <h3 style="color: #e67e22; margin-top: 0;">💬 Message:</h3>
+          <p style="line-height: 1.8; white-space: pre-wrap;">${msg.message}</p>
+        </div>
+        
+        <p style="text-align: center; color: #95a5a6; font-size: 12px; margin-top: 30px;">
+          Ce message provient du formulaire de contact VHR Dashboard.<br>
+          Vous pouvez répondre directement à cet email pour contacter l'expéditeur.
+        </p>
+      </div>
+    `
+  };
+  
+  try {
+    await emailTransporter.sendMail(mailOptions);
+    console.log('[email] Contact message forwarded to admin:', adminEmail);
+    return true;
+  } catch (e) {
+    console.error('[email] Failed to send contact message:', e);
+    return false;
+  }
+}
+
 // Send license email
 async function sendLicenseEmail(email, licenseKey, username) {
   const mailOptions = {
@@ -361,7 +414,9 @@ app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
   
   res.setHeader('Content-Disposition', 'attachment; filename="VHR-Dashboard-Portable.zip"');
   res.setHeader('Content-Type', 'application/zip');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Content-Length', fs.statSync(portableZip).size);
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   return res.sendFile(portableZip);
 });
 
@@ -375,6 +430,9 @@ app.get('/download/dashboard', (req, res) => {
     if (fs.existsSync(demoZip)) {
       res.setHeader('Content-Disposition', 'attachment; filename="vhr-dashboard-demo-final.zip"');
       res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Length', fs.statSync(demoZip).size);
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.setHeader('Access-Control-Allow-Origin', '*');
       return res.sendFile(demoZip);
     }
     return res.status(404).json({ 
@@ -385,7 +443,9 @@ app.get('/download/dashboard', (req, res) => {
   
   res.setHeader('Content-Disposition', 'attachment; filename="VHR-Dashboard-Portable.zip"');
   res.setHeader('Content-Type', 'application/zip');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Content-Length', fs.statSync(portableZip).size);
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   return res.sendFile(portableZip);
 });
 
@@ -1057,58 +1117,103 @@ app.post('/api/subscriptions/cancel', authMiddleware, async (req, res) => {
 app.post('/api/license/check', async (req, res) => {
   try {
     const { licenseKey } = req.body || {};
-    
-    // If license key provided, validate it
-    if (licenseKey) {
-      const isValid = validateLicenseKey(licenseKey);
+    const normalizedKey = typeof licenseKey === 'string' ? licenseKey.trim().toUpperCase() : null;
+
+    // If license key provided, validate it directly
+    if (normalizedKey) {
+      const isValid = validateLicenseKey(normalizedKey);
       if (isValid) {
-        return res.json({ 
-          ok: true, 
-          licensed: true, 
+        return res.json({
+          ok: true,
+          licensed: true,
           type: 'perpetual',
-          message: 'Licence valide - Accès complet' 
+          licenseKey: normalizedKey,
+          message: 'Licence valide - Accès complet'
         });
       }
     }
-    
-    // Check if user has active subscription (requires auth)
-    if (req.cookies && req.cookies.token) {
+
+    // Retrieve auth token from cookie or Authorization header
+    let authToken = null;
+    if (req.cookies && req.cookies.vhr_token) {
+      authToken = req.cookies.vhr_token;
+    } else if (req.cookies && req.cookies.token) {
+      authToken = req.cookies.token;
+    } else if (req.headers && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+      authToken = req.headers.authorization.split(' ')[1];
+    }
+
+    if (authToken) {
       try {
-        const decoded = jwt.verify(req.cookies.token, JWT_SECRET);
+        const decoded = jwt.verify(authToken, JWT_SECRET);
         const user = getUserByUsername(decoded.username);
-        if (user && user.subscriptionStatus === 'active') {
-          return res.json({ 
-            ok: true, 
-            licensed: true, 
-            type: 'subscription',
-            message: 'Abonnement actif - Accès complet' 
-          });
+
+        if (user) {
+          // Admins always have perpetual access
+          if (user.role === 'admin') {
+            let adminLicense = findActiveLicenseByUsername(user.username);
+            if (!adminLicense) {
+              adminLicense = addLicense(user.username, user.email || 'admin@example.local', 'admin_perpetual');
+              console.log(`[license] Auto-issued perpetual license for admin ${user.username}: ${adminLicense.key}`);
+            }
+
+            return res.json({
+              ok: true,
+              licensed: true,
+              type: 'perpetual',
+              admin: true,
+              licenseKey: adminLicense.key,
+              message: 'Compte administrateur - accès complet illimité'
+            });
+          }
+
+          // Perpetual license linked to the user (no key required client side)
+          const userLicense = findActiveLicenseByUsername(user.username);
+          if (userLicense) {
+            return res.json({
+              ok: true,
+              licensed: true,
+              type: 'perpetual',
+              licenseKey: userLicense.key,
+              message: 'Licence perpétuelle détectée - Accès complet'
+            });
+          }
+
+          // Active subscription grants access
+          if (user.subscriptionStatus === 'active') {
+            return res.json({
+              ok: true,
+              licensed: true,
+              type: 'subscription',
+              message: 'Abonnement actif - Accès complet'
+            });
+          }
         }
-      } catch (e) {
-        // Token invalid or expired
+      } catch (tokenError) {
+        console.warn('[license] auth token verification failed:', tokenError && tokenError.message ? tokenError.message : tokenError);
       }
     }
-    
+
     // Check demo status
     const demoStatus = getDemoStatus();
     if (!demoStatus.isExpired) {
-      return res.json({ 
-        ok: true, 
-        licensed: false, 
+      return res.json({
+        ok: true,
+        licensed: false,
         trial: true,
         daysRemaining: demoStatus.daysRemaining,
         expiresAt: demoStatus.expiresAt,
-        message: `Essai gratuit - ${demoStatus.daysRemaining} jour(s) restant(s)` 
+        message: `Essai gratuit - ${demoStatus.daysRemaining} jour(s) restant(s)`
       });
     }
-    
+
     // Demo expired, no license
-    return res.json({ 
-      ok: true, 
-      licensed: false, 
+    return res.json({
+      ok: true,
+      licensed: false,
       trial: false,
       expired: true,
-      message: 'Période d\'essai expirée - Veuillez vous abonner ou acheter une licence' 
+      message: 'Période d\'essai expirée - Veuillez vous abonner ou acheter une licence'
     });
   } catch (e) {
     console.error('[license] check error:', e);
@@ -1441,7 +1546,47 @@ app.get('/api/purchases/options', (req, res) => {
   }
 });
 
-// Create checkout session for one-time purchase
+// Create checkout session for subscription (requires authentication)
+app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) => {
+  try {
+    const { planId } = req.body || {};
+    if (!planId) return res.status(400).json({ ok: false, error: 'planId required' });
+
+    const plan = subscriptionConfig.PLANS[planId];
+    if (!plan) return res.status(400).json({ ok: false, error: 'Plan not found' });
+
+    const user = getUserByUsername(req.user.username);
+    if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          price: plan.stripePriceId,
+          quantity: 1,
+        },
+      ],
+      mode: 'subscription',
+      customer_email: user.email,
+      success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/vhr-dashboard-pro.html?subscription=success`,
+      cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/vhr-dashboard-pro.html?subscription=canceled`,
+      metadata: {
+        userId: user.id || user.username,
+        username: user.username,
+        planId: planId,
+        planName: plan.name
+      }
+    });
+
+    console.log('[subscriptions] checkout session created:', { id: session.id, user: user.username, plan: planId });
+    res.json({ ok: true, sessionId: session.id, url: session.url });
+  } catch (e) {
+    console.error('[subscriptions] create-checkout error:', e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Create checkout session for one-time purchase (requires authentication)
 app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
   try {
     const { purchaseId } = req.body || {};
@@ -1682,7 +1827,7 @@ app.get('/api/admin/stats', authMiddleware, (req, res) => {
 });
 
 // Submit contact form message (public endpoint, no auth required)
-app.post('/api/contact', (req, res) => {
+app.post('/api/contact', async (req, res) => {
   try {
     const { name, email, subject, message } = req.body || {};
     if (!name || !email || !subject || !message) {
@@ -1701,6 +1846,12 @@ app.post('/api/contact', (req, res) => {
     };
     messages.push(msg);
     saveMessages();
+    
+    // Send email notification to admin
+    const emailSent = await sendContactMessageToAdmin(msg);
+    if (emailSent) {
+      console.log('[contact] Message forwarded to admin email');
+    }
     
     res.json({ ok: true, message: 'Message reçu. Nous vous répondrons bientôt.' });
   } catch (e) {
