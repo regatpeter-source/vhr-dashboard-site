@@ -6,6 +6,8 @@ let viewMode = localStorage.getItem('vhr_view_mode') || 'table'; // 'table' ou '
 let currentUser = localStorage.getItem('vhr_user') || '';
 let userList = JSON.parse(localStorage.getItem('vhr_user_list') || '[]');
 let userRoles = JSON.parse(localStorage.getItem('vhr_user_roles') || '{}');
+let licenseKey = localStorage.getItem('vhr_license_key') || '';
+let licenseStatus = { licensed: false, trial: false, expired: false };
 
 // ========== NAVBAR ========== 
 function createNavbar() {
@@ -1085,7 +1087,178 @@ socket.on('stream-event', (evt) => {
 	if (evt.type === 'stop') showToast('⏹️ Stream arrêté', 'info');
 });
 
+// ========== LICENSE CHECK & UNLOCK SYSTEM ========== 
+async function checkLicense() {
+	try {
+		const res = await api('/api/license/check', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ licenseKey })
+		});
+		
+		licenseStatus = res;
+		
+		if (res.expired) {
+			// Trial expired - show unlock modal
+			showUnlockModal(res);
+			return false;
+		}
+		
+		if (res.trial) {
+			// Show trial banner
+			showTrialBanner(res.daysRemaining);
+		}
+		
+		return res.licensed || res.trial;
+	} catch (e) {
+		console.error('[license] check failed:', e);
+		return true; // Allow access on error
+	}
+}
+
+function showTrialBanner(daysRemaining) {
+	let banner = document.getElementById('trialBanner');
+	if (banner) return;
+	
+	banner = document.createElement('div');
+	banner.id = 'trialBanner';
+	banner.style = 'position:fixed;top:56px;left:0;width:100vw;background:linear-gradient(135deg, #f39c12, #e67e22);color:#fff;padding:10px 20px;text-align:center;z-index:1050;font-weight:bold;box-shadow:0 2px 8px #000;';
+	banner.innerHTML = `
+		⏱️ Essai gratuit - <b>${daysRemaining} jour(s)</b> restant(s) 
+		<button onclick="showUnlockModal()" style="margin-left:20px;background:#2ecc71;color:#000;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
+			🚀 Débloquer maintenant
+		</button>
+	`;
+	document.body.appendChild(banner);
+	document.body.style.paddingTop = '106px'; // 56 + 50
+}
+
+window.showUnlockModal = function(status = licenseStatus) {
+	let modal = document.getElementById('unlockModal');
+	if (modal) modal.remove();
+	
+	modal = document.createElement('div');
+	modal.id = 'unlockModal';
+	modal.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.95);z-index:2000;display:flex;align-items:center;justify-content:center;overflow-y:auto;';
+	
+	const expiredMessage = status.expired 
+		? '<h2 style="color:#e74c3c;">⚠️ Période d\'essai expirée</h2><p style="color:#95a5a6;">Pour continuer à utiliser VHR Dashboard, choisissez une option ci-dessous :</p>'
+		: '<h2 style="color:#f39c12;">🚀 Débloquez VHR Dashboard</h2><p style="color:#95a5a6;">Profitez de toutes les fonctionnalités sans limitation !</p>';
+	
+	modal.innerHTML = `
+		<div style="background:linear-gradient(135deg, #1a1d24, #2c3e50);max-width:700px;width:90%;border-radius:16px;padding:40px;color:#fff;box-shadow:0 8px 32px #000;">
+			${expiredMessage}
+			
+			<!-- Option 1: Abonnement mensuel -->
+			<div style="background:#2c3e50;padding:24px;border-radius:12px;margin:20px 0;border:2px solid #3498db;">
+				<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+					<h3 style="color:#3498db;margin:0;">💳 Abonnement Mensuel</h3>
+					<span style="font-size:28px;font-weight:bold;color:#2ecc71;">9,99€<span style="font-size:14px;color:#95a5a6;">/mois</span></span>
+				</div>
+				<ul style="color:#ecf0f1;line-height:1.8;margin:12px 0;">
+					<li>✅ Toutes les fonctionnalités</li>
+					<li>✅ Mises à jour automatiques</li>
+					<li>✅ Support prioritaire</li>
+					<li>✅ Annulation à tout moment</li>
+				</ul>
+				<button onclick="subscribePro()" style="width:100%;background:#3498db;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
+					📱 S'abonner maintenant
+				</button>
+			</div>
+			
+			<!-- Option 2: Achat définitif -->
+			<div style="background:#2c3e50;padding:24px;border-radius:12px;margin:20px 0;border:2px solid #2ecc71;">
+				<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+					<h3 style="color:#2ecc71;margin:0;">🎯 Licence à Vie</h3>
+					<span style="font-size:28px;font-weight:bold;color:#2ecc71;">49,99€<span style="font-size:14px;color:#95a5a6;">/unique</span></span>
+				</div>
+				<ul style="color:#ecf0f1;line-height:1.8;margin:12px 0;">
+					<li>✅ Licence perpétuelle (à vie)</li>
+					<li>✅ Aucun paiement récurrent</li>
+					<li>✅ Clé de licence par email</li>
+					<li>✅ Fonctionne hors ligne</li>
+				</ul>
+				<button onclick="purchasePro()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
+					🎁 Acheter maintenant
+				</button>
+			</div>
+			
+			<!-- Option 3: Activer licence existante -->
+			<div style="background:#34495e;padding:20px;border-radius:12px;margin:20px 0;">
+				<h3 style="color:#9b59b6;margin-bottom:12px;">🔑 Vous avez déjà une licence ?</h3>
+				<input type="text" id="licenseKeyInput" placeholder="VHR-XXXX-XXXX-XXXX-XXXX" 
+					style="width:100%;background:#2c3e50;color:#fff;border:2px solid #9b59b6;padding:12px;border-radius:8px;margin-bottom:12px;font-size:14px;letter-spacing:2px;text-transform:uppercase;" />
+				<button onclick="activateLicense()" style="width:100%;background:#9b59b6;color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;">
+					✅ Activer ma licence
+				</button>
+			</div>
+			
+			${!status.expired ? `<button onclick="closeUnlockModal()" style="width:100%;background:#7f8c8d;color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;margin-top:12px;">❌ Fermer</button>` : ''}
+		</div>
+	`;
+	
+	document.body.appendChild(modal);
+};
+
+window.closeUnlockModal = function() {
+	const modal = document.getElementById('unlockModal');
+	if (modal) modal.remove();
+};
+
+window.subscribePro = async function() {
+	showToast('🔄 Redirection vers le paiement...', 'info');
+	// Redirect to pricing page for subscription
+	window.location.href = '/pricing.html?plan=professional';
+};
+
+window.purchasePro = async function() {
+	showToast('🔄 Redirection vers le paiement...', 'info');
+	// Redirect to pricing page for one-time purchase
+	window.location.href = '/pricing.html?plan=perpetual';
+};
+
+window.activateLicense = async function() {
+	const input = document.getElementById('licenseKeyInput');
+	const key = input.value.trim().toUpperCase();
+	
+	if (!key || !key.startsWith('VHR-')) {
+		showToast('❌ Clé de licence invalide', 'error');
+		return;
+	}
+	
+	try {
+		const res = await api('/api/license/activate', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ licenseKey: key })
+		});
+		
+		if (res.ok) {
+			licenseKey = key;
+			localStorage.setItem('vhr_license_key', key);
+			licenseStatus.licensed = true;
+			licenseStatus.expired = false;
+			
+			showToast('✅ Licence activée avec succès !', 'success');
+			closeUnlockModal();
+			
+			// Remove trial banner if exists
+			const banner = document.getElementById('trialBanner');
+			if (banner) {
+				banner.remove();
+				document.body.style.paddingTop = '56px';
+			}
+		} else {
+			showToast('❌ ' + (res.error || 'Clé invalide'), 'error');
+		}
+	} catch (e) {
+		console.error('[license] activate error:', e);
+		showToast('❌ Erreur lors de l\'activation', 'error');
+	}
+};
+
 // ========== INIT ========== 
 console.log('[Dashboard PRO] Init');
 createNavbar();
+checkLicense();
 loadDevices();

@@ -15,6 +15,10 @@ const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 
 
 const app = express();
@@ -95,6 +99,108 @@ function getDemoRemainingDays(user) {
 
 // Statut global de la démo (pour les téléchargements sans compte)
 const DEMO_STATUS_FILE = path.join(__dirname, 'data', 'demo-status.json');
+const LICENSES_FILE = path.join(__dirname, 'data', 'licenses.json');
+
+// ========== EMAIL CONFIGURATION ==========
+const emailTransporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+  port: process.env.EMAIL_PORT || 587,
+  secure: false,
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  }
+});
+
+// ========== LICENSE SYSTEM ==========
+const LICENSE_SECRET = process.env.LICENSE_SECRET || 'vhr-dashboard-secret-key-2025';
+
+function generateLicenseKey(username) {
+  const timestamp = Date.now();
+  const random = crypto.randomBytes(8).toString('hex');
+  const data = `${username}|${timestamp}|${random}`;
+  const hash = crypto.createHmac('sha256', LICENSE_SECRET)
+    .update(data)
+    .digest('hex')
+    .substring(0, 16);
+  const key = `VHR-${hash.substring(0, 4).toUpperCase()}-${hash.substring(4, 8).toUpperCase()}-${hash.substring(8, 12).toUpperCase()}-${hash.substring(12, 16).toUpperCase()}`;
+  return { key, username, createdAt: new Date().toISOString() };
+}
+
+function validateLicenseKey(key) {
+  if (!key || !key.startsWith('VHR-')) return false;
+  const licenses = loadLicenses();
+  return licenses.some(l => l.key === key && l.status === 'active');
+}
+
+function loadLicenses() {
+  ensureDataDir();
+  if (!fs.existsSync(LICENSES_FILE)) {
+    fs.writeFileSync(LICENSES_FILE, JSON.stringify([]));
+    return [];
+  }
+  return JSON.parse(fs.readFileSync(LICENSES_FILE, 'utf8'));
+}
+
+function saveLicenses(licenses) {
+  ensureDataDir();
+  fs.writeFileSync(LICENSES_FILE, JSON.stringify(licenses, null, 2));
+}
+
+function addLicense(username, email, purchaseId) {
+  const licenses = loadLicenses();
+  const license = generateLicenseKey(username);
+  license.email = email;
+  license.purchaseId = purchaseId;
+  license.status = 'active';
+  licenses.push(license);
+  saveLicenses(licenses);
+  return license;
+}
+
+// Send license email
+async function sendLicenseEmail(email, licenseKey, username) {
+  const mailOptions = {
+    from: process.env.EMAIL_USER || 'noreply@vhr-dashboard.com',
+    to: email,
+    subject: '🎉 Votre licence VHR Dashboard',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #0d0f14; color: #ecf0f1; border-radius: 10px;">
+        <h1 style="color: #2ecc71; text-align: center;">🥽 VHR Dashboard</h1>
+        <h2 style="color: #3498db;">Merci pour votre achat !</h2>
+        <p>Bonjour <strong>${username}</strong>,</p>
+        <p>Votre licence VHR Dashboard a été activée avec succès. Voici votre clé de licence :</p>
+        <div style="background: #1a1d24; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
+          <h2 style="color: #2ecc71; font-size: 24px; letter-spacing: 2px;">${licenseKey}</h2>
+        </div>
+        <h3 style="color: #e67e22;">Comment activer votre licence :</h3>
+        <ol style="line-height: 1.8;">
+          <li>Ouvrez le VHR Dashboard</li>
+          <li>Cliquez sur le bouton <strong>"Activer une licence"</strong></li>
+          <li>Copiez-collez votre clé de licence</li>
+          <li>Profitez de toutes les fonctionnalités sans limitation !</li>
+        </ol>
+        <p style="color: #95a5a6; font-size: 12px; margin-top: 30px; text-align: center;">
+          Cette licence est valide à vie et ne nécessite aucun paiement récurrent.<br>
+          Conservez cette clé en lieu sûr.
+        </p>
+        <p style="text-align: center; margin-top: 20px;">
+          <strong style="color: #2ecc71;">Besoin d'aide ?</strong><br>
+          <a href="mailto:support@vhr-dashboard.com" style="color: #3498db;">support@vhr-dashboard.com</a>
+        </p>
+      </div>
+    `
+  };
+  
+  try {
+    await emailTransporter.sendMail(mailOptions);
+    console.log('[email] License sent to:', email);
+    return true;
+  } catch (e) {
+    console.error('[email] Failed to send license:', e);
+    return false;
+  }
+}
 
 function getDemoStatus() {
   try {
@@ -943,6 +1049,311 @@ app.post('/api/subscriptions/cancel', authMiddleware, async (req, res) => {
     });
   } catch (e) {
     console.error('[subscriptions] cancel error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+// ========== LICENSE VERIFICATION ==========
+
+// Check license or demo status at dashboard startup
+app.post('/api/license/check', async (req, res) => {
+  try {
+    const { licenseKey } = req.body || {};
+    
+    // If license key provided, validate it
+    if (licenseKey) {
+      const isValid = validateLicenseKey(licenseKey);
+      if (isValid) {
+        return res.json({ 
+          ok: true, 
+          licensed: true, 
+          type: 'perpetual',
+          message: 'Licence valide - Accès complet' 
+        });
+      }
+    }
+    
+    // Check if user has active subscription (requires auth)
+    if (req.cookies && req.cookies.token) {
+      try {
+        const decoded = jwt.verify(req.cookies.token, JWT_SECRET);
+        const user = getUserByUsername(decoded.username);
+        if (user && user.subscriptionStatus === 'active') {
+          return res.json({ 
+            ok: true, 
+            licensed: true, 
+            type: 'subscription',
+            message: 'Abonnement actif - Accès complet' 
+          });
+        }
+      } catch (e) {
+        // Token invalid or expired
+      }
+    }
+    
+    // Check demo status
+    const demoStatus = getDemoStatus();
+    if (!demoStatus.isExpired) {
+      return res.json({ 
+        ok: true, 
+        licensed: false, 
+        trial: true,
+        daysRemaining: demoStatus.daysRemaining,
+        expiresAt: demoStatus.expiresAt,
+        message: `Essai gratuit - ${demoStatus.daysRemaining} jour(s) restant(s)` 
+      });
+    }
+    
+    // Demo expired, no license
+    return res.json({ 
+      ok: true, 
+      licensed: false, 
+      trial: false,
+      expired: true,
+      message: 'Période d\'essai expirée - Veuillez vous abonner ou acheter une licence' 
+    });
+  } catch (e) {
+    console.error('[license] check error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+// Activate license key
+app.post('/api/license/activate', async (req, res) => {
+  try {
+    const { licenseKey } = req.body || {};
+    if (!licenseKey) return res.status(400).json({ ok: false, error: 'License key required' });
+    
+    const isValid = validateLicenseKey(licenseKey);
+    if (!isValid) {
+      return res.status(400).json({ ok: false, error: 'Clé de licence invalide' });
+    }
+    
+    res.json({ 
+      ok: true, 
+      message: 'Licence activée avec succès !',
+      licensed: true 
+    });
+  } catch (e) {
+    console.error('[license] activate error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+// Send license email
+async function sendLicenseEmail(email, licenseKey, username) {
+  const mailOptions = {
+    from: process.env.EMAIL_USER || 'noreply@vhr-dashboard.com',
+    to: email,
+    subject: '🎉 Votre licence VHR Dashboard',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #0d0f14; color: #ecf0f1; border-radius: 10px;">
+        <h1 style="color: #2ecc71; text-align: center;">🥽 VHR Dashboard</h1>
+        <h2 style="color: #3498db;">Merci pour votre achat !</h2>
+        <p>Bonjour <strong>${username}</strong>,</p>
+        <p>Votre licence VHR Dashboard a été activée avec succès. Voici votre clé de licence :</p>
+        <div style="background: #1a1d24; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
+          <h2 style="color: #2ecc71; font-size: 24px; letter-spacing: 2px;">${licenseKey}</h2>
+        </div>
+        <h3 style="color: #e67e22;">Comment activer votre licence :</h3>
+        <ol style="line-height: 1.8;">
+          <li>Ouvrez le VHR Dashboard</li>
+          <li>Cliquez sur le bouton <strong>"Activer une licence"</strong></li>
+          <li>Copiez-collez votre clé de licence</li>
+          <li>Profitez de toutes les fonctionnalités sans limitation !</li>
+        </ol>
+        <p style="color: #95a5a6; font-size: 12px; margin-top: 30px; text-align: center;">
+          Cette licence est valide à vie et ne nécessite aucun paiement récurrent.<br>
+          Conservez cette clé en lieu sûr.
+        </p>
+        <p style="text-align: center; margin-top: 20px;">
+          <strong style="color: #2ecc71;">Besoin d'aide ?</strong><br>
+          <a href="mailto:support@vhr-dashboard.com" style="color: #3498db;">support@vhr-dashboard.com</a>
+        </p>
+      </div>
+    `
+  };
+  
+  try {
+    await emailTransporter.sendMail(mailOptions);
+    console.log('[email] License sent to:', email);
+    return true;
+  } catch (e) {
+    console.error('[email] Failed to send license:', e);
+    return false;
+  }
+}
+
+// ========== LICENSE VERIFICATION API ==========
+
+// Check license or demo status at dashboard startup
+app.post('/api/license/check', async (req, res) => {
+  try {
+    const { licenseKey } = req.body || {};
+    
+    // If license key provided, validate it
+    if (licenseKey) {
+      const isValid = validateLicenseKey(licenseKey);
+      if (isValid) {
+        return res.json({ 
+          ok: true, 
+          licensed: true, 
+          type: 'perpetual',
+          message: 'Licence valide - Accès complet' 
+        });
+      }
+    }
+    
+    // Check if user has active subscription (requires auth)
+    if (req.cookies && req.cookies.token) {
+      try {
+        const decoded = jwt.verify(req.cookies.token, JWT_SECRET);
+        const user = getUserByUsername(decoded.username);
+        if (user && user.subscriptionStatus === 'active') {
+          return res.json({ 
+            ok: true, 
+            licensed: true, 
+            type: 'subscription',
+            message: 'Abonnement actif - Accès complet' 
+          });
+        }
+      } catch (e) {
+        // Token invalid or expired
+      }
+    }
+    
+    // Check demo status
+    const demoStatus = getDemoStatus();
+    if (!demoStatus.isExpired) {
+      return res.json({ 
+        ok: true, 
+        licensed: false, 
+        trial: true,
+        daysRemaining: demoStatus.daysRemaining,
+        expiresAt: demoStatus.expiresAt,
+        message: `Essai gratuit - ${demoStatus.daysRemaining} jour(s) restant(s)` 
+      });
+    }
+    
+    // Demo expired, no license
+    return res.json({ 
+      ok: true, 
+      licensed: false, 
+      trial: false,
+      expired: true,
+      message: 'Période d\'essai expirée - Veuillez vous abonner ou acheter une licence' 
+    });
+  } catch (e) {
+    console.error('[license] check error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+// Activate license key
+app.post('/api/license/activate', async (req, res) => {
+  try {
+    const { licenseKey } = req.body || {};
+    if (!licenseKey) return res.status(400).json({ ok: false, error: 'License key required' });
+    
+    const isValid = validateLicenseKey(licenseKey);
+    if (!isValid) {
+      return res.status(400).json({ ok: false, error: 'Clé de licence invalide' });
+    }
+    
+    res.json({ 
+      ok: true, 
+      message: 'Licence activée avec succès !',
+      licensed: true 
+    });
+  } catch (e) {
+    console.error('[license] activate error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+// ========== LICENSE VERIFICATION API ==========
+
+// Check license or demo status at dashboard startup
+app.post('/api/license/check', async (req, res) => {
+  try {
+    const { licenseKey } = req.body || {};
+    
+    // If license key provided, validate it
+    if (licenseKey) {
+      const isValid = validateLicenseKey(licenseKey);
+      if (isValid) {
+        return res.json({ 
+          ok: true, 
+          licensed: true, 
+          type: 'perpetual',
+          message: 'Licence valide - Accès complet' 
+        });
+      }
+    }
+    
+    // Check if user has active subscription (requires auth)
+    if (req.cookies && req.cookies.token) {
+      try {
+        const decoded = jwt.verify(req.cookies.token, JWT_SECRET);
+        const user = getUserByUsername(decoded.username);
+        if (user && user.subscriptionStatus === 'active') {
+          return res.json({ 
+            ok: true, 
+            licensed: true, 
+            type: 'subscription',
+            message: 'Abonnement actif - Accès complet' 
+          });
+        }
+      } catch (e) {
+        // Token invalid or expired
+      }
+    }
+    
+    // Check demo status
+    const demoStatus = getDemoStatus();
+    if (!demoStatus.isExpired) {
+      return res.json({ 
+        ok: true, 
+        licensed: false, 
+        trial: true,
+        daysRemaining: demoStatus.daysRemaining,
+        expiresAt: demoStatus.expiresAt,
+        message: `Essai gratuit - ${demoStatus.daysRemaining} jour(s) restant(s)` 
+      });
+    }
+    
+    // Demo expired, no license
+    return res.json({ 
+      ok: true, 
+      licensed: false, 
+      trial: false,
+      expired: true,
+      message: 'Période d\'essai expirée - Veuillez vous abonner ou acheter une licence' 
+    });
+  } catch (e) {
+    console.error('[license] check error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+// Activate license key
+app.post('/api/license/activate', async (req, res) => {
+  try {
+    const { licenseKey } = req.body || {};
+    if (!licenseKey) return res.status(400).json({ ok: false, error: 'License key required' });
+    
+    const isValid = validateLicenseKey(licenseKey);
+    if (!isValid) {
+      return res.status(400).json({ ok: false, error: 'Clé de licence invalide' });
+    }
+    
+    res.json({ 
+      ok: true, 
+      message: 'Licence activée avec succès !',
+      licensed: true 
+    });
+  } catch (e) {
+    console.error('[license] activate error:', e);
     res.status(500).json({ ok: false, error: 'Server error' });
   }
 });
@@ -2276,16 +2687,28 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
         const purchase = purchaseId ? purchaseConfig.PURCHASE_OPTIONS[purchaseId] : null;
         
         if (purchase && user.email) {
-          const purchaseData = {
-            planName: purchase.name,
-            orderId: obj.id,
-            price: (obj.amount_total / 100).toFixed(2),
-            licenseDuration: purchase.license.duration === 'perpetual' ? 'Perpétuel' : '1 an',
-            updatesUntil: purchase.license.duration === 'perpetual' ? 'À jamais' : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toLocaleDateString()
-          };
+          // Generate and send license key
+          if (purchase.license) {
+            const license = addLicense(user.username, user.email, purchaseId);
+            console.log('[webhook] License generated:', license.key);
+            
+            // Send license via email
+            await sendLicenseEmail(user.email, license.key, user.username);
+            console.log('[webhook] License email sent to:', user.email);
+          }
           
-          const emailResult = await emailService.sendPurchaseSuccessEmail(user, purchaseData);
-          console.log('[webhook] Purchase success email sent:', emailResult);
+          // Send purchase confirmation email (if emailService exists)
+          if (typeof emailService !== 'undefined') {
+            const purchaseData = {
+              planName: purchase.name,
+              orderId: obj.id,
+              price: (obj.amount_total / 100).toFixed(2),
+              licenseDuration: purchase.license?.duration === 'perpetual' ? 'Perpétuel' : '1 an',
+              updatesUntil: purchase.license?.duration === 'perpetual' ? 'À jamais' : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toLocaleDateString()
+            };
+            const emailResult = await emailService.sendPurchaseSuccessEmail(user, purchaseData);
+            console.log('[webhook] Purchase success email sent:', emailResult);
+          }
         }
       } else if (obj.mode === 'subscription') {
         // Subscription - Abonnement mensuel
