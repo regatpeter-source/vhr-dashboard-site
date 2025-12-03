@@ -166,9 +166,16 @@ function findActiveLicenseByUsername(username) {
 async function sendContactMessageToAdmin(msg) {
   const adminEmail = process.env.EMAIL_USER;
   if (!adminEmail) {
-    console.warn('[email] EMAIL_USER not configured, cannot send contact notification');
+    console.error('[email] EMAIL_USER not configured in .env, cannot send contact notification');
     return false;
   }
+  
+  if (!process.env.EMAIL_PASS) {
+    console.error('[email] EMAIL_PASS not configured in .env, cannot send contact notification');
+    return false;
+  }
+  
+  console.log('[email] Sending contact message to:', adminEmail, 'from:', msg.email);
   
   const mailOptions = {
     from: adminEmail,
@@ -912,13 +919,15 @@ app.post('/api/login', async (req, res) => {
   console.log('[api/login] login successful for:', username);
   const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
   // Set cookie for better protection in browsers (httpOnly)
+  // On Render/production, always use secure HTTPS cookies
   const cookieOptions = {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: true,  // Always true for httpOnly cookies to work on HTTPS (Render)
     maxAge: 2 * 60 * 60 * 1000 // 2h
   };
   res.cookie('vhr_token', token, cookieOptions);
+  console.log('[api/login] cookie set with secure=true, maxAge=2h');
   res.json({ ok: true, token, username: user.username, role: user.role, email: user.email || null });
 });
 
@@ -1862,6 +1871,8 @@ app.post('/api/contact', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Tous les champs sont requis' });
     }
     
+    console.log('[contact] New message from:', email, 'subject:', subject);
+    
     // Add to in-memory messages
     const msg = {
       id: messageIdCounter++,
@@ -1874,16 +1885,19 @@ app.post('/api/contact', async (req, res) => {
     };
     messages.push(msg);
     saveMessages();
+    console.log('[contact] Message saved to messages.json');
     
     // Send email notification to admin
     const emailSent = await sendContactMessageToAdmin(msg);
     if (emailSent) {
-      console.log('[contact] Message forwarded to admin email');
+      console.log('[contact] ✓ Email forwarded to admin');
+    } else {
+      console.warn('[contact] ⚠️ Email NOT sent (check EMAIL_USER/EMAIL_PASS in .env)');
     }
     
     res.json({ ok: true, message: 'Message reçu. Nous vous répondrons bientôt.' });
   } catch (e) {
-    console.error('[api] contact:', e);
+    console.error('[api] contact error:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
