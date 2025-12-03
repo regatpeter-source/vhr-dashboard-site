@@ -1,0 +1,261 @@
+/* VHR DASHBOARD PRO - Fond noir style professionnel */
+/* Date: 2025-12-03 */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+  background: #0d0f14;
+  color: #ecf0f1;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Container principal */
+#deviceGrid {
+  animation: fadeIn 0.5s ease-out;
+}
+
+/* Boutons généraux */
+button {
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 13px;
+}
+
+button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(46, 204, 113, 0.3);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Scrollbar personnalisée */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1a1d24;
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2ecc71;
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #27ae60;
+}
+
+/* Tables */
+table {
+  font-size: 14px;
+}
+
+table th {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+table td, table th {
+  transition: background 0.2s ease;
+}
+
+table tbody tr:hover {
+  background: #2c3e50 !important;
+}
+
+/* Select personnalisé */
+select {
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+select:hover {
+  border-color: #27ae60 !important;
+}
+
+select:focus {
+  outline: none;
+  border-color: #2ecc71 !important;
+  box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.2);
+}
+
+/* Cartes */
+.device-card {
+  transition: all 0.3s ease;
+  animation: fadeIn 0.5s ease-out;
+}
+
+.device-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(46, 204, 113, 0.3) !important;
+  border-color: #27ae60 !important;
+}
+
+/* Modal backdrop */
+#modal {
+  backdrop-filter: blur(8px);
+}
+
+/* Toast notifications */
+.toast-notif {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* User menu */
+#userMenu {
+  animation: fadeIn 0.2s ease-out;
+}
+
+#userMenu ul li {
+  transition: all 0.2s ease;
+}
+
+#userMenu ul li:hover {
+  background: #2c3e50 !important;
+  transform: translateX(4px);
+}
+
+/* Badges de statut */
+.badge {
+  display: inline-block;
+  font-size: 0.85em;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-weight: bold;
+  animation: fadeIn 0.5s ease-out;
+}
+
+.badge.device {
+  background: #2ecc71;
+  color: #fff;
+}
+
+.badge.streaming {
+  background: #3498db;
+  color: #fff;
+  animation: pulse 2s infinite;
+}
+
+.badge.offline {
+  background: #e74c3c;
+  color: #fff;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  body {
+    padding-top: 60px !important;
+  }
+  
+  #mainNavbar {
+    height: 60px !important;
+    flex-wrap: wrap;
+  }
+  
+  #mainNavbar > div:first-child {
+    font-size: 18px !important;
+  }
+  
+  #toggleViewBtn {
+    margin-right: 8px !important;
+    padding: 6px 10px !important;
+    font-size: 12px !important;
+  }
+  
+  #navbarUser {
+    font-size: 12px !important;
+  }
+  
+  #navbarUser button {
+    padding: 4px 8px !important;
+    font-size: 11px !important;
+  }
+  
+  table {
+    font-size: 11px;
+  }
+  
+  table th, table td {
+    padding: 8px !important;
+  }
+  
+  button {
+    font-size: 11px !important;
+    padding: 4px 8px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  #deviceGrid {
+    padding: 10px !important;
+    gap: 12px !important;
+  }
+  
+  table th, table td {
+    padding: 6px !important;
+  }
+}
+
+/* Loading spinner */
+.spinner {
+  border: 3px solid #23272f;
+  border-top: 3px solid #2ecc71;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+  margin: 20px auto;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Glow effect pour éléments actifs */
+.glow {
+  box-shadow: 0 0 20px rgba(46, 204, 113, 0.6);
+}
+
+/* No device message */
+.no-device-msg {
+  text-align: center;
+  padding: 60px 20px;
+  color: #95a5a6;
+  font-size: 18px;
+  animation: fadeIn 0.5s ease-out;
+}
+
+.no-device-msg button {
+  margin-top: 20px;
+}
