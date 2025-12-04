@@ -503,6 +503,28 @@ app.get('/download/dashboard', (req, res) => {
   }
 });
 
+// Serve PowerShell launcher script for local dashboard launch
+app.get('/download/launch-script', (req, res) => {
+  const scriptPath = path.join(__dirname, 'scripts', 'launch-dashboard.ps1');
+  
+  try {
+    if (!fs.existsSync(scriptPath)) {
+      return res.status(404).json({ 
+        ok: false, 
+        error: 'Launch script not found' 
+      });
+    }
+    
+    res.setHeader('Content-Type', 'application/x-powershell');
+    res.setHeader('Content-Disposition', 'attachment; filename="launch-dashboard.ps1"');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.sendFile(scriptPath);
+  } catch (e) {
+    console.error('[launch-script] error:', e);
+    return res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
 // Support old links: redirect root developer guide to canonical site-vitrine page
 app.get('/developer-setup.html', (req, res) => {
   res.redirect(302, '/site-vitrine/developer-setup.html');

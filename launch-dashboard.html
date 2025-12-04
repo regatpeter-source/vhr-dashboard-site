@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lancer VHR Dashboard - VHR DASHBOARD</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0d0f14 0%, #1a1d24 100%);
+            color: #ecf0f1;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 600px;
+            width: 100%;
+            background: #1a1d24;
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            border: 2px solid #2c3e50;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        h1 {
+            color: #2ecc71;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #95a5a6;
+            font-size: 1.1em;
+        }
+        
+        .info-box {
+            background: #0d0f14;
+            border-left: 4px solid #3498db;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            color: #ecf0f1;
+        }
+        
+        .info-box strong {
+            color: #2ecc71;
+        }
+        
+        .launch-btn {
+            width: 100%;
+            padding: 18px;
+            background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+            color: #000;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.2em;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 30px 0 20px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(46, 204, 113, 0.3);
+        }
+        
+        .launch-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(46, 204, 113, 0.4);
+        }
+        
+        .launch-btn:active {
+            transform: translateY(0);
+        }
+        
+        .launch-btn.loading {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+        
+        .steps {
+            margin: 30px 0;
+        }
+        
+        .step {
+            display: flex;
+            margin: 15px 0;
+            align-items: flex-start;
+        }
+        
+        .step-number {
+            background: #3498db;
+            color: #000;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            flex-shrink: 0;
+            margin-right: 15px;
+        }
+        
+        .step-content {
+            flex: 1;
+        }
+        
+        .step-content strong {
+            color: #2ecc71;
+            display: block;
+            margin-bottom: 5px;
+        }
+        
+        .step-content p {
+            color: #95a5a6;
+            font-size: 0.95em;
+        }
+        
+        .requirements {
+            background: #2c3e50;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        
+        .requirements h3 {
+            color: #e67e22;
+            margin-bottom: 15px;
+        }
+        
+        .requirements ul {
+            list-style: none;
+            padding-left: 20px;
+        }
+        
+        .requirements li {
+            margin: 8px 0;
+            color: #ecf0f1;
+        }
+        
+        .requirements li:before {
+            content: "✓ ";
+            color: #2ecc71;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+        
+        .success-message {
+            display: none;
+            background: #27ae60;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .success-message.show {
+            display: block;
+        }
+        
+        footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #2c3e50;
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }
+        
+        a {
+            color: #3498db;
+            text-decoration: none;
+        }
+        
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🥽 VHR Dashboard</h1>
+            <p class="subtitle">Lancez le dashboard en local</p>
+        </header>
+        
+        <div class="info-box">
+            <strong>ℹ️ Informations :</strong>
+            <p>Le dashboard VHR fonctionne mieux en local sur votre ordinateur. Cliquez ci-dessous pour télécharger et lancer automatiquement.</p>
+        </div>
+        
+        <button class="launch-btn" id="launchBtn" onclick="launchDashboard()">
+            🚀 Lancer le Dashboard
+        </button>
+        
+        <div class="success-message" id="successMsg">
+            ✓ Dashboard lancé avec succès !
+        </div>
+        
+        <div class="steps">
+            <h3 style="color: #3498db; margin-bottom: 20px;">📋 Étapes du processus :</h3>
+            
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <strong>Téléchargement</strong>
+                    <p>Le fichier ZIP est téléchargé depuis les serveurs VHR</p>
+                </div>
+            </div>
+            
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <strong>Extraction</strong>
+                    <p>Le fichier est extrait dans un dossier temporaire</p>
+                </div>
+            </div>
+            
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <strong>Lancement</strong>
+                    <p>Le dashboard démarre automatiquement dans votre navigateur</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="requirements">
+            <h3>✨ Prérequis :</h3>
+            <ul>
+                <li>Windows 7 ou supérieur</li>
+                <li>PowerShell 5.0+</li>
+                <li>Navigateur web moderne (Chrome, Edge, Firefox)</li>
+                <li>Environ 500 MB d'espace disque</li>
+            </ul>
+        </div>
+        
+        <footer>
+            <p>Pour les problèmes : <a href="/contact.html">Contactez-nous</a> | <a href="/">Retour au site</a></p>
+        </footer>
+    </div>
+    
+    <script>
+        async function launchDashboard() {
+            const btn = document.getElementById('launchBtn');
+            const successMsg = document.getElementById('successMsg');
+            
+            // Désactiver le bouton
+            btn.disabled = true;
+            btn.classList.add('loading');
+            btn.textContent = '⏳ Lancement en cours...';
+            successMsg.classList.remove('show');
+            
+            try {
+                // Appeler l'endpoint du serveur pour télécharger le script
+                const response = await fetch('/download/launch-script');
+                
+                if (!response.ok) {
+                    throw new Error('Erreur lors du téléchargement du script');
+                }
+                
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'launch-dashboard.ps1';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                
+                // Afficher le message de succès
+                successMsg.classList.add('show');
+                btn.textContent = '✓ Script téléchargé !';
+                
+                // Réinitialiser après 3 secondes
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.classList.remove('loading');
+                    btn.textContent = '🚀 Lancer le Dashboard';
+                }, 3000);
+                
+            } catch (error) {
+                console.error('Erreur:', error);
+                btn.textContent = '✗ Erreur - Réessayez';
+                btn.disabled = false;
+                btn.classList.remove('loading');
+                
+                setTimeout(() => {
+                    btn.textContent = '🚀 Lancer le Dashboard';
+                }, 3000);
+            }
+        }
+    </script>
+</body>
+</html>
