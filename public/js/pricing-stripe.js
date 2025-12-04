@@ -1,7 +1,9 @@
 /* Minimal client code to create a Stripe Checkout session via server endpoint /create-checkout-session */
 (function() {
   function onBuyClick(e) {
+    console.log('[pricing-stripe] onBuyClick called, e:', e);
     e.preventDefault();
+    console.log('[pricing-stripe] preventDefault() called');
     const priceId = this.dataset.priceId || this.getAttribute('data-price-id');
     const mode = this.dataset.mode || this.getAttribute('data-mode') || 'payment';
     if (!priceId) return console.warn('[pricing-stripe] priceId not found on element', this);
