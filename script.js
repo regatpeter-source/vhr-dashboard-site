@@ -63,6 +63,11 @@ function downloadDemo() {
 
 // Vérifier l'authentification pour l'abonnement
 function handleSubscriptionClick(event) {
+  // On pricing.html, let pricing-stripe.js handle it
+  if (window.location.pathname === '/pricing.html') {
+    return true;
+  }
+  
   event.preventDefault();
   
   // Vérifier si l'utilisateur a un token (connecté)
