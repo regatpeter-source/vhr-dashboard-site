@@ -85,7 +85,14 @@ function handleSubscriptionClick(event) {
 }
 
 // Initialize subscription button listeners (CSP-compliant)
+// SKIP on pricing.html - let pricing-stripe.js handle it
 document.addEventListener('DOMContentLoaded', function() {
+  // Don't attach listeners on pricing page
+  if (window.location.pathname === '/pricing.html' || window.location.href.includes('/pricing.html')) {
+    console.log('[script.js] Skipping subscription handlers on pricing.html');
+    return;
+  }
+  
   const subBtn = document.getElementById('stripe-sub-btn');
   const oneTimeBtn = document.getElementById('stripe-onetime-btn');
   const demoBtnMain = document.getElementById('demo-download-btn');
