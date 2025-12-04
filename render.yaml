@@ -2,7 +2,7 @@ services:
   - type: web
     name: vhr-dashboard-backend
     env: docker
-    branch: feat/dev-setup-pr
+    branch: main
     plan: starter
     dockerfilePath: ./Dockerfile
     autoDeploy: true
