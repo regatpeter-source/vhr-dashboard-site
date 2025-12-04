@@ -1225,15 +1225,20 @@ window.subscribePro = async function() {
 			body: JSON.stringify({ planId: 'professional' })
 		});
 		
-		if (res.ok && res.url) {
+		console.log('[subscribe] API response:', res);
+		
+		if (res && res.url) {
+			// Session créée avec succès, rediriger vers Stripe Checkout
 			window.location.href = res.url;
-		} else if (res.error && res.error.includes('authentication')) {
-			showToast('⚠️ Vous devez vous connecter', 'error');
-			setTimeout(() => {
-				window.location.href = '/account.html?action=login';
-			}, 2000);
+		} else if (res && res.error) {
+			showToast('❌ Erreur: ' + res.error, 'error');
+			if (res.error.includes('authentication')) {
+				setTimeout(() => {
+					window.location.href = '/account.html?action=login';
+				}, 2000);
+			}
 		} else {
-			showToast('❌ Erreur: ' + (res.error || 'Session non créée'), 'error');
+			showToast('❌ Erreur: Session non créée', 'error');
 		}
 	} catch (e) {
 		console.error('[subscribe] error:', e);
@@ -1261,15 +1266,20 @@ window.purchasePro = async function() {
 			body: JSON.stringify({ purchaseId: 'perpetual_pro' })
 		});
 		
-		if (res.ok && res.url) {
+		console.log('[purchase] API response:', res);
+		
+		if (res && res.url) {
+			// Session créée avec succès, rediriger vers Stripe Checkout
 			window.location.href = res.url;
-		} else if (res.error && res.error.includes('authentication')) {
-			showToast('⚠️ Vous devez vous connecter', 'error');
-			setTimeout(() => {
-				window.location.href = '/account.html?action=login';
-			}, 2000);
+		} else if (res && res.error) {
+			showToast('❌ Erreur: ' + res.error, 'error');
+			if (res.error.includes('authentication')) {
+				setTimeout(() => {
+					window.location.href = '/account.html?action=login';
+				}, 2000);
+			}
 		} else {
-			showToast('❌ Erreur: ' + (res.error || 'Session non créée'), 'error');
+			showToast('❌ Erreur: Session non créée', 'error');
 		}
 	} catch (e) {
 		console.error('[purchase] error:', e);
