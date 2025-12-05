@@ -509,7 +509,7 @@ app.get('/download/dashboard', (req, res) => {
 
 // Serve PowerShell launcher script for local dashboard launch
 app.get('/download/launch-script', (req, res) => {
-  const scriptPath = path.join(__dirname, 'scripts', 'launch-dashboard.ps1');
+  const scriptPath = path.join(__dirname, 'scripts', 'start-local-server.ps1');
   
   try {
     if (!fs.existsSync(scriptPath)) {
@@ -520,7 +520,7 @@ app.get('/download/launch-script', (req, res) => {
     }
     
     res.setHeader('Content-Type', 'application/x-powershell');
-    res.setHeader('Content-Disposition', 'attachment; filename="launch-dashboard.ps1"');
+    res.setHeader('Content-Disposition', 'attachment; filename="start-local-server.ps1"');
     res.setHeader('Cache-Control', 'public, max-age=86400');
     return res.sendFile(scriptPath);
   } catch (e) {
