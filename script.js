@@ -84,30 +84,28 @@ function handleSubscriptionClick(event) {
   return true;
 }
 
-// Initialize subscription button listeners (CSP-compliant)
-// SKIP on pricing.html - let pricing-stripe.js handle it
-document.addEventListener('DOMContentLoaded', function() {
-  // Don't attach listeners on pricing page
-  if (window.location.pathname === '/pricing.html' || window.location.href.includes('/pricing.html')) {
-    console.log('[script.js] Skipping subscription handlers on pricing.html');
-    return;
-  }
-  
-  const subBtn = document.getElementById('stripe-sub-btn');
-  const oneTimeBtn = document.getElementById('stripe-onetime-btn');
-  const demoBtnMain = document.getElementById('demo-download-btn');
-  const demoBtnFooter = document.getElementById('demo-download-footer');
-  
-  if (subBtn) {
-    subBtn.addEventListener('click', handleSubscriptionClick);
-  }
-  if (oneTimeBtn) {
-    oneTimeBtn.addEventListener('click', handleSubscriptionClick);
-  }
-  if (demoBtnMain) {
-    demoBtnMain.addEventListener('click', handleDemoDownload);
-  }
-  if (demoBtnFooter) {
-    demoBtnFooter.addEventListener('click', handleDemoDownload);
-  }
-});
+// Don't execute subscription handlers on pricing.html - let pricing-stripe.js handle it
+if (window.location.pathname === '/pricing.html' || window.location.href.includes('/pricing.html')) {
+  console.log('[script.js] Skipping ALL handlers on pricing.html - pricing-stripe.js will handle payment');
+} else {
+  // Continue with normal handlers on other pages
+  document.addEventListener('DOMContentLoaded', function() {
+    const subBtn = document.getElementById('stripe-sub-btn');
+    const oneTimeBtn = document.getElementById('stripe-onetime-btn');
+    const demoBtnMain = document.getElementById('demo-download-btn');
+    const demoBtnFooter = document.getElementById('demo-download-footer');
+    
+    if (subBtn) {
+      subBtn.addEventListener('click', handleSubscriptionClick);
+    }
+    if (oneTimeBtn) {
+      oneTimeBtn.addEventListener('click', handleSubscriptionClick);
+    }
+    if (demoBtnMain) {
+      demoBtnMain.addEventListener('click', handleDemoDownload);
+    }
+    if (demoBtnFooter) {
+      demoBtnFooter.addEventListener('click', handleDemoDownload);
+    }
+  });
+}
