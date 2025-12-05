@@ -391,6 +391,9 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+// DEPRECATED: These download routes are no longer used - users now launch from /launch-dashboard.html
+// Keeping them for backward compatibility if direct links exist
+/*
 // Fallback: serve the canonical zip path at /downloads/vhr-dashboard-demo.zip (SANS RESTRICTION)
 app.get('/downloads/vhr-dashboard-demo.zip', (req, res) => {
   try {
@@ -444,6 +447,7 @@ app.get('/vhr-dashboard-demo.zip', (req, res) => {
     return res.status(500).send('Server error');
   }
 });
+*/
 
 // Route pour le dashboard portable (VHR-Dashboard-Portable.zip) - SANS RESTRICTION
 app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
