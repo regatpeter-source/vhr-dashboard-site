@@ -364,6 +364,12 @@ app.get('/download/launch-script', (req, res) => {
   }
 });
 
+// Serve launch-dashboard.html for 1-click launcher
+app.get('/launch-dashboard.html', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.sendFile(path.join(__dirname, 'launch-dashboard.html'));
+});
+
 // Support old links: redirect root developer guide to canonical site-vitrine page
 app.get('/developer-setup.html', (req, res) => {
   res.redirect(302, '/site-vitrine/developer-setup.html');
