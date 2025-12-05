@@ -29,10 +29,15 @@ function getCookie(name) {
   return null;
 }
 
-// Open local dashboard in new window
+// Open dashboard launcher - downloads PowerShell script
 function openDashboard(event) {
   event.preventDefault();
-  window.open('http://localhost:3000', '_blank');
+  const link = document.createElement('a');
+  link.href = '/download/launch-script';
+  link.download = 'launch-dashboard.ps1';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 // ========== DOMContentLoaded Handlers ==========

@@ -1,5 +1,5 @@
 // Launch Dashboard Script
-// Opens localhost:3000 in a new window
+// Downloads and executes PowerShell launcher
 
 async function launchDashboard() {
     const btn = document.getElementById('launchBtn');
@@ -8,26 +8,37 @@ async function launchDashboard() {
     // Disable button
     btn.disabled = true;
     btn.classList.add('loading');
-    btn.textContent = '🚀 Ouverture en cours...';
+    btn.textContent = '⏳ Téléchargement...';
     successMsg.classList.remove('show');
     
     try {
-        // Wait a moment before opening for visual feedback
+        // Download the PowerShell script
+        const response = await fetch('/download/launch-script');
+        
+        if (!response.ok) {
+            throw new Error('Erreur lors du téléchargement');
+        }
+        
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'launch-dashboard.ps1';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        // Show success message
+        successMsg.classList.add('show');
+        btn.textContent = '✓ Script téléchargé !';
+        
+        // Reset after 5 seconds
         setTimeout(() => {
-            // Open local dashboard directly
-            window.open('http://localhost:3000', '_blank');
-            
-            // Show success message
-            successMsg.classList.add('show');
-            btn.textContent = '✓ Dashboard ouvert !';
-            
-            // Reset after 3 seconds
-            setTimeout(() => {
-                btn.disabled = false;
-                btn.classList.remove('loading');
-                btn.textContent = '🚀 Lancer le Dashboard';
-            }, 3000);
-        }, 500);
+            btn.disabled = false;
+            btn.classList.remove('loading');
+            btn.textContent = '🚀 Lancer le Dashboard';
+        }, 5000);
         
     } catch (error) {
         console.error('Erreur:', error);
