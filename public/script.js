@@ -30,8 +30,6 @@ function getCookie(name) {
   return null;
 }
 
-// Vérifier l'authentification pour l'abonnement (handled by pricing-stripe.js)
-
 // ========== DOMContentLoaded Handlers ==========
 document.addEventListener('DOMContentLoaded', function() {
   // All Stripe buttons handled by pricing-stripe.js (external script)
