@@ -4,7 +4,7 @@
 
 # Configuration
 $serverPort = 3000
-$dashboardUrl = "http://localhost:$serverPort"
+$dashboardUrl = "http://localhost:$serverPort/vhr-dashboard-app.html"
 $maxWaitSeconds = 30
 
 # Colors for output

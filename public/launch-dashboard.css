@@ -168,6 +168,39 @@ h1 {
     margin-right: 8px;
 }
 
+.authentication-notice {
+    background: #1e3a3a;
+    border-left: 4px solid #e74c3c;
+    padding: 20px;
+    border-radius: 8px;
+    margin: 20px 0;
+}
+
+.authentication-notice h3 {
+    color: #e74c3c;
+    margin-bottom: 15px;
+}
+
+.authentication-notice p {
+    color: #ecf0f1;
+    margin: 10px 0;
+    line-height: 1.6;
+}
+
+.authentication-notice strong {
+    color: #f39c12;
+}
+
+.authentication-notice ul {
+    margin: 15px 0 0 20px;
+    color: #ecf0f1;
+}
+
+.authentication-notice li {
+    margin: 8px 0;
+    line-height: 1.5;
+}
+
 footer {
     text-align: center;
     margin-top: 30px;
