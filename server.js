@@ -50,8 +50,7 @@ app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(cookieParser());
 
-// ========== DEMO/TRIAL MANAGEMENT ==========
-const demoConfig = require('./config/demo.config');
+// ========== CONFIGURATION MANAGEMENT ==========
 const subscriptionConfig = require('./config/subscription.config');
 const purchaseConfig = require('./config/purchase.config');
 const emailService = require('./services/emailService');
@@ -95,8 +94,6 @@ function getDemoRemainingDays(user) {
   return Math.max(0, remainingDays);
 }
 
-// Statut global de la démo (pour les téléchargements sans compte)
-const DEMO_STATUS_FILE = path.join(__dirname, 'data', 'demo-status.json');
 const LICENSES_FILE = path.join(__dirname, 'data', 'licenses.json');
 
 // ========== EMAIL CONFIGURATION ==========
@@ -278,48 +275,6 @@ async function sendLicenseEmail(email, licenseKey, username) {
   } catch (e) {
     console.error('[email] Failed to send license:', e);
     return false;
-  }
-}
-
-function getDemoStatus() {
-  try {
-    ensureDataDir();
-    if (!fs.existsSync(DEMO_STATUS_FILE)) {
-      // Première fois - créer l'enregistrement
-      const status = {
-        firstDownloadedAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + demoConfig.DEMO_DURATION_MS).toISOString()
-      };
-      fs.writeFileSync(DEMO_STATUS_FILE, JSON.stringify(status, null, 2));
-      return { 
-        isExpired: false, 
-        daysRemaining: demoConfig.DEMO_DAYS,
-        expiresAt: status.expiresAt,
-        firstDownload: true
-      };
-    }
-    
-    const status = JSON.parse(fs.readFileSync(DEMO_STATUS_FILE, 'utf8'));
-    const expiresAt = new Date(status.expiresAt);
-    const now = new Date();
-    const isExpired = now > expiresAt;
-    const remainingMs = expiresAt.getTime() - now.getTime();
-    const daysRemaining = Math.max(0, Math.ceil(remainingMs / (24 * 60 * 60 * 1000)));
-    
-    return {
-      isExpired,
-      daysRemaining,
-      expiresAt: status.expiresAt,
-      firstDownload: false
-    };
-  } catch (e) {
-    console.error('[demo] error reading status:', e);
-    return {
-      isExpired: false,
-      daysRemaining: demoConfig.DEMO_DAYS,
-      expiresAt: new Date(Date.now() + demoConfig.DEMO_DURATION_MS).toISOString(),
-      error: true
-    };
   }
 }
 
@@ -897,17 +852,6 @@ app.get('/api/demo/status', authMiddleware, (req, res) => {
     console.error('[demo] status error:', e);
     res.status(500).json({ ok: false, error: 'Server error' });
   }
-});
-
-// Vérifier le statut de la démo globale (sans authentification)
-app.get('/api/demo/check-download', (req, res) => {
-  const status = getDemoStatus();
-  res.json({
-    ok: !status.isExpired,
-    daysRemaining: status.daysRemaining,
-    expiresAt: status.expiresAt,
-    isExpired: status.isExpired
-  });
 });
 
 // ========== SUBSCRIPTION MANAGEMENT ==========
