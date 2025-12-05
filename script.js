@@ -63,11 +63,6 @@ function downloadDemo() {
 
 // Vérifier l'authentification pour l'abonnement
 function handleSubscriptionClick(event) {
-  // On pricing.html, let pricing-stripe.js handle it
-  if (window.location.pathname === '/pricing.html') {
-    return true;
-  }
-  
   event.preventDefault();
   
   // Vérifier si l'utilisateur a un token (connecté)
@@ -84,28 +79,15 @@ function handleSubscriptionClick(event) {
   return true;
 }
 
-// Don't execute subscription handlers on pricing.html - let pricing-stripe.js handle it
-if (window.location.pathname === '/pricing.html' || window.location.href.includes('/pricing.html')) {
-  console.log('[script.js] Skipping ALL handlers on pricing.html - pricing-stripe.js will handle payment');
-} else {
-  // Continue with normal handlers on other pages
-  document.addEventListener('DOMContentLoaded', function() {
-    const subBtn = document.getElementById('stripe-sub-btn');
-    const oneTimeBtn = document.getElementById('stripe-onetime-btn');
-    const demoBtnMain = document.getElementById('demo-download-btn');
-    const demoBtnFooter = document.getElementById('demo-download-footer');
-    
-    if (subBtn) {
-      subBtn.addEventListener('click', handleSubscriptionClick);
-    }
-    if (oneTimeBtn) {
-      oneTimeBtn.addEventListener('click', handleSubscriptionClick);
-    }
-    if (demoBtnMain) {
-      demoBtnMain.addEventListener('click', handleDemoDownload);
-    }
-    if (demoBtnFooter) {
-      demoBtnFooter.addEventListener('click', handleDemoDownload);
-    }
-  });
-}
+// Initialize demo download listeners (but NOT subscription buttons - handled by pricing-stripe.js)
+document.addEventListener('DOMContentLoaded', function() {
+  const demoBtnMain = document.getElementById('demo-download-btn');
+  const demoBtnFooter = document.getElementById('demo-download-footer');
+  
+  if (demoBtnMain) {
+    demoBtnMain.addEventListener('click', handleDemoDownload);
+  }
+  if (demoBtnFooter) {
+    demoBtnFooter.addEventListener('click', handleDemoDownload);
+  }
+});
