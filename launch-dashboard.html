@@ -236,7 +236,7 @@
             <p>Cliquez ci-dessous pour ouvrir votre dashboard en local dans une nouvelle fenêtre.</p>
         </div>
         
-        <button class="launch-btn" id="launchBtn" onclick="launchDashboard()">
+        <button class="launch-btn" id="launchBtn">
             🚀 Lancer le Dashboard
         </button>
         
@@ -259,6 +259,14 @@
     </div>
     
     <script>
+        // Attacher l'event listener quand le DOM est prêt
+        document.addEventListener('DOMContentLoaded', function() {
+            const launchBtn = document.getElementById('launchBtn');
+            if (launchBtn) {
+                launchBtn.addEventListener('click', launchDashboard);
+            }
+        });
+        
         async function launchDashboard() {
             const btn = document.getElementById('launchBtn');
             const successMsg = document.getElementById('successMsg');
