@@ -323,38 +323,7 @@ function getDemoStatus() {
   }
 }
 
-// Serve downloads folder (demo APK/ZIP). Force attachment on ZIP/APK to prompt download.
-app.use('/downloads', express.static(path.join(__dirname, 'downloads'), {
-  setHeaders: (res, filePath) => {
-    try {
-      if (filePath.endsWith('.zip')) {
-        res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
-        res.setHeader('Content-Type', 'application/zip');
-      }
-      if (filePath.endsWith('.apk')) {
-        res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
-        res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-      }
-    } catch (e) { /* ignore */ }
-  }
-}));
-// Convenience route: direct APK download at root path (no subfolder) for ease of use
-// Convenience route: direct APK download at root path (no subfolder) for ease of use
-app.get('/vhr-dashboard-demo.apk', (req, res) => {
-  // Prefer serving from downloads/, fallback to public/ (for static hosting environments)
-  const apkCandidate1 = path.join(__dirname, 'downloads', 'vhr-dashboard-demo.apk');
-  const apkCandidate2 = path.join(__dirname, 'public', 'vhr-dashboard-demo.apk');
-  const apkPath = fs.existsSync(apkCandidate1) ? apkCandidate1 : (fs.existsSync(apkCandidate2) ? apkCandidate2 : null);
-  try {
-    if (!apkPath) return res.status(404).send('APK not found');
-    res.setHeader('Content-Disposition', `attachment; filename="${path.basename(apkPath)}"`);
-    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-    return res.sendFile(apkPath);
-  } catch (e) {
-    console.error('[downloads] /vhr-dashboard-demo.apk error:', e && e.message);
-    return res.status(500).send('Server error');
-  }
-});
+// Downloads system removed - using launcher system instead
 app.use(express.static(path.join(__dirname, 'public')));
 // Serve style and script root assets from public root as well (so /style.css and /script.js work)
 app.use('/style.css', express.static(path.join(__dirname, 'public', 'style.css')));
@@ -391,59 +360,7 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Fallback: serve the canonical zip path at /downloads/vhr-dashboard-demo.zip (SANS RESTRICTION)
-app.get('/downloads/vhr-dashboard-demo.zip', (req, res) => {
-  try {
-    const zip1 = path.join(__dirname, 'downloads', 'vhr-dashboard-demo.zip');
-    const zip2 = path.join(__dirname, 'downloads', 'vhr-dashboard-demo-final.zip');
-    const candidate = fs.existsSync(zip1) ? zip1 : (fs.existsSync(zip2) ? zip2 : null);
-    if (!candidate) return res.status(404).send('ZIP not found');
-    
-    const stats = fs.statSync(candidate);
-    res.setHeader('Content-Type', 'application/x-zip-compressed');
-    res.setHeader('Content-Length', stats.size);
-    res.setHeader('Content-Disposition', `attachment; filename="${path.basename(candidate)}"`);
-    res.setHeader('Cache-Control', 'public, max-age=86400');
-    return res.sendFile(candidate);
-  } catch (e) {
-    console.error('[downloads] error:', e);
-    return res.status(500).send('Server error');
-  }
-});
-
-// Also provide a top-level route for the zip: /vhr-dashboard-demo.zip
-app.get('/vhr-dashboard-demo.zip', (req, res) => {
-  try {
-    // Vérifier ou créer l'enregistrement de téléchargement de démo (7 jours)
-    const demoStatus = getDemoStatus();
-    
-    if (demoStatus.isExpired) {
-      return res.status(403).json({ 
-        ok: false, 
-        error: 'Demo period has expired (7 days)', 
-        daysRemaining: 0,
-        expiresAt: demoStatus.expiresAt
-      });
-    }
-    
-    // Télécharger le ZIP si la période de démo est valide
-    const zip1 = path.join(__dirname, 'downloads', 'vhr-dashboard-demo.zip');
-    const zip2 = path.join(__dirname, 'downloads', 'vhr-dashboard-demo-final.zip');
-    const candidate = fs.existsSync(zip1) ? zip1 : (fs.existsSync(zip2) ? zip2 : null);
-    if (!candidate) return res.status(404).send('ZIP not found');
-    
-    const stats = fs.statSync(candidate);
-    res.setHeader('Content-Type', 'application/x-zip-compressed');
-    res.setHeader('Content-Length', stats.size);
-    res.setHeader('Content-Disposition', `attachment; filename="${path.basename(candidate)}"`);
-    res.setHeader('X-Demo-Days-Remaining', demoStatus.daysRemaining);
-    res.setHeader('Cache-Control', 'public, max-age=86400');
-    return res.sendFile(candidate);
-  } catch (e) {
-    console.error('[vhr-dashboard-demo] error:', e);
-    return res.status(500).send('Server error');
-  }
-});
+// Fallback route removed - using launcher system instead
 
 // Route pour le dashboard portable (VHR-Dashboard-Portable.zip) - SANS RESTRICTION
 app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
@@ -470,42 +387,9 @@ app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
 });
 
 // Route générique pour tous les téléchargements du dashboard (sans restriction de démo)
-app.get('/download/dashboard', (req, res) => {
-  const portableZip = path.join(__dirname, 'VHR-Dashboard-Portable.zip');
-  
-  try {
-    if (!fs.existsSync(portableZip)) {
-      // Fallback vers le ZIP de démo final si le portable n'existe pas
-      const demoZip = path.join(__dirname, 'downloads', 'vhr-dashboard-demo-final.zip');
-      if (fs.existsSync(demoZip)) {
-        const stats = fs.statSync(demoZip);
-        res.setHeader('Content-Type', 'application/x-zip-compressed');
-        res.setHeader('Content-Length', stats.size);
-        res.setHeader('Content-Disposition', 'attachment; filename="vhr-dashboard-demo-final.zip"');
-        res.setHeader('Cache-Control', 'public, max-age=86400');
-        return res.sendFile(demoZip);
-      }
-      return res.status(404).json({ 
-        ok: false, 
-        error: 'Dashboard package not found' 
-      });
-    }
-    
-    const stats = fs.statSync(portableZip);
-    res.setHeader('Content-Type', 'application/x-zip-compressed');
-    res.setHeader('Content-Length', stats.size);
-    res.setHeader('Content-Disposition', 'attachment; filename="VHR-Dashboard-Portable.zip"');
-    res.setHeader('Cache-Control', 'public, max-age=86400');
-    return res.sendFile(portableZip);
-  } catch (e) {
-    console.error('[download] error:', e);
-    return res.status(500).json({ ok: false, error: 'Server error' });
-  }
-});
-
-// Serve PowerShell launcher script for local dashboard launch
+// Launcher script download - kept for local dashboard launch
 app.get('/download/launch-script', (req, res) => {
-  const scriptPath = path.join(__dirname, 'scripts', 'launch-dashboard.ps1');
+  const scriptPath = path.join(__dirname, 'scripts', 'start-local-server.bat');
   
   try {
     if (!fs.existsSync(scriptPath)) {
@@ -515,8 +399,8 @@ app.get('/download/launch-script', (req, res) => {
       });
     }
     
-    res.setHeader('Content-Type', 'application/x-powershell');
-    res.setHeader('Content-Disposition', 'attachment; filename="launch-dashboard.ps1"');
+    res.setHeader('Content-Type', 'application/x-bat');
+    res.setHeader('Content-Disposition', 'attachment; filename="start-local-server.bat"');
     res.setHeader('Cache-Control', 'public, max-age=86400');
     return res.sendFile(scriptPath);
   } catch (e) {
