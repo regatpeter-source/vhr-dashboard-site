@@ -33,33 +33,12 @@ function getCookie(name) {
 // Télécharger la démo - simple et direct
 function handleDemoDownload(event) {
   event.preventDefault();
-  
-  // Vérifier le statut de la démo (7 jours)
-  fetch('/api/demo/check-download')
-    .then(r => r.json())
-    .then(data => {
-      if (data.isExpired) {
-        alert(`❌ Période de démo expirée!\n\nVotre démo gratuite de 7 jours s'est terminée le ${new Date(data.expiresAt).toLocaleDateString()}.\n\nPour continuer à utiliser VHR Dashboard, veuillez:\n• Vous abonner mensuellement\n• Acheter une licence définitive`);
-        return;
-      }
-      
-      console.log(`[demo] ${data.daysRemaining} jours restants avant expiration`);
-      downloadDemo();
-    })
-    .catch(err => {
-      console.error('[demo] error checking status:', err);
-      downloadDemo(); // Télécharger quand même en cas d'erreur
-    });
+  // Redirection vers le launcher local
+  window.location.href = '/launch-dashboard.html';
 }
 
 function downloadDemo() {
-  console.log('[demo] downloading demo zip');
-  const link = document.createElement('a');
-  link.href = '/vhr-dashboard-demo.zip';
-  link.download = 'vhr-dashboard-demo.zip';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  // DEPRECATED: Now handled by handleDemoDownload
 }
 
 // Vérifier l'authentification pour l'abonnement
