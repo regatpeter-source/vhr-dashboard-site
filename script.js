@@ -29,6 +29,12 @@ function getCookie(name) {
   return null;
 }
 
+// Open local dashboard in new window
+function openDashboard(event) {
+  event.preventDefault();
+  window.open('http://localhost:3000', '_blank');
+}
+
 // ========== DOMContentLoaded Handlers ==========
 document.addEventListener('DOMContentLoaded', function() {
   // All Stripe buttons handled by pricing-stripe.js (external script)
