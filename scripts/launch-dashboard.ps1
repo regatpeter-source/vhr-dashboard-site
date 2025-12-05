@@ -1,75 +1,115 @@
 #!/usr/bin/env pwsh
-# VHR Dashboard Local Launcher
-# Télécharge et lance le VHR Dashboard en local
+# VHR Dashboard Quick Launcher
+# Starts local server and opens dashboard - completely automated and silent
 
-$DashboardUrl = "https://vhr-dashboard-site.onrender.com/VHR-Dashboard-Portable.zip"
-$DownloadPath = "$env:TEMP\VHR-Dashboard-Portable.zip"
-$ExtractPath = "$env:TEMP\VHR-Dashboard"
-$DashboardPath = "$ExtractPath\VHR-Dashboard-Portable"
+# Configuration
+$serverPort = 3000
+$dashboardUrl = "http://localhost:$serverPort"
+$maxWaitSeconds = 30
 
-Write-Host "================================" -ForegroundColor Cyan
-Write-Host "🥽 VHR Dashboard Local Launcher" -ForegroundColor Cyan
-Write-Host "================================" -ForegroundColor Cyan
-Write-Host ""
+# Colors for output
+function Write-Status { Write-Host $args -ForegroundColor Cyan }
+function Write-Success { Write-Host $args -ForegroundColor Green }
+function Write-Error-Custom { Write-Host $args -ForegroundColor Red }
 
-# Étape 1 : Télécharger
-Write-Host "[1/4] 📥 Téléchargement du dashboard..." -ForegroundColor Yellow
-try {
-    $ProgressPreference = 'SilentlyContinue'
-    Invoke-WebRequest -Uri $DashboardUrl -OutFile $DownloadPath -UseBasicParsing
-    Write-Host "✓ Téléchargement terminé" -ForegroundColor Green
-} catch {
-    Write-Host "✗ Erreur de téléchargement: $_" -ForegroundColor Red
+Write-Status "🚀 Lancement du VHR Dashboard..."
+
+# Check if Node.js is installed
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    Write-Error-Custom "❌ Node.js n'est pas installé"
+    Write-Host "Téléchargez Node.js depuis: https://nodejs.org" -ForegroundColor Yellow
+    Start-Sleep -Seconds 3
     exit 1
 }
 
-# Étape 2 : Extraire
-Write-Host "[2/4] 📦 Extraction du fichier..." -ForegroundColor Yellow
-if (Test-Path $ExtractPath) {
-    Remove-Item -Path $ExtractPath -Recurse -Force
-}
-try {
-    Expand-Archive -Path $DownloadPath -DestinationPath $ExtractPath
-    Write-Host "✓ Extraction terminée" -ForegroundColor Green
-} catch {
-    Write-Host "✗ Erreur d'extraction: $_" -ForegroundColor Red
-    exit 1
-}
+Write-Success "✓ Node.js détecté"
 
-# Étape 3 : Chercher le dossier du dashboard
-Write-Host "[3/4] 🔍 Recherche du dashboard..." -ForegroundColor Yellow
-if (!(Test-Path $DashboardPath)) {
-    $SubFolders = Get-ChildItem -Path $ExtractPath -Directory
-    if ($SubFolders.Count -gt 0) {
-        $DashboardPath = $SubFolders[0].FullName
-    } else {
-        Write-Host "✗ Dossier du dashboard non trouvé" -ForegroundColor Red
-        exit 1
+# Get the project directory (parent of scripts folder)
+$projectDir = Split-Path -Parent $PSScriptRoot
+
+# Check if already running on port
+try {
+    $testConnection = Test-NetConnection -ComputerName localhost -Port $serverPort -ErrorAction SilentlyContinue
+    if ($testConnection.TcpTestSucceeded) {
+        Write-Status "✓ Serveur déjà actif sur le port $serverPort"
+        # Open dashboard directly
+        Start-Sleep -Milliseconds 500
+        Start-Process $dashboardUrl
+        exit 0
     }
-}
-Write-Host "✓ Dashboard trouvé: $DashboardPath" -ForegroundColor Green
+} catch {}
 
-# Étape 4 : Lancer
-Write-Host "[4/4] 🚀 Lancement du dashboard..." -ForegroundColor Yellow
+# Install dependencies if node_modules doesn't exist
+if (-not (Test-Path "$projectDir\node_modules")) {
+    Write-Status "📦 Installation des dépendances..."
+    Push-Location $projectDir
+    npm install --silent 2>$null | Out-Null
+    Pop-Location
+    Write-Success "✓ Dépendances installées"
+}
+
+# Start the server in the background (hidden window)
+Write-Status "🔧 Démarrage du serveur..."
+
+$processInfo = New-Object System.Diagnostics.ProcessStartInfo
+$processInfo.FileName = "node"
+$processInfo.Arguments = "server.js"
+$processInfo.WorkingDirectory = $projectDir
+$processInfo.UseShellExecute = $false
+$processInfo.RedirectStandardOutput = $true
+$processInfo.RedirectStandardError = $true
+$processInfo.CreateNoWindow = $true
+
+$serverProcess = New-Object System.Diagnostics.Process
+$serverProcess.StartInfo = $processInfo
+
 try {
-    if (Test-Path "$DashboardPath\index.html") {
-        Start-Process "$DashboardPath\index.html"
-        Write-Host "✓ Dashboard lancé avec succès!" -ForegroundColor Green
-    } elseif (Test-Path "$DashboardPath\VHR-Dashboard.exe") {
-        Start-Process "$DashboardPath\VHR-Dashboard.exe"
-        Write-Host "✓ Dashboard lancé avec succès!" -ForegroundColor Green
-    } else {
-        Write-Host "✗ Impossible de trouver le fichier à lancer" -ForegroundColor Red
-        Get-ChildItem -Path $DashboardPath -Recurse | Select-Object -First 10
-        exit 1
-    }
+    $serverProcess.Start() | Out-Null
+    Write-Success "✓ Serveur lancé (PID: $($serverProcess.Id))"
 } catch {
-    Write-Host "✗ Erreur au lancement: $_" -ForegroundColor Red
+    Write-Error-Custom "❌ Impossible de lancer le serveur"
     exit 1
 }
 
+# Wait for server to be ready (max 30 seconds)
+Write-Status "⏳ Attente du serveur..."
+$startTime = Get-Date
+$serverReady = $false
+
+while ((Get-Date) - $startTime -lt (New-TimeSpan -Seconds $maxWaitSeconds)) {
+    try {
+        $response = Invoke-WebRequest -Uri "$dashboardUrl/ping" -TimeoutSec 2 -ErrorAction SilentlyContinue
+        if ($response.StatusCode -eq 200) {
+            $serverReady = $true
+            break
+        }
+    } catch {}
+    
+    Start-Sleep -Milliseconds 500
+}
+
+if (-not $serverReady) {
+    Write-Error-Custom "❌ Le serveur n'a pas répondu à temps"
+    $serverProcess.Kill()
+    exit 1
+}
+
+Write-Success "✓ Serveur prêt!"
+
+# Open dashboard in browser (only one window)
+Write-Status "📱 Ouverture du dashboard..."
+Start-Sleep -Milliseconds 200
+Start-Process $dashboardUrl
+
+Write-Success "✓ Dashboard lancé avec succès!"
 Write-Host ""
-Write-Host "================================" -ForegroundColor Cyan
-Write-Host "Nettoyage du fichier ZIP..." -ForegroundColor Gray
-Remove-Item -Path $DownloadPath -Force -ErrorAction SilentlyContinue
-Write-Host "✓ Terminé!" -ForegroundColor Green
+Write-Host "Le serveur continue de fonctionner en arrière-plan." -ForegroundColor Gray
+Write-Host "Fermez cette fenêtre quand vous avez fini." -ForegroundColor Gray
+
+# Wait for user to close the window or server crashes
+$serverProcess.WaitForExit()
+
+# Clean up
+if (-not $serverProcess.HasExited) {
+    $serverProcess.Kill()
+}
