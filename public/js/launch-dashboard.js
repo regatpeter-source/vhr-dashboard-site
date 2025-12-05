@@ -50,3 +50,11 @@ async function launchDashboard() {
         }, 3000);
     }
 }
+
+// Attach event listener when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    const launchBtn = document.getElementById('launchBtn');
+    if (launchBtn) {
+        launchBtn.addEventListener('click', launchDashboard);
+    }
+});
