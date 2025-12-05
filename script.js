@@ -29,33 +29,10 @@ function getCookie(name) {
   return null;
 }
 
-// Vérifier l'authentification pour l'abonnement
-function handleSubscriptionClick(event) {
-  event.preventDefault();
-  
-  // Vérifier si l'utilisateur a un token (connecté)
-  const token = localStorage.getItem('vhr_token') || getCookie('vhr_token');
-  
-  if (!token) {
-    // Utilisateur non authentifié - rediriger vers la page de compte
-    window.location.href = '/account.html?action=subscription_required';
-    return;
-  }
-  
-  // Utilisateur authentifié - continuer avec le paiement
-  // Laisser le gestionnaire Stripe par défaut prendre le relais
-  return true;
-}
+// Vérifier l'authentification pour l'abonnement (handled by pricing-stripe.js)
 
-// Initialize subscription button listeners (CSP-compliant)
+// ========== DOMContentLoaded Handlers ==========
 document.addEventListener('DOMContentLoaded', function() {
-  const subBtn = document.getElementById('stripe-sub-btn');
-  const oneTimeBtn = document.getElementById('stripe-onetime-btn');
-  
-  if (subBtn) {
-    subBtn.addEventListener('click', handleSubscriptionClick);
-  }
-  if (oneTimeBtn) {
-    oneTimeBtn.addEventListener('click', handleSubscriptionClick);
-  }
+  // All Stripe buttons handled by pricing-stripe.js (external script)
+  // No local listeners needed to avoid conflicts
 });
