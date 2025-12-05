@@ -199,7 +199,7 @@
         
         <div class="info-box">
             <strong>ℹ️ VHR Dashboard</strong>
-            <p>Votre dashboard démarre maintenant en local sur votre ordinateur.</p>
+            <p>Cliquez ci-dessous pour ouvrir votre dashboard en local dans une nouvelle fenêtre.</p>
         </div>
         
         <button class="launch-btn" id="launchBtn" onclick="launchDashboard()">
@@ -207,7 +207,7 @@
         </button>
         
         <div class="success-message" id="successMsg">
-            ✓ Dashboard lancé avec succès !
+            ✓ Dashboard ouvert dans une nouvelle fenêtre !
         </div>
         
         <div class="requirements">
@@ -232,37 +232,26 @@
             // Désactiver le bouton
             btn.disabled = true;
             btn.classList.add('loading');
-            btn.textContent = '⏳ Lancement en cours...';
+            btn.textContent = '🚀 Ouverture en cours...';
             successMsg.classList.remove('show');
             
             try {
-                // Appeler l'endpoint du serveur pour télécharger le script
-                const response = await fetch('/download/launch-script');
-                
-                if (!response.ok) {
-                    throw new Error('Erreur lors du téléchargement du script');
-                }
-                
-                const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'launch-dashboard.ps1';
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-                
-                // Afficher le message de succès
-                successMsg.classList.add('show');
-                btn.textContent = '✓ Script téléchargé !';
-                
-                // Réinitialiser après 3 secondes
+                // Ouverture directe du dashboard local
+                // Attendre 1 seconde avant d'ouvrir pour laisser le feedback visuel
                 setTimeout(() => {
-                    btn.disabled = false;
-                    btn.classList.remove('loading');
-                    btn.textContent = '🚀 Lancer le Dashboard';
-                }, 3000);
+                    window.open('http://localhost:3000', '_blank');
+                    
+                    // Afficher le message de succès
+                    successMsg.classList.add('show');
+                    btn.textContent = '✓ Dashboard ouvert !';
+                    
+                    // Réinitialiser après 3 secondes
+                    setTimeout(() => {
+                        btn.disabled = false;
+                        btn.classList.remove('loading');
+                        btn.textContent = '🚀 Lancer le Dashboard';
+                    }, 3000);
+                }, 500);
                 
             } catch (error) {
                 console.error('Erreur:', error);
