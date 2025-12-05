@@ -59,19 +59,11 @@ function handleSubscriptionClick(event) {
   return true;
 }
 
-// Initialize subscription button listeners (CSP-compliant)
+// Initialize demo button listeners only (subscription buttons handled by pricing-stripe.js)
 document.addEventListener('DOMContentLoaded', function() {
-  const subBtn = document.getElementById('stripe-sub-btn');
-  const oneTimeBtn = document.getElementById('stripe-onetime-btn');
   const demoBtnMain = document.getElementById('demo-download-btn');
   const demoBtnFooter = document.getElementById('demo-download-footer');
   
-  if (subBtn) {
-    subBtn.addEventListener('click', handleSubscriptionClick);
-  }
-  if (oneTimeBtn) {
-    oneTimeBtn.addEventListener('click', handleSubscriptionClick);
-  }
   if (demoBtnMain) {
     demoBtnMain.addEventListener('click', handleDemoDownload);
   }
