@@ -344,7 +344,7 @@ app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
 // Route générique pour tous les téléchargements du dashboard (sans restriction de démo)
 // Launcher script download - kept for local dashboard launch
 app.get('/download/launch-script', (req, res) => {
-  const scriptPath = path.join(__dirname, 'scripts', 'start-local-server.bat');
+  const scriptPath = path.join(__dirname, 'scripts', 'launch-dashboard.ps1');
   
   try {
     if (!fs.existsSync(scriptPath)) {
@@ -354,8 +354,8 @@ app.get('/download/launch-script', (req, res) => {
       });
     }
     
-    res.setHeader('Content-Type', 'application/x-bat');
-    res.setHeader('Content-Disposition', 'attachment; filename="start-local-server.bat"');
+    res.setHeader('Content-Type', 'application/x-powershell');
+    res.setHeader('Content-Disposition', 'attachment; filename="launch-dashboard.ps1"');
     res.setHeader('Cache-Control', 'public, max-age=86400');
     return res.sendFile(scriptPath);
   } catch (e) {
