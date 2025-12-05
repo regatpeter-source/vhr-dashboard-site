@@ -107,10 +107,11 @@ module.exports = {
   // Configuration des emails
   EMAIL: {
     FROM: process.env.EMAIL_FROM || 'noreply@vhr-dashboard.com',
-    SMTP_HOST: process.env.SMTP_HOST || 'smtp.gmail.com',
-    SMTP_PORT: process.env.SMTP_PORT || 587,
-    SMTP_USER: process.env.SMTP_USER || '',
-    SMTP_PASS: process.env.SMTP_PASS || '',
+    // Support pour Brevo (Sendinblue) et autres providers SMTP
+    SMTP_HOST: process.env.BREVO_SMTP_HOST || process.env.SMTP_HOST || 'smtp-relay.brevo.com',
+    SMTP_PORT: process.env.BREVO_SMTP_PORT || process.env.SMTP_PORT || 587,
+    SMTP_USER: process.env.BREVO_SMTP_USER || process.env.SMTP_USER || '',
+    SMTP_PASS: process.env.BREVO_SMTP_PASS || process.env.SMTP_PASS || '',
     
     // Activer/désactiver l'envoi d'emails
     ENABLED: process.env.EMAIL_ENABLED === 'true' || false,
