@@ -43,22 +43,10 @@ function handleDemoDownload(event) {
       }
       
       console.log(`[demo] ${data.daysRemaining} jours restants avant expiration`);
-      downloadDemo();
     })
     .catch(err => {
       console.error('[demo] error checking status:', err);
-      downloadDemo(); // Télécharger quand même en cas d'erreur
     });
-}
-
-function downloadDemo() {
-  console.log('[demo] downloading demo zip');
-  const link = document.createElement('a');
-  link.href = '/vhr-dashboard-demo.zip';
-  link.download = 'vhr-dashboard-demo.zip';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
 }
 
 // Vérifier l'authentification pour l'abonnement
@@ -83,19 +71,11 @@ function handleSubscriptionClick(event) {
 document.addEventListener('DOMContentLoaded', function() {
   const subBtn = document.getElementById('stripe-sub-btn');
   const oneTimeBtn = document.getElementById('stripe-onetime-btn');
-  const demoBtnMain = document.getElementById('demo-download-btn');
-  const demoBtnFooter = document.getElementById('demo-download-footer');
   
   if (subBtn) {
     subBtn.addEventListener('click', handleSubscriptionClick);
   }
   if (oneTimeBtn) {
     oneTimeBtn.addEventListener('click', handleSubscriptionClick);
-  }
-  if (demoBtnMain) {
-    demoBtnMain.addEventListener('click', handleDemoDownload);
-  }
-  if (demoBtnFooter) {
-    demoBtnFooter.addEventListener('click', handleDemoDownload);
   }
 });
