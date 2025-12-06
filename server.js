@@ -409,8 +409,6 @@ app.get('/developer-setup.html', (req, res) => {
 
 // Optional catch-all for known client-side routes or health probes that may access non-existent paths
 app.get('/favicon.ico', (req, res) => res.sendFile(path.join(__dirname, 'site-vitrine', 'favicon.ico')));
-// Simple ping route for health checks
-app.get('/ping', (req, res) => res.json({ ok: true, message: 'pong' }));
 
 // Ensure HTML responses have charset set to UTF-8 so browsers render accents correctly
 app.use((req, res, next) => {
