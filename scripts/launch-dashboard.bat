@@ -1,8 +1,8 @@
 @echo off
 REM VHR Dashboard Launcher Shortcut
 REM This batch file launches the PowerShell launcher script
+REM Execution policy is bypassed for this session only (no admin rights needed)
 
-REM Get the directory where this script is located
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
@@ -15,7 +15,6 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Launch the PowerShell script
 echo.
 echo ========================================
 echo VHR Dashboard Launcher
@@ -24,14 +23,9 @@ echo.
 echo Starting the PowerShell launcher...
 echo.
 
-REM Launch PowerShell with the script
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launch-dashboard.ps1"
-
-REM If PowerShell execution failed, try with RemoteSigned policy
-if errorlevel 1 (
-    echo.
-    echo Attempting with RemoteSigned policy...
-    powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0launch-dashboard.ps1"
-)
+REM Launch PowerShell with execution policy bypassed for this session
+REM Using -Command with & operator (call operator) and iex (Invoke-Expression)
+REM This is the most compatible way to bypass execution policy without admin rights
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& { . '%~dp0launch-dashboard.ps1' }"
 
 pause
