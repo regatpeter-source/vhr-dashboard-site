@@ -30,12 +30,12 @@ function getCookie(name) {
   return null;
 }
 
-// Open dashboard launcher - downloads PowerShell script
+// Open dashboard launcher - downloads batch wrapper script
 function openDashboard(event) {
   event.preventDefault();
   const link = document.createElement('a');
   link.href = '/download/launch-script';
-  link.download = 'launch-dashboard.ps1';
+  link.download = 'launch-dashboard.bat';
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
