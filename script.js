@@ -42,6 +42,12 @@ function openDashboard(event) {
 
 // ========== DOMContentLoaded Handlers ==========
 document.addEventListener('DOMContentLoaded', function() {
+  // Launch Dashboard button - download PowerShell script
+  const launchBtn = document.getElementById('launchDashboardBtn');
+  if (launchBtn) {
+    launchBtn.addEventListener('click', openDashboard);
+  }
+  
   // All Stripe buttons handled by pricing-stripe.js (external script)
   // No local listeners needed to avoid conflicts
 });
