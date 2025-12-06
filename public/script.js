@@ -30,44 +30,20 @@ function getCookie(name) {
   return null;
 }
 
-// Télécharger la démo - simple et direct
-function handleDemoDownload(event) {
+// Open dashboard launcher - redirect to launcher page
+function openDashboard(event) {
   event.preventDefault();
-  // Redirection vers le launcher local
   window.location.href = '/launch-dashboard.html';
 }
 
-function downloadDemo() {
-  // DEPRECATED: Now handled by handleDemoDownload
-}
-
-// Vérifier l'authentification pour l'abonnement
-function handleSubscriptionClick(event) {
-  event.preventDefault();
-  
-  // Vérifier si l'utilisateur a un token (connecté)
-  const token = localStorage.getItem('vhr_token') || getCookie('vhr_token');
-  
-  if (!token) {
-    // Utilisateur non authentifié - rediriger vers la page de compte
-    window.location.href = '/account.html?action=subscription_required';
-    return;
-  }
-  
-  // Utilisateur authentifié - continuer avec le paiement
-  // Laisser le gestionnaire Stripe par défaut prendre le relais
-  return true;
-}
-
-// Initialize demo button listeners only (subscription buttons handled by pricing-stripe.js)
+// ========== DOMContentLoaded Handlers ==========
 document.addEventListener('DOMContentLoaded', function() {
-  const demoBtnMain = document.getElementById('demo-download-btn');
-  const demoBtnFooter = document.getElementById('demo-download-footer');
+  // Launch Dashboard button - download PowerShell script
+  const launchBtn = document.getElementById('launchDashboardBtn');
+  if (launchBtn) {
+    launchBtn.addEventListener('click', openDashboard);
+  }
   
-  if (demoBtnMain) {
-    demoBtnMain.addEventListener('click', handleDemoDownload);
-  }
-  if (demoBtnFooter) {
-    demoBtnFooter.addEventListener('click', handleDemoDownload);
-  }
+  // All Stripe buttons handled by pricing-stripe.js (external script)
+  // No local listeners needed to avoid conflicts
 });
