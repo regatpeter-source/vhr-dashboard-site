@@ -23,7 +23,7 @@ async function launchDashboard() {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'launch-dashboard.ps1';
+        a.download = 'launch-dashboard.bat';
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
@@ -31,7 +31,7 @@ async function launchDashboard() {
         
         // Show success message
         successMsg.classList.add('show');
-        btn.textContent = '✓ Script téléchargé !';
+        btn.textContent = '✓ Fichier téléchargé !';
         
         // Reset after 5 seconds
         setTimeout(() => {
