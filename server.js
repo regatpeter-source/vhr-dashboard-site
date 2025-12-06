@@ -373,7 +373,20 @@ app.get('/launch-dashboard.html', (req, res) => {
 // Serve vhr-dashboard-app.html (main dashboard with auth)
 app.get('/vhr-dashboard-app.html', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.sendFile(path.join(__dirname, 'public', 'vhr-dashboard-app.html'));
+  const filePath = path.join(__dirname, 'public', 'vhr-dashboard-app.html');
+  console.log('[route] /vhr-dashboard-app.html requested, sending file:', filePath);
+  res.sendFile(filePath, (err) => {
+    if (err) {
+      console.error('[route] /vhr-dashboard-app.html sendFile error:', err);
+      res.status(404).json({ error: 'File not found', path: filePath });
+    }
+  });
+});
+
+// Test route to verify HTML serving works
+app.get('/test-dashboard', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send('<html><body><h1>Test Dashboard Route Works!</h1></body></html>');
 });
 
 // Support old links: redirect root developer guide to canonical site-vitrine page
