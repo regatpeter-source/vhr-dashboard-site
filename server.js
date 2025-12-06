@@ -278,6 +278,42 @@ async function sendLicenseEmail(email, licenseKey, username) {
   }
 }
 
+// ========== EXPLICIT ROUTES (must come BEFORE express.static middleware) ==========
+
+// Serve launch-dashboard.html for 1-click launcher
+app.get('/launch-dashboard.html', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.sendFile(path.join(__dirname, 'launch-dashboard.html'));
+});
+
+// Serve vhr-dashboard-app.html (main dashboard with auth) - BEFORE express.static so it doesn't get caught
+app.get('/vhr-dashboard-app.html', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  const filePath = path.join(__dirname, 'public', 'vhr-dashboard-app.html');
+  console.log('[route] /vhr-dashboard-app.html requested, sending file:', filePath);
+  
+  // Check if file exists
+  if (!fs.existsSync(filePath)) {
+    console.error('[route] /vhr-dashboard-app.html NOT FOUND at:', filePath);
+    return res.status(404).json({ error: 'File not found', path: filePath });
+  }
+  
+  console.log('[route] /vhr-dashboard-app.html file exists, sending...');
+  res.sendFile(filePath, (err) => {
+    if (err) {
+      console.error('[route] /vhr-dashboard-app.html sendFile error:', err);
+    }
+  });
+});
+
+// Test route to verify HTML serving works
+app.get('/test-dashboard', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send('<html><body><h1>Test Dashboard Route Works!</h1></body></html>');
+});
+
+// ========== STATIC MIDDLEWARE (serves all public files) ==========
+
 // Downloads system removed - using launcher system instead
 app.use(express.static(path.join(__dirname, 'public')));
 // Serve style and script root assets from public root as well (so /style.css and /script.js work)
@@ -362,31 +398,6 @@ app.get('/download/launch-script', (req, res) => {
     console.error('[launch-script] error:', e);
     return res.status(500).json({ ok: false, error: 'Server error' });
   }
-});
-
-// Serve launch-dashboard.html for 1-click launcher
-app.get('/launch-dashboard.html', (req, res) => {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.sendFile(path.join(__dirname, 'launch-dashboard.html'));
-});
-
-// Serve vhr-dashboard-app.html (main dashboard with auth)
-app.get('/vhr-dashboard-app.html', (req, res) => {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  const filePath = path.join(__dirname, 'public', 'vhr-dashboard-app.html');
-  console.log('[route] /vhr-dashboard-app.html requested, sending file:', filePath);
-  res.sendFile(filePath, (err) => {
-    if (err) {
-      console.error('[route] /vhr-dashboard-app.html sendFile error:', err);
-      res.status(404).json({ error: 'File not found', path: filePath });
-    }
-  });
-});
-
-// Test route to verify HTML serving works
-app.get('/test-dashboard', (req, res) => {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send('<html><body><h1>Test Dashboard Route Works!</h1></body></html>');
 });
 
 // Support old links: redirect root developer guide to canonical site-vitrine page
