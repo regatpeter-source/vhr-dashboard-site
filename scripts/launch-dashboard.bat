@@ -25,13 +25,13 @@ echo Starting the PowerShell launcher...
 echo.
 
 REM Launch PowerShell with the script
-powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\launch-dashboard.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launch-dashboard.ps1"
 
 REM If PowerShell execution failed, try with RemoteSigned policy
 if errorlevel 1 (
     echo.
     echo Attempting with RemoteSigned policy...
-    powershell -NoProfile -ExecutionPolicy RemoteSigned -File ".\scripts\launch-dashboard.ps1"
+    powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0launch-dashboard.ps1"
 )
 
 pause
