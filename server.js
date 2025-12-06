@@ -379,6 +379,7 @@ app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
 
 // Route générique pour tous les téléchargements du dashboard (sans restriction de démo)
 // Launcher script download - kept for local dashboard launch
+// Force redeploy: serve batch wrapper file for auto-execution on Windows
 app.get('/download/launch-script', (req, res) => {
   // Serve the .bat wrapper instead of .ps1 so it auto-executes on Windows
   const scriptPath = path.join(__dirname, 'scripts', 'launch-dashboard.bat');
