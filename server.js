@@ -370,6 +370,12 @@ app.get('/launch-dashboard.html', (req, res) => {
   res.sendFile(path.join(__dirname, 'launch-dashboard.html'));
 });
 
+// Serve vhr-dashboard-app.html (main dashboard with auth)
+app.get('/vhr-dashboard-app.html', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.sendFile(path.join(__dirname, 'public', 'vhr-dashboard-app.html'));
+});
+
 // Support old links: redirect root developer guide to canonical site-vitrine page
 app.get('/developer-setup.html', (req, res) => {
   res.redirect(302, '/site-vitrine/developer-setup.html');
