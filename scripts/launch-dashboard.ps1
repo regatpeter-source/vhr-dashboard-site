@@ -1,75 +1,50 @@
-#!/usr/bin/env pwsh
-# VHR Dashboard Local Launcher
-# Télécharge et lance le VHR Dashboard en local
-
-$DashboardUrl = "https://vhr-dashboard-site.onrender.com/VHR-Dashboard-Portable.zip"
-$DownloadPath = "$env:TEMP\VHR-Dashboard-Portable.zip"
-$ExtractPath = "$env:TEMP\VHR-Dashboard"
-$DashboardPath = "$ExtractPath\VHR-Dashboard-Portable"
-
-Write-Host "================================" -ForegroundColor Cyan
-Write-Host "🥽 VHR Dashboard Local Launcher" -ForegroundColor Cyan
-Write-Host "================================" -ForegroundColor Cyan
+$port = 3000
+$url = "http://localhost:$port/vhr-dashboard-app.html"
+$dir = Split-Path -Parent $PSScriptRoot
+Write-Host "VHR Dashboard Launcher"
+Write-Host "======================================"
+Write-Host "Checking Node.js..."
+node --version
+if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: Node.js not found"; pause; exit 1 }
+Write-Host "Project: $dir"
+Write-Host "Checking npm dependencies..."
+if (-not (Test-Path "$dir\node_modules")) {
+  Write-Host "Installing..."
+  cd $dir
+  npm install 2>&1 | Out-Null
+  cd $PSScriptRoot
+}
+Write-Host "Starting server..."
+$proc = New-Object System.Diagnostics.ProcessStartInfo
+$proc.FileName = "node"
+$proc.Arguments = "server.js"
+$proc.WorkingDirectory = $dir
+$proc.UseShellExecute = $false
+$proc.RedirectStandardOutput = $true
+$proc.RedirectStandardError = $true
+$proc.CreateNoWindow = $true
+$p = New-Object System.Diagnostics.Process
+$p.StartInfo = $proc
+$p.Start() | Out-Null
+Write-Host "Server started (PID: $($p.Id))"
+Write-Host "Waiting for server..."
+$done = $false
+for ($i = 0; $i -lt 60; $i++) {
+  try {
+    $r = Invoke-WebRequest -Uri "http://localhost:$port/ping" -TimeoutSec 1 -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
+    if ($r.StatusCode -eq 200) { $done = $true; break }
+  } catch { }
+  Start-Sleep -Milliseconds 500
+  if ($i % 4 -eq 0) { Write-Host "." -NoNewline }
+}
 Write-Host ""
-
-# Étape 1 : Télécharger
-Write-Host "[1/4] 📥 Téléchargement du dashboard..." -ForegroundColor Yellow
-try {
-    $ProgressPreference = 'SilentlyContinue'
-    Invoke-WebRequest -Uri $DashboardUrl -OutFile $DownloadPath -UseBasicParsing
-    Write-Host "✓ Téléchargement terminé" -ForegroundColor Green
-} catch {
-    Write-Host "✗ Erreur de téléchargement: $_" -ForegroundColor Red
-    exit 1
-}
-
-# Étape 2 : Extraire
-Write-Host "[2/4] 📦 Extraction du fichier..." -ForegroundColor Yellow
-if (Test-Path $ExtractPath) {
-    Remove-Item -Path $ExtractPath -Recurse -Force
-}
-try {
-    Expand-Archive -Path $DownloadPath -DestinationPath $ExtractPath
-    Write-Host "✓ Extraction terminée" -ForegroundColor Green
-} catch {
-    Write-Host "✗ Erreur d'extraction: $_" -ForegroundColor Red
-    exit 1
-}
-
-# Étape 3 : Chercher le dossier du dashboard
-Write-Host "[3/4] 🔍 Recherche du dashboard..." -ForegroundColor Yellow
-if (!(Test-Path $DashboardPath)) {
-    $SubFolders = Get-ChildItem -Path $ExtractPath -Directory
-    if ($SubFolders.Count -gt 0) {
-        $DashboardPath = $SubFolders[0].FullName
-    } else {
-        Write-Host "✗ Dossier du dashboard non trouvé" -ForegroundColor Red
-        exit 1
-    }
-}
-Write-Host "✓ Dashboard trouvé: $DashboardPath" -ForegroundColor Green
-
-# Étape 4 : Lancer
-Write-Host "[4/4] 🚀 Lancement du dashboard..." -ForegroundColor Yellow
-try {
-    if (Test-Path "$DashboardPath\index.html") {
-        Start-Process "$DashboardPath\index.html"
-        Write-Host "✓ Dashboard lancé avec succès!" -ForegroundColor Green
-    } elseif (Test-Path "$DashboardPath\VHR-Dashboard.exe") {
-        Start-Process "$DashboardPath\VHR-Dashboard.exe"
-        Write-Host "✓ Dashboard lancé avec succès!" -ForegroundColor Green
-    } else {
-        Write-Host "✗ Impossible de trouver le fichier à lancer" -ForegroundColor Red
-        Get-ChildItem -Path $DashboardPath -Recurse | Select-Object -First 10
-        exit 1
-    }
-} catch {
-    Write-Host "✗ Erreur au lancement: $_" -ForegroundColor Red
-    exit 1
-}
-
-Write-Host ""
-Write-Host "================================" -ForegroundColor Cyan
-Write-Host "Nettoyage du fichier ZIP..." -ForegroundColor Gray
-Remove-Item -Path $DownloadPath -Force -ErrorAction SilentlyContinue
-Write-Host "✓ Terminé!" -ForegroundColor Green
+if (-not $done) { Write-Host "ERROR: Server timeout"; $p.Kill(); pause; exit 1 }
+Write-Host "Server ready! Opening browser..."
+Start-Process $url
+Write-Host "Dashboard opened at $url"
+Write-Host "Press Ctrl+C to stop server"
+$p.WaitForExit()
+if (-not $p.HasExited) { $p.Kill() }
+Write-Host "Server stopped"
+pause
+exit 0

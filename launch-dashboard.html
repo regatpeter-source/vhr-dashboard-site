@@ -4,236 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lancer VHR Dashboard - VHR DASHBOARD</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #0d0f14 0%, #1a1d24 100%);
-            color: #ecf0f1;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        
-        .container {
-            max-width: 600px;
-            width: 100%;
-            background: #1a1d24;
-            border-radius: 16px;
-            padding: 40px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-            border: 2px solid #2c3e50;
-        }
-        
-        header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        
-        h1 {
-            color: #2ecc71;
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }
-        
-        .subtitle {
-            color: #95a5a6;
-            font-size: 1.1em;
-        }
-        
-        .info-box {
-            background: #0d0f14;
-            border-left: 4px solid #3498db;
-            padding: 20px;
-            margin: 20px 0;
-            border-radius: 8px;
-            color: #ecf0f1;
-        }
-        
-        .info-box strong {
-            color: #2ecc71;
-        }
-        
-        .launch-btn {
-            width: 100%;
-            padding: 18px;
-            background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
-            color: #000;
-            border: none;
-            border-radius: 8px;
-            font-size: 1.2em;
-            font-weight: bold;
-            cursor: pointer;
-            margin: 30px 0 20px;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(46, 204, 113, 0.3);
-        }
-        
-        .launch-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(46, 204, 113, 0.4);
-        }
-        
-        .launch-btn:active {
-            transform: translateY(0);
-        }
-        
-        .launch-btn.loading {
-            background: #95a5a6;
-            cursor: not-allowed;
-        }
-        
-        .steps {
-            margin: 30px 0;
-        }
-        
-        .step {
-            display: flex;
-            margin: 15px 0;
-            align-items: flex-start;
-        }
-        
-        .step-number {
-            background: #3498db;
-            color: #000;
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            flex-shrink: 0;
-            margin-right: 15px;
-        }
-        
-        .step-content {
-            flex: 1;
-        }
-        
-        .step-content strong {
-            color: #2ecc71;
-            display: block;
-            margin-bottom: 5px;
-        }
-        
-        .step-content p {
-            color: #95a5a6;
-            font-size: 0.95em;
-        }
-        
-        .requirements {
-            background: #2c3e50;
-            padding: 20px;
-            border-radius: 8px;
-            margin: 20px 0;
-        }
-        
-        .requirements h3 {
-            color: #e67e22;
-            margin-bottom: 15px;
-        }
-        
-        .requirements ul {
-            list-style: none;
-            padding-left: 20px;
-        }
-        
-        .requirements li {
-            margin: 8px 0;
-            color: #ecf0f1;
-        }
-        
-        .requirements li:before {
-            content: "✓ ";
-            color: #2ecc71;
-            font-weight: bold;
-            margin-right: 8px;
-        }
-        
-        .success-message {
-            display: none;
-            background: #27ae60;
-            padding: 20px;
-            border-radius: 8px;
-            margin: 20px 0;
-            text-align: center;
-            color: #ecf0f1;
-        }
-        
-        .success-message strong {
-            display: block;
-            font-size: 1.1em;
-            margin-bottom: 10px;
-        }
-        
-        .success-message p {
-            margin: 8px 0;
-            font-size: 0.95em;
-        }
-        
-        .success-message ol {
-            display: inline-block;
-            text-align: left;
-            font-size: 0.9em;
-            background: rgba(0, 0, 0, 0.2);
-            padding: 15px 20px;
-            border-radius: 6px;
-            margin: 10px 0;
-        }
-        
-        .success-message li {
-            margin: 8px 0;
-            line-height: 1.5;
-        }
-        
-        .success-message code {
-            background: rgba(0, 0, 0, 0.3);
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-family: 'Courier New', monospace;
-        }
-        
-        .success-message.show {
-            display: block;
-        }
-        
-        footer {
-            text-align: center;
-            margin-top: 40px;
-            padding-top: 20px;
-            border-top: 1px solid #2c3e50;
-            color: #7f8c8d;
-            font-size: 0.9em;
-        }
-        
-        a {
-            color: #3498db;
-            text-decoration: none;
-        }
-        
-        a:hover {
-            text-decoration: underline;
-        }
-    </style>
+    <link rel="stylesheet" href="/launch-dashboard.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🥽 VHR Dashboard</h1>
-            <p class="subtitle">Lancez le dashboard en local</p>
+            <h1>🚀 VHR Dashboard</h1>
+            <p class="subtitle">Lancer en local sur votre ordinateur</p>
         </header>
         
         <div class="info-box">
-            <strong>ℹ️ VHR Dashboard</strong>
-            <p>Cliquez ci-dessous pour ouvrir votre dashboard en local dans une nouvelle fenêtre.</p>
+            <strong>ℹ️ Informations :</strong>
+            <p>Cliquez ci-dessous pour télécharger et lancer le dashboard. Le serveur démarre automatiquement en arrière-plan.</p>
         </div>
         
         <button class="launch-btn" id="launchBtn">
@@ -241,15 +23,54 @@
         </button>
         
         <div class="success-message" id="successMsg">
-            ✓ Dashboard ouvert dans une nouvelle fenêtre !
+            ✓ Fichier téléchargé ! Double-cliquez sur <strong>launch-dashboard.bat</strong> pour lancer.
+        </div>
+        
+        <div class="authentication-notice">
+            <h3>🔐 Authentification requise</h3>
+            <p>Une fois le dashboard ouvert, <strong>vous devez vous authentifier</strong> pour que la période d'essai de <strong>7 jours</strong> commence.</p>
+            <p>Vous pouvez :</p>
+            <ul>
+                <li><strong>Créer un compte</strong> avec votre email</li>
+                <li><strong>Vous connecter</strong> si vous avez déjà un compte</li>
+            </ul>
+            <p class="auth-conseil">💡 <strong>Conseil :</strong> Gardez votre session ouverte pour que le décompte des 7 jours soit actif.</p>
+        </div>
+        
+        <div class="steps">
+            <h3>📋 Comment ça marche :</h3>
+            
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <strong>Cliquer sur le bouton</strong>
+                    <p>Appuyez sur "Lancer le Dashboard" pour télécharger le fichier <code>launch-dashboard.bat</code></p>
+                </div>
+            </div>
+            
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <strong>Double-cliquer le fichier</strong>
+                    <p>Trouvez le fichier téléchargé et double-cliquez dessus pour lancer automatiquement</p>
+                </div>
+            </div>
+            
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <strong>Attendre le lancement</strong>
+                    <p>Une fenêtre terminal s'ouvre brièvement, puis le dashboard se lance automatiquement dans votre navigateur</p>
+                </div>
+            </div>
         </div>
         
         <div class="requirements">
-            <h3>✨ Système requis :</h3>
+            <h3>✨ Prérequis :</h3>
             <ul>
-                <li>Windows 10/11</li>
-                <li>Navigateur web moderne</li>
-                <li>Connexion internet</li>
+                <li>Serveur local en cours d'exécution (port 3000)</li>
+                <li>Navigateur web moderne (Chrome, Edge, Firefox)</li>
+                <li>Cookies activés</li>
             </ul>
         </div>
         
@@ -258,7 +79,6 @@
         </footer>
     </div>
     
-    <!-- Load external JavaScript for CSP compliance -->
     <script src="/js/launch-dashboard.js"></script>
 </body>
 </html>
