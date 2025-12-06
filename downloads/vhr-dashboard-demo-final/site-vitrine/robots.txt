@@ -1,6 +1,0 @@
-User-agent: *
-Allow: /
-Sitemap: https://regatpeter-source.github.io/vhr-dashboard-site/sitemap.xml
-
-# Empêche l'indexation des dossiers sensibles (à adapter si besoin)
-Disallow: /downloads/
