@@ -18,7 +18,7 @@ if errorlevel 1 (
 REM Launch the PowerShell script
 echo.
 echo ========================================
-echo 🥽 VHR Dashboard Launcher
+echo VHR Dashboard Launcher
 echo ========================================
 echo.
 echo Starting the PowerShell launcher...
