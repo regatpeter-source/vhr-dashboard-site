@@ -30,15 +30,10 @@ function getCookie(name) {
   return null;
 }
 
-// Open dashboard launcher - downloads batch wrapper script
+// Open dashboard launcher - redirect to launcher page
 function openDashboard(event) {
   event.preventDefault();
-  const link = document.createElement('a');
-  link.href = '/download/launch-script';
-  link.download = 'launch-dashboard.bat';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  window.location.href = '/launch-dashboard.html';
 }
 
 // ========== DOMContentLoaded Handlers ==========
