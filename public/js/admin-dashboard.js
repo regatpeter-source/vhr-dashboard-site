@@ -13,6 +13,16 @@ async function authFetch(url, options = {}) {
   });
 }
 
+// Initialize Android Installer when tab is clicked
+function initializeAndroidInstaller() {
+  if (window.androidInstaller) return; // Already initialized
+  if (typeof AndroidInstaller === 'undefined') return; // Script not loaded yet
+  
+  const installer = new AndroidInstaller();
+  installer.initializeUI();
+  window.androidInstaller = installer;
+}
+
 // Check auth
 async function checkAuth() {
   try {
@@ -269,6 +279,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (this.dataset.tab === 'users') loadUsers();
       else if (this.dataset.tab === 'subscriptions') loadSubscriptions();
       else if (this.dataset.tab === 'messages') loadMessages();
+      else if (this.dataset.tab === 'android') initializeAndroidInstaller();
     });
   });
 
