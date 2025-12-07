@@ -333,7 +333,9 @@ class AdminAndroidInstaller {
     msgBox.style.borderLeftColor = type === 'error' ? '#c62828' : (type === 'success' ? '#2e7d32' : '#667eea');
     msgBox.style.background = type === 'error' ? '#ffebee' : (type === 'success' ? '#e8f5e9' : '#f0f4ff');
     msgBox.style.color = type === 'error' ? '#c62828' : (type === 'success' ? '#2e7d32' : '#1565c0');
-    msgBox.textContent = message;
+    msgBox.style.whiteSpace = 'pre-wrap';
+    msgBox.style.wordWrap = 'break-word';
+    msgBox.innerHTML = message.replace(/\n/g, '<br>');
   }
 
   /**
