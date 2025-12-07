@@ -731,6 +731,10 @@ let favorites = [];
 
 async function api(path, opts = {}) {
 	try {
+		// Include cookies in request (for httpOnly vhr_token cookie)
+		if (!opts.credentials) {
+			opts.credentials = 'include';
+		}
 		const res = await fetch(path, opts);
 		return await res.json();
 	} catch (e) {
