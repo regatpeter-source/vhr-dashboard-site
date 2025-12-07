@@ -2,12 +2,27 @@ FROM node:18-bullseye
 
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV JAVA_HOME=/usr/lib/jvm/temurin-11-jdk-amd64
+ENV PATH=$JAVA_HOME/bin:$PATH
+ENV GRADLE_HOME=/opt/gradle/gradle-8.7
+ENV PATH=$GRADLE_HOME/bin:$PATH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
   adb \
   ffmpeg \
   scrcpy \
+  temurin-11-jdk \
+  wget \
+  unzip \
   && rm -rf /var/lib/apt/lists/*
+
+# Install Gradle 8.7
+RUN mkdir -p /opt/gradle && \
+  cd /opt/gradle && \
+  wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip && \
+  unzip gradle-8.7-bin.zip && \
+  rm gradle-8.7-bin.zip && \
+  ln -s gradle-8.7 current
 
 WORKDIR /usr/src/app
 
