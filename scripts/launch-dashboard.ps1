@@ -1,20 +1,9 @@
 $port = 3000
 $url = "http://localhost:$port/vhr-dashboard-app.html"
 
-# Auto-detect project directory by looking for server.js
-$dir = (Get-Location).Path
-while ($dir -and -not (Test-Path "$dir\server.js")) {
-  $parent = Split-Path -Parent $dir
-  if ($parent -eq $dir -or -not $parent) { $dir = $null; break }
-  $dir = $parent
-}
-
-if (-not $dir -or -not (Test-Path "$dir\server.js")) {
-  Write-Host "ERROR: Could not find project directory (looking for server.js)"
-  Write-Host "Current: $(Get-Location)"
-  pause
-  exit 1
-}
+# Use project directory passed from batch, or current location
+if (-not $projectDir) { $projectDir = Get-Location }
+$dir = $projectDir.ToString()
 
 Write-Host "VHR Dashboard Launcher"
 Write-Host "======================================"
