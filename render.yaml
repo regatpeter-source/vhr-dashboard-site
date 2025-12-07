@@ -16,3 +16,7 @@ services:
       - key: HOST
       - key: HEALTH_CHECK_PATH
         value: "/_status"
+      - key: JAVA_HOME
+        value: "/usr/lib/jvm/temurin-11-jdk-amd64"
+      - key: GRADLE_HOME
+        value: "/opt/gradle/gradle-8.7"
