@@ -44,26 +44,3 @@ module.exports = {
     }
   }
 };
-      trialDays: 14 // 14 jours d'essai gratuit
-    }
-  },
-
-  // Configuration de facturation
-  BILLING: {
-    CURRENCY: 'EUR',
-    TAX_RATE: 0.20, // 20% de TVA (à adapter selon votre juridiction)
-    INVOICE_REMINDER_DAYS: 7, // Rappel avant fin de période
-    RENEWAL_CHECK_DAYS: 3 // Vérifier le renouvellement 3 jours avant expiration
-  },
-
-  // Événements de subscription
-  SUBSCRIPTION_EVENTS: {
-    CREATED: 'subscription.created',
-    UPDATED: 'subscription.updated',
-    RENEWED: 'subscription.renewed',
-    EXPIRED: 'subscription.expired',
-    CANCELLED: 'subscription.cancelled',
-    PAYMENT_FAILED: 'subscription.payment_failed',
-    PAYMENT_SUCCEEDED: 'subscription.payment_succeeded'
-  }
-};
