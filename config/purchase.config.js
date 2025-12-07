@@ -95,9 +95,6 @@ Merci d'avoir choisi VHR Dashboard!
     AUTO_RENEWAL_REMINDER_DAYS: 0
   }
 };
-      features: [
-        'Accès 1 an',
-        'Version Professional',
         'Jusqu\'à 50 utilisateurs',
         'Toutes les mises à jour pendant 1 an',
         'Support par email',
