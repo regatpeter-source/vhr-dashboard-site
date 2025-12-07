@@ -23,8 +23,8 @@ function createNavbar() {
 		<button id="toggleViewBtn" style="margin-right:15px;background:#2ecc71;color:#000;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			📊 Vue: Tableau
 		</button>
-		<button id="installerBtn" style="margin-right:15px;background:#9b59b6;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
-			🚀 Installer l'App
+		<button id="installerBtn" style="margin-right:15px;background:#9b59b6;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;" title="Installer l'application vocale sur votre Meta Quest">
+			🚀 Voix vers Casque
 		</button>
 		<button id="favoritesBtn" style="margin-right:15px;background:#f39c12;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			⭐ Ajouter aux favoris

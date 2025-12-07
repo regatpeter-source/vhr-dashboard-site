@@ -3515,17 +3515,29 @@ app.post('/api/android/compile', async (req, res) => {
     
     // Fournir des messages d'aide utiles
     let errorMsg = e.message;
-    if (e.message.includes('gradle') || e.message.includes('Gradle')) {
-      errorMsg = 'Gradle not found. Install Gradle, Android Studio, or run: gradle wrapper';
+    let helpText = '';
+    
+    if (e.message.includes('gradle') || e.message.includes('Gradle') || e.message.includes('not found')) {
+      errorMsg = 'Gradle ou Java JDK non trouvé sur le système';
+      helpText = '\n\nÉTAPES POUR CORRIGER:\n' +
+                 '1. Installez Java JDK 11+ (OpenJDK recommandé)\n' +
+                 '2. Installez Android Studio\n' +
+                 '3. Configurez JAVA_HOME dans vos variables d\'environnement\n' +
+                 '4. Redémarrez votre terminal/serveur';
     } else if (e.message.includes('JAVA_HOME')) {
-      errorMsg = 'JAVA_HOME not set. Please install Java JDK and set JAVA_HOME environment variable.';
+      errorMsg = 'JAVA_HOME non configuré';
+      helpText = '\n\nÉTAPES POUR CORRIGER:\n' +
+                 '1. Installez Java JDK 11+\n' +
+                 '2. Définissez JAVA_HOME = "C:\\Program Files\\Java\\jdk-11" (ou votre chemin)\n' +
+                 '3. Redémarrez le serveur';
     } else if (e.message.includes('timeout')) {
-      errorMsg = 'Compilation timeout. First build may take 5-15 minutes. Please try again.';
+      errorMsg = 'La compilation a dépassé le délai imparti';
+      helpText = '\n\nLa première compilation peut prendre 5-15 minutes. Réessayez.';
     }
     
     res.status(500).json({ 
       ok: false, 
-      error: 'Compilation failed: ' + errorMsg.substring(0, 300)
+      error: 'Compilation failed: ' + errorMsg + helpText
     });
   }
 });
