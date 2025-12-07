@@ -980,6 +980,7 @@ window.startStreamFromTable = async function(serial) {
 	if (res.ok) {
 		showToast('✅ Stream démarré !', 'success');
 		incrementStat('totalSessions');
+		showStreamViewer(serial);
 	}
 	else showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
 	setTimeout(loadDevices, 500);
@@ -993,10 +994,93 @@ window.startStreamFromCard = async function(serial) {
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ serial, profile })
 	});
-	if (res.ok) showToast('✅ Stream démarré !', 'success');
+	if (res.ok) {
+		showToast('✅ Stream démarré !', 'success');
+		showStreamViewer(serial);
+	}
 	else showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
 	setTimeout(loadDevices, 500);
 };
+
+window.showStreamViewer = function(serial) {
+	let modal = document.getElementById('streamModal');
+	if (!modal) {
+		modal = document.createElement('div');
+		modal.id = 'streamModal';
+		modal.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.95);z-index:3000;display:flex;flex-direction:column;align-items:center;justify-content:center;';
+		document.body.appendChild(modal);
+	}
+	
+	modal.innerHTML = `
+		<div style='width:90%;max-width:960px;background:#1a1d24;border-radius:12px;overflow:hidden;box-shadow:0 8px 32px #000;'>
+			<div style='background:#23272f;padding:16px;display:flex;justify-content:space-between;align-items:center;'>
+				<h2 style='color:#2ecc71;margin:0;'>📹 Stream - ${serial}</h2>
+				<button onclick='closeStreamViewer()' style='background:#e74c3c;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;'>✕ Fermer</button>
+			</div>
+			<div id='streamContainer' style='width:100%;background:#000;position:relative;padding-bottom:56.25%;'>
+				<canvas id='streamCanvas' style='position:absolute;top:0;left:0;width:100%;height:100%;display:block;'></canvas>
+			</div>
+			<div style='background:#23272f;padding:16px;text-align:center;color:#95a5a6;font-size:12px;'>
+				🟢 En direct - ${new Date().toLocaleTimeString('fr-FR')}
+			</div>
+		</div>
+	`;
+	modal.style.display = 'flex';
+	
+	// Initialiser JSMpeg après un délai pour que le canvas soit rendu
+	setTimeout(() => {
+		initStreamPlayer(serial);
+	}, 100);
+};
+
+window.closeStreamViewer = function() {
+	const modal = document.getElementById('streamModal');
+	if (modal) modal.style.display = 'none';
+	if (window.jsmpegPlayer) {
+		window.jsmpegPlayer.destroy();
+		window.jsmpegPlayer = null;
+	}
+};
+
+window.initStreamPlayer = function(serial) {
+	// Vérifier si JSMpeg est chargé
+	if (typeof JSMpeg === 'undefined') {
+		// Charger JSMpeg dynamiquement
+		const script = document.createElement('script');
+		script.src = 'https://cdn.jsdelivr.net/npm/jsmpeg-player@0.2.8/jsmpeg.min.js';
+		script.onload = () => {
+			connectStreamSocket(serial);
+		};
+		document.head.appendChild(script);
+	} else {
+		connectStreamSocket(serial);
+	}
+};
+
+window.connectStreamSocket = function(serial) {
+	const wsUrl = 'ws://' + window.location.host + '/api/stream/ws?serial=' + encodeURIComponent(serial);
+	
+	try {
+		const ws = new WebSocket(wsUrl);
+		ws.binaryType = 'arraybuffer';
+		
+		const canvas = document.getElementById('streamCanvas');
+		if (!canvas) return;
+		
+		const player = new JSMpeg.Player(wsUrl, {
+			canvas: canvas,
+			autoplay: true,
+			progressive: true
+		});
+		
+		window.jsmpegPlayer = player;
+		showToast('🎬 Stream connecté !', 'success');
+	} catch (e) {
+		console.error('[stream] ws connection error:', e);
+		showToast('❌ Erreur de connexion stream: ' + e.message, 'error');
+	}
+};
+
 
 window.stopStreamFromTable = async function(serial) {
 	const res = await api('/api/stream/stop', {

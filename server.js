@@ -2209,7 +2209,46 @@ function stopStream(serial) {
 }
 
 // ---------- WebSocket ----------
-// ...existing code...
+server.on('upgrade', (req, res, head) => {
+  if (req.url.startsWith('/api/stream/ws')) {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const serial = url.searchParams.get('serial');
+      
+      if (!serial) {
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end('serial parameter required');
+        return;
+      }
+
+      const entry = streams.get(serial);
+      if (!entry) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('stream not found');
+        return;
+      }
+
+      wssMpeg1.handleUpgrade(req, res, head, (ws) => {
+        entry.mpeg1Clients.add(ws);
+        console.log(`[WebSocket] Client connected to stream ${serial}, total clients: ${entry.mpeg1Clients.size}`);
+        
+        ws.on('close', () => {
+          entry.mpeg1Clients.delete(ws);
+          console.log(`[WebSocket] Client disconnected from stream ${serial}, remaining: ${entry.mpeg1Clients.size}`);
+        });
+
+        ws.on('error', (err) => {
+          console.error(`[WebSocket] Error on stream ${serial}:`, err.message);
+          entry.mpeg1Clients.delete(ws);
+        });
+      });
+    } catch (err) {
+      console.error('[WebSocket] Upgrade error:', err);
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end('Internal server error');
+    }
+  }
+});
 
 // ---------- API Endpoints ----------
 app.get('/api/devices', (req, res) => res.json({ ok: true, devices }));
