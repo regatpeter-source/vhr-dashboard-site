@@ -3306,3 +3306,232 @@ app.get('/public-config', (req, res) => {
   });
 });
 
+// ========== ANDROID TTS APP INSTALLER ENDPOINTS ==========
+
+/**
+ * GET /api/adb/devices - Liste tous les appareils ADB connectés
+ */
+app.get('/api/adb/devices', async (req, res) => {
+  try {
+    // Essayer 'adb' puis 'adb.exe'
+    let devices = [];
+    const commands = ['adb devices -l', 'adb.exe devices -l'];
+    
+    for (const cmd of commands) {
+      try {
+        const { stdout } = await execp(cmd);
+        const lines = stdout.trim().split('\n').slice(1); // Skip header
+        devices = lines
+          .filter(line => line.trim() && !line.includes('List of attached devices'))
+          .map(line => {
+            const parts = line.split(/\s+/);
+            const serial = parts[0];
+            const status = parts[1] || 'unknown';
+            // Parse device info from remaining parts
+            const model = parts.find(p => p.includes('model:'))?.replace('model:', '') || 'Unknown';
+            const device = parts.find(p => p.includes('device:'))?.replace('device:', '') || 'Device';
+            
+            return {
+              serial,
+              status,
+              name: `${device} (${model})`.replace(/[_\-]/g, ' ')
+            };
+          });
+        break; // Success, exit loop
+      } catch (e) {
+        continue; // Try next command
+      }
+    }
+
+    if (devices.length === 0) {
+      console.log('[ADB] No devices connected');
+      return res.json({ 
+        ok: true, 
+        devices: [],
+        message: 'No ADB devices connected. Ensure USB debugging is enabled.'
+      });
+    }
+
+    console.log(`[ADB] Found ${devices.length} device(s):`, devices.map(d => d.serial).join(', '));
+    res.json({ ok: true, devices });
+  } catch (e) {
+    console.error('[ADB] Error listing devices:', e.message);
+    res.json({ 
+      ok: false, 
+      error: 'ADB not available or devices not connected',
+      devices: []
+    });
+  }
+});
+
+/**
+ * POST /api/android/compile - Compile l'APK (debug ou release)
+ */
+app.post('/api/android/compile', async (req, res) => {
+  const { buildType = 'debug' } = req.body;
+  const appDir = path.join(__dirname, 'tts-receiver-app');
+
+  try {
+    // Vérifier que le répertoire existe
+    if (!fs.existsSync(appDir)) {
+      return res.status(404).json({ 
+        ok: false, 
+        error: 'Android app directory not found at ' + appDir 
+      });
+    }
+
+    console.log(`[Android] Starting ${buildType} build...`);
+    const startTime = Date.now();
+
+    // Déterminer la commande selon le système d'exploitation
+    const isWindows = process.platform === 'win32';
+    const gradleCmd = isWindows 
+      ? path.join(appDir, 'gradlew.bat')
+      : path.join(appDir, 'gradlew');
+
+    // Vérifier que gradlew existe
+    if (!fs.existsSync(gradleCmd)) {
+      return res.status(500).json({ 
+        ok: false, 
+        error: 'Gradle wrapper not found. Run "gradle wrapper" first.' 
+      });
+    }
+
+    // Compiler
+    const buildTarget = buildType === 'release' ? 'assembleRelease' : 'assembleDebug';
+    const { stdout, stderr } = await execp(
+      `"${gradleCmd}" ${buildTarget}`,
+      { cwd: appDir, maxBuffer: 10 * 1024 * 1024, timeout: 600000 } // 10min timeout
+    );
+
+    // Vérifier que l'APK a été créé
+    const apkPath = buildType === 'release'
+      ? path.join(appDir, 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk')
+      : path.join(appDir, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
+
+    if (!fs.existsSync(apkPath)) {
+      return res.status(500).json({ 
+        ok: false, 
+        error: 'APK compilation failed: output file not found',
+        stderr: stderr.substring(0, 500)
+      });
+    }
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    const apkSize = (fs.statSync(apkPath).size / 1024 / 1024).toFixed(2);
+
+    console.log(`[Android] ✅ ${buildType} build successful (${duration}s, ${apkSize}MB)`);
+    res.json({ 
+      ok: true, 
+      apkPath,
+      buildType,
+      size: apkSize,
+      duration: duration,
+      message: `APK compiled successfully (${apkSize}MB)`
+    });
+
+  } catch (e) {
+    console.error('[Android] Build error:', e.message);
+    res.status(500).json({ 
+      ok: false, 
+      error: 'Compilation failed: ' + e.message.substring(0, 200)
+    });
+  }
+});
+
+/**
+ * POST /api/android/install - Installe l'APK sur l'appareil
+ */
+app.post('/api/android/install', async (req, res) => {
+  const { deviceSerial, buildType = 'debug' } = req.body;
+
+  if (!deviceSerial) {
+    return res.status(400).json({ ok: false, error: 'deviceSerial required' });
+  }
+
+  const appDir = path.join(__dirname, 'tts-receiver-app');
+  const apkPath = buildType === 'release'
+    ? path.join(appDir, 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk')
+    : path.join(appDir, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
+
+  try {
+    // Vérifier que l'APK existe
+    if (!fs.existsSync(apkPath)) {
+      return res.status(404).json({ 
+        ok: false, 
+        error: 'APK not found. Compile first using /api/android/compile'
+      });
+    }
+
+    console.log(`[ADB] Installing ${path.basename(apkPath)} to ${deviceSerial}...`);
+    const startTime = Date.now();
+
+    // Installer l'APK
+    const { stdout } = await execp(
+      `adb -s ${deviceSerial} install -r "${apkPath}"`,
+      { maxBuffer: 5 * 1024 * 1024, timeout: 120000 } // 2min timeout
+    );
+
+    // Vérifier le succès
+    if (!stdout.includes('Success') && !stdout.includes('success')) {
+      console.error('[ADB] Install output:', stdout);
+      return res.status(500).json({ 
+        ok: false, 
+        error: 'Installation may have failed. Check device status.'
+      });
+    }
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`[ADB] ✅ Installation successful (${duration}s)`);
+    res.json({ 
+      ok: true,
+      duration: duration,
+      message: `APK installed successfully on ${deviceSerial}`
+    });
+
+  } catch (e) {
+    console.error('[ADB] Install error:', e.message);
+    res.status(500).json({ 
+      ok: false, 
+      error: 'Installation failed: ' + e.message.substring(0, 200)
+    });
+  }
+});
+
+/**
+ * POST /api/android/launch - Lance l'app sur l'appareil
+ */
+app.post('/api/android/launch', async (req, res) => {
+  const { deviceSerial } = req.body;
+
+  if (!deviceSerial) {
+    return res.status(400).json({ ok: false, error: 'deviceSerial required' });
+  }
+
+  try {
+    console.log(`[ADB] Launching VHR TTS on ${deviceSerial}...`);
+    const startTime = Date.now();
+
+    // Lancer l'app
+    const { stdout } = await execp(
+      `adb -s ${deviceSerial} shell am start -n com.vhr.dashboard/.MainActivity`,
+      { maxBuffer: 2 * 1024 * 1024, timeout: 30000 }
+    );
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`[ADB] ✅ App launched (${duration}s)`);
+    res.json({ 
+      ok: true,
+      duration: duration,
+      message: `App launched on ${deviceSerial}`
+    });
+
+  } catch (e) {
+    console.error('[ADB] Launch error:', e.message);
+    res.status(500).json({ 
+      ok: false, 
+      error: 'Launch failed: ' + e.message.substring(0, 200)
+    });
+  }
+});
+
