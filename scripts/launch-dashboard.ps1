@@ -1,15 +1,15 @@
 $port = 3000
 $url = "http://localhost:$port/vhr-dashboard-app.html"
 
-REM Auto-detect project directory by looking for server.js
-$dir = Get-Location
-while ($dir -ne $null -and -not (Test-Path "$dir\server.js")) {
+# Auto-detect project directory by looking for server.js
+$dir = (Get-Location).Path
+while ($dir -and -not (Test-Path "$dir\server.js")) {
   $parent = Split-Path -Parent $dir
-  if ($parent -eq $dir) { break }
+  if ($parent -eq $dir -or -not $parent) { $dir = $null; break }
   $dir = $parent
 }
 
-if (-not (Test-Path "$dir\server.js")) {
+if (-not $dir -or -not (Test-Path "$dir\server.js")) {
   Write-Host "ERROR: Could not find project directory (looking for server.js)"
   Write-Host "Current: $(Get-Location)"
   pause
