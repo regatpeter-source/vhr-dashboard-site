@@ -111,12 +111,22 @@ async function loadMessages() {
       tbody.innerHTML = '';
       data.messages.forEach(msg => {
         const row = tbody.insertRow();
-        const statusBadge = msg.status === 'unread' ? 'badge-unread' : 'badge-read';
+        let statusBadge, statusIcon;
+        if (msg.status === 'unread') {
+          statusBadge = 'badge-unread';
+          statusIcon = '🔴';
+        } else if (msg.status === 'responded') {
+          statusBadge = 'badge-active';
+          statusIcon = '✓';
+        } else {
+          statusBadge = 'badge-inactive';
+          statusIcon = '✓';
+        }
         row.innerHTML = `
           <td>${msg.name}</td>
           <td>${msg.email}</td>
           <td>${msg.subject}</td>
-          <td><span class="badge ${statusBadge}">${msg.status}</span></td>
+          <td><span class="badge ${statusBadge}">${statusIcon} ${msg.status}</span></td>
           <td>${new Date(msg.createdAt).toLocaleDateString()}</td>
           <td>
             <button class="action-btn action-btn-view" onclick="viewMessage('${msg.id}')">View</button>
@@ -125,11 +135,11 @@ async function loadMessages() {
         `;
       });
     } else {
-      document.getElementById('messagesMessage').innerHTML = '<div class="empty-state"><p>No messages found</p></div>';
+      document.getElementById('messagesMessage').innerHTML = '<div class="empty-state"><p>📭 No messages found</p></div>';
     }
   } catch (e) {
     console.error('Error loading messages:', e);
-    document.getElementById('messagesMessage').innerHTML = `<div class="error">Error loading messages</div>`;
+    document.getElementById('messagesMessage').innerHTML = `<div class="error">❌ Error loading messages</div>`;
   }
 }
 
@@ -144,19 +154,48 @@ async function viewMessage(messageId) {
       const responseForm = `
         <div class="form-group">
           <label>Response:</label>
-          <textarea id="responseText" placeholder="Type your response here..."></textarea>
+          <textarea id="responseText" placeholder="Type your response here..." style="height: 150px; resize: vertical;"></textarea>
+          <small style="color: #666; margin-top: 8px; display: block;">💬 A signature will be automatically added to your response</small>
         </div>
         <button class="btn-submit" onclick="respondToMessage('${msg.id}')">Send Response</button>
       `;
+      
+      const statusBadgeClass = msg.status === 'unread' ? 'badge-unread' : (msg.status === 'responded' ? 'badge-active' : 'badge-inactive');
+      const statusLabel = msg.status === 'unread' ? '📧 Unread' : (msg.status === 'responded' ? '✓ Responded' : 'Read');
+      
+      const userAvatar = msg.name.charAt(0).toUpperCase();
+      const respondedAt = msg.respondedAt ? new Date(msg.respondedAt).toLocaleString() : null;
+      
       modalBody.innerHTML = `
-        <p><strong>From:</strong> ${msg.name} (${msg.email})</p>
-        <p><strong>Subject:</strong> ${msg.subject}</p>
-        <p><strong>Date:</strong> ${new Date(msg.createdAt).toLocaleString()}</p>
-        <p><strong>Status:</strong> <span class="badge ${msg.status === 'unread' ? 'badge-unread' : 'badge-read'}">${msg.status}</span></p>
-        <hr style="margin: 20px 0; border: none; border-top: 1px solid #e2e8f0;">
-        <p><strong>Message:</strong></p>
-        <p>${msg.message}</p>
-        ${msg.response ? `<hr style="margin: 20px 0;"><p><strong>Your Response:</strong></p><p>${msg.response}</p>` : responseForm}
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+          <div style="display: flex; gap: 12px; align-items: flex-start;">
+            <div style="width: 40px; height: 40px; border-radius: 50%; background: #667eea; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 16px;">${userAvatar}</div>
+            <div style="flex: 1;">
+              <p style="margin: 0; font-weight: 600; color: #333;">${msg.name}</p>
+              <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">${msg.email}</p>
+              <p style="margin: 8px 0 0 0; color: #999; font-size: 12px;">${new Date(msg.createdAt).toLocaleString()}</p>
+            </div>
+            <span class="badge ${statusBadgeClass}" style="white-space: nowrap;">${statusLabel}</span>
+          </div>
+        </div>
+        
+        <h4 style="margin: 20px 0 10px 0; color: #333;">${msg.subject}</h4>
+        
+        <div style="background: white; padding: 15px; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 20px; line-height: 1.6; color: #555;">
+          ${msg.message.replace(/\n/g, '<br>')}
+        </div>
+        
+        ${msg.response ? `
+          <div style="background: #f0f7ff; padding: 15px; border-left: 4px solid #667eea; border-radius: 6px; margin-bottom: 20px;">
+            <p style="margin: 0 0 10px 0; font-weight: 600; color: #667eea;">📨 Your Response (${respondedAt})</p>
+            <div style="color: #555; line-height: 1.6; margin-bottom: 10px; white-space: pre-wrap; font-family: inherit;">
+              ${msg.response.replace(/\n/g, '<br>')}
+            </div>
+            <p style="margin: 10px 0 0 0; font-size: 12px; color: #999; border-top: 1px solid rgba(102, 126, 234, 0.2); padding-top: 10px;">
+              Responded by: <strong>${msg.respondedBy || 'Admin'}</strong>
+            </p>
+          </div>
+        ` : responseForm}
       `;
       document.getElementById('messageModal').classList.add('active');
     }
@@ -165,24 +204,31 @@ async function viewMessage(messageId) {
   }
 }
 
-// Respond to message
+// Respond to message with automatic signature
 async function respondToMessage(messageId) {
   const response = document.getElementById('responseText').value;
   if (!response) {
     alert('Please write a response');
     return;
   }
+  
+  // Add VHR Dashboard signature to response
+  const signature = `\n\n---\n📱 VHR Dashboard Support\nPeter Vhr Dashboard\nYour VR Management Solution\ncontact@vhrdashboard.com`;
+  const responseWithSignature = response + signature;
+  
   try {
     const res = await authFetch(`${API_BASE}/admin/messages/${messageId}`, {
       method: 'PATCH',
-      body: JSON.stringify({ status: 'responded', response })
+      body: JSON.stringify({ status: 'responded', response: responseWithSignature })
     });
     const data = await res.json();
     if (data.ok) {
-      alert('Response sent!');
+      alert('✓ Response sent successfully with signature!');
       document.getElementById('messageModal').classList.remove('active');
       loadMessages();
       loadStats();
+    } else {
+      alert('Error: ' + data.error);
     }
   } catch (e) {
     console.error('Error responding:', e);
