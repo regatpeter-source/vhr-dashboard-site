@@ -195,7 +195,9 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
   }
 
   try {
-    const template = purchaseConfig.EMAIL_TEMPLATES.SUBSCRIPTION_SUCCESS || purchaseConfig.EMAIL_TEMPLATES.SUBSCRIPTION_CONFIRMATION;
+    const template = (purchaseConfig.EMAIL_TEMPLATES && purchaseConfig.EMAIL_TEMPLATES.SUBSCRIPTION_SUCCESS) || 
+                     (purchaseConfig.EMAIL_TEMPLATES && purchaseConfig.EMAIL_TEMPLATES.SUBSCRIPTION_CONFIRMATION) || 
+                     { title: 'Abonnement Confirmé', subject: '✅ Votre abonnement VHR Dashboard est actif' };
     
     const htmlContent = `
 <!DOCTYPE html>
