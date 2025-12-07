@@ -1219,6 +1219,25 @@ window.subscribePro = async function() {
 		return;
 	}
 	
+	// Check if user is authenticated with JWT (has valid token)
+	try {
+		const meRes = await api('/api/me');
+		if (!meRes || !meRes.ok) {
+			showToast('⚠️ Vous devez vous connecter à votre compte', 'error');
+			setTimeout(() => {
+				window.location.href = '/account.html?action=login';
+			}, 2000);
+			return;
+		}
+	} catch (e) {
+		console.error('[subscribe] auth check failed:', e);
+		showToast('⚠️ Erreur d\'authentification - veuillez vous reconnecter', 'error');
+		setTimeout(() => {
+			window.location.href = '/account.html?action=login';
+		}, 2000);
+		return;
+	}
+	
 	showToast('🔄 Création de la session de paiement...', 'info');
 	
 	try {
@@ -1256,6 +1275,25 @@ window.purchasePro = async function() {
 		showToast('⚠️ Vous devez créer un compte pour acheter la licence', 'error');
 		setTimeout(() => {
 			window.location.href = '/account.html?action=register';
+		}, 2000);
+		return;
+	}
+	
+	// Check if user is authenticated with JWT (has valid token)
+	try {
+		const meRes = await api('/api/me');
+		if (!meRes || !meRes.ok) {
+			showToast('⚠️ Vous devez vous connecter à votre compte', 'error');
+			setTimeout(() => {
+				window.location.href = '/account.html?action=login';
+			}, 2000);
+			return;
+		}
+	} catch (e) {
+		console.error('[purchase] auth check failed:', e);
+		showToast('⚠️ Erreur d\'authentification - veuillez vous reconnecter', 'error');
+		setTimeout(() => {
+			window.location.href = '/account.html?action=login';
 		}, 2000);
 		return;
 	}
