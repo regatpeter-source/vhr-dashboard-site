@@ -2166,7 +2166,7 @@ async function startStream(serial, opts = {}) {
     cleanup();
   });
 
-  io.emit('stream-event', { type: 'start', serial, config: { maxSize, bitrate } });
+  io.emit('stream-event', { type: 'start', serial, config: { size, bitrate } });
   return true;
 }
 
