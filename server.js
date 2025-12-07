@@ -3519,20 +3519,23 @@ app.post('/api/android/compile', async (req, res) => {
     
     if (e.message.includes('gradle') || e.message.includes('Gradle') || e.message.includes('not found')) {
       errorMsg = 'Gradle ou Java JDK non trouvé sur le système';
-      helpText = '\n\nÉTAPES POUR CORRIGER:\n' +
-                 '1. Installez Java JDK 11+ (OpenJDK recommandé)\n' +
-                 '2. Installez Android Studio\n' +
-                 '3. Configurez JAVA_HOME dans vos variables d\'environnement\n' +
-                 '4. Redémarrez votre terminal/serveur';
+      helpText = '\n\n🚀 SOLUTION RAPIDE:\n' +
+                 'Téléchargez et exécutez le script d\'installation automatique:\n' +
+                 'PowerShell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest https://raw.githubusercontent.com/regatpeter-source/vhr-dashboard-site/main/scripts/install-build-tools.ps1 -OutFile install-tools.ps1; .\\install-tools.ps1"\n' +
+                 '\n📖 OU installez manuellement:\n' +
+                 '1. Java JDK 11+: https://adoptium.net/\n' +
+                 '2. Gradle 8.7+: https://gradle.org/releases/\n' +
+                 '3. Définissez JAVA_HOME dans les variables d\'environnement\n' +
+                 '4. Redémarrez le serveur et réessayez';
     } else if (e.message.includes('JAVA_HOME')) {
       errorMsg = 'JAVA_HOME non configuré';
-      helpText = '\n\nÉTAPES POUR CORRIGER:\n' +
-                 '1. Installez Java JDK 11+\n' +
-                 '2. Définissez JAVA_HOME = "C:\\Program Files\\Java\\jdk-11" (ou votre chemin)\n' +
+      helpText = '\n\n📖 CORRECTION:\n' +
+                 '1. Installez Java JDK 11+: https://adoptium.net/\n' +
+                 '2. Définissez JAVA_HOME = "C:\\Program Files\\Eclipse Adoptium\\jdk-11" (ou votre chemin)\n' +
                  '3. Redémarrez le serveur';
     } else if (e.message.includes('timeout')) {
       errorMsg = 'La compilation a dépassé le délai imparti';
-      helpText = '\n\nLa première compilation peut prendre 5-15 minutes. Réessayez.';
+      helpText = '\n\nℹ️  La première compilation peut prendre 5-15 minutes. Réessayez.';
     }
     
     res.status(500).json({ 
