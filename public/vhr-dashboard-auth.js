@@ -45,6 +45,8 @@ async function handleLogin() {
       
       // Save user info and show dashboard
       localStorage.setItem('vhr_user', data.username);
+      localStorage.setItem('vhr_user_id', data.userId);
+      window.currentUserId = data.userId;
       showDashboard();
       checkDemoStatus();
       checkSubscriptionStatus();
@@ -103,6 +105,8 @@ async function handleRegister() {
       
       setTimeout(() => {
         localStorage.setItem('vhr_user', data.username);
+        localStorage.setItem('vhr_user_id', data.userId);
+        window.currentUserId = data.userId;
         showDashboard();
         checkDemoStatus();
         checkSubscriptionStatus();
@@ -121,6 +125,8 @@ async function handleRegister() {
 
 function handleLogout() {
   localStorage.removeItem('vhr_user');
+  localStorage.removeItem('vhr_user_id');
+  window.currentUserId = null;
   document.getElementById('dashboardContainer').style.display = 'none';
   document.getElementById('authContainer').style.display = 'flex';
   document.getElementById('loginUser').value = '';
@@ -214,7 +220,9 @@ async function checkSubscriptionStatus() {
 // Check if already logged in
 window.addEventListener('load', () => {
   const savedUser = localStorage.getItem('vhr_user');
+  const savedUserId = localStorage.getItem('vhr_user_id');
   if (savedUser) {
+    window.currentUserId = savedUserId;
     showDashboard();
     checkDemoStatus();
     checkSubscriptionStatus();

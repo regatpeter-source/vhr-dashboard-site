@@ -618,17 +618,28 @@ function loadUsers() {
       raw = raw.replace(/^\uFEFF/, '').trim();
       console.log(`[users] file content length: ${raw.length} chars`);
       const parsed = JSON.parse(raw || '[]');
+      let userList = [];
       if (Array.isArray(parsed)) {
         console.log(`[users] loaded ${parsed.length} users from file`);
-        return parsed;
-      }
-      // If file contains a single user object, wrap it in array
-      if (parsed && typeof parsed === 'object') {
+        userList = parsed;
+      } else if (parsed && typeof parsed === 'object') {
         console.log('[users] loaded 1 user from file (single object)');
-        return [parsed];
+        userList = [parsed];
+      } else {
+        console.log('[users] empty file, using fallback');
+        return [];
       }
-      console.log('[users] empty file, using fallback');
-      return [];
+      
+      // Ajouter un ID aux utilisateurs qui n'en ont pas
+      userList = userList.map(user => {
+        if (!user.id) {
+          user.id = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          console.log(`[users] Generated ID for user ${user.username}: ${user.id}`);
+        }
+        return user;
+      });
+      
+      return userList;
     } else {
       console.log(`[users] USERS_FILE not found at ${USERS_FILE}, using fallback`);
     }
@@ -637,7 +648,7 @@ function loadUsers() {
   }
   // Default fallback: admin user
   console.log('[users] using default fallback admin user');
-  return [{ username: 'vhr', passwordHash: '$2b$10$ov9F32cIWWXhvNumETtB1urvsdD5Y4Wl6wXlSHoCy.f4f03kRGcf2', role: 'admin', email: 'admin@example.local', stripeCustomerId: null }];
+  return [{ id: 'admin', username: 'vhr', passwordHash: '$2b$10$ov9F32cIWWXhvNumETtB1urvsdD5Y4Wl6wXlSHoCy.f4f03kRGcf2', role: 'admin', email: 'admin@example.local', stripeCustomerId: null }];
 }
 
 let users = loadUsers();
@@ -902,7 +913,7 @@ app.post('/api/login', async (req, res) => {
   };
   res.cookie('vhr_token', token, cookieOptions);
   console.log('[api/login] cookie set with secure=' + !isLocalhost + ', maxAge=2h, isLocalhost=' + isLocalhost);
-  res.json({ ok: true, token, username: user.username, role: user.role, email: user.email || null });
+  res.json({ ok: true, token, userId: user.id, username: user.username, role: user.role, email: user.email || null });
 });
 
 // --- Route de logout (optionnelle, côté client il suffit de supprimer le token) ---
@@ -3278,6 +3289,7 @@ app.post('/api/register', async (req, res) => {
     if (getUserByUsername(username)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
     const passwordHash = await bcrypt.hash(password, 10);
     const newUser = { 
+      id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       username, 
       passwordHash, 
       role: 'user', 
@@ -3291,7 +3303,7 @@ app.post('/api/register', async (req, res) => {
     const token = jwt.sign({ username: newUser.username, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
     const cookieOptions = { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 2 * 60 * 60 * 1000 };
     res.cookie('vhr_token', token, cookieOptions);
-    res.json({ ok: true, token, username: newUser.username, role: newUser.role, email: newUser.email });
+    res.json({ ok: true, token, userId: newUser.id, username: newUser.username, role: newUser.role, email: newUser.email });
   } catch (e) {
     console.error('[api] register:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -3361,6 +3373,69 @@ app.get('/api/adb/devices', async (req, res) => {
       ok: false, 
       error: 'ADB not available or devices not connected',
       devices: []
+    });
+  }
+});
+
+/**
+ * POST /api/installer/check-permission - Vérifie si l'utilisateur peut installer l'app
+ */
+app.post('/api/installer/check-permission', async (req, res) => {
+  const { userId } = req.body;
+
+  try {
+    // Charger les données utilisateur
+    const users = loadUsers();
+    const user = users.find(u => u.id === userId);
+
+    if (!user) {
+      return res.status(401).json({ ok: false, error: 'User not found' });
+    }
+
+    // Charger les licences
+    const licenses = loadLicenses();
+
+    // Vérifier les types d'accès:
+    // 1. Abonnement actif
+    const hasActiveSubscription = user.subscriptionStatus === 'active';
+
+    // 2. Licence d'achat perpétuel
+    const hasPerpetualLicense = licenses.some(l => 
+      l.userId === userId && 
+      l.type === 'perpetual' && 
+      l.status === 'active'
+    );
+
+    // 3. Licence d'abonnement
+    const hasSubscriptionLicense = licenses.some(l => 
+      l.userId === userId && 
+      l.type === 'subscription' && 
+      l.status === 'active'
+    );
+
+    const canInstall = hasActiveSubscription || hasPerpetualLicense || hasSubscriptionLicense;
+    const installationType = hasPerpetualLicense ? 'perpetual' : 'subscription';
+
+    if (canInstall) {
+      console.log(`[Installer] Permission granted for user ${user.username} (${installationType})`);
+      return res.json({ 
+        ok: true, 
+        canInstall: true,
+        installationType,
+        message: `Accès ${installationType === 'perpetual' ? 'à vie' : 'abonnement'} actif`
+      });
+    } else {
+      console.log(`[Installer] Permission denied for user ${user.username} - no valid license`);
+      return res.json({ 
+        ok: false, 
+        error: 'You need an active subscription or license to install this app'
+      });
+    }
+  } catch (e) {
+    console.error('[Installer] Permission check error:', e.message);
+    res.status(500).json({ 
+      ok: false, 
+      error: 'Permission check failed: ' + e.message 
     });
   }
 });
