@@ -23,8 +23,8 @@ function createNavbar() {
 		<button id="toggleViewBtn" style="margin-right:15px;background:#2ecc71;color:#000;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			📊 Vue: Tableau
 		</button>
-		<button id="downloadBtn" style="margin-right:15px;background:#9b59b6;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
-			📥 Télécharger
+		<button id="favoritesBtn" style="margin-right:15px;background:#f39c12;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
+			⭐ Ajouter aux favoris
 		</button>
 		<button id="accountBtn" style="margin-right:15px;background:#3498db;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			👤 Mon Compte
@@ -35,7 +35,7 @@ function createNavbar() {
 	document.body.style.paddingTop = '56px';
 	
 	document.getElementById('toggleViewBtn').onclick = toggleView;
-	document.getElementById('downloadBtn').onclick = showDownloadPanel;
+	document.getElementById('favoritesBtn').onclick = addDashboardToFavorites;
 	document.getElementById('accountBtn').onclick = showAccountPanel;
 	updateUserUI();
 }
@@ -136,134 +136,21 @@ window.closeUserMenu = function() {
 };
 
 // ========== DOWNLOAD PANEL ========== 
-function showDownloadPanel() {
-	let panel = document.getElementById('downloadPanel');
-	if (panel) panel.remove();
+window.addDashboardToFavorites = function() {
+	// Add this page to browser bookmarks
+	const url = window.location.href;
+	const title = '🥽 VHR Dashboard PRO';
 	
-	panel = document.createElement('div');
-	panel.id = 'downloadPanel';
-	panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:2000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
-	panel.onclick = (e) => { if (e.target === panel) closeDownloadPanel(); };
-	
-	panel.innerHTML = `
-		<div style='background:#1a1d24;border:3px solid #9b59b6;border-radius:16px;padding:0;max-width:700px;width:90%;box-shadow:0 8px 32px #000;color:#fff;'>
-			<!-- Header -->
-			<div style='background:linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);padding:24px;border-radius:13px 13px 0 0;position:relative;'>
-				<button onclick='closeDownloadPanel()' style='position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;font-weight:bold;'>✕</button>
-				<div style='display:flex;align-items:center;gap:16px;'>
-					<div style='font-size:48px;'>📥</div>
-					<div>
-						<h2 style='margin:0;font-size:28px;color:#fff;'>Téléchargements</h2>
-						<p style='margin:6px 0 0 0;color:rgba(255,255,255,0.8);font-size:14px;'>Obtenez VHR Dashboard pour votre PC</p>
-					</div>
-				</div>
-			</div>
-			
-			<!-- Content -->
-			<div style='padding:32px;'>
-				<h3 style='color:#9b59b6;margin-bottom:20px;font-size:20px;'>💻 Dashboard Portable Windows</h3>
-				<div style='background:#23272f;padding:24px;border-radius:12px;margin-bottom:24px;'>
-					<p style='color:#ecf0f1;margin-bottom:16px;line-height:1.6;'>
-						<b style='color:#2ecc71;'>✅ Version complète et gratuite</b><br>
-						Le dashboard VHR complet avec toutes les fonctionnalités pour gérer vos casques VR localement.
-					</p>
-					<ul style='color:#95a5a6;margin:16px 0 20px 20px;line-height:1.8;'>
-						<li>✨ Interface moderne avec fond noir</li>
-						<li>📊 Vue tableau multi-casques</li>
-						<li>🎤 Fonction voix PC → Casque (TTS)</li>
-						<li>📶 WiFi automatique</li>
-						<li>🎮 Gestion complète des apps</li>
-						<li>📹 Streaming vidéo (Scrcpy)</li>
-						<li>👤 Gestion multi-utilisateurs</li>
-					</ul>
-					
-					<div style='background:#1a1d24;padding:16px;border-radius:8px;border:2px solid #2ecc71;margin-bottom:16px;'>
-						<div style='display:flex;align-items:center;gap:12px;margin-bottom:12px;'>
-							<span style='font-size:32px;'>📦</span>
-							<div style='flex:1;'>
-								<div style='color:#2ecc71;font-weight:bold;font-size:16px;'>VHR-Dashboard-Portable.zip</div>
-								<div style='color:#95a5a6;font-size:13px;'>Version complète • Prêt à l'emploi</div>
-							</div>
-						</div>
-						<button onclick='downloadDashboard()' style='width:100%;background:#2ecc71;color:#000;border:none;padding:16px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>
-							📥 Télécharger le Dashboard (ZIP)
-						</button>
-					</div>
-					
-					<div style='background:#1a1d24;padding:16px;border-radius:8px;border-left:4px solid #3498db;'>
-						<p style='color:#3498db;margin:0 0 8px 0;font-weight:bold;font-size:14px;'>ℹ️ Installation rapide :</p>
-						<ol style='color:#95a5a6;margin:0;padding-left:20px;line-height:1.6;font-size:13px;'>
-							<li>Téléchargez le fichier ZIP</li>
-							<li>Extrayez le contenu dans un dossier</li>
-							<li>Double-cliquez sur <code style='background:#23272f;padding:2px 6px;border-radius:4px;color:#2ecc71;'>VHR Dashboard.bat</code></li>
-							<li>Le dashboard s'ouvre automatiquement dans votre navigateur !</li>
-						</ol>
-					</div>
-				</div>
-				
-				<h3 style='color:#9b59b6;margin-bottom:16px;font-size:20px;'>📱 Démo APK Android (Casque VR)</h3>
-				<div style='background:#23272f;padding:24px;border-radius:12px;'>
-					<p style='color:#ecf0f1;margin-bottom:16px;line-height:1.6;'>
-						Application de démonstration à installer directement sur votre casque Quest.
-					</p>
-					<div style='display:grid;grid-template-columns:1fr 1fr;gap:12px;'>
-						<button onclick='downloadDemoZip()' style='background:#34495e;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;'>
-							📦 Télécharger ZIP
-						</button>
-						<button onclick='downloadDemoApk()' style='background:#34495e;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;'>
-							📲 Télécharger APK
-						</button>
-					</div>
-				</div>
-				
-				<div style='margin-top:24px;text-align:center;'>
-					<button onclick='closeDownloadPanel()' style='background:#e74c3c;color:#fff;border:none;padding:12px 32px;border-radius:8px;cursor:pointer;font-weight:bold;'>
-						❌ Fermer
-					</button>
-				</div>
-			</div>
-		</div>
-	`;
-	
-	document.body.appendChild(panel);
-}
-
-window.closeDownloadPanel = function() {
-	const panel = document.getElementById('downloadPanel');
-	if (panel) panel.remove();
-};
-
-window.downloadDashboard = async function() {
-	showToast('📥 Téléchargement en cours...', 'info');
-	
-	try {
-		// Créer le package si nécessaire
-		const checkRes = await fetch('/VHR-Dashboard-Portable.zip', { method: 'HEAD' });
-		
-		if (!checkRes.ok) {
-			showToast('⚠️ Génération du package...', 'info', 5000);
-			await fetch('/api/package-dashboard', { method: 'POST' });
-			await new Promise(resolve => setTimeout(resolve, 2000));
-		}
-		
-		// Télécharger le fichier
-		window.location.href = '/download/dashboard';
-		showToast('✅ Téléchargement lancé !', 'success');
-		incrementStat('totalSessions'); // Compter comme une action
-	} catch (e) {
-		console.error('Download error:', e);
-		showToast('❌ Erreur de téléchargement', 'error');
+	if (window.sidebar && window.sidebar.addPanel) {
+		// Firefox
+		window.sidebar.addPanel(title, url, '');
+	} else if (window.external && window.external.AddFavorite) {
+		// Internet Explorer
+		window.external.AddFavorite(url, title);
+	} else {
+		// Autres navigateurs - affiche instruction
+		showToast('⭐ Appuyez sur Ctrl+D pour ajouter aux favoris', 'info', 4000);
 	}
-};
-
-window.downloadDemoZip = function() {
-	window.location.href = '/downloads/vhr-dashboard-demo.zip';
-	showToast('📦 Téléchargement du ZIP...', 'success');
-};
-
-window.downloadDemoApk = function() {
-	window.location.href = '/vhr-dashboard-demo.apk';
-	showToast('📲 Téléchargement de l\'APK...', 'success');
 };
 
 // ========== MON COMPTE PANEL ========== 
