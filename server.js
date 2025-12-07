@@ -3473,12 +3473,20 @@ app.post('/api/android/compile', async (req, res) => {
     console.log(`[Android] Executing: ${buildCommand}`);
 
     // Compiler avec un timeout très long pour la première build
+    const env = {
+      ...process.env,
+      JAVA_HOME: process.env.JAVA_HOME || 'C:\\Java\\jdk-11.0.29+7',
+      PATH: (process.env.JAVA_HOME || 'C:\\Java\\jdk-11.0.29+7') + '\\bin;C:\\Gradle\\gradle-8.7\\bin;' + process.env.PATH
+    };
+    
     const { stdout, stderr } = await execp(
       buildCommand,
       { 
         cwd: appDir, 
         maxBuffer: 50 * 1024 * 1024,  // 50MB buffer
-        timeout: 900000  // 15 minutes
+        timeout: 1800000,  // 30 minutes (première build peut être longue)
+        env: env,
+        shell: true  // Important: permet aux variables d'environnement d'être propagées sur Windows
       }
     );
 
@@ -3517,7 +3525,11 @@ app.post('/api/android/compile', async (req, res) => {
     let errorMsg = e.message;
     let helpText = '';
     
-    if (e.message.includes('gradle') || e.message.includes('Gradle') || e.message.includes('not found')) {
+    // Erreurs vraies de Gradle/Java non trouvé
+    if (e.message.includes('ENOENT') || 
+        e.message.includes('not found') && e.message.includes('gradlew') ||
+        e.message.includes('java: command not found') ||
+        e.message.includes('gradle: command not found')) {
       errorMsg = 'Gradle ou Java JDK non trouvé sur le système';
       helpText = '\n\n🚀 SOLUTION RAPIDE:\n' +
                  'Téléchargez et exécutez le script d\'installation automatique:\n' +
@@ -3531,11 +3543,15 @@ app.post('/api/android/compile', async (req, res) => {
       errorMsg = 'JAVA_HOME non configuré';
       helpText = '\n\n📖 CORRECTION:\n' +
                  '1. Installez Java JDK 11+: https://adoptium.net/\n' +
-                 '2. Définissez JAVA_HOME = "C:\\Program Files\\Eclipse Adoptium\\jdk-11" (ou votre chemin)\n' +
+                 '2. Définissez JAVA_HOME = "C:\\Java\\jdk-11.0.29+7"\n' +
                  '3. Redémarrez le serveur';
     } else if (e.message.includes('timeout')) {
       errorMsg = 'La compilation a dépassé le délai imparti';
-      helpText = '\n\nℹ️  La première compilation peut prendre 5-15 minutes. Réessayez.';
+      helpText = '\n\nℹ️  La première compilation peut prendre 10-20 minutes. Réessayez.';
+    } else if (e.message.includes('plugin') || e.message.includes('Plugin')) {
+      // Les plugins manquants sont téléchargés à la première build
+      errorMsg = 'Les dépendances Android sont en cours de téléchargement...';
+      helpText = '\n\nℹ️  Relancez la compilation dans 2-3 minutes. Cela peut prendre du temps la première fois.';
     }
     
     res.status(500).json({ 
