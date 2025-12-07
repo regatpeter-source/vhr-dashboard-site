@@ -54,6 +54,7 @@ app.use(cookieParser());
 // ========== CONFIGURATION MANAGEMENT ==========
 const subscriptionConfig = require('./config/subscription.config');
 const purchaseConfig = require('./config/purchase.config');
+const demoConfig = require('./config/demo.config');
 const emailService = require('./services/emailService');
 
 // Initialize email service
@@ -3389,18 +3390,22 @@ app.post('/api/android/compile', async (req, res) => {
       ? path.join(appDir, 'gradlew.bat')
       : path.join(appDir, 'gradlew');
 
-    // Vérifier que gradlew existe
-    if (!fs.existsSync(gradleCmd)) {
-      return res.status(500).json({ 
-        ok: false, 
-        error: 'Gradle wrapper not found. Run "gradle wrapper" first.' 
-      });
+    // Essayer les commandes de build dans cet ordre
+    let buildCommand = null;
+    const buildTarget = buildType === 'release' ? 'assembleRelease' : 'assembleDebug';
+    
+    // Option 1: gradlew (wrapper)
+    if (fs.existsSync(gradleCmd)) {
+      buildCommand = `"${gradleCmd}" ${buildTarget}`;
+    }
+    // Option 2: gradle command directement
+    else {
+      buildCommand = `gradle ${buildTarget}`;
     }
 
     // Compiler
-    const buildTarget = buildType === 'release' ? 'assembleRelease' : 'assembleDebug';
     const { stdout, stderr } = await execp(
-      `"${gradleCmd}" ${buildTarget}`,
+      buildCommand,
       { cwd: appDir, maxBuffer: 10 * 1024 * 1024, timeout: 600000 } // 10min timeout
     );
 
