@@ -3386,27 +3386,39 @@ app.post('/api/android/compile', async (req, res) => {
 
     // Déterminer la commande selon le système d'exploitation
     const isWindows = process.platform === 'win32';
-    const gradleCmd = isWindows 
-      ? path.join(appDir, 'gradlew.bat')
-      : path.join(appDir, 'gradlew');
-
-    // Essayer les commandes de build dans cet ordre
-    let buildCommand = null;
     const buildTarget = buildType === 'release' ? 'assembleRelease' : 'assembleDebug';
     
-    // Option 1: gradlew (wrapper)
-    if (fs.existsSync(gradleCmd)) {
-      buildCommand = `"${gradleCmd}" ${buildTarget}`;
-    }
-    // Option 2: gradle command directement
-    else {
-      buildCommand = `gradle ${buildTarget}`;
+    let buildCommand;
+    
+    if (isWindows) {
+      // Sur Windows, essayer gradlew.bat d'abord
+      const gradlewBat = path.join(appDir, 'gradlew.bat');
+      if (fs.existsSync(gradlewBat)) {
+        buildCommand = `"${gradlewBat}" ${buildTarget}`;
+      } else {
+        // Sinon utiliser gradle directement
+        buildCommand = `gradle ${buildTarget}`;
+      }
+    } else {
+      // Sur Unix, essayer gradlew d'abord
+      const gradlew = path.join(appDir, 'gradlew');
+      if (fs.existsSync(gradlew)) {
+        buildCommand = `"${gradlew}" ${buildTarget}`;
+      } else {
+        buildCommand = `gradle ${buildTarget}`;
+      }
     }
 
-    // Compiler
+    console.log(`[Android] Executing: ${buildCommand}`);
+
+    // Compiler avec un timeout très long pour la première build
     const { stdout, stderr } = await execp(
       buildCommand,
-      { cwd: appDir, maxBuffer: 10 * 1024 * 1024, timeout: 600000 } // 10min timeout
+      { 
+        cwd: appDir, 
+        maxBuffer: 50 * 1024 * 1024,  // 50MB buffer
+        timeout: 900000  // 15 minutes
+      }
     );
 
     // Vérifier que l'APK a été créé
@@ -3415,6 +3427,8 @@ app.post('/api/android/compile', async (req, res) => {
       : path.join(appDir, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
 
     if (!fs.existsSync(apkPath)) {
+      console.error('[Android] APK not found at:', apkPath);
+      console.error('[Android] Build stderr:', stderr.substring(0, 1000));
       return res.status(500).json({ 
         ok: false, 
         error: 'APK compilation failed: output file not found',
@@ -3437,9 +3451,20 @@ app.post('/api/android/compile', async (req, res) => {
 
   } catch (e) {
     console.error('[Android] Build error:', e.message);
+    
+    // Fournir des messages d'aide utiles
+    let errorMsg = e.message;
+    if (e.message.includes('gradle') || e.message.includes('Gradle')) {
+      errorMsg = 'Gradle not found. Install Gradle, Android Studio, or run: gradle wrapper';
+    } else if (e.message.includes('JAVA_HOME')) {
+      errorMsg = 'JAVA_HOME not set. Please install Java JDK and set JAVA_HOME environment variable.';
+    } else if (e.message.includes('timeout')) {
+      errorMsg = 'Compilation timeout. First build may take 5-15 minutes. Please try again.';
+    }
+    
     res.status(500).json({ 
       ok: false, 
-      error: 'Compilation failed: ' + e.message.substring(0, 200)
+      error: 'Compilation failed: ' + errorMsg.substring(0, 300)
     });
   }
 });
