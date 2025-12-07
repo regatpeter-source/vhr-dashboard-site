@@ -26,6 +26,7 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com', 'https://*.gstatic.com'],
+      scriptSrcAttr: ["'unsafe-inline'"],
       // CSP Level 3: script/style element-specific directives
       scriptSrcElem: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com', 'https://*.gstatic.com'],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://*.gstatic.com', 'https://*.google.com'],
@@ -572,6 +573,24 @@ function saveUsers() {
     console.error('[users] save error', e && e.message);
     return false;
   }
+}
+
+// ========== DEMO STATUS MANAGEMENT ========== 
+function getDemoStatus() {
+  const DEMO_START = new Date('2025-12-07T00:00:00Z').getTime();
+  const DEMO_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+  const DEMO_END = DEMO_START + DEMO_DURATION;
+  
+  const now = Date.now();
+  const daysRemaining = Math.ceil((DEMO_END - now) / (24 * 60 * 60 * 1000));
+  const isExpired = now > DEMO_END;
+  
+  return {
+    isExpired,
+    daysRemaining: Math.max(0, daysRemaining),
+    expiresAt: new Date(DEMO_END).toISOString(),
+    message: isExpired ? 'Demo expiré' : `Essai gratuit - ${Math.max(0, daysRemaining)} jour(s) restant(s)`
+  };
 }
 
 function loadUsers() {
