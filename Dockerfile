@@ -7,12 +7,24 @@ ENV PATH=$JAVA_HOME/bin:$PATH
 ENV GRADLE_HOME=/opt/gradle/gradle-8.7
 ENV PATH=$GRADLE_HOME/bin:$PATH
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \
+  wget \
+  gnupg \
+  ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+# Add Eclipse Adoptium repository for Java
+RUN wget -qO - https://packages.adoptium.net/adoptium.asc | apt-key add - && \
+  echo "deb https://packages.adoptium.net/adoptium jammy main" > /etc/apt/sources.list.d/adoptium.list
+
+# Update and install dependencies including Java and build tools
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \
   adb \
   ffmpeg \
   scrcpy \
   temurin-11-jdk \
-  wget \
   unzip \
   && rm -rf /var/lib/apt/lists/*
 
@@ -20,7 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mkdir -p /opt/gradle && \
   cd /opt/gradle && \
   wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip && \
-  unzip gradle-8.7-bin.zip && \
+  unzip -q gradle-8.7-bin.zip && \
   rm gradle-8.7-bin.zip && \
   ln -s gradle-8.7 current
 
