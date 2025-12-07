@@ -655,11 +655,8 @@ function showToast(msg, type='info', duration=3000) {
 
 // ========== INIT USER ========== 
 if (!currentUser) {
-	setTimeout(() => {
-		const name = prompt('Bienvenue ! Entrez votre nom d\'utilisateur :');
-		if (name && name.trim()) setUser(name.trim());
-		else setUser('Invité');
-	}, 300);
+	// Don't auto-create guest user - force login/register
+	setUser(null);
 }
 
 // ========== API & DATA ========== 
@@ -1466,8 +1463,252 @@ window.activateLicense = async function() {
 	}
 };
 
+// ========== MANDATORY AUTHENTICATION ========== 
+window.showAuthModal = function(mode = 'login') {
+	// Hide all dashboard content
+	const dashboard = document.getElementById('dashboard');
+	if (dashboard) dashboard.style.display = 'none';
+	
+	let modal = document.getElementById('authModal');
+	if (modal) modal.remove();
+	
+	modal = document.createElement('div');
+	modal.id = 'authModal';
+	modal.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.95);z-index:3000;display:flex;align-items:center;justify-content:center;';
+	
+	const isLogin = mode === 'login';
+	
+	modal.innerHTML = `
+		<div style="background:linear-gradient(135deg, #1a1d24, #2c3e50);max-width:500px;width:90%;border-radius:16px;padding:40px;color:#fff;box-shadow:0 8px 32px #000;">
+			<div style="text-align:center;margin-bottom:32px;">
+				<h2 style="color:#2ecc71;margin:0 0 8px 0;font-size:32px;">🥽 VHR Dashboard</h2>
+				<p style="color:#95a5a6;margin:0;font-size:14px;">Authentification obligatoire pour commencer</p>
+			</div>
+			
+			<!-- Tabs -->
+			<div style="display:flex;margin-bottom:24px;gap:12px;">
+				<button onclick="switchAuthTab('login')" id="loginTab" style="flex:1;padding:12px;background:${isLogin ? '#2ecc71' : '#34495e'};color:${isLogin ? '#000' : '#fff'};border:none;border-radius:8px;cursor:pointer;font-weight:bold;transition:all 0.3s;">
+					🔐 Connexion
+				</button>
+				<button onclick="switchAuthTab('register')" id="registerTab" style="flex:1;padding:12px;background:${isLogin ? '#34495e' : '#2ecc71'};color:${isLogin ? '#fff' : '#000'};border:none;border-radius:8px;cursor:pointer;font-weight:bold;transition:all 0.3s;">
+					📝 Inscription
+				</button>
+			</div>
+			
+			<!-- Login Form -->
+			<div id="loginForm" style="display:${isLogin ? 'block' : 'none'};">
+				<div style="margin-bottom:16px;">
+					<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Email</label>
+					<input type="email" id="loginEmail" placeholder="votre@email.com" style="width:100%;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+				</div>
+				<div style="margin-bottom:20px;">
+					<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Mot de passe</label>
+					<input type="password" id="loginPassword" placeholder="••••••••" style="width:100%;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+				</div>
+				<button onclick="loginUser()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
+					🔐 Se connecter
+				</button>
+				<div style="margin-top:12px;text-align:center;color:#95a5a6;font-size:12px;">
+					Pas encore inscrit ? <span style="color:#2ecc71;cursor:pointer;" onclick="switchAuthTab('register')">Créer un compte</span>
+				</div>
+			</div>
+			
+			<!-- Register Form -->
+			<div id="registerForm" style="display:${isLogin ? 'none' : 'block'};">
+				<div style="margin-bottom:16px;">
+					<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Nom d'utilisateur</label>
+					<input type="text" id="registerUsername" placeholder="Mon nom" style="width:100%;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+				</div>
+				<div style="margin-bottom:16px;">
+					<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Email</label>
+					<input type="email" id="registerEmail" placeholder="votre@email.com" style="width:100%;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+				</div>
+				<div style="margin-bottom:20px;">
+					<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Mot de passe</label>
+					<input type="password" id="registerPassword" placeholder="••••••••" style="width:100%;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+				</div>
+				<button onclick="registerUser()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
+					📝 S'inscrire
+				</button>
+				<div style="margin-top:12px;text-align:center;color:#95a5a6;font-size:12px;">
+					Déjà inscrit ? <span style="color:#2ecc71;cursor:pointer;" onclick="switchAuthTab('login')">Se connecter</span>
+				</div>
+			</div>
+			
+			<!-- Trial Info -->
+			<div style="margin-top:24px;padding:16px;background:#34495e;border-radius:8px;border-left:4px solid #f39c12;">
+				<p style="margin:0;color:#f39c12;font-size:13px;font-weight:bold;">⏱️ Essai gratuit : 7 jours après inscription</p>
+				<p style="margin:6px 0 0 0;color:#95a5a6;font-size:12px;">Accès complet pendant 7 jours. Puis choisir abonnement ou licence.</p>
+			</div>
+		</div>
+	`;
+	
+	document.body.appendChild(modal);
+};
+
+window.switchAuthTab = function(tab) {
+	const isLogin = tab === 'login';
+	document.getElementById('loginTab').style.background = isLogin ? '#2ecc71' : '#34495e';
+	document.getElementById('loginTab').style.color = isLogin ? '#000' : '#fff';
+	document.getElementById('registerTab').style.background = isLogin ? '#34495e' : '#2ecc71';
+	document.getElementById('registerTab').style.color = isLogin ? '#fff' : '#000';
+	
+	document.getElementById('loginForm').style.display = isLogin ? 'block' : 'none';
+	document.getElementById('registerForm').style.display = isLogin ? 'none' : 'block';
+};
+
+window.loginUser = async function() {
+	const email = document.getElementById('loginEmail').value.trim();
+	const password = document.getElementById('loginPassword').value;
+	
+	if (!email || !password) {
+		showToast('❌ Email et mot de passe requis', 'error');
+		return;
+	}
+	
+	showToast('🔄 Connexion en cours...', 'info');
+	
+	try {
+		const res = await fetch('/api/auth/login', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			credentials: 'include', // Important: send cookies
+			body: JSON.stringify({ email, password })
+		});
+		
+		const data = await res.json();
+		
+		if (res.ok && data.ok) {
+			// JWT token is now in httpOnly cookie
+			showToast('✅ Connecté avec succès !', 'success');
+			
+			// Set the username from response
+			currentUser = data.user.name || data.user.email;
+			localStorage.setItem('vhr_current_user', currentUser);
+			
+			// Close auth modal and show dashboard
+			const modal = document.getElementById('authModal');
+			if (modal) modal.remove();
+			
+			const dashboard = document.getElementById('dashboard');
+			if (dashboard) dashboard.style.display = 'block';
+			
+			// Initialize dashboard
+			setTimeout(() => {
+				loadDevices();
+				checkLicense();
+			}, 200);
+		} else {
+			showToast('❌ ' + (data.error || 'Connexion échouée'), 'error');
+		}
+	} catch (e) {
+		console.error('[auth] login error:', e);
+		showToast('❌ Erreur de connexion', 'error');
+	}
+};
+
+window.registerUser = async function() {
+	const username = document.getElementById('registerUsername').value.trim();
+	const email = document.getElementById('registerEmail').value.trim();
+	const password = document.getElementById('registerPassword').value;
+	
+	if (!username || !email || !password) {
+		showToast('❌ Tous les champs sont requis', 'error');
+		return;
+	}
+	
+	if (password.length < 6) {
+		showToast('❌ Le mot de passe doit contenir au moins 6 caractères', 'error');
+		return;
+	}
+	
+	showToast('📝 Création de compte...', 'info');
+	
+	try {
+		const res = await fetch('/api/auth/register', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			credentials: 'include', // Important: send cookies
+			body: JSON.stringify({ username, email, password })
+		});
+		
+		const data = await res.json();
+		
+		if (res.ok && data.ok) {
+			// JWT token is now in httpOnly cookie
+			// Trial period starts now
+			const trialStart = new Date();
+			localStorage.setItem('vhr_trial_start_' + username, trialStart.toISOString());
+			
+			showToast('✅ Compte créé ! Essai 7 jours activé 🎉', 'success');
+			
+			// Set the username
+			currentUser = username;
+			localStorage.setItem('vhr_current_user', currentUser);
+			
+			// Close auth modal and show dashboard
+			const modal = document.getElementById('authModal');
+			if (modal) modal.remove();
+			
+			const dashboard = document.getElementById('dashboard');
+			if (dashboard) dashboard.style.display = 'block';
+			
+			// Initialize dashboard
+			setTimeout(() => {
+				loadDevices();
+				checkLicense();
+			}, 200);
+		} else {
+			showToast('❌ ' + (data.error || 'Inscription échouée'), 'error');
+		}
+	} catch (e) {
+		console.error('[auth] register error:', e);
+		showToast('❌ Erreur lors de l\'inscription', 'error');
+	}
+};
+
+// ========== CHECK JWT ON LOAD ========== 
+async function checkJWTAuth() {
+	try {
+		const res = await api('/api/me');
+		
+		if (res && res.ok && res.user) {
+			// User is authenticated
+			currentUser = res.user.name || res.user.email;
+			localStorage.setItem('vhr_current_user', currentUser);
+			return true;
+		} else {
+			// No valid JWT - show auth modal
+			showAuthModal('login');
+			return false;
+		}
+	} catch (e) {
+		console.error('[auth] JWT check error:', e);
+		showAuthModal('login');
+		return false;
+	}
+}
+
+
 // ========== INIT ========== 
 console.log('[Dashboard PRO] Init');
-createNavbar();
-checkLicense();
-loadDevices();
+
+// Wrap dashboard content in a container that can be hidden
+const htmlContent = document.documentElement.innerHTML;
+if (!document.getElementById('dashboard')) {
+	const wrapper = document.createElement('div');
+	wrapper.id = 'dashboard';
+	// Move everything into wrapper
+	document.body.innerHTML = htmlContent;
+}
+
+// Check JWT authentication FIRST
+checkJWTAuth().then(isAuth => {
+	if (isAuth) {
+		// User is authenticated - create navbar and load data
+		createNavbar();
+		checkLicense();
+		loadDevices();
+	}
+	// else: Auth modal is already shown by checkJWTAuth()
+});
