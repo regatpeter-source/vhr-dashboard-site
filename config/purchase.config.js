@@ -1,83 +1,100 @@
 /**
  * Configuration des achats définitifs (paiement unique)
- * Définit les options d'achat permanent sans abonnement
+ * Licence perpétuelle unique: 499€ TTC pour tous
  */
 
 module.exports = {
-  // Options d'achat définitif (paiement unique)
+  // Option d'achat définitif unique
   PURCHASE_OPTIONS: {
-    // Accès perpétuel - Version Pro
-    PERPETUAL_PRO: {
-      id: 'purchase_perpetual_pro',
-      name: 'VHR Dashboard - Accès Pro Perpétuel',
-      description: 'Accès perpétuel à VHR Dashboard version Professional',
-      price: 299.99, // EUR
+    // Licence perpétuelle - Accès à vie
+    PERPETUAL: {
+      id: 'perpetual_pro',
+      name: 'VHR Dashboard - Licence à Vie',
+      description: 'Accès perpétuel à VHR Dashboard - 499€ TTC unique',
+      price: 499.00, // EUR TTC (paiement unique)
       currency: 'EUR',
       billingPeriod: 'once',
-      stripePriceId: process.env.STRIPE_PRICE_ID_PERPETUAL_PRO || 'price_1QeNjQJq3YJ6xXXXXXXXXXXX',
+      stripePriceId: process.env.STRIPE_PRICE_ID_PERPETUAL || 'price_1Qa0ZBXXXXXXXXXXXXXXXX', // À remplacer par votre ID réel Stripe
       features: [
         'Accès perpétuel (jamais expirer)',
-        'Version Professional',
-        'Jusqu\'à 50 utilisateurs',
-        'Mises à jour incluses pendant 1 an',
-        'Support par email pendant 1 an',
-        'API personnalisée',
-        'Intégrations Zapier',
-        'Rapports personnalisés'
-      ],
-      limits: {
-        maxUsers: 50,
-        maxDataPoints: 50000,
-        storageGB: 50,
-        apiCallsPerDay: 10000
-      },
-      license: {
-        duration: 'perpetual',
-        updatesCoveredMonths: 12,
-        supportCoveredMonths: 12
-      }
-    },
-
-    // Accès perpétuel - Version Enterprise
-    PERPETUAL_ENTERPRISE: {
-      id: 'purchase_perpetual_enterprise',
-      name: 'VHR Dashboard - Accès Enterprise Perpétuel',
-      description: 'Accès perpétuel à VHR Dashboard version Enterprise',
-      price: 999.99, // EUR
-      currency: 'EUR',
-      billingPeriod: 'once',
-      stripePriceId: process.env.STRIPE_PRICE_ID_PERPETUAL_ENTERPRISE || 'price_1QeNjRJq3YJ6xXXXXXXXXXXX',
-      features: [
-        'Accès perpétuel (jamais expirer)',
-        'Version Enterprise complète',
-        'Utilisateurs illimités',
+        'Accès complet VHR Dashboard',
+        'Gestion de casques VR illimitée',
+        'Streaming vidéo (Scrcpy)',
+        'WiFi automatique',
+        'Voix PC → Casque (TTS)',
+        'Gestion des apps',
         'Mises à jour incluses à vie',
-        'Support prioritaire pendant 2 ans',
-        'SSO (Single Sign-On)',
-        'API illimitée',
-        'Support technique personnel',
-        'SLA garanti 99.9%',
-        'Serveur dédié optionnel'
+        'Support utilisateur prioritaire'
       ],
       limits: {
         maxUsers: -1, // Illimité
-        maxDataPoints: -1,
-        storageGB: -1,
-        apiCallsPerDay: -1
+        maxDataPoints: -1, // Illimité
+        storageGB: -1, // Illimité
+        apiCallsPerDay: -1 // Illimité
       },
       license: {
         duration: 'perpetual',
         updatesCoveredMonths: -1, // Illimité
-        supportCoveredMonths: 24
+        supportCoveredMonths: -1 // Illimité
       }
+    }
+  },
+
+  // Templates d'email pour les notifications
+  EMAIL_TEMPLATES: {
+    PURCHASE_CONFIRMATION: {
+      subject: '✅ Votre licence VHR Dashboard est activée',
+      title: 'Achat confirmé',
+      greeting: 'Bonjour {username},',
+      content: `
+Merci pour votre achat ! Votre licence VHR Dashboard à vie est maintenant activée.
+
+**Détails de votre achat:**
+- **Licence:** VHR Dashboard - Licence à Vie
+- **Prix:** 499€ TTC
+- **Date d'achat:** {purchaseDate}
+- **Clé de licence:** {licenseKey}
+- **Accès:** Perpétuel (à vie)
+
+**Accéder au dashboard:**
+{dashboardUrl}
+
+Votre licence est immédiatement opérationnelle. Vous pouvez commencer à utiliser VHR Dashboard maintenant.
+
+Questions? Contactez le support: {supportEmail}
+      `
     },
 
-    // Pack 1 an - Toutes mises à jour
-    ANNUAL_PRO: {
-      id: 'purchase_annual_pro',
-      name: 'VHR Dashboard - Pack Annuel Pro',
-      description: 'Accès 1 an à VHR Dashboard Professional avec toutes les mises à jour',
-      price: 99.99, // EUR
+    PURCHASE_RECEIPT: {
+      subject: '🧾 Reçu de votre achat VHR Dashboard',
+      title: 'Reçu d\'achat',
+      greeting: 'Bonjour {username},',
+      content: `
+Voici votre reçu d'achat:
+
+**Produit:** VHR Dashboard - Licence à Vie
+**Montant:** 499,00€ TTC
+**Date:** {purchaseDate}
+**Transaction ID:** {transactionId}
+**Clé de licence:** {licenseKey}
+
+Conservez ce reçu pour vos dossiers. Votre licence n'expire jamais.
+
+Pour gérer votre compte: {accountUrl}
+
+Merci d'avoir choisi VHR Dashboard!
+      `
+    }
+  },
+
+  // Configuration des licences
+  LICENSE: {
+    KEY_LENGTH: 32,
+    KEY_FORMAT: 'VHR-XXXX-XXXX-XXXX-XXXX', // Format d'affichage
+    EXPIRATION_REMINDER_DAYS: 30, // N/A pour perpétuel
+    AUTO_RENEWAL_REMINDER_DAYS: 0 // N/A pour perpétuel
+  }
+};
       currency: 'EUR',
       billingPeriod: 'annual',
       stripePriceId: process.env.STRIPE_PRICE_ID_ANNUAL_PRO || 'price_1QeNjSJq3YJ6xXXXXXXXXXXX',
