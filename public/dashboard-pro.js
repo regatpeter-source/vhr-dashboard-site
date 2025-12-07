@@ -1004,12 +1004,15 @@ window.showAppsDialog = async function(device) {
 	const res = await api(`/api/apps/${device.serial}`);
 	if (!res.ok) return showToast('❌ Erreur chargement apps', 'error');
 	const apps = res.apps || [];
+	const favs = JSON.parse(localStorage.getItem('vhr_favorites_' + device.serial) || '[]');
 	let html = `<h3 style='color:#2ecc71;'>Apps installées sur ${device.name}</h3>`;
 	html += `<div style='max-height:400px;overflow-y:auto;'>`;
 	apps.forEach(pkg => {
-		html += `<div style='padding:8px;margin:4px 0;background:#23272f;border-radius:6px;'>
-			<span style='color:#fff;'>${pkg}</span>
-			<button onclick="launchApp('${device.serial}','${pkg}')" style='float:right;background:#2ecc71;color:#000;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;'>▶️ Lancer</button>
+		const isFav = favs.includes(pkg);
+		html += `<div style='padding:8px;margin:4px 0;background:#23272f;border-radius:6px;display:flex;justify-content:space-between;align-items:center;'>
+			<span style='color:#fff;flex:1;'>${pkg}</span>
+			<button onclick="toggleFavorite('${device.serial}','${pkg}')" style='background:${isFav ? '#f39c12' : '#555'};color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-weight:bold;margin-right:4px;'>⭐</button>
+			<button onclick="launchApp('${device.serial}','${pkg}')" style='background:#2ecc71;color:#000;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;'>▶️ Lancer</button>
 		</div>`;
 	});
 	html += `</div>`;
@@ -1028,6 +1031,22 @@ window.launchApp = async function(serial, pkg) {
 	}
 	else showToast('❌ Erreur lancement', 'error');
 	closeModal();
+};
+
+window.toggleFavorite = function(serial, pkg) {
+	const favs = JSON.parse(localStorage.getItem('vhr_favorites_' + serial) || '[]');
+	const idx = favs.indexOf(pkg);
+	if (idx >= 0) {
+		favs.splice(idx, 1);
+		showToast('⭐ Retiré des favoris', 'info');
+	} else {
+		favs.push(pkg);
+		showToast('⭐ Ajouté aux favoris', 'success');
+	}
+	localStorage.setItem('vhr_favorites_' + serial, JSON.stringify(favs));
+	// Rafraîchir la liste sans fermer la modal
+	const device = { serial, name: 'Device' };
+	showAppsDialog(device);
 };
 
 window.showFavoritesDialog = async function(device) {
