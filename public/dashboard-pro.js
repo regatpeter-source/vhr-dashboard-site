@@ -1153,7 +1153,7 @@ window.showUnlockModal = function(status = licenseStatus) {
 			<div style="background:#2c3e50;padding:24px;border-radius:12px;margin:20px 0;border:2px solid #3498db;">
 				<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
 					<h3 style="color:#3498db;margin:0;">💳 Abonnement Mensuel</h3>
-					<span style="font-size:28px;font-weight:bold;color:#2ecc71;">9,99€<span style="font-size:14px;color:#95a5a6;">/mois</span></span>
+					<span style="font-size:28px;font-weight:bold;color:#2ecc71;">29€<span style="font-size:14px;color:#95a5a6;">/mois TTC</span></span>
 				</div>
 				<ul style="color:#ecf0f1;line-height:1.8;margin:12px 0;">
 					<li>✅ Toutes les fonctionnalités</li>
@@ -1170,7 +1170,7 @@ window.showUnlockModal = function(status = licenseStatus) {
 			<div style="background:#2c3e50;padding:24px;border-radius:12px;margin:20px 0;border:2px solid #2ecc71;">
 				<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
 					<h3 style="color:#2ecc71;margin:0;">🎯 Licence à Vie</h3>
-					<span style="font-size:28px;font-weight:bold;color:#2ecc71;">49,99€<span style="font-size:14px;color:#95a5a6;">/unique</span></span>
+					<span style="font-size:28px;font-weight:bold;color:#2ecc71;">499€<span style="font-size:14px;color:#95a5a6;">/unique TTC</span></span>
 				</div>
 				<ul style="color:#ecf0f1;line-height:1.8;margin:12px 0;">
 					<li>✅ Licence perpétuelle (à vie)</li>
