@@ -2098,12 +2098,27 @@ async function startStream(serial, opts = {}) {
 
   const adbProc = spawn('adb', adbArgs);
 
-  const entry = streams.get(serial) || { clients: new Set(), mpeg1Clients: new Set() };
+  const entry = streams.get(serial) || { clients: new Set(), mpeg1Clients: new Set(), h264Clients: new Set() };
   entry.adbProc = adbProc;
   entry.shouldRun = true;
   entry.autoReconnect = Boolean(opts.autoReconnect);
   streams.set(serial, entry);
 
+  // ---------- Pipeline H264 direct (no re-encoding = no flicker!) ----------
+  // Pass H264 directly from ADB to WebSocket clients
+  // This eliminates the need for FFmpeg re-encoding and dramatically reduces CPU usage and latency
+  adbProc.stdout.on('data', chunk => {
+    // Send H264 frames directly to all connected WebSocket clients
+    for (const ws of entry.h264Clients || []) {
+      if (ws.readyState === 1) {
+        try { ws.send(chunk) } catch {}
+      }
+    }
+  });
+
+  // Keep the old MPEG1 pipeline commented for reference
+  // If we ever need MPEG1 again, just uncomment and spawn ffmpeg
+  /*
   // ---------- Pipeline JSMpeg (MPEG1) ultra-low-latency ----------
   // ffmpeg: H264 (adb) -> MPEG1-TS (JSMpeg) avec tous les flags de faible latence
   const ffmpegArgs = [
@@ -2142,12 +2157,13 @@ async function startStream(serial, opts = {}) {
       }
     }
   });
+  */
 
   adbProc.on('exit', code => {
     console.log(`[adb] EXIT code=${code}`);
     const ent = streams.get(serial);
     if (!ent) return cleanup();
-    const stillHasViewers = (ent.clients && ent.clients.size > 0) || (ent.mpeg1Clients && ent.mpeg1Clients.size > 0);
+    const stillHasViewers = (ent.clients && ent.clients.size > 0) || (ent.h264Clients && ent.h264Clients.size > 0) || (ent.mpeg1Clients && ent.mpeg1Clients.size > 0);
     if (ent.shouldRun && ent.autoReconnect && stillHasViewers) {
       console.log(`[server] ­ƒöä Auto-restart in 3s...`);
       cleanup();
@@ -2229,17 +2245,17 @@ server.on('upgrade', (req, res, head) => {
       }
 
       wssMpeg1.handleUpgrade(req, res, head, (ws) => {
-        entry.mpeg1Clients.add(ws);
-        console.log(`[WebSocket] Client connected to stream ${serial}, total clients: ${entry.mpeg1Clients.size}`);
+        entry.h264Clients.add(ws);
+        console.log(`[WebSocket] H264 Client connected to stream ${serial}, total clients: ${entry.h264Clients.size}`);
         
         ws.on('close', () => {
-          entry.mpeg1Clients.delete(ws);
-          console.log(`[WebSocket] Client disconnected from stream ${serial}, remaining: ${entry.mpeg1Clients.size}`);
+          entry.h264Clients.delete(ws);
+          console.log(`[WebSocket] H264 Client disconnected from stream ${serial}, remaining: ${entry.h264Clients.size}`);
         });
 
         ws.on('error', (err) => {
           console.error(`[WebSocket] Error on stream ${serial}:`, err.message);
-          entry.mpeg1Clients.delete(ws);
+          entry.h264Clients.delete(ws);
         });
       });
     } catch (err) {
