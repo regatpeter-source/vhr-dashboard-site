@@ -1465,10 +1465,6 @@ window.activateLicense = async function() {
 
 // ========== MANDATORY AUTHENTICATION ========== 
 window.showAuthModal = function(mode = 'login') {
-	// Hide all dashboard content
-	const dashboard = document.getElementById('dashboard');
-	if (dashboard) dashboard.style.display = 'none';
-	
 	let modal = document.getElementById('authModal');
 	if (modal) modal.remove();
 	
@@ -1586,17 +1582,15 @@ window.loginUser = async function() {
 			currentUser = data.user.name || data.user.email;
 			localStorage.setItem('vhr_current_user', currentUser);
 			
-			// Close auth modal and show dashboard
+			// Close auth modal
 			const modal = document.getElementById('authModal');
 			if (modal) modal.remove();
 			
-			const dashboard = document.getElementById('dashboard');
-			if (dashboard) dashboard.style.display = 'block';
-			
 			// Initialize dashboard
 			setTimeout(() => {
-				loadDevices();
+				createNavbar();
 				checkLicense();
+				loadDevices();
 			}, 200);
 		} else {
 			showToast('❌ ' + (data.error || 'Connexion échouée'), 'error');
@@ -1636,7 +1630,7 @@ window.registerUser = async function() {
 		
 		if (res.ok && data.ok) {
 			// JWT token is now in httpOnly cookie
-			// Trial period starts now
+			// Trial period starts now (set by server)
 			const trialStart = new Date();
 			localStorage.setItem('vhr_trial_start_' + username, trialStart.toISOString());
 			
@@ -1646,17 +1640,15 @@ window.registerUser = async function() {
 			currentUser = username;
 			localStorage.setItem('vhr_current_user', currentUser);
 			
-			// Close auth modal and show dashboard
+			// Close auth modal
 			const modal = document.getElementById('authModal');
 			if (modal) modal.remove();
 			
-			const dashboard = document.getElementById('dashboard');
-			if (dashboard) dashboard.style.display = 'block';
-			
 			// Initialize dashboard
 			setTimeout(() => {
-				loadDevices();
+				createNavbar();
 				checkLicense();
+				loadDevices();
 			}, 200);
 		} else {
 			showToast('❌ ' + (data.error || 'Inscription échouée'), 'error');
@@ -1693,16 +1685,7 @@ async function checkJWTAuth() {
 // ========== INIT ========== 
 console.log('[Dashboard PRO] Init');
 
-// Wrap dashboard content in a container that can be hidden
-const htmlContent = document.documentElement.innerHTML;
-if (!document.getElementById('dashboard')) {
-	const wrapper = document.createElement('div');
-	wrapper.id = 'dashboard';
-	// Move everything into wrapper
-	document.body.innerHTML = htmlContent;
-}
-
-// Check JWT authentication FIRST
+// Check JWT authentication FIRST - this will show auth modal if needed
 checkJWTAuth().then(isAuth => {
 	if (isAuth) {
 		// User is authenticated - create navbar and load data
