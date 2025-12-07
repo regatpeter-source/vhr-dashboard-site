@@ -9,6 +9,7 @@
   <title>VHR DASHBOARD – Application</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/dashboard.css">
+  <link rel="stylesheet" href="/css/android-installer.css">
   <style>
     * {
       margin: 0;
@@ -296,6 +297,46 @@
         ❌ Votre période d'essai a expiré. Veuillez vous abonner pour continuer à utiliser VHR Dashboard.
       </div>
       
+      <!-- Navigation des onglets -->
+      <div class="tabs-navigation" style="display: flex; gap: 12px; margin-bottom: 24px; border-bottom: 1px solid #ddd;">
+        <button class="tab-btn active" data-tab="devices" style="
+          padding: 12px 24px;
+          background: none;
+          border: none;
+          border-bottom: 2px solid #667eea;
+          cursor: pointer;
+          font-size: 1em;
+          font-weight: 600;
+          color: #667eea;
+          transition: all 0.3s;
+        ">
+          📱 Appareils
+        </button>
+        <button class="tab-btn" data-tab="installer" style="
+          padding: 12px 24px;
+          background: none;
+          border: none;
+          border-bottom: 2px solid transparent;
+          cursor: pointer;
+          font-size: 1em;
+          font-weight: 600;
+          color: #999;
+          transition: all 0.3s;
+        ">
+          🚀 Installer l'App
+        </button>
+      </div>
+
+      <!-- Onglet Appareils -->
+      <div id="devicesTab" class="tab-content active">
+        <div id="deviceGrid"></div>
+      </div>
+
+      <!-- Onglet Installation -->
+      <div id="installerTab" class="tab-content" style="display: none;">
+        <div id="userInstallerContainer"></div>
+      </div>
+      
       <div id="deviceGrid"></div>
     </div>
   </div>
@@ -306,7 +347,58 @@
   <!-- Dashboard functionality -->
   <script src="/dashboard.js"></script>
   
+  <!-- User installer module -->
+  <script src="/js/user-installer.js"></script>
+  
   <!-- Authentication system (external file for CSP compliance) -->
   <script src="/vhr-dashboard-auth.js"></script>
+
+  <!-- Tab navigation script -->
+  <script>
+    // Gestion des onglets
+    document.addEventListener('DOMContentLoaded', () => {
+      const tabBtns = document.querySelectorAll('.tab-btn');
+      const tabContents = document.querySelectorAll('.tab-content');
+
+      tabBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const tabName = btn.dataset.tab;
+          
+          // Masquer tous les onglets
+          tabContents.forEach(tab => tab.style.display = 'none');
+          tabBtns.forEach(b => {
+            b.classList.remove('active');
+            b.style.borderBottomColor = 'transparent';
+            b.style.color = '#999';
+          });
+
+          // Afficher l'onglet actif
+          const activeTab = document.getElementById(tabName + 'Tab');
+          if (activeTab) {
+            activeTab.style.display = 'block';
+            btn.classList.add('active');
+            btn.style.borderBottomColor = '#667eea';
+            btn.style.color = '#667eea';
+
+            // Initialiser le module d'installation si nécessaire
+            if (tabName === 'installer' && window.currentUserId) {
+              initializeUserInstaller();
+            }
+          }
+        });
+      });
+
+      // Fonction globale pour initialiser l'installer utilisateur
+      window.initializeUserInstaller = function() {
+        if (window.userInstallerInitialized) return;
+        
+        const installer = new UserAndroidInstaller(window.currentUserId);
+        installer.checkInstallPermission().then(() => {
+          installer.initializeUI();
+          window.userInstallerInitialized = true;
+        });
+      };
+    });
+  </script>
 </body>
 </html>
