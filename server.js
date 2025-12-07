@@ -1998,12 +1998,9 @@ app.delete('/api/admin/messages/:id', authMiddleware, (req, res) => {
 app.get('/api/admin/stats', authMiddleware, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
   try {
-    if (!dbEnabled) return res.json({ ok: true, stats: { totalUsers: 0, activeSubscriptions: 0, unreadMessages: 0 } });
-    
-    const db = require('./db');
-    const totalUsers = db.getAllUsers().length;
-    const activeSubscriptions = db.getActiveSubscriptions().length;
-    const unreadMessages = db.getUnreadMessages().length;
+    const totalUsers = users.length;
+    const activeSubscriptions = subscriptions.filter(s => s.status === 'active').length;
+    const unreadMessages = messages.filter(m => m.status === 'unread').length;
     
     res.json({ ok: true, stats: { totalUsers, activeSubscriptions, unreadMessages } });
   } catch (e) {
