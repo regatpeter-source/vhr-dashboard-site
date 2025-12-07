@@ -870,14 +870,16 @@ app.post('/api/login', async (req, res) => {
   const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
   // Set cookie for better protection in browsers (httpOnly)
   // On Render/production, always use secure HTTPS cookies
+  // On localhost, allow insecure cookies for development
+  const isLocalhost = req.hostname === 'localhost' || req.hostname === '127.0.0.1';
   const cookieOptions = {
     httpOnly: true,
     sameSite: 'lax',
-    secure: true,  // Always true for httpOnly cookies to work on HTTPS (Render)
+    secure: !isLocalhost,  // Only require HTTPS on production, allow HTTP on localhost
     maxAge: 2 * 60 * 60 * 1000 // 2h
   };
   res.cookie('vhr_token', token, cookieOptions);
-  console.log('[api/login] cookie set with secure=true, maxAge=2h');
+  console.log('[api/login] cookie set with secure=' + !isLocalhost + ', maxAge=2h, isLocalhost=' + isLocalhost);
   res.json({ ok: true, token, username: user.username, role: user.role, email: user.email || null });
 });
 
