@@ -1,6 +1,6 @@
 $port = 3000
 $url = "http://localhost:$port/vhr-dashboard-app.html"
-$dir = Split-Path -Parent $PSScriptRoot
+$dir = if ($PSScriptRoot) { Split-Path -Parent $PSScriptRoot } else { Get-Location }
 Write-Host "VHR Dashboard Launcher"
 Write-Host "======================================"
 Write-Host "Checking Node.js..."
@@ -10,9 +10,9 @@ Write-Host "Project: $dir"
 Write-Host "Checking npm dependencies..."
 if (-not (Test-Path "$dir\node_modules")) {
   Write-Host "Installing..."
-  cd $dir
+  Push-Location $dir
   npm install 2>&1 | Out-Null
-  cd $PSScriptRoot
+  Pop-Location
 }
 Write-Host "Starting server..."
 $proc = New-Object System.Diagnostics.ProcessStartInfo
