@@ -119,6 +119,17 @@ async function sendPurchaseSuccessEmail(user, purchaseData) {
         </div>
       </div>
       
+      <h2 style="color: #2ecc71; margin-top: 30px;">👤 Vos Identifiants</h2>
+      
+      <div class="license-box" style="border-left-color: #3498db;">
+        <p style="margin-top: 0; color: #666;">Utilisez ces identifiants pour accéder à VHR Dashboard partout:</p>
+        <div style="background: #f0f0f0; padding: 12px; border-radius: 4px; margin-bottom: 10px;">
+          <p style="margin: 5px 0;"><strong>Nom d'utilisateur:</strong> <code style="background: #fff; padding: 3px 6px; border-radius: 3px; font-family: monospace;">${user.username}</code></p>
+          <p style="margin: 5px 0;"><strong>Email:</strong> <code style="background: #fff; padding: 3px 6px; border-radius: 3px; font-family: monospace;">${user.email}</code></p>
+        </div>
+        <p style="margin-bottom: 0; color: #666; font-size: 12px;"><em>💡 Vous recevrez votre mot de passe dans un email séparé pour des raisons de sécurité.</em></p>
+      </div>
+      
       <h2 style="color: #2ecc71; margin-top: 30px;">🔑 Votre Clé de Licence</h2>
       
       <div class="license-box">
@@ -313,6 +324,117 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
 }
 
 /**
+ * Envoyer un email avec les identifiants de connexion
+ */
+async function sendCredentialsEmail(user) {
+  if (!transporter && purchaseConfig.EMAIL.ENABLED) {
+    initEmailTransporter();
+  }
+
+  if (!transporter) {
+    console.warn('[email] Cannot send email: transporter not available');
+    return { success: false, error: 'Email service not configured' };
+  }
+
+  try {
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; background: #f5f5f5; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 20px auto; padding: 0; background: #fff; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); overflow: hidden; }
+    .header { background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); color: white; padding: 30px 20px; text-align: center; }
+    .header h1 { margin: 0; font-size: 28px; }
+    .content { padding: 30px 20px; }
+    .credentials-box { background: #f8f9fa; border-left: 4px solid #3498db; padding: 20px; border-radius: 6px; margin: 20px 0; }
+    .credential-item { background: white; padding: 15px; border-radius: 4px; margin-bottom: 10px; border: 1px solid #e0e0e0; }
+    .credential-label { color: #666; font-size: 12px; text-transform: uppercase; margin-bottom: 5px; display: block; }
+    .credential-value { background: #f5f5f5; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 14px; word-break: break-all; }
+    .copy-hint { font-size: 11px; color: #999; margin-top: 5px; }
+    .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 12px; border-top: 1px solid #e0e0e0; }
+    .alert { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; border-radius: 4px; margin: 20px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🔐 Vos Identifiants VHR Dashboard</h1>
+      <p style="margin: 10px 0 0 0; opacity: 0.9;">Pour une sécurité maximale, vos identifiants sont envoyés séparément</p>
+    </div>
+    
+    <div class="content">
+      <p>Bonjour <strong>${user.username}</strong>,</p>
+      
+      <p>Voici vos identifiants de connexion pour accéder à VHR Dashboard. Ces informations vous permettront de vous connecter depuis n'importe où.</p>
+      
+      <div class="credentials-box">
+        <div class="credential-item">
+          <span class="credential-label">👤 Nom d'utilisateur</span>
+          <div class="credential-value">${user.username}</div>
+          <div class="copy-hint">Ce nom d'utilisateur sera utilisé partout</div>
+        </div>
+        
+        <div class="credential-item">
+          <span class="credential-label">📧 Email</span>
+          <div class="credential-value">${user.email}</div>
+          <div class="copy-hint">Utilisé pour les notifications et la récupération de compte</div>
+        </div>
+        
+        <div class="credential-item">
+          <span class="credential-label">🔑 Mot de passe</span>
+          <div class="credential-value">${user.plainPassword || 'Utilisez le mot de passe que vous avez défini'}</div>
+          <div class="copy-hint">Conservez-le en lieu sûr</div>
+        </div>
+      </div>
+      
+      <h2 style="color: #3498db; margin-top: 30px;">🚀 Accéder à VHR Dashboard</h2>
+      <p>Vous pouvez maintenant vous connecter en visitant :</p>
+      <p style="text-align: center;">
+        <a href="http://localhost:3000/vhr-dashboard-pro.html" style="color: #3498db; font-weight: bold;">http://localhost:3000/vhr-dashboard-pro.html</a>
+      </p>
+      
+      <div class="alert">
+        <strong>⚠️ Sécurité</strong>
+        <p style="margin: 8px 0 0 0;">Ne partagez jamais vos identifiants. VHR Dashboard ne vous les demandera jamais par email.</p>
+      </div>
+      
+      <h2 style="color: #3498db; margin-top: 30px;">❓ Besoin d'aide ?</h2>
+      <p>Si vous avez oublié vos identifiants, contactez le support :</p>
+      <p style="text-align: center;">
+        <a href="mailto:${purchaseConfig.EMAIL.SUPPORT_EMAIL}" style="color: #3498db; font-weight: bold;">${purchaseConfig.EMAIL.SUPPORT_EMAIL}</a>
+      </p>
+    </div>
+    
+    <div class="footer">
+      <p>Bienvenue dans VHR Dashboard !</p>
+      <p><a href="http://localhost:3000/account.html" style="color: #3498db;">Mon Compte</a> | <a href="${purchaseConfig.EMAIL.DOCUMENTATION_URL}" style="color: #3498db;">Documentation</a></p>
+      <p>&copy; 2025 VHR Dashboard. Tous droits réservés.</p>
+    </div>
+  </div>
+</body>
+</html>
+    `;
+
+    const mailOptions = {
+      from: purchaseConfig.EMAIL.FROM,
+      to: user.email,
+      subject: '🔐 Vos identifiants VHR Dashboard - Connexion sécurisée',
+      html: htmlContent
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('[email] Credentials email sent:', { to: user.email, messageId: info.messageId });
+    
+    return { success: true, messageId: info.messageId };
+  } catch (e) {
+    console.error('[email] Failed to send credentials email:', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
  * Générer une clé de licence unique
  */
 function generateLicenseKey() {
@@ -334,5 +456,6 @@ module.exports = {
   initEmailTransporter,
   sendPurchaseSuccessEmail,
   sendSubscriptionSuccessEmail,
+  sendCredentialsEmail,
   generateLicenseKey
 };
