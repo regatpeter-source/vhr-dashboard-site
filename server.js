@@ -1032,34 +1032,92 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-// Get demo/trial status
-app.get('/api/demo/status', authMiddleware, (req, res) => {
+// Get demo/trial status - also check Stripe subscription status
+app.get('/api/demo/status', authMiddleware, async (req, res) => {
   try {
     const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
     
-    const hasActiveSubscription = user.subscriptionStatus === 'active';
     const demoExpired = isDemoExpired(user);
     const remainingDays = getDemoRemainingDays(user);
     const expirationDate = user.demoStartDate ? 
       new Date(new Date(user.demoStartDate).getTime() + demoConfig.DEMO_DURATION_MS).toISOString() : 
       null;
     
-    res.json({
-      ok: true,
-      demo: {
-        demoStartDate: user.demoStartDate || null,
-        demoExpired: demoExpired,
-        remainingDays: remainingDays,
-        totalDays: demoConfig.DEMO_DAYS,
-        expirationDate: expirationDate,
-        hasActiveSubscription: hasActiveSubscription,
-        daysUntilWarning: demoConfig.WARNING_DAYS_BEFORE
+    // Check if demo is expired
+    if (demoExpired) {
+      // Demo is expired - check if user has ACTIVE subscription with Stripe
+      let hasValidSubscription = false;
+      let subscriptionStatus = 'none';
+      let stripeError = null;
+      
+      if (user.stripeCustomerId) {
+        try {
+          // Fetch latest subscription from Stripe for this customer
+          const stripeSubs = await stripe.subscriptions.list({
+            customer: user.stripeCustomerId,
+            status: 'active',
+            limit: 1
+          });
+          
+          if (stripeSubs.data && stripeSubs.data.length > 0) {
+            const activeSub = stripeSubs.data[0];
+            hasValidSubscription = activeSub.status === 'active';
+            subscriptionStatus = activeSub.status; // 'active', 'past_due', etc.
+            console.log(`[demo/status] User ${user.username} has Stripe subscription: ${subscriptionStatus}`);
+          } else {
+            // No active subscription
+            subscriptionStatus = 'none';
+            console.log(`[demo/status] User ${user.username} has no active Stripe subscription`);
+          }
+        } catch (e) {
+          console.error(`[demo/status] Error checking Stripe subscription for ${user.username}:`, e.message);
+          stripeError = e.message;
+        }
+      } else {
+        // No Stripe customer ID
+        subscriptionStatus = 'none';
+        console.log(`[demo/status] User ${user.username} has no Stripe customer ID`);
       }
-    });
+      
+      // If demo expired AND no valid subscription = BLOCKED
+      res.json({
+        ok: true,
+        demo: {
+          demoStartDate: user.demoStartDate || null,
+          demoExpired: true,
+          remainingDays: 0,
+          totalDays: demoConfig.DEMO_DAYS,
+          expirationDate: expirationDate,
+          hasValidSubscription: hasValidSubscription,
+          subscriptionStatus: subscriptionStatus,
+          stripeError: stripeError,
+          accessBlocked: !hasValidSubscription, // KEY: Block access if no valid subscription
+          message: hasValidSubscription 
+            ? '✅ Accès accordé via abonnement actif'
+            : '❌ Essai expiré - Abonnement requis pour continuer'
+        }
+      });
+    } else {
+      // Demo is still valid - user can access
+      res.json({
+        ok: true,
+        demo: {
+          demoStartDate: user.demoStartDate || null,
+          demoExpired: false,
+          remainingDays: remainingDays,
+          totalDays: demoConfig.DEMO_DAYS,
+          expirationDate: expirationDate,
+          hasValidSubscription: user.subscriptionStatus === 'active',
+          subscriptionStatus: user.subscriptionStatus || 'none',
+          accessBlocked: false,
+          message: `✅ Essai en cours - ${remainingDays} jour(s) restant(s)`
+        }
+      });
+    }
   } catch (e) {
     console.error('[demo] status error:', e);
-    res.status(500).json({ ok: false, error: 'Server error' });
+    res.status(500).json({ ok: false, error: 'Server error', details: e.message });
   }
 });
 
