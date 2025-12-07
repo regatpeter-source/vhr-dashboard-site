@@ -3126,46 +3126,76 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
       
       // Envoyer un email de confirmation pour un achat/abonnement
       if (obj.mode === 'payment') {
-        // One-time payment - Achat définitif
+        // One-time payment - Achat définitif (Licence perpétuelle 499€)
         const purchaseId = obj.metadata?.purchaseId;
         const purchase = purchaseId ? purchaseConfig.PURCHASE_OPTIONS[purchaseId] : null;
         
         if (purchase && user.email) {
-          // Generate and send license key
-          if (purchase.license) {
-            const license = addLicense(user.username, user.email, purchaseId);
-            console.log('[webhook] License generated:', license.key);
-            
-            // Send license via email
-            await sendLicenseEmail(user.email, license.key, user.username);
-            console.log('[webhook] License email sent to:', user.email);
-          }
+          console.log('[webhook] Processing payment for user:', user.username, 'purchaseId:', purchaseId);
           
-          // Send purchase confirmation email (if emailService exists)
-          if (typeof emailService !== 'undefined') {
+          // Generate unique license key for this purchase
+          const licenseKey = emailService.generateLicenseKey();
+          console.log('[webhook] Generated license key:', licenseKey);
+          
+          // Store license key in user record
+          user.licenseKey = licenseKey;
+          user.licenseGeneratedAt = new Date().toISOString();
+          user.licenseType = 'perpetual';
+          user.licensePurchaseId = purchaseId;
+          user.licensePurchaseAmount = (obj.amount_total / 100);
+          
+          // Store in licenses file as well (for backup)
+          const license = addLicense(user.username, user.email, purchaseId);
+          console.log('[webhook] License stored:', license.key);
+          
+          // Send purchase success email with license key
+          try {
             const purchaseData = {
               planName: purchase.name,
               orderId: obj.id,
               price: (obj.amount_total / 100).toFixed(2),
-              licenseDuration: purchase.license?.duration === 'perpetual' ? 'Perpétuel' : '1 an',
-              updatesUntil: purchase.license?.duration === 'perpetual' ? 'À jamais' : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toLocaleDateString()
+              licenseDuration: 'Perpétuel',
+              updatesUntil: 'À jamais',
+              licenseKey: licenseKey // Add license key to email data
             };
+            
             const emailResult = await emailService.sendPurchaseSuccessEmail(user, purchaseData);
             console.log('[webhook] Purchase success email sent:', emailResult);
+            
+            if (!emailResult.success) {
+              console.error('[webhook] Email send failed:', emailResult.error);
+            }
+          } catch (e) {
+            console.error('[webhook] Error sending purchase email:', e.message);
           }
         }
       } else if (obj.mode === 'subscription') {
-        // Subscription - Abonnement mensuel
+        // Subscription - Abonnement mensuel (29€/mois)
         if (user.email) {
-          const subscriptionData = {
-            planName: obj.metadata?.purchaseName || 'Professional',
-            billingPeriod: 'month',
-            price: (obj.amount_total / 100).toFixed(2),
-            subscriptionId: obj.subscription
-          };
+          console.log('[webhook] Processing subscription for user:', user.username);
           
-          const emailResult = await emailService.sendSubscriptionSuccessEmail(user, subscriptionData);
-          console.log('[webhook] Subscription success email sent:', emailResult);
+          // Mark subscription as active
+          user.subscriptionStatus = 'active';
+          user.subscriptionPurchasedAt = new Date().toISOString();
+          
+          try {
+            const subscriptionData = {
+              planName: obj.metadata?.purchaseName || 'Abonnement Professionnel',
+              billingPeriod: 'month',
+              price: (obj.amount_total / 100).toFixed(2),
+              subscriptionId: obj.subscription,
+              userName: user.username
+            };
+            
+            const emailResult = await emailService.sendSubscriptionSuccessEmail(user, subscriptionData);
+            console.log('[webhook] Subscription success email sent:', emailResult);
+            
+            if (!emailResult.success) {
+              console.error('[webhook] Email send failed:', emailResult.error);
+            }
+          } catch (e) {
+            console.error('[webhook] Error sending subscription email:', e.message);
+          }
         }
       }
     }
