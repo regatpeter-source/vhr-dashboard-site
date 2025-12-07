@@ -793,6 +793,14 @@ function getUserByStripeCustomerId(customerId) {
   return users.find(u => u.stripeCustomerId === customerId);
 }
 
+function getUserByEmail(email) {
+  if (dbEnabled) {
+    const u = require('./db').findUserByEmail?.(email);
+    return u || null;
+  }
+  return users.find(u => u.email === email);
+}
+
 function persistUser(user) {
   if (dbEnabled) {
     require('./db').addOrUpdateUser(user);
@@ -893,6 +901,135 @@ app.post('/api/logout', (req, res) => {
 app.get('/api/me', authMiddleware, (req, res) => {
   const user = { username: req.user.username, role: req.user.role };
   res.json({ ok: true, user });
+});
+
+// ========== NEW AUTHENTICATION ROUTES (for dashboard auth modal) ==========
+
+// POST /api/auth/login - Login with email + password
+app.post('/api/auth/login', async (req, res) => {
+  console.log('[api/auth/login] request received');
+  reloadUsers(); // Reload users from file in case they were modified externally
+  const { email, password } = req.body;
+  
+  if (!email || !password) {
+    return res.status(400).json({ ok: false, error: 'Email et mot de passe requis' });
+  }
+  
+  console.log('[api/auth/login] attempting login for email:', email);
+  
+  // Find user by email
+  const user = getUserByEmail(email);
+  if (!user) {
+    console.log('[api/auth/login] user not found by email');
+    return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
+  }
+  
+  const valid = await bcrypt.compare(password, user.passwordHash);
+  if (!valid) {
+    console.log('[api/auth/login] password mismatch for:', user.username);
+    return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
+  }
+  
+  console.log('[api/auth/login] login successful for:', user.username);
+  
+  const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+  
+  // Set httpOnly cookie for better security in browsers
+  const isLocalhost = req.hostname === 'localhost' || req.hostname === '127.0.0.1';
+  const cookieOptions = {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: !isLocalhost,  // Only require HTTPS on production
+    maxAge: 2 * 60 * 60 * 1000 // 2h
+  };
+  res.cookie('vhr_token', token, cookieOptions);
+  
+  res.json({ 
+    ok: true, 
+    token, 
+    user: {
+      name: user.username,
+      email: user.email,
+      role: user.role
+    }
+  });
+});
+
+// POST /api/auth/register - Register with username + email + password
+app.post('/api/auth/register', async (req, res) => {
+  console.log('[api/auth/register] request received');
+  reloadUsers(); // Reload users from file in case they were modified externally
+  const { username, email, password } = req.body;
+  
+  if (!username || !email || !password) {
+    return res.status(400).json({ ok: false, error: 'Tous les champs sont requis' });
+  }
+  
+  if (password.length < 6) {
+    return res.status(400).json({ ok: false, error: 'Le mot de passe doit contenir au moins 6 caractères' });
+  }
+  
+  // Check if username already exists
+  if (getUserByUsername(username)) {
+    return res.status(400).json({ ok: false, error: 'Le nom d\'utilisateur existe déjà' });
+  }
+  
+  // Check if email already exists
+  if (getUserByEmail(email)) {
+    return res.status(400).json({ ok: false, error: 'Cet email est déjà utilisé' });
+  }
+  
+  console.log('[api/auth/register] registering new user:', username, email);
+  
+  try {
+    // Hash password
+    const passwordHash = await bcrypt.hash(password, 10);
+    
+    // Create new user with trial period starting now
+    const newUser = {
+      username,
+      email,
+      passwordHash,
+      role: 'user',
+      demoStartDate: new Date().toISOString(), // Trial starts now
+      subscriptionStatus: null,
+      subscriptionId: null,
+      stripeCustomerId: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    
+    // Persist user (to file or DB)
+    persistUser(newUser);
+    
+    console.log('[api/auth/register] user registered successfully:', username);
+    
+    // Create JWT token for automatic login
+    const token = jwt.sign({ username: newUser.username, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    
+    // Set httpOnly cookie
+    const isLocalhost = req.hostname === 'localhost' || req.hostname === '127.0.0.1';
+    const cookieOptions = {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: !isLocalhost,
+      maxAge: 2 * 60 * 60 * 1000 // 2h
+    };
+    res.cookie('vhr_token', token, cookieOptions);
+    
+    res.json({ 
+      ok: true, 
+      token,
+      user: {
+        name: newUser.username,
+        email: newUser.email,
+        role: newUser.role
+      }
+    });
+  } catch (e) {
+    console.error('[api/auth/register] error:', e);
+    res.status(500).json({ ok: false, error: 'Erreur lors de l\'inscription' });
+  }
 });
 
 // Get demo/trial status
