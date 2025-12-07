@@ -1226,7 +1226,7 @@ window.subscribePro = async function() {
 		const res = await api('/api/subscriptions/create-checkout', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ planId: 'professional' })
+			body: JSON.stringify({ planId: 'STANDARD' })
 		});
 		
 		console.log('[subscribe] API response:', res);
@@ -1267,7 +1267,7 @@ window.purchasePro = async function() {
 		const res = await api('/api/purchases/create-checkout', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ purchaseId: 'perpetual_pro' })
+			body: JSON.stringify({ purchaseId: 'PERPETUAL' })
 		});
 		
 		console.log('[purchase] API response:', res);
