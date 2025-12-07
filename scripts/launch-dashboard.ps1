@@ -1,5 +1,5 @@
 $port = 3000
-$url = "http://localhost:$port/vhr-dashboard-app.html"
+$url = "http://localhost:$port/vhr-dashboard-pro.html"
 
 # Use project directory passed from batch, or current location
 if (-not $projectDir) { $projectDir = Get-Location }
