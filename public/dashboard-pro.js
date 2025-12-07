@@ -23,6 +23,9 @@ function createNavbar() {
 		<button id="toggleViewBtn" style="margin-right:15px;background:#2ecc71;color:#000;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			📊 Vue: Tableau
 		</button>
+		<button id="installerBtn" style="margin-right:15px;background:#9b59b6;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
+			🚀 Installer l'App
+		</button>
 		<button id="favoritesBtn" style="margin-right:15px;background:#f39c12;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			⭐ Ajouter aux favoris
 		</button>
@@ -35,6 +38,7 @@ function createNavbar() {
 	document.body.style.paddingTop = '56px';
 	
 	document.getElementById('toggleViewBtn').onclick = toggleView;
+	document.getElementById('installerBtn').onclick = showInstallerPanel;
 	document.getElementById('favoritesBtn').onclick = addDashboardToFavorites;
 	document.getElementById('accountBtn').onclick = showAccountPanel;
 	updateUserUI();
@@ -488,6 +492,45 @@ window.switchAccountTab = function(tab) {
 	if (tab === 'profile') content.innerHTML = getProfileContent(stats, userRoles[currentUser] || 'user');
 	else if (tab === 'stats') content.innerHTML = getStatsContent(stats);
 	else if (tab === 'settings') content.innerHTML = getSettingsContent();
+};
+
+// ========== INSTALLER PANEL (Admin) ==========
+window.showInstallerPanel = function() {
+	let panel = document.getElementById('installerPanel');
+	if (panel) panel.remove();
+	
+	panel = document.createElement('div');
+	panel.id = 'installerPanel';
+	panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:2000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
+	panel.onclick = (e) => { if (e.target === panel) closeInstallerPanel(); };
+	
+	panel.innerHTML = `
+		<div style='background:#1a1d24;border:3px solid #9b59b6;border-radius:16px;padding:0;max-width:1200px;width:95%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px #000;color:#fff;'>
+			<!-- Header -->
+			<div style='background:linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);padding:24px;border-radius:13px 13px 0 0;position:relative;display:flex;justify-content:space-between;align-items:center;'>
+				<h2 style='margin:0;font-size:28px;color:#fff;display:flex;align-items:center;gap:12px;'>
+					🚀 Installer l'App Android TTS
+				</h2>
+				<button onclick='closeInstallerPanel()' style='background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;font-weight:bold;'>✕</button>
+			</div>
+			
+			<!-- Content -->
+			<div id='adminInstallerContainer' style='padding:24px;'></div>
+		</div>
+	`;
+	
+	document.body.appendChild(panel);
+	
+	// Initialiser l'interface d'installation (admin)
+	if (window.AdminAndroidInstaller) {
+		const installer = new AdminAndroidInstaller();
+		installer.initializeUI();
+	}
+};
+
+window.closeInstallerPanel = function() {
+	const panel = document.getElementById('installerPanel');
+	if (panel) panel.remove();
 };
 
 window.closeAccountPanel = function() {
