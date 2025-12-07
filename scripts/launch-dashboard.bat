@@ -7,11 +7,30 @@ echo VHR Dashboard Launcher
 echo ========================================
 echo.
 
-REM Get the script directory and project directory
-set "SCRIPT_DIR=%~dp0"
-for /d %%I in ("%SCRIPT_DIR%..") do set "PROJECT_DIR=%%~fI"
+REM Search for the project by looking for package.json
+set "SEARCH_DIR=%USERPROFILE%"
+set "PROJECT_DIR="
 
-echo Project: %PROJECT_DIR%
+REM Check common locations first
+if exist "%USERPROFILE%\VR-Manager\package.json" (
+  set "PROJECT_DIR=%USERPROFILE%\VR-Manager"
+) else if exist "%USERPROFILE%\Documents\VR-Manager\package.json" (
+  set "PROJECT_DIR=%USERPROFILE%\Documents\VR-Manager"
+) else if exist "C:\VR-Manager\package.json" (
+  set "PROJECT_DIR=C:\VR-Manager"
+)
+
+if "!PROJECT_DIR!"=="" (
+  echo ERROR: Could not find VR-Manager project
+  echo Searched in:
+  echo   - %USERPROFILE%\VR-Manager
+  echo   - %USERPROFILE%\Documents\VR-Manager
+  echo   - C:\VR-Manager
+  pause
+  exit /b 1
+)
+
+echo Project: !PROJECT_DIR!
 echo.
 echo Downloading and executing launcher...
 echo.
@@ -25,7 +44,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "try { " ^
   "  (New-Object System.Net.WebClient).DownloadFile($url, $tempFile); " ^
   "  if (Test-Path $tempFile) { " ^
-  "    $projectDir = '%PROJECT_DIR%'; " ^
+  "    $projectDir = '!PROJECT_DIR!'; " ^
   "    & $tempFile; " ^
   "  } " ^
   "} finally { " ^
