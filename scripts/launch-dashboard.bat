@@ -1,6 +1,7 @@
 @echo off
 REM VHR Dashboard Launcher Shortcut
 REM Downloads and executes the PowerShell launcher script
+REM Force redeploy on Render
 
 setlocal enabledelayedexpansion
 
