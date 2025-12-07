@@ -1188,29 +1188,42 @@ socket.on('stream-event', (evt) => {
 // ========== LICENSE CHECK & UNLOCK SYSTEM ========== 
 async function checkLicense() {
 	try {
-		const res = await api('/api/license/check', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ licenseKey })
-		});
+		// Check demo/trial status with Stripe subscription verification
+		const res = await api('/api/demo/status');
 		
-		licenseStatus = res;
-		
-		if (res.expired) {
-			// Trial expired - show unlock modal
-			showUnlockModal(res);
-			return false;
+		if (!res || !res.ok) {
+			console.error('[license] demo status check failed');
+			return true; // Allow on error
 		}
 		
-		if (res.trial) {
-			// Show trial banner
-			showTrialBanner(res.daysRemaining);
+		const demoStatus = res.demo;
+		console.log('[license] Demo status:', demoStatus);
+		
+		// Demo is still valid - show banner with remaining days
+		if (!demoStatus.demoExpired) {
+			showTrialBanner(demoStatus.remainingDays);
+			return true; // Allow access
 		}
 		
-		return res.licensed || res.trial;
+		// Demo is expired - check if user has valid subscription
+		if (demoStatus.accessBlocked) {
+			// No valid subscription after demo expiration
+			console.warn('[license] Access blocked: demo expired + no subscription');
+			showUnlockModal({
+				expired: true,
+				accessBlocked: true,
+				subscriptionStatus: demoStatus.subscriptionStatus
+			});
+			return false; // BLOCK ACCESS
+		} else {
+			// Has valid Stripe subscription
+			console.log('[license] Access granted: user has active subscription');
+			showTrialBanner(0); // Show banner indicating active subscription
+			return true; // Allow access
+		}
 	} catch (e) {
 		console.error('[license] check failed:', e);
-		return true; // Allow access on error
+		return true; // Allow access on error (fail-open for UX)
 	}
 }
 
@@ -1220,12 +1233,25 @@ function showTrialBanner(daysRemaining) {
 	
 	banner = document.createElement('div');
 	banner.id = 'trialBanner';
-	banner.style = 'position:fixed;top:56px;left:0;width:100vw;background:linear-gradient(135deg, #f39c12, #e67e22);color:#fff;padding:10px 20px;text-align:center;z-index:1050;font-weight:bold;box-shadow:0 2px 8px #000;';
+	
+	let bannerText = '';
+	let bgColor = 'linear-gradient(135deg, #f39c12, #e67e22)'; // Orange for trial
+	
+	if (daysRemaining > 0) {
+		// Trial in progress
+		bannerText = `⏱️ Essai gratuit - <b>${daysRemaining} jour(s)</b> restant(s)`;
+	} else {
+		// Active subscription
+		bgColor = 'linear-gradient(135deg, #2ecc71, #27ae60)'; // Green for active
+		bannerText = `✅ Abonnement actif`;
+	}
+	
+	banner.style = `position:fixed;top:56px;left:0;width:100vw;background:${bgColor};color:#fff;padding:10px 20px;text-align:center;z-index:1050;font-weight:bold;box-shadow:0 2px 8px #000;`;
 	banner.innerHTML = `
-		⏱️ Essai gratuit - <b>${daysRemaining} jour(s)</b> restant(s) 
-		<button onclick="showUnlockModal()" style="margin-left:20px;background:#2ecc71;color:#000;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
+		${bannerText}
+		${daysRemaining > 0 ? `<button onclick="showUnlockModal()" style="margin-left:20px;background:#2ecc71;color:#000;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			🚀 Débloquer maintenant
-		</button>
+		</button>` : ''}
 	`;
 	document.body.appendChild(banner);
 	document.body.style.paddingTop = '106px'; // 56 + 50
@@ -1239,13 +1265,19 @@ window.showUnlockModal = function(status = licenseStatus) {
 	modal.id = 'unlockModal';
 	modal.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.95);z-index:2000;display:flex;align-items:center;justify-content:center;overflow-y:auto;';
 	
-	const expiredMessage = status.expired 
-		? '<h2 style="color:#e74c3c;">⚠️ Période d\'essai expirée</h2><p style="color:#95a5a6;">Pour continuer à utiliser VHR Dashboard, choisissez une option ci-dessous :</p>'
-		: '<h2 style="color:#f39c12;">🚀 Débloquez VHR Dashboard</h2><p style="color:#95a5a6;">Profitez de toutes les fonctionnalités sans limitation !</p>';
+	// Determine the message based on status
+	let headerMessage = '<h2 style="color:#e74c3c;">⚠️ Accès refusé</h2>';
+	let bodyMessage = '<p style="color:#95a5a6;">Votre période d\'essai a expiré.<br>Pour continuer à utiliser VHR Dashboard, choisissez une option ci-dessous :</p>';
+	
+	if (status.expired || status.accessBlocked) {
+		headerMessage = '<h2 style="color:#e74c3c;">⚠️ Essai expiré - Abonnement requis</h2>';
+		bodyMessage = '<p style="color:#95a5a6;">Votre accès à VHR Dashboard a expiré car votre période d\'essai est terminée et aucun abonnement n\'est actif.<br><br>Choisissez une option ci-dessous pour continuer :</p>';
+	}
 	
 	modal.innerHTML = `
 		<div style="background:linear-gradient(135deg, #1a1d24, #2c3e50);max-width:700px;width:90%;border-radius:16px;padding:40px;color:#fff;box-shadow:0 8px 32px #000;">
-			${expiredMessage}
+			${headerMessage}
+			${bodyMessage}
 			
 			<!-- Option 1: Abonnement mensuel -->
 			<div style="background:#2c3e50;padding:24px;border-radius:12px;margin:20px 0;border:2px solid #3498db;">
@@ -1291,7 +1323,7 @@ window.showUnlockModal = function(status = licenseStatus) {
 				</button>
 			</div>
 			
-			${!status.expired ? `<button onclick="closeUnlockModal()" style="width:100%;background:#7f8c8d;color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;margin-top:12px;">❌ Fermer</button>` : ''}
+			${status.expired || status.accessBlocked ? '' : `<button onclick="closeUnlockModal()" style="width:100%;background:#7f8c8d;color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;margin-top:12px;">❌ Fermer</button>`}
 		</div>
 	`;
 	
@@ -1688,10 +1720,15 @@ console.log('[Dashboard PRO] Init');
 // Check JWT authentication FIRST - this will show auth modal if needed
 checkJWTAuth().then(isAuth => {
 	if (isAuth) {
-		// User is authenticated - create navbar and load data
-		createNavbar();
-		checkLicense();
-		loadDevices();
+		// User is authenticated - check license/subscription status
+		checkLicense().then(hasAccess => {
+			if (hasAccess) {
+				// User has access (demo valid or active subscription)
+				createNavbar();
+				loadDevices();
+			}
+			// else: Access blocked - unlock modal already shown by checkLicense()
+		});
 	}
 	// else: Auth modal is already shown by checkJWTAuth()
 });
