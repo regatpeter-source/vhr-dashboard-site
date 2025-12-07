@@ -26,19 +26,36 @@ $proc.CreateNoWindow = $true
 $p = New-Object System.Diagnostics.Process
 $p.StartInfo = $proc
 $p.Start() | Out-Null
-Write-Host "Server started (PID: $($p.Id))"
+$pid = $p.Id
+Write-Host "Server started (PID: $pid)"
 Write-Host "Waiting for server..."
+
 $done = $false
-for ($i = 0; $i -lt 60; $i++) {
+$output_task = $p.StandardOutput.ReadToEndAsync()
+$error_task = $p.StandardError.ReadToEndAsync()
+
+for ($i = 0; $i -lt 120; $i++) {
+  if ($p.HasExited) {
+    Write-Host ""
+    Write-Host "ERROR: Server crashed!"
+    if ($output_task.IsCompleted) { Write-Host "Output: $($output_task.Result)" }
+    if ($error_task.IsCompleted) { Write-Host "Error: $($error_task.Result)" }
+    pause
+    exit 1
+  }
+  
   try {
     $r = Invoke-WebRequest -Uri "http://localhost:$port/ping" -TimeoutSec 1 -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
     if ($r.StatusCode -eq 200) { $done = $true; break }
   } catch { }
+  
   Start-Sleep -Milliseconds 500
   if ($i % 4 -eq 0) { Write-Host "." -NoNewline }
 }
+
 Write-Host ""
-if (-not $done) { Write-Host "ERROR: Server timeout"; $p.Kill(); pause; exit 1 }
+if (-not $done) { Write-Host "ERROR: Server timeout after 60 seconds"; $p.Kill(); pause; exit 1 }
+
 Write-Host "Server ready! Opening browser..."
 Start-Process $url
 Write-Host "Dashboard opened at $url"
