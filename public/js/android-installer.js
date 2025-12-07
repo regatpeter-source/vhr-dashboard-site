@@ -282,6 +282,7 @@ class AndroidInstaller {
   async compileAPK(buildType) {
     this.updateStep('compile', 'in-progress');
     this.addLog(`📦 Compilation ${buildType} APK en cours...`, 'info');
+    this.addLog(`💡 Note: La première compilation peut prendre 2-5 minutes (téléchargement des dépendances Gradle)`, 'warning');
 
     const startTime = Date.now();
 
