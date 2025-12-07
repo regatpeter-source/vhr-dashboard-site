@@ -1,6 +1,7 @@
 $port = 3000
 $url = "http://localhost:$port/vhr-dashboard-app.html"
-$dir = if ($PSScriptRoot) { Split-Path -Parent $PSScriptRoot } else { Get-Location }
+if (-not $projectDir) { $projectDir = Get-Location }
+$dir = $projectDir
 Write-Host "VHR Dashboard Launcher"
 Write-Host "======================================"
 Write-Host "Checking Node.js..."
@@ -26,8 +27,8 @@ $proc.CreateNoWindow = $true
 $p = New-Object System.Diagnostics.Process
 $p.StartInfo = $proc
 $p.Start() | Out-Null
-$pid = $p.Id
-Write-Host "Server started (PID: $pid)"
+$serverpid = $p.Id
+Write-Host "Server started (PID: $serverpid)"
 Write-Host "Waiting for server..."
 
 $done = $false
