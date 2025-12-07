@@ -90,14 +90,11 @@ Merci d'avoir choisi VHR Dashboard!
   // Configuration des licences
   LICENSE: {
     KEY_LENGTH: 32,
-    KEY_FORMAT: 'VHR-XXXX-XXXX-XXXX-XXXX', // Format d'affichage
-    EXPIRATION_REMINDER_DAYS: 30, // N/A pour perpétuel
-    AUTO_RENEWAL_REMINDER_DAYS: 0 // N/A pour perpétuel
+    KEY_FORMAT: 'VHR-XXXX-XXXX-XXXX-XXXX',
+    EXPIRATION_REMINDER_DAYS: 30,
+    AUTO_RENEWAL_REMINDER_DAYS: 0
   }
 };
-      currency: 'EUR',
-      billingPeriod: 'annual',
-      stripePriceId: process.env.STRIPE_PRICE_ID_ANNUAL_PRO || 'price_1QeNjSJq3YJ6xXXXXXXXXXXX',
       features: [
         'Accès 1 an',
         'Version Professional',
