@@ -1019,6 +1019,9 @@ window.showStreamViewer = function(serial) {
 			</div>
 			<div id='streamContainer' style='width:100%;background:#000;position:relative;padding-bottom:56.25%;'>
 				<canvas id='streamCanvas' style='position:absolute;top:0;left:0;width:100%;height:100%;display:block;'></canvas>
+				<div id='streamLoading' style='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;text-align:center;font-size:16px;z-index:10;'>
+					⏳ Connexion au stream...
+				</div>
 			</div>
 			<div style='background:#23272f;padding:16px;text-align:center;color:#95a5a6;font-size:12px;'>
 				🟢 En direct - ${new Date().toLocaleTimeString('fr-FR')}
@@ -1027,10 +1030,11 @@ window.showStreamViewer = function(serial) {
 	`;
 	modal.style.display = 'flex';
 	
-	// Initialiser JSMpeg après un délai pour que le canvas soit rendu
+	// Attendre 1 seconde que le stream soit bien lancé côté serveur avant de connecter le player
+	console.log('[stream] Modal opened, waiting for stream to stabilize...');
 	setTimeout(() => {
 		initStreamPlayer(serial);
-	}, 100);
+	}, 1000);
 };
 
 window.closeStreamViewer = function() {
@@ -1043,40 +1047,69 @@ window.closeStreamViewer = function() {
 };
 
 window.initStreamPlayer = function(serial) {
+	console.log('[stream] initStreamPlayer called for:', serial);
+	
 	// Vérifier si JSMpeg est chargé
 	if (typeof JSMpeg === 'undefined') {
+		console.log('[stream] JSMpeg not loaded, loading from CDN...');
 		// Charger JSMpeg dynamiquement
 		const script = document.createElement('script');
 		script.src = 'https://cdn.jsdelivr.net/npm/jsmpeg-player@0.2.8/jsmpeg.min.js';
+		script.onerror = () => {
+			console.error('[stream] Failed to load JSMpeg library');
+			showToast('❌ Erreur: impossible de charger la librairie vidéo', 'error');
+		};
 		script.onload = () => {
+			console.log('[stream] JSMpeg library loaded successfully');
 			connectStreamSocket(serial);
 		};
 		document.head.appendChild(script);
 	} else {
+		console.log('[stream] JSMpeg already loaded, using it');
 		connectStreamSocket(serial);
 	}
 };
 
 window.connectStreamSocket = function(serial) {
 	const wsUrl = 'ws://' + window.location.host + '/api/stream/ws?serial=' + encodeURIComponent(serial);
+	const canvas = document.getElementById('streamCanvas');
+	
+	if (!canvas) {
+		console.error('[stream] Canvas not found');
+		showToast('❌ Canvas non trouvé', 'error');
+		return;
+	}
+	
+	console.log('[stream] connectStreamSocket: URL:', wsUrl);
+	console.log('[stream] connectStreamSocket: Canvas found');
+	console.log('[stream] connectStreamSocket: JSMpeg class available?', typeof JSMpeg !== 'undefined');
 	
 	try {
-		const ws = new WebSocket(wsUrl);
-		ws.binaryType = 'arraybuffer';
+		console.log('[stream] Creating JSMpeg player...');
 		
-		const canvas = document.getElementById('streamCanvas');
-		if (!canvas) return;
-		
+		// JSMpeg.Player handles WebSocket connection internally
 		const player = new JSMpeg.Player(wsUrl, {
 			canvas: canvas,
 			autoplay: true,
-			progressive: true
+			progressive: true,
+			onPlay: () => {
+				console.log('[stream] JSMpeg onPlay callback fired');
+				showToast('🎬 Stream connecté !', 'success');
+				// Remove loading indicator
+				const loading = document.getElementById('streamLoading');
+				if (loading) loading.style.display = 'none';
+			},
+			onError: (err) => {
+				console.error('[stream] JSMpeg onError callback:', err);
+				showToast('❌ Erreur stream: ' + err, 'error');
+			}
 		});
 		
 		window.jsmpegPlayer = player;
-		showToast('🎬 Stream connecté !', 'success');
+		console.log('[stream] JSMpeg player created and assigned to window.jsmpegPlayer');
 	} catch (e) {
-		console.error('[stream] ws connection error:', e);
+		console.error('[stream] Connection error:', e);
+		console.error('[stream] Stack:', e.stack);
 		showToast('❌ Erreur de connexion stream: ' + e.message, 'error');
 	}
 };
