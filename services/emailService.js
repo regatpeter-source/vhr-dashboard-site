@@ -47,7 +47,7 @@ function initEmailTransporter() {
 }
 
 /**
- * Envoyer un email de confirmation de paiement avec lien de téléchargement
+ * Envoyer un email de confirmation de paiement avec licence perpétuelle
  */
 async function sendPurchaseSuccessEmail(user, purchaseData) {
   if (!transporter && purchaseConfig.EMAIL.ENABLED) {
@@ -83,12 +83,9 @@ async function sendPurchaseSuccessEmail(user, purchaseData) {
     .info-label { color: #666; font-size: 12px; text-transform: uppercase; margin-bottom: 5px; }
     .info-value { font-weight: bold; font-size: 16px; color: #2ecc71; }
     .button { display: inline-block; background: #2ecc71; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 10px 0; font-weight: bold; }
-    .button-secondary { background: #3498db; }
     .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 12px; border-top: 1px solid #e0e0e0; }
-    .steps-list { list-style: none; padding: 0; margin: 20px 0; }
-    .steps-list li { padding: 12px 0; border-bottom: 1px solid #e0e0e0; }
-    .steps-list li:before { content: "✓ "; color: #2ecc71; font-weight: bold; margin-right: 10px; }
-    .steps-list li:last-child { border-bottom: none; }
+    .steps-list { list-style: decimal; margin-left: 20px; padding: 0; }
+    .steps-list li { padding: 8px 0; color: #333; }
   </style>
 </head>
 <body>
@@ -131,7 +128,7 @@ async function sendPurchaseSuccessEmail(user, purchaseData) {
       </div>
       
       <h2 style="color: #2ecc71; margin-top: 30px;">📋 Prochaines Étapes</h2>
-      <ol class="steps-list" style="list-style: decimal; margin-left: 20px;">
+      <ol class="steps-list">
         <li>Ouvrez <a href="http://localhost:3000/vhr-dashboard-pro.html" style="color: #3498db;">votre Dashboard</a></li>
         <li>Cliquez sur le bouton <strong>"🚀 Débloquer"</strong></li>
         <li>Sélectionnez <strong>"🔑 Vous avez déjà une licence"</strong></li>
@@ -183,57 +180,6 @@ async function sendPurchaseSuccessEmail(user, purchaseData) {
     return { success: false, error: e.message };
   }
 }
-      <p>Cliquez sur le bouton ci-dessous pour télécharger votre dashboard:</p>
-      <a href="${downloadLink}" class="button">Télécharger VHR Dashboard</a>
-
-      <h2>🔑 Informations d'accès</h2>
-      <div class="info-box">
-        <strong>Utilisateur:</strong> ${user.username}<br>
-        <strong>Clé de licence:</strong> <code>${licenseKey}</code><br>
-        <strong>Durée:</strong> ${purchaseData.licenseDuration}<br>
-        <strong>Mises à jour incluses jusqu'au:</strong> ${purchaseData.updatesUntil}
-      </div>
-
-      <h2>📋 Prochaines étapes</h2>
-      <ol>
-        <li>Téléchargez le fichier ZIP</li>
-        <li>Extrayez-le sur votre serveur</li>
-        <li>Consultez la documentation d'installation: <a href="${purchaseConfig.EMAIL.DOCUMENTATION_URL}">${purchaseConfig.EMAIL.DOCUMENTATION_URL}</a></li>
-        <li>Contactez le support si vous avez besoin d'aide</li>
-      </ol>
-
-      <p>Bienvenue dans VHR Dashboard!</p>
-    </div>
-
-    <div class="footer">
-      <p>Questions? Contactez-nous: <a href="mailto:${purchaseConfig.EMAIL.SUPPORT_EMAIL}">${purchaseConfig.EMAIL.SUPPORT_EMAIL}</a></p>
-      <p>&copy; 2025 VHR Dashboard. Tous droits réservés.</p>
-    </div>
-  </div>
-</body>
-</html>
-    `;
-
-    const mailOptions = {
-      from: purchaseConfig.EMAIL.FROM,
-      to: user.email,
-      subject: template.subject,
-      html: htmlContent
-    };
-
-    const info = await transporter.sendMail(mailOptions);
-    console.log('[email] Purchase success email sent:', { to: user.email, messageId: info.messageId });
-    
-    return { 
-      success: true, 
-      messageId: info.messageId,
-      licenseKey: licenseKey
-    };
-  } catch (e) {
-    console.error('[email] Failed to send purchase success email:', e);
-    return { success: false, error: e.message };
-  }
-}
 
 /**
  * Envoyer un email de confirmation d'abonnement
@@ -268,10 +214,7 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
     .info-value { font-weight: bold; font-size: 16px; color: #3498db; }
     .button { display: inline-block; background: #3498db; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 10px 0; font-weight: bold; }
     .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 12px; border-top: 1px solid #e0e0e0; }
-    .features-list { list-style: none; padding: 0; margin: 20px 0; }
-    .features-list li { padding: 12px 0; border-bottom: 1px solid #e0e0e0; }
     .features-list li:before { content: "✓ "; color: #3498db; font-weight: bold; margin-right: 10px; }
-    .features-list li:last-child { border-bottom: none; }
     .alert { background: #e8f4f8; border-left: 4px solid #3498db; padding: 15px; border-radius: 4px; margin: 20px 0; }
   </style>
 </head>
@@ -354,46 +297,6 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
       from: purchaseConfig.EMAIL.FROM,
       to: user.email,
       subject: template.subject || '✅ Votre abonnement VHR Dashboard est actif',
-      html: htmlContent
-    };
-
-    const info = await transporter.sendMail(mailOptions);
-    console.log('[email] Subscription success email sent:', { to: user.email, messageId: info.messageId });
-    
-    return { success: true, messageId: info.messageId };
-  } catch (e) {
-    console.error('[email] Failed to send subscription success email:', e);
-    return { success: false, error: e.message };
-  }
-}
-
-      <h2>🚀 Accès instantané</h2>
-      <p>Votre accès est activé immédiatement. Accédez à votre dashboard:</p>
-      <a href="http://localhost:3000" class="button">Accéder à mon Dashboard</a>
-
-      <h2>⚙️ Gérer votre abonnement</h2>
-      <p>
-        • <a href="http://localhost:3000/account.html">Voir vos factures</a><br>
-        • <a href="http://localhost:3000/account.html">Mettre à jour le paiement</a><br>
-        • <a href="http://localhost:3000/account.html">Annuler l'abonnement</a>
-      </p>
-
-      <p>Merci d'avoir choisi VHR Dashboard!</p>
-    </div>
-
-    <div class="footer">
-      <p>Support: <a href="mailto:${purchaseConfig.EMAIL.SUPPORT_EMAIL}">${purchaseConfig.EMAIL.SUPPORT_EMAIL}</a></p>
-      <p>&copy; 2025 VHR Dashboard. Tous droits réservés.</p>
-    </div>
-  </div>
-</body>
-</html>
-    `;
-
-    const mailOptions = {
-      from: purchaseConfig.EMAIL.FROM,
-      to: user.email,
-      subject: template.subject,
       html: htmlContent
     };
 
