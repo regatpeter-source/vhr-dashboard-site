@@ -491,6 +491,26 @@ function getSettingsContent() {
 	
 	return `
 		<div style='max-width:700px;margin:0 auto;'>
+			<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>💳 Abonnement & Facturation</h3>
+			<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;border-left:4px solid #3498db;'>
+				<div style='margin-bottom:16px;'>
+					<label style='color:#95a5a6;font-size:12px;text-transform:uppercase;letter-spacing:1px;'>Statut</label>
+					<div style='color:#fff;font-size:16px;font-weight:bold;margin-top:4px;'>
+						<span style='color:#2ecc71;'>✓ Plan Actif</span>
+						<span style='color:#95a5a6;margin-left:12px;font-size:13px;'>(29€/mois)</span>
+					</div>
+				</div>
+				<div style='margin-bottom:20px;padding:12px;background:#1a1d24;border-radius:6px;'>
+					<div style='color:#95a5a6;font-size:12px;'>Prochain renouvellement</div>
+					<div style='color:#2ecc71;font-size:14px;font-weight:bold;margin-top:4px;'>15 Janvier 2025</div>
+				</div>
+				<div style='display:flex;gap:10px;flex-wrap:wrap;'>
+					<button onclick='showModal("<h3>Voir les factures</h3><p>Facture du 15 Décembre 2024 - 29€</p><p>Facture du 15 Novembre 2024 - 29€</p>")' style='flex:1;min-width:150px;background:#3498db;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>📄 Factures</button>
+					<button onclick='showModal("<h3>Gérer le paiement</h3><p>Vous serez redirigé vers le portail Stripe pour gérer votre méthode de paiement.</p><button onclick=\"window.location.href=\\\"/api/billing/portal\\\" style=\\\"width:100%;background:#2ecc71;color:#000;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;\\\">Accéder au portail Stripe</button>")' style='flex:1;min-width:150px;background:#f39c12;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>💳 Méthode de paiement</button>
+					<button onclick='confirmCancelSubscription()' style='flex:1;min-width:150px;background:#e74c3c;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>❌ Annuler l\'abonnement</button>
+				</div>
+			</div>
+			
 			<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>🎨 Apparence</h3>
 			<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;'>
 				<div style='margin-bottom:16px;'>
@@ -633,6 +653,39 @@ window.saveSettings = function() {
 	}
 	
 	showToast('✅ Paramètres sauvegardés !', 'success');
+};
+
+window.confirmCancelSubscription = function() {
+	showModal(`
+		<h3 style='color:#e74c3c;margin-bottom:16px;'>⚠️ Annuler l'abonnement</h3>
+		<p style='color:#fff;margin-bottom:12px;'>Êtes-vous sûr de vouloir annuler votre abonnement ?</p>
+		<ul style='color:#95a5a6;margin-bottom:20px;'>
+			<li>Vous perdrez accès aux fonctionnalités premium</li>
+			<li>Aucun remboursement ne sera effectué</li>
+			<li>Les données seront conservées pendant 90 jours</li>
+		</ul>
+		<div style='display:flex;gap:10px;'>
+			<button onclick='cancelSubscription()' style='flex:1;background:#e74c3c;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;'>Confirmer l'annulation</button>
+			<button onclick='closeModal()' style='flex:1;background:#95a5a6;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;'>Garder mon abonnement</button>
+		</div>
+	`);
+};
+
+window.cancelSubscription = async function() {
+	showToast('⏳ Annulation en cours...', 'info');
+	const res = await api('/api/subscriptions/cancel', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' }
+	});
+	if (res.ok) {
+		showToast('✅ Abonnement annulé avec succès', 'success');
+		closeModal();
+		setTimeout(() => {
+			window.location.href = '/account.html';
+		}, 2000);
+	} else {
+		showToast('❌ Erreur: ' + (res.error || 'Annulation échouée'), 'error');
+	}
 };
 
 window.exportUserData = function() {
