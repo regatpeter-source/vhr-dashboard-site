@@ -402,6 +402,21 @@ app.get('/download/launch-script', (req, res) => {
   }
 });
 
+// Serve PowerShell launcher script as text (for remote execution via iex)
+app.get('/scripts/launch-dashboard.ps1', (req, res) => {
+  const scriptPath = path.join(__dirname, 'scripts', 'launch-dashboard.ps1');
+  try {
+    if (!fs.existsSync(scriptPath)) {
+      return res.status(404).send('Script not found');
+    }
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.sendFile(scriptPath);
+  } catch (e) {
+    console.error('[ps1-script] error:', e);
+    return res.status(500).send('Server error');
+  }
+});
+
 // Support old links: redirect root developer guide to canonical site-vitrine page
 app.get('/developer-setup.html', (req, res) => {
   res.redirect(302, '/site-vitrine/developer-setup.html');
