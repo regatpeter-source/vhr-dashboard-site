@@ -1,7 +1,21 @@
 $port = 3000
 $url = "http://localhost:$port/vhr-dashboard-app.html"
-if (-not $projectDir) { $projectDir = Get-Location }
-$dir = $projectDir
+
+REM Auto-detect project directory by looking for server.js
+$dir = Get-Location
+while ($dir -ne $null -and -not (Test-Path "$dir\server.js")) {
+  $parent = Split-Path -Parent $dir
+  if ($parent -eq $dir) { break }
+  $dir = $parent
+}
+
+if (-not (Test-Path "$dir\server.js")) {
+  Write-Host "ERROR: Could not find project directory (looking for server.js)"
+  Write-Host "Current: $(Get-Location)"
+  pause
+  exit 1
+}
+
 Write-Host "VHR Dashboard Launcher"
 Write-Host "======================================"
 Write-Host "Checking Node.js..."
