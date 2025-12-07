@@ -871,7 +871,8 @@ function renderDevicesTable() {
 						<option value='high'>High</option>
 						<option value='ultra'>Ultra</option>
 					</select><br>
-					<button onclick='startStreamFromTable("${d.serial}")' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>▶️ Start</button>
+					<button onclick='startStreamFromTable("${d.serial}")' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>▶️ Scrcpy</button>
+					<button onclick='startStreamJSMpeg("${d.serial}")' style='background:#9b59b6;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin-left:4px;'>🎬 JSMpeg</button>
 				` : `
 					<button onclick='stopStreamFromTable("${d.serial}")' style='background:#e74c3c;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>⏹️ Stop</button>
 				`}
@@ -931,7 +932,7 @@ function renderDevicesCards() {
 				</span>
 			</div>
 			<div style='margin-bottom:10px;'>
-				${d.status !== 'streaming' ? `
+					${d.status !== 'streaming' ? `
 					<select id='profile_card_${d.serial}' style='width:100%;background:#34495e;color:#fff;border:1px solid #2ecc71;padding:8px;border-radius:6px;margin-bottom:6px;'>
 						<option value='ultra-low'>Ultra Low</option>
 						<option value='low'>Low</option>
@@ -940,7 +941,8 @@ function renderDevicesCards() {
 						<option value='high'>High</option>
 						<option value='ultra'>Ultra</option>
 					</select>
-					<button onclick='startStreamFromCard("${d.serial}")' style='width:100%;background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>▶️ Start Stream</button>
+					<button onclick='startStreamFromCard("${d.serial}")' style='width:100%;background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>▶️ Scrcpy</button>
+					<button onclick='startStreamJSMpeg("${d.serial}")' style='width:100%;background:#9b59b6;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>🎬 JSMpeg</button>
 				` : `
 					<button onclick='stopStreamFromTable("${d.serial}")' style='width:100%;background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>⏹️ Stop Stream</button>
 				`}
@@ -972,34 +974,53 @@ function renderDevices() {
 window.startStreamFromTable = async function(serial) {
 	const profileSelect = document.getElementById(`profile_${serial}`);
 	const profile = profileSelect ? profileSelect.value : 'default';
-	const res = await api('/api/stream/start', {
+	
+	// Launch Scrcpy directly (simple and works great)
+	const res = await api('/api/scrcpy-gui', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ serial, profile })
+		body: JSON.stringify({ serial })
 	});
+	
 	if (res.ok) {
-		showToast('✅ Stream démarré !', 'success');
+		showToast('🎮 Scrcpy lancé ! Vérifiez votre écran...', 'success');
 		incrementStat('totalSessions');
-		showStreamViewer(serial);
+	} else {
+		showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
 	}
-	else showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
 	setTimeout(loadDevices, 500);
 };
 
 window.startStreamFromCard = async function(serial) {
 	const profileSelect = document.getElementById(`profile_card_${serial}`);
 	const profile = profileSelect ? profileSelect.value : 'default';
+	
+	// Launch Scrcpy directly (simple and works great)
+	const res = await api('/api/scrcpy-gui', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ serial })
+	});
+	
+	if (res.ok) {
+		showToast('🎮 Scrcpy lancé ! Vérifiez votre écran...', 'success');
+	} else {
+		showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
+	}
+	setTimeout(loadDevices, 500);
+};
+
+window.startStreamJSMpeg = async function(serial) {
 	const res = await api('/api/stream/start', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ serial, profile })
+		body: JSON.stringify({ serial, profile: 'default' })
 	});
 	if (res.ok) {
-		showToast('✅ Stream démarré !', 'success');
-		showStreamViewer(serial);
+		showToast('✅ Stream JSMpeg démarré !', 'success');
+		setTimeout(() => showStreamViewer(serial), 500);
 	}
 	else showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
-	setTimeout(loadDevices, 500);
 };
 
 window.showStreamViewer = function(serial) {
