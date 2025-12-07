@@ -495,11 +495,13 @@ function maskKey(k) {
 }
 
 app.post('/create-checkout-session', async (req, res) => {
-  const { priceId, mode } = req.body || {};
+  const { priceId, mode, username, userEmail, password } = req.body || {};
   const origin = req.headers.origin || `http://localhost:${process.env.PORT || 3000}`;
   if (!priceId || !mode) return res.status(400).json({ error: 'priceId et mode sont requis' });
+  
   try {
-    console.log('[Stripe] create-checkout-session request:', { priceId, mode, origin });
+    console.log('[Stripe] create-checkout-session request:', { priceId, mode, username, userEmail, origin });
+    
     // Validate price exists and is compatible with mode
     let priceInfo = null;
     try {
@@ -519,6 +521,15 @@ app.post('/create-checkout-session', async (req, res) => {
     if (mode === 'subscription' && priceInfo.type !== 'recurring') {
       return res.status(400).json({ error: `Price type mismatch: expected a recurring price for mode=subscription (got: ${priceInfo.type})` });
     }
+    
+    // Build metadata with user info if provided
+    const metadata = {};
+    if (username) {
+      metadata.username = username;
+      metadata.userEmail = userEmail;
+      metadata.passwordHash = password; // Will be hashed in webhook
+    }
+    
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [
@@ -530,8 +541,10 @@ app.post('/create-checkout-session', async (req, res) => {
       mode: mode, // 'subscription' ou 'payment'
       success_url: `${origin}/pricing.html?success=1`,
       cancel_url: `${origin}/pricing.html?canceled=1`,
+      metadata: metadata, // Store user registration data in metadata
+      customer_email: userEmail || undefined, // Pre-fill customer email in Stripe
     });
-    console.log('[Stripe] session created:', { id: session.id, url: session.url });
+    console.log('[Stripe] session created:', { id: session.id, url: session.url, hasUserData: !!username });
     res.json({ url: session.url });
   } catch (err) {
     console.error('[Stripe] create-checkout-session error:', err);
@@ -3107,8 +3120,58 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
     const type = event.type;
     if (!obj) return res.json({ received: true });
     const customerId = obj.customer || (obj.customer_id) || null;
-    if (!customerId) return res.json({ received: true });
-    const user = getUserByStripeCustomerId(customerId);
+    
+    // For checkout.session.completed, try to create/find user from metadata first
+    let user = null;
+    let isNewUser = false;
+    if (type === 'checkout.session.completed' && obj.metadata) {
+      const { username, userEmail, passwordHash } = obj.metadata;
+      if (username && userEmail && passwordHash) {
+        // Check if user already exists
+        user = users.find(u => u.username === username);
+        if (!user) {
+          // Create new user from registration data
+          console.log('[webhook] Creating new user from checkout metadata:', username);
+          try {
+            const hashedPassword = await bcrypt.hash(passwordHash, 10);
+            user = {
+              id: crypto.randomUUID(),
+              username: username,
+              email: userEmail,
+              passwordHash: hashedPassword,
+              role: 'user',
+              stripeCustomerId: customerId || null,
+              createdAt: new Date().toISOString(),
+              demoStartDate: new Date().toISOString(),
+              demoExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+            };
+            users.push(user);
+            saveUsers();
+            isNewUser = true;
+            console.log('[webhook] New user created:', { username, email: userEmail });
+            
+            // Send credentials email immediately after user creation
+            try {
+              const credentialsEmailData = {
+                ...user,
+                plainPassword: passwordHash // Include password in email data
+              };
+              await emailService.sendCredentialsEmail(credentialsEmailData);
+            } catch (emailError) {
+              console.error('[webhook] Error sending credentials email:', emailError.message);
+            }
+          } catch (error) {
+            console.error('[webhook] Error creating user:', error.message);
+          }
+        }
+      }
+    }
+    
+    // If no user found from metadata, try to find by Stripe customer ID
+    if (!user && customerId) {
+      user = getUserByStripeCustomerId(customerId);
+    }
+    
     if (!user) return res.json({ received: true });
 
     if (type === 'invoice.paid') {
