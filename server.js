@@ -288,24 +288,10 @@ app.get('/launch-dashboard.html', (req, res) => {
   res.sendFile(path.join(__dirname, 'launch-dashboard.html'));
 });
 
-// Serve vhr-dashboard-app.html (main dashboard with auth) - BEFORE express.static so it doesn't get caught
+// Redirect vhr-dashboard-app.html to vhr-dashboard-pro.html
 app.get('/vhr-dashboard-app.html', (req, res) => {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  const filePath = path.join(__dirname, 'public', 'vhr-dashboard-app.html');
-  console.log('[route] /vhr-dashboard-app.html requested, sending file:', filePath);
-  
-  // Check if file exists
-  if (!fs.existsSync(filePath)) {
-    console.error('[route] /vhr-dashboard-app.html NOT FOUND at:', filePath);
-    return res.status(404).json({ error: 'File not found', path: filePath });
-  }
-  
-  console.log('[route] /vhr-dashboard-app.html file exists, sending...');
-  res.sendFile(filePath, (err) => {
-    if (err) {
-      console.error('[route] /vhr-dashboard-app.html sendFile error:', err);
-    }
-  });
+  console.log('[route] /vhr-dashboard-app.html requested, redirecting to /vhr-dashboard-pro.html');
+  res.redirect(301, '/vhr-dashboard-pro.html');
 });
 
 // Test route to verify HTML serving works
