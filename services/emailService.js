@@ -262,6 +262,16 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
         </div>
       </div>
       
+      <h2 style="color: #3498db; margin-top: 30px;">👤 Vos Identifiants</h2>
+      
+      <div style="background: #f8f9fa; border-left: 4px solid #3498db; padding: 15px; border-radius: 6px; margin: 20px 0;">
+        <p style="margin-top: 0; color: #666;">Utilisez ces identifiants pour vous connecter:</p>
+        <div style="background: #f0f0f0; padding: 12px; border-radius: 4px;">
+          <p style="margin: 5px 0;"><strong>Nom d'utilisateur:</strong> <code style="background: #fff; padding: 3px 6px; border-radius: 3px; font-family: monospace;">${user.username}</code></p>
+          <p style="margin: 5px 0;"><strong>Email:</strong> <code style="background: #fff; padding: 3px 6px; border-radius: 3px; font-family: monospace;">${user.email}</code></p>
+        </div>
+      </div>
+      
       <h2 style="color: #3498db; margin-top: 30px;">🚀 Accès Instantané</h2>
       <p>Votre accès est activé immédiatement. Vous pouvez commencer à utiliser VHR Dashboard maintenant :</p>
       <a href="http://localhost:3000/vhr-dashboard-pro.html" class="button">Ouvrir mon Dashboard</a>
