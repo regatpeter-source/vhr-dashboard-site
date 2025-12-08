@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="FAQ VHR DASHBOARD: Réponses aux questions sur la gestion de casques VR, les formations VR, MDM VR et la réalité virtuelle.">
+  <meta name="keywords" content="FAQ VR, questions VR, MDM VR FAQ, gestion casques VR questions, formation VR réponses">
+  <meta property="og:title" content="FAQ - VHR DASHBOARD">
+  <meta property="og:description" content="Trouvez les réponses à vos questions sur VHR DASHBOARD et la gestion VR.">
+  
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Quels casques VR sont compatibles avec VHR DASHBOARD?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "VHR DASHBOARD est compatible avec Meta Quest 2, Meta Quest 3, Meta Quest Pro, HTC Vive, et autres casques utilisant ADB (Android Debug Bridge). Une liste complète est disponible dans notre documentation."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Quel est le coût d'un déploiement pour 100 casques?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Le coût varie selon votre forfait: Enterprise commence à 2999€/mois pour 100 casques. Nous offrons des démonstrations gratuites et des projections ROI personnalisées."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Comment les données des formations sont-elles sécurisées?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Nous utilisons le chiffrement AES-256, les serveurs HTTPS/TLS, avons obtenu la certification RGPD, et supportons HIPAA pour le secteur médical. Audits de sécurité réguliers effectués."
+        }
+      }
+    ]
+  }
+  </script>
+  
+  <title>FAQ - VHR DASHBOARD</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="canonical" href="https://vhr-dashboard-site.onrender.com/faq.html">
+  <style>
+    .faq-header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 60px 20px;
+      text-align: center;
+      color: white;
+      border-radius: 12px;
+      margin-bottom: 40px;
+    }
+    .faq-container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .faq-item {
+      background: #1a1d24;
+      border: 1px solid #34495e;
+      border-radius: 8px;
+      margin-bottom: 15px;
+      overflow: hidden;
+    }
+    .faq-question {
+      padding: 20px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: white;
+      font-weight: bold;
+      transition: all 0.3s ease;
+      border-left: 4px solid #667eea;
+    }
+    .faq-question:hover {
+      background: rgba(102, 126, 234, 0.1);
+      border-left-color: #2ecc71;
+    }
+    .faq-question.active {
+      border-left-color: #2ecc71;
+      background: rgba(46, 204, 113, 0.05);
+    }
+    .faq-icon {
+      font-size: 1.5em;
+      transition: transform 0.3s ease;
+    }
+    .faq-icon.active {
+      transform: rotate(180deg);
+    }
+    .faq-answer {
+      display: none;
+      padding: 0 20px;
+      max-height: 0;
+      overflow: hidden;
+      transition: all 0.3s ease;
+      color: #ccc;
+      line-height: 1.8;
+    }
+    .faq-answer.active {
+      display: block;
+      padding: 20px;
+      max-height: 1000px;
+      border-top: 1px solid #34495e;
+    }
+    .faq-category {
+      margin: 40px 0 20px 0;
+      color: #2ecc71;
+      font-size: 1.3em;
+      font-weight: bold;
+      border-bottom: 2px solid #2ecc71;
+      padding-bottom: 10px;
+    }
+    .search-box {
+      margin-bottom: 30px;
+      position: relative;
+    }
+    .search-box input {
+      width: 100%;
+      padding: 15px;
+      border-radius: 8px;
+      border: 1px solid #34495e;
+      background: #1a1d24;
+      color: white;
+      font-size: 1em;
+    }
+    .search-box input::placeholder {
+      color: #95a5a6;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <nav>
+      <div class="logo">VHR DASHBOARD</div>
+      <ul>
+        <li><a href="index.html">Accueil</a></li>
+        <li><a href="features.html">Fonctionnalités</a></li>
+        <li><a href="faq.html" class="active">FAQ</a></li>
+        <li><a href="contact.html">Contact</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main>
+    <div class="faq-header">
+      <h1>❓ Foire Aux Questions</h1>
+      <p>Trouvez les réponses à vos questions sur VHR DASHBOARD</p>
+    </div>
+
+    <section style="max-width: 900px; margin: 0 auto; padding: 40px 20px;">
+      <div class="search-box">
+        <input type="text" id="faqSearch" placeholder="🔍 Recherchez dans la FAQ...">
+      </div>
+
+      <div class="faq-container">
+        <!-- GENERAL CATEGORY -->
+        <div class="faq-category">📱 Général</div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFAQ(this)">
+            <span>Qu'est-ce que VHR DASHBOARD exactement?</span>
+            <span class="faq-icon">⬇️</span>
+          </div>
+          <div class="faq-answer">
+            VHR DASHBOARD est une plateforme cloud complète de gestion et supervision de casques VR (Meta Quest, HTC Vive, etc.). Elle permet de contrôler, surveiller et former avec des casques VR à distance, centralisée. Idéale pour les centres de formation, universités, entreprises et événements.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFAQ(this)">
+            <span>Quels casques VR sont compatibles?</span>
+            <span class="faq-icon">⬇️</span>
+          </div>
+          <div class="faq-answer">
+            VHR DASHBOARD fonctionne avec: Meta Quest 2, Meta Quest 3, Meta Quest Pro, HTC Vive Focus, HTC Vive XR Elite, et tout casque supportant ADB (Android Debug Bridge). Nous ajoutons régulièrement le support de nouveaux modèles.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFAQ(this)">
+            <span>Puis-je essayer VHR DASHBOARD gratuitement?</span>
+            <span class="faq-icon">⬇️</span>
+          </div>
+          <div class="faq-answer">
+            Oui! Nous offrons une période d'essai gratuite de 30 jours avec accès complet à la plateforme. Vous pouvez tester avec jusqu'à 5 casques. Aucune carte bancaire requise pour commencer.
+          </div>
+        </div>
+
+        <!-- TECHNICAL CATEGORY -->
+        <div class="faq-category">⚙️ Technique & Configuration</div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFAQ(this)">
+            <span>Comment installer VHR DASHBOARD sur mes casques?</span>
+            <span class="faq-icon">⬇️</span>
+          </div>
+          <div class="faq-answer">
+            L'installation est très simple: 
+            1. Connectez votre casque au dashboard via WiFi
+            2. Suivez l'assistant de configuration (2-3 minutes)
+            3. Le casque apparaît immédiatement dans votre flotte
+            Notre guide détaillé avec captures d'écran est disponible dans la documentation. Support par email si besoin.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFAQ(this)">
+            <span>Quelle bande passante internet est nécessaire?</span>
+            <span class="faq-icon">⬇️</span>
+          </div>
+          <div class="faq-answer">
+            Pour la gestion et supervision: 2-5 Mbps par casque
+            Pour le streaming VR haute qualité: 15-25 Mbps par casque
+            Pour une formation de 50 casques: 250-500 Mbps en upload/download recommandé
+            Nous avons une calculatrice de bande passante dans votre account.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFAQ(this)">
+            <span>Quel type de serveur ai-je besoin pour 100 casques?</span>
+            <span class="faq-icon">⬇️</span>
+          </div>
+          <div class="faq-answer">
+            VHR DASHBOARD est full cloud. Aucun serveur à gérer! Nous gérons tous les serveurs, scalabilité, mises à jour, backups. Vous accédez juste au dashboard via votre navigateur. C'est inclus dans votre abonnement.
+          </div>
+        </div>
+
+        <!-- SECURITY CATEGORY -->
+        <div class="faq-category">🔒 Sécurité & Conformité</div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFAQ(this)">
+            <span>Comment mes données sont-elles sécurisées?</span>
+            <span class="faq-icon">⬇️</span>
+          </div>
+          <div class="faq-answer">
+            Nous utilisons:
+            - Chiffrement AES-256 pour les données au repos
+            - HTTPS/TLS 1.3 pour les données en transit
+            - Serveurs Amazon AWS avec ISO 27001
+            - Backups automatiques 3x par jour
+            - Authentification 2FA obligatoire pour admins
+            - Audits de sécurité trimestriels
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFAQ(this)">
+            <span>Êtes-vous RGPD compliant?</span>
+            <span class="faq-icon">⬇️</span>
+          </div>
+          <div class="faq-answer">
+            Oui, totalement. Nous avons la certification RGPD et respectons:
+            - Droit à l'oubli (suppression complète des données)
+            - Portabilité des données (export en 48h)
+            - Privacy by design
+            - DPIA disponible
+            - DPO disponible pour Enterprise
+            Nos serveurs sont en Europe (Frankfurt AWS).
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFAQ(this)">
+            <span>Supportez-vous HIPAA et autres normes?</span>
+            <span class="faq-icon">⬇️</span>
+          </div>
+          <div class="faq-answer">
+            Oui! Nous supportons:
+            - HIPAA (santé)
+            - COPPA (éducation des enfants)
+            - SOC 2 Type II
+            - ISO 27001
+            Contactez-nous pour les détails spécifiques de votre secteur.
+          </div>
+        </div>
+
+        <!-- PRICING CATEGORY -->
+        <div class="faq-category">💰 Tarification & Plans</div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFAQ(this)">
+            <span>Combien coûte VHR DASHBOARD?</span>
+            <span class="faq-icon">⬇️</span>
+          </div>
+          <div class="faq-answer">
+            - Starter: 29€/mois (jusqu'à 5 casques)
+            - Professional: 249€/mois (jusqu'à 50 casques)
+            - Enterprise: À partir de 2999€/mois (illimité + support 24/7)
+            Tous les plans incluent les mises à jour, support par email, et 99.9% uptime SLA.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFAQ(this)">
+            <span>Y a-t-il des frais cachés?</span>
+            <span class="faq-icon">⬇️</span>
+          </div>
+          <div class="faq-answer">
+            Non, aucun frais caché. Votre facturation est transparente:
+            - Frais mensuels fixes (selon votre plan)
+            - Pas de frais de configuration
+            - Pas de frais d'intégration
+            - Pas de frais cachés par casque supplémentaire
+            Vous pouvez résilier à tout moment sans pénalité.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFAQ(this)">
+            <span>Offrez-vous des réductions pour les non-profits et éducation?</span>
+            <span class="faq-icon">⬇️</span>
+          </div>
+          <div class="faq-answer">
+            Oui! Nous offrons 50% de réduction pour:
+            - Universités publiques
+            - Écoles et collèges
+            - Organisations à but non lucratif
+            - Gouvernements et administrations
+            Contactez nous à partners@vhr-dashboard.com avec votre statut.
+          </div>
+        </div>
+
+        <!-- TRAINING CATEGORY -->
+        <div class="faq-category">🎓 Formation & Support</div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFAQ(this)">
+            <span>Comment former mon équipe à utiliser VHR DASHBOARD?</span>
+            <span class="faq-icon">⬇️</span>
+          </div>
+          <div class="faq-answer">
+            Nous offrons plusieurs ressources:
+            - Webinaires de formation gratuits (tous les jeudis)
+            - Documentation complète et tutoriels vidéo
+            - Chat support en direct (Starter+)
+            - Formations personnalisées (Enterprise)
+            - Certification "VHR Expert" (gratuite)
+            Chaque nouvel utilisateur reçoit aussi un guide de démarrage.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFAQ(this)">
+            <span>Quel support est disponible?</span>
+            <span class="faq-icon">⬇️</span>
+          </div>
+          <div class="faq-answer">
+            - Email: Tous les plans, réponse en 24h
+            - Chat: Professional+, réponse en 2h
+            - Téléphone: Enterprise, 24/7
+            - Slack dédié: Enterprise
+            - Account Manager: Enterprise
+            Les utilisateurs Professional+ accèdent aussi à notre base de connaissance avec +200 articles.
+          </div>
+        </div>
+
+        <!-- INTEGRATION CATEGORY -->
+        <div class="faq-category">🔗 Intégrations & API</div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFAQ(this)">
+            <span>Pouvez-vous intégrer avec notre LMS (Moodle, Canvas, Blackboard)?</span>
+            <span class="faq-icon">⬇️</span>
+          </div>
+          <div class="faq-answer">
+            Oui! Nous avons des intégrations natives pour:
+            - Moodle (plugin officiel)
+            - Canvas (via LTI)
+            - Blackboard (via REST API)
+            - Brightspace
+            - Cornerstone
+            Et de nombreuses autres via notre API REST complète. Contact: integration@vhr-dashboard.com
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question" onclick="toggleFAQ(this)">
+            <span>Avez-vous une API publique?</span>
+            <span class="faq-icon">⬇️</span>
+          </div>
+          <div class="faq-answer">
+            Oui! Notre API REST complète est disponible pour Professional+ plans:
+            - Documentation OpenAPI/Swagger
+            - Webhooks pour les événements
+            - SDKs JavaScript et Python
+            - 1000+ requêtes/jour incluses
+            Consultez notre portail développeur: https://dev.vhr-dashboard.com
+          </div>
+        </div>
+      </div>
+
+      <section style="background: #23272f; padding: 40px; border-radius: 12px; text-align: center; margin: 60px 0; color: white; border-left: 4px solid #2ecc71;">
+        <h3 style="color: #2ecc71; margin-bottom: 15px;">Vous ne trouvez pas votre réponse?</h3>
+        <p style="margin-bottom: 20px;">Contactez notre équipe support - nous répondrons en moins de 2 heures</p>
+        <a href="contact.html" style="background: #2ecc71; color: #000; padding: 10px 30px; border-radius: 6px; text-decoration: none; font-weight: bold;">Contacter le support</a>
+      </section>
+    </section>
+  </main>
+
+  <footer>
+    <p>&copy; 2025 VHR DASHBOARD. Tous droits réservés. | <a href="contact.html">Contact</a> | <a href="faq.html">FAQ</a></p>
+  </footer>
+
+  <script>
+    function toggleFAQ(element) {
+      const question = element;
+      const answer = element.nextElementSibling;
+      const icon = question.querySelector('.faq-icon');
+      
+      // Close other FAQs
+      document.querySelectorAll('.faq-question.active').forEach(q => {
+        if (q !== question) {
+          q.classList.remove('active');
+          q.querySelector('.faq-icon').classList.remove('active');
+          q.nextElementSibling.classList.remove('active');
+        }
+      });
+      
+      // Toggle current
+      question.classList.toggle('active');
+      icon.classList.toggle('active');
+      answer.classList.toggle('active');
+    }
+    
+    // Search functionality
+    const searchInput = document.getElementById('faqSearch');
+    searchInput.addEventListener('keyup', function() {
+      const query = this.value.toLowerCase();
+      document.querySelectorAll('.faq-item').forEach(item => {
+        const question = item.querySelector('.faq-question').textContent.toLowerCase();
+        const answer = item.querySelector('.faq-answer').textContent.toLowerCase();
+        if (question.includes(query) || answer.includes(query)) {
+          item.style.display = 'block';
+        } else {
+          item.style.display = 'none';
+        }
+      });
+    });
+  </script>
+</body>
+</html>
