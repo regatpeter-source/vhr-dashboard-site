@@ -1470,7 +1470,8 @@ window.showAppsDialog = async function(device) {
 		html += `<div style='padding:8px;margin:4px 0;background:#23272f;border-radius:6px;display:flex;justify-content:space-between;align-items:center;'>
 			<span style='color:#fff;flex:1;'>${pkg}</span>
 			<button onclick="toggleFavorite('${device.serial}','${pkg}')" style='background:${isFav ? '#f39c12' : '#555'};color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-weight:bold;margin-right:4px;'>⭐</button>
-			<button onclick="launchApp('${device.serial}','${pkg}')" style='background:#2ecc71;color:#000;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;'>▶️ Lancer</button>
+			<button onclick="launchApp('${device.serial}','${pkg}')" style='background:#2ecc71;color:#000;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;margin-right:4px;'>▶️ Lancer</button>
+			<button onclick="stopGame('${device.serial}','${pkg}')" style='background:#e74c3c;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;'>⏹️ Stop</button>
 		</div>`;
 	});
 	html += `</div>`;
@@ -1489,6 +1490,35 @@ window.launchApp = async function(serial, pkg) {
 	}
 	else showToast('❌ Erreur lancement', 'error');
 	closeModal();
+};
+
+// Stop game and return to Oculus menu
+window.stopGame = async function(serial, pkg) {
+	try {
+		showToast('⏹️ Arrêt du jeu...', 'info');
+		
+		// Stop the app
+		const stopRes = await api(`/api/apps/${serial}/stop`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ package: pkg })
+		});
+		
+		if (stopRes && stopRes.ok) {
+			showToast('✅ Jeu arrêté!', 'success');
+		} else {
+			console.warn('[stopGame] Stop app failed:', stopRes);
+		}
+		
+		// Return to Oculus home menu (wait a bit to let the app stop first)
+		setTimeout(() => {
+			sendHomeButtonToHeadset(serial);
+		}, 500);
+		
+	} catch (error) {
+		console.error('[stopGame]', error);
+		showToast('⚠️ Erreur lors de l\'arrêt du jeu', 'error');
+	}
 };
 
 window.toggleFavorite = function(serial, pkg) {
@@ -1514,9 +1544,10 @@ window.showFavoritesDialog = async function(device) {
 	let html = `<h3 style='color:#2ecc71;'>Favoris pour ${device.name}</h3>`;
 	html += `<div style='max-height:400px;overflow-y:auto;'>`;
 	favs.forEach(fav => {
-		html += `<div style='padding:8px;margin:4px 0;background:#23272f;border-radius:6px;'>
-			<span style='color:#fff;'>${fav.name}</span>
-			<button onclick="launchApp('${device.serial}','${fav.packageId}')" style='float:right;background:#e67e22;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;'>⭐ Lancer</button>
+		html += `<div style='padding:8px;margin:4px 0;background:#23272f;border-radius:6px;display:flex;justify-content:space-between;align-items:center;'>
+			<span style='color:#fff;flex:1;'>${fav.name}</span>
+			<button onclick="launchApp('${device.serial}','${fav.packageId}')" style='background:#e67e22;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;margin-right:4px;'>⭐ Lancer</button>
+			<button onclick="stopGame('${device.serial}','${fav.packageId}')" style='background:#e74c3c;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;'>⏹️ Stop</button>
 		</div>`;
 	});
 	html += `</div>`;
