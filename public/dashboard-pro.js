@@ -1189,56 +1189,89 @@ window.sendVoiceToHeadset = async function(serial) {
 	panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:2000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
 	panel.onclick = (e) => { if (e.target === panel) window.closeVoicePanel(); };
 	
-	panel.innerHTML = `
-		<div style='background:#1a1d24;border:3px solid #1abc9c;border-radius:16px;padding:0;max-width:600px;width:90%;max-height:80vh;overflow:hidden;box-shadow:0 8px 32px #000;color:#fff;display:flex;flex-direction:column;'>
-			<!-- Header -->
-			<div style='background:linear-gradient(135deg, #1abc9c 0%, #16a085 100%);padding:20px;border-radius:13px 13px 0 0;position:relative;display:flex;align-items:center;justify-content:space-between;'>
-				<div style='display:flex;align-items:center;gap:12px;'>
-					<div style='font-size:32px;'>🎤</div>
-					<div>
-						<h2 style='margin:0;font-size:24px;color:#fff;'>Voix vers Casque</h2>
-						<p style='margin:4px 0 0 0;font-size:12px;opacity:0.9;'>Envoyez des messages au ${deviceName}</p>
-					</div>
-				</div>
-				<button id='voiceCloseBtn' style='position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;font-weight:bold;'>✕</button>
-			</div>
-			
-			<!-- Messages Area -->
-			<div id='voiceMessagesArea' style='flex:1;overflow-y:auto;padding:20px;background:#0f1115;display:flex;flex-direction:column;gap:12px;'>
-				<div style='text-align:center;color:#95a5a6;font-size:13px;padding:20px;'>
-					📝 Tapez un message et appuyez sur Envoyer ou Entrée
-				</div>
-			</div>
-			
-			<!-- Input Area -->
-			<div style='padding:20px;background:#23272f;border-top:1px solid #2ecc71;'>
-				<div style='display:flex;gap:8px;align-items:flex-end;'>
-					<div style='flex:1;'>
-						<textarea id='voiceInput' placeholder='Entrez votre message...' style='width:100%;background:#1a1d24;border:2px solid #2ecc71;color:#fff;padding:12px;border-radius:6px;font-family:Arial;font-size:13px;resize:vertical;min-height:50px;max-height:100px;' />
-						<small style='color:#95a5a6;font-size:11px;display:block;margin-top:4px;'>💡 Shift+Entrée pour nouvelle ligne</small>
-					</div>
-					<button id='voiceSendBtn' style='background:#2ecc71;color:#000;border:none;padding:12px 24px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:14px;white-space:nowrap;height:fit-content;'>📤 Envoyer</button>
-				</div>
-			</div>
-			
-			<!-- Actions -->
-			<div style='padding:16px;background:#1a1d24;border-top:1px solid #34495e;display:grid;grid-template-columns:1fr 1fr;gap:8px;'>
-				<button id='voiceClearBtn' style='background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>🗑️ Effacer</button>
-				<button id='voiceCloseBtn2' style='background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>❌ Fermer</button>
-			</div>
-		</div>
-	`;
+	// Créer la structure HTML
+	const container = document.createElement('div');
+	container.style = 'background:#1a1d24;border:3px solid #1abc9c;border-radius:16px;padding:0;max-width:600px;width:90%;max-height:80vh;overflow:hidden;box-shadow:0 8px 32px #000;color:#fff;display:flex;flex-direction:column;';
+	
+	// Header
+	const header = document.createElement('div');
+	header.style = 'background:linear-gradient(135deg, #1abc9c 0%, #16a085 100%);padding:20px;border-radius:13px 13px 0 0;position:relative;display:flex;align-items:center;justify-content:space-between;';
+	header.innerHTML = '<div style="display:flex;align-items:center;gap:12px;"><div style="font-size:32px;">🎤</div><div><h2 style="margin:0;font-size:24px;color:#fff;">Voix vers Casque</h2><p style="margin:4px 0 0 0;font-size:12px;opacity:0.9;">Envoyez des messages au ' + deviceName + '</p></div></div>';
+	
+	const closeBtn1 = document.createElement('button');
+	closeBtn1.id = 'voiceCloseBtn';
+	closeBtn1.style = 'position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;font-weight:bold;';
+	closeBtn1.textContent = '✕';
+	header.appendChild(closeBtn1);
+	
+	// Messages Area
+	const messagesArea = document.createElement('div');
+	messagesArea.id = 'voiceMessagesArea';
+	messagesArea.style = 'flex:1;overflow-y:auto;padding:20px;background:#0f1115;display:flex;flex-direction:column;gap:12px;';
+	const placeholderMsg = document.createElement('div');
+	placeholderMsg.style = 'text-align:center;color:#95a5a6;font-size:13px;padding:20px;';
+	placeholderMsg.textContent = '📝 Tapez un message et appuyez sur Envoyer ou Entrée';
+	messagesArea.appendChild(placeholderMsg);
+	
+	// Input Area
+	const inputContainer = document.createElement('div');
+	inputContainer.style = 'padding:20px;background:#23272f;border-top:1px solid #2ecc71;';
+	
+	const inputWrapper = document.createElement('div');
+	inputWrapper.style = 'display:flex;gap:8px;align-items:flex-end;';
+	
+	const textareaWrapper = document.createElement('div');
+	textareaWrapper.style = 'flex:1;';
+	
+	const textarea = document.createElement('textarea');
+	textarea.id = 'voiceInput';
+	textarea.placeholder = 'Entrez votre message...';
+	textarea.style = 'width:100%;background:#1a1d24;border:2px solid #2ecc71;color:#fff;padding:12px;border-radius:6px;font-family:Arial;font-size:13px;resize:vertical;min-height:50px;max-height:100px;';
+	
+	const hint = document.createElement('small');
+	hint.style = 'color:#95a5a6;font-size:11px;display:block;margin-top:4px;';
+	hint.textContent = '💡 Shift+Entrée pour nouvelle ligne';
+	
+	textareaWrapper.appendChild(textarea);
+	textareaWrapper.appendChild(hint);
+	
+	const sendBtn = document.createElement('button');
+	sendBtn.id = 'voiceSendBtn';
+	sendBtn.style = 'background:#2ecc71;color:#000;border:none;padding:12px 24px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:14px;white-space:nowrap;height:fit-content;';
+	sendBtn.textContent = '📤 Envoyer';
+	
+	inputWrapper.appendChild(textareaWrapper);
+	inputWrapper.appendChild(sendBtn);
+	inputContainer.appendChild(inputWrapper);
+	
+	// Actions
+	const actionsContainer = document.createElement('div');
+	actionsContainer.style = 'padding:16px;background:#1a1d24;border-top:1px solid #34495e;display:grid;grid-template-columns:1fr 1fr;gap:8px;';
+	
+	const clearBtn = document.createElement('button');
+	clearBtn.id = 'voiceClearBtn';
+	clearBtn.style = 'background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;';
+	clearBtn.textContent = '🗑️ Effacer';
+	
+	const closeBtn2 = document.createElement('button');
+	closeBtn2.id = 'voiceCloseBtn2';
+	closeBtn2.style = 'background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;';
+	closeBtn2.textContent = '❌ Fermer';
+	
+	actionsContainer.appendChild(clearBtn);
+	actionsContainer.appendChild(closeBtn2);
+	
+	// Assembler le panel
+	container.appendChild(header);
+	container.appendChild(messagesArea);
+	container.appendChild(inputContainer);
+	container.appendChild(actionsContainer);
+	panel.appendChild(container);
 	
 	document.body.appendChild(panel);
 	
 	// Attacher les événements
-	const inputField = document.getElementById('voiceInput');
-	const sendBtn = document.getElementById('voiceSendBtn');
-	const clearBtn = document.getElementById('voiceClearBtn');
-	const closeBtn1 = document.getElementById('voiceCloseBtn');
-	const closeBtn2 = document.getElementById('voiceCloseBtn2');
-	
-	inputField.addEventListener('keypress', (e) => {
+	textarea.addEventListener('keypress', (e) => {
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
 			window.sendVoiceMessage(serial);
@@ -1250,7 +1283,7 @@ window.sendVoiceToHeadset = async function(serial) {
 	closeBtn1.addEventListener('click', window.closeVoicePanel);
 	closeBtn2.addEventListener('click', window.closeVoicePanel);
 	
-	inputField.focus();
+	textarea.focus();
 };
 
 window.sendVoiceMessage = async function(serial) {
