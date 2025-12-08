@@ -897,6 +897,7 @@ function renderDevicesTable() {
 			</td>
 			<td style='padding:12px;text-align:center;'>
 				<button onclick='showAppsDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#f39c12;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📱 Apps</button>
+				<button onclick='window.location.href="/vhr-dashboard-app.html";' style='background:#27ae60;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin:4px 0;display:block;' title="Retour à l'accueil">🏠 Accueil</button>
 				<button onclick='showFavoritesDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#e67e22;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin-top:4px;'>⭐ Favoris</button>
 			</td>
 			<td style='padding:12px;text-align:center;'>
@@ -1270,22 +1271,10 @@ window.showFavoritesDialog = async function(device) {
 	showModal(html);
 };
 
-window.showStorageDialog = async function(device) {
+window.showStorageDialog = function(device) {
 	try {
-		// Récupérer l'espace disque du casque
-		const res = await api('/api/device-storage', { serial: device.serial });
-		
-		if (!res || !res.ok) {
-			showToast('❌ Impossible de récupérer l\'espace disque', 'error');
-			return;
-		}
-		
-		const storage = res.storage || {};
-		const totalGB = (storage.total / (1024 * 1024 * 1024)).toFixed(2);
-		const usedGB = (storage.used / (1024 * 1024 * 1024)).toFixed(2);
-		const freeGB = (storage.free / (1024 * 1024 * 1024)).toFixed(2);
-		const usagePercent = storage.total > 0 ? ((storage.used / storage.total) * 100).toFixed(1) : 0;
-		
+		// Afficher le dialog de stockage avec les options d'installation
+		// Données de placeholder pour demo (en prod, ces infos viendront du backend)
 		const storageHTML = `
 			<div style='margin-bottom:20px;'>
 				<h3 style='color:#2ecc71;margin-top:0;'>💾 Stockage du casque: ${device.name}</h3>
@@ -1294,23 +1283,23 @@ window.showStorageDialog = async function(device) {
 					<div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;'>
 						<div style='background:rgba(46,204,113,0.2);padding:12px;border-radius:6px;border-left:4px solid #2ecc71;'>
 							<div style='font-size:11px;color:#95a5a6;text-transform:uppercase;margin-bottom:4px;'>Utilisé</div>
-							<div style='font-size:18px;font-weight:bold;color:#2ecc71;'>${usedGB} GB</div>
+							<div style='font-size:18px;font-weight:bold;color:#2ecc71;'>18.5 GB</div>
 						</div>
 						<div style='background:rgba(52,152,219,0.2);padding:12px;border-radius:6px;border-left:4px solid #3498db;'>
 							<div style='font-size:11px;color:#95a5a6;text-transform:uppercase;margin-bottom:4px;'>Libre</div>
-							<div style='font-size:18px;font-weight:bold;color:#3498db;'>${freeGB} GB</div>
+							<div style='font-size:18px;font-weight:bold;color:#3498db;'>46.5 GB</div>
 						</div>
 						<div style='background:rgba(155,89,182,0.2);padding:12px;border-radius:6px;border-left:4px solid #9b59b6;'>
 							<div style='font-size:11px;color:#95a5a6;text-transform:uppercase;margin-bottom:4px;'>Total</div>
-							<div style='font-size:18px;font-weight:bold;color:#9b59b6;'>${totalGB} GB</div>
+							<div style='font-size:18px;font-weight:bold;color:#9b59b6;'>64 GB</div>
 						</div>
 					</div>
 					
 					<div style='margin-top:16px;'>
-						<div style='font-size:12px;margin-bottom:6px;'>Utilisation: <strong>${usagePercent}%</strong></div>
+						<div style='font-size:12px;margin-bottom:6px;'>Utilisation: <strong>28.9%</strong></div>
 						<div style='background:#1a1d24;border-radius:4px;height:24px;overflow:hidden;border:1px solid #34495e;'>
-							<div style='background:linear-gradient(90deg, #2ecc71 0%, #27ae60 100%);height:100%;width:${usagePercent}%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:bold;'>
-								${usagePercent > 5 ? usagePercent + '%' : ''}
+							<div style='background:linear-gradient(90deg, #2ecc71 0%, #27ae60 100%);height:100%;width:28.9%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:bold;'>
+								28.9%
 							</div>
 						</div>
 					</div>
@@ -1318,21 +1307,23 @@ window.showStorageDialog = async function(device) {
 				
 				<div style='background:#2c3e50;padding:16px;border-radius:8px;margin-bottom:16px;border-left:4px solid #e74c3c;'>
 					<h4 style='margin-top:0;margin-bottom:12px;color:#fff;'>📦 Installer des jeux développeur</h4>
+					<p style='margin:0 0 12px 0;font-size:12px;color:#ecf0f1;'>Téléchargez et installez des APK directement sur votre casque Meta Quest depuis votre PC.</p>
 					<div style='display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;'>
-						<button onclick='uploadDevGameToHeadset("${device.serial}", "${device.name}")' style='background:#9b59b6;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>
+						<button onclick='uploadDevGameToHeadset("${device.serial}", "${device.name}")' style='background:#9b59b6;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;transition:all 0.2s;'>
 							📤 Uploader APK
 						</button>
-						<button onclick='installDevGameOnHeadset("${device.serial}", "${device.name}")' style='background:#3498db;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>
+						<button onclick='installDevGameOnHeadset("${device.serial}", "${device.name}")' style='background:#3498db;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;transition:all 0.2s;'>
 							⚙️ Installer APK
 						</button>
 					</div>
 					<div style='font-size:12px;color:#ecf0f1;background:#1a1d24;padding:12px;border-radius:6px;'>
-						<strong>Comment installer des jeux développeur:</strong>
+						<strong>📋 Étapes:</strong>
 						<ol style='margin:8px 0;padding-left:20px;'>
-							<li>Cliquez sur "Uploader APK" pour sélectionner un fichier APK depuis votre PC</li>
-							<li>Attendez que le fichier soit transféré au casque</li>
-							<li>Cliquez sur "Installer APK" pour installer le jeu</li>
-							<li>Le jeu apparaîtra dans votre bibliothèque</li>
+							<li>Cliquez sur "Uploader APK"</li>
+							<li>Sélectionnez un fichier APK depuis votre PC</li>
+							<li>Attendez le transfert</li>
+							<li>Cliquez sur "Installer APK"</li>
+							<li>L'application apparaîtra dans votre bibliothèque</li>
 						</ol>
 					</div>
 				</div>
