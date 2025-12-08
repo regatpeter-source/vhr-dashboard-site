@@ -1047,6 +1047,9 @@ window.showStreamViewer = function(serial) {
 		document.body.appendChild(modal);
 	}
 	
+	// Store serial in data attribute for later use
+	modal.dataset.serial = serial;
+	
 	modal.innerHTML = `
 		<div style='width:90%;max-width:960px;background:#1a1d24;border-radius:12px;overflow:hidden;box-shadow:0 8px 32px #000;'>
 			<div style='background:#23272f;padding:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;'>
@@ -1085,21 +1088,32 @@ window.showStreamViewer = function(serial) {
 	// Attendre 1 seconde que le stream soit bien lancé côté serveur avant de connecter le player
 	console.log('[stream] Modal opened, waiting for stream to stabilize...');
 	
-	// Ajouter event listener au select audio
-	const audioSelect = document.getElementById('audioOutputSelect');
-	if (audioSelect) {
-		audioSelect.addEventListener('change', (e) => {
-			const audioMode = e.target.value;
-			console.log('[stream] Audio mode changed to:', audioMode);
-			showToast('🔊 Audio: ' + (audioMode === 'headset' ? 'Casque' : audioMode === 'pc' ? 'PC' : 'Les deux'), 'info');
-			// Envoyer au serveur si nécessaire
-			api('/api/stream/audio-output', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ serial, audioOutput: audioMode })
-			}).catch(err => console.error('[stream audio]', err));
-		});
-	}
+	// Ajouter event listener au select audio - attendre que le DOM soit ready
+	setTimeout(() => {
+		const audioSelect = document.getElementById('audioOutputSelect');
+		if (audioSelect) {
+			audioSelect.addEventListener('change', (e) => {
+				const audioMode = e.target.value;
+				const serialFromModal = document.getElementById('streamModal').dataset.serial || serial;
+				console.log('[stream] Audio mode changed to:', audioMode, 'Serial:', serialFromModal);
+				showToast('🔊 Audio: ' + (audioMode === 'headset' ? 'Casque' : audioMode === 'pc' ? 'PC' : 'Les deux'), 'info');
+				// Envoyer au serveur
+				api('/api/stream/audio-output', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ serial: serialFromModal, audioOutput: audioMode })
+				}).then(res => {
+					if (res && res.ok) {
+						console.log('[stream audio] Success:', res);
+					} else {
+						console.error('[stream audio] Failed:', res);
+					}
+				}).catch(err => console.error('[stream audio]', err));
+			});
+		} else {
+			console.warn('[stream] audioOutputSelect element not found');
+		}
+	}, 100);
 	
 	// Mettre à jour l'heure en temps réel
 	setInterval(() => {
@@ -1252,25 +1266,17 @@ window.sendHomeButtonToHeadset = async function(serial) {
 			body: JSON.stringify({ serial })
 		});
 		
+		console.log('[sendHomeButtonToHeadset] Response:', res);
+		
 		if (res && res.ok) {
 			showToast('✅ Menu home ouvert sur le casque!', 'success');
 		} else {
-			// Si l'API n'existe pas, essayer une commande ADB alternative
-			const res2 = await api('/api/adb/shell', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ serial, command: 'input keyevent KEYCODE_HOME' })
-			});
-			
-			if (res2 && res2.ok) {
-				showToast('✅ Menu home ouvert sur le casque!', 'success');
-			} else {
-				showToast('⚠️ Commande envoyée (vérifiez le casque)', 'warning');
-			}
+			console.error('[sendHomeButtonToHeadset] Failed:', res);
+			showToast('⚠️ Erreur d\'ouverture du menu home', 'error');
 		}
 	} catch (error) {
 		console.error('[home button]', error);
-		showToast('⚠️ Bouton home activé sur le casque', 'warning');
+		showToast('⚠️ Erreur communication avec le casque', 'error');
 	}
 };
 

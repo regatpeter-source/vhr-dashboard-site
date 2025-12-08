@@ -446,7 +446,7 @@ function requireADB(req, res, next) {
   next();
 }
 // Apply to common ADB & streaming endpoints to make it obvious in logs that the feature is disabled
-app.use(['/api/adb', '/api/adb/*', '/api/stream', '/api/stream/*', '/api/apps', '/api/apps/*', '/api/battery', '/api/battery/*'], requireADB);
+app.use(['/api/adb', '/api/adb/*', '/api/stream', '/api/stream/*', '/api/apps', '/api/apps/*', '/api/battery', '/api/battery/*', '/api/device', '/api/device/*'], requireADB);
 
 // --- Stripe Checkout ---
 // Trim quotes and whitespace if an operator copy/pasted the key with surrounding quotes
@@ -2936,6 +2936,51 @@ app.post('/api/adb/command', async (req, res) => {
     res.json({ ok: result.code === 0, stdout: result.stdout, stderr: result.stderr });
   } catch (e) {
     console.error('[api] adb/command:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Home button - Open Oculus/Meta Quest menu
+app.post('/api/device/home-button', async (req, res) => {
+  const { serial } = req.body || {};
+  if (!serial) {
+    return res.status(400).json({ ok: false, error: 'serial required' });
+  }
+
+  try {
+    const result = await runAdbCommand(serial, ['shell', 'input', 'keyevent', 'KEYCODE_HOME']);
+    console.log(`[home-button] Serial: ${serial}, Result:`, result);
+    res.json({ ok: result.code === 0, stdout: result.stdout, stderr: result.stderr });
+  } catch (e) {
+    console.error('[api] device/home-button:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Stream audio output configuration
+app.post('/api/stream/audio-output', async (req, res) => {
+  const { serial, audioOutput } = req.body || {};
+  if (!serial || !audioOutput) {
+    return res.status(400).json({ ok: false, error: 'serial and audioOutput required' });
+  }
+
+  // audioOutput can be: 'headset', 'pc', or 'both'
+  // This endpoint stores the preference - actual audio routing is handled by scrcpy/streaming backend
+  
+  try {
+    console.log(`[stream-audio] Serial: ${serial}, AudioOutput: ${audioOutput}`);
+    
+    // Store preference for this device (in-memory for now)
+    if (!global.streamPreferences) global.streamPreferences = {};
+    global.streamPreferences[serial] = { audioOutput, timestamp: new Date() };
+    
+    res.json({ 
+      ok: true, 
+      message: `Audio output set to: ${audioOutput}`,
+      preference: global.streamPreferences[serial]
+    });
+  } catch (e) {
+    console.error('[api] stream/audio-output:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
