@@ -1,7 +1,44 @@
+# VHR DASHBOARD - robots.txt for SEO optimization
+# Last Updated: 2025-12-08
+
 User-agent: *
 Allow: /
+Allow: /index.html
+Allow: /features.html
+Allow: /pricing.html
+Allow: /contact.html
+Allow: /developer-setup.html
+Allow: /public/
+Allow: /api/demo/
+
+Disallow: /tmp_*
+Disallow: /backup-*
 Disallow: /downloads/
 Disallow: /data/
 Disallow: /temp*
+Disallow: /scripts/
+Disallow: /node_modules/
+Disallow: /account.html
+Disallow: /api/internal/
 
+# Crawl delay
+Crawl-delay: 1
+
+# Sitemap location
 Sitemap: https://vhr-dashboard-site.onrender.com/sitemap.xml
+
+# Google specific
+User-agent: Googlebot
+Allow: /
+Crawl-delay: 0.5
+
+# Bing specific
+User-agent: Bingbot
+Allow: /
+Crawl-delay: 1
+
+# Block bad bots
+User-agent: AhrefsBot
+User-agent: SemrushBot
+User-agent: MJ12bot
+Disallow: /
