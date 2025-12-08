@@ -1,0 +1,119 @@
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "BlogPosting",
+      "headline": "Guide Complet: Gérer 50+ Casques VR",
+      "datePublished": "2025-12-12",
+      "dateModified": "2025-12-15",
+      "author": {
+        "@type": "Organization",
+        "name": "VHR DASHBOARD"
+      },
+      "image": "https://vhr-dashboard-site.onrender.com/images/blog-vr-management.jpg",
+      "description": "Découvrez les meilleures pratiques pour gérer efficacement une flotte importante de casques VR Meta Quest ou HTC Vive.",
+      "articleBody": "Guide complet sur la gestion de 50+ casques VR...",
+      "wordCount": 2000,
+      "timeToRead": "8 minutes"
+    },
+    {
+      "@type": "BlogPosting",
+      "headline": "Formation VR en Entreprise: 5 Cas de Succès",
+      "datePublished": "2025-12-10",
+      "dateModified": "2025-12-15",
+      "author": {
+        "@type": "Organization",
+        "name": "VHR DASHBOARD"
+      },
+      "image": "https://vhr-dashboard-site.onrender.com/images/blog-vr-training.jpg",
+      "description": "Comment des entreprises utilisent la VR pour former leurs collaborateurs plus rapidement.",
+      "articleBody": "5 cas de succès de formations VR en entreprise...",
+      "wordCount": 1500,
+      "timeToRead": "6 minutes"
+    },
+    {
+      "@type": "BlogPosting",
+      "headline": "Sécurité VR: Conformité RGPD pour Formations",
+      "datePublished": "2025-12-08",
+      "dateModified": "2025-12-15",
+      "author": {
+        "@type": "Organization",
+        "name": "VHR DASHBOARD"
+      },
+      "image": "https://vhr-dashboard-site.onrender.com/images/blog-vr-security.jpg",
+      "description": "Comprendre les obligations RGPD pour les données collectées lors des formations VR.",
+      "articleBody": "Guide RGPD pour formations VR...",
+      "wordCount": 2500,
+      "timeToRead": "10 minutes"
+    },
+    {
+      "@type": "BlogPosting",
+      "headline": "ROI des Formations VR: Calculez vos Économies",
+      "datePublished": "2025-12-05",
+      "dateModified": "2025-12-15",
+      "author": {
+        "@type": "Organization",
+        "name": "VHR DASHBOARD"
+      },
+      "image": "https://vhr-dashboard-site.onrender.com/images/blog-vr-roi.jpg",
+      "description": "Calcul du retour sur investissement des formations en réalité virtuelle.",
+      "articleBody": "Comment calculer le ROI de formations VR...",
+      "wordCount": 1800,
+      "timeToRead": "7 minutes"
+    },
+    {
+      "@type": "BlogPosting",
+      "headline": "Tendances VR 2025: Qu'attendre cette Année?",
+      "datePublished": "2025-12-01",
+      "dateModified": "2025-12-15",
+      "author": {
+        "@type": "Organization",
+        "name": "VHR DASHBOARD"
+      },
+      "image": "https://vhr-dashboard-site.onrender.com/images/blog-vr-trends.jpg",
+      "description": "Les tendances principales de la VR en 2025.",
+      "articleBody": "Tendances VR 2025...",
+      "wordCount": 2200,
+      "timeToRead": "9 minutes"
+    },
+    {
+      "@type": "BlogPosting",
+      "headline": "Streaming VR: Guide Technique Complet",
+      "datePublished": "2025-11-28",
+      "dateModified": "2025-12-15",
+      "author": {
+        "@type": "Organization",
+        "name": "VHR DASHBOARD"
+      },
+      "image": "https://vhr-dashboard-site.onrender.com/images/blog-vr-streaming.jpg",
+      "description": "Guide technique complet du streaming VR.",
+      "articleBody": "Guide technique streaming VR...",
+      "wordCount": 3000,
+      "timeToRead": "12 minutes"
+    },
+    {
+      "@type": "Blog",
+      "name": "VHR DASHBOARD Blog",
+      "description": "Blog avec guides, tutoriels et articles sur la gestion VR",
+      "publisher": {
+        "@type": "Organization",
+        "name": "VHR DASHBOARD",
+        "logo": "https://vhr-dashboard-site.onrender.com/logo.png"
+      },
+      "mainEntity": [
+        {
+          "@type": "BlogPosting",
+          "headline": "Guide Complet: Gérer 50+ Casques VR"
+        },
+        {
+          "@type": "BlogPosting",
+          "headline": "Formation VR en Entreprise: 5 Cas de Succès"
+        },
+        {
+          "@type": "BlogPosting",
+          "headline": "Sécurité VR: Conformité RGPD pour Formations"
+        }
+      ]
+    }
+  ]
+}
