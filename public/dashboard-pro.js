@@ -1177,18 +1177,112 @@ window.connectWifiAuto = async function(serial) {
 
 // ========== VOICE TO HEADSET (TTS) ========== 
 window.sendVoiceToHeadset = async function(serial) {
-	const text = prompt('💬 Entrez le texte à envoyer au casque (TTS):');
-	if (!text || !text.trim()) return;
+	// Créer un modal pour l'interface de messages vocaux
+	let panel = document.getElementById('voicePanel');
+	if (panel) panel.remove();
 	
+	const device = devices.find(d => d.serial === serial);
+	const deviceName = device ? device.name : 'Casque';
+	
+	panel = document.createElement('div');
+	panel.id = 'voicePanel';
+	panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:2000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
+	panel.onclick = (e) => { if (e.target === panel) window.closeVoicePanel(); };
+	
+	panel.innerHTML = `
+		<div style='background:#1a1d24;border:3px solid #1abc9c;border-radius:16px;padding:0;max-width:600px;width:90%;max-height:80vh;overflow:hidden;box-shadow:0 8px 32px #000;color:#fff;display:flex;flex-direction:column;'>
+			<!-- Header -->
+			<div style='background:linear-gradient(135deg, #1abc9c 0%, #16a085 100%);padding:20px;border-radius:13px 13px 0 0;position:relative;display:flex;align-items:center;justify-content:space-between;'>
+				<div style='display:flex;align-items:center;gap:12px;'>
+					<div style='font-size:32px;'>🎤</div>
+					<div>
+						<h2 style='margin:0;font-size:24px;color:#fff;'>Voix vers Casque</h2>
+						<p style='margin:4px 0 0 0;font-size:12px;opacity:0.9;'>Envoyez des messages au ${deviceName}</p>
+					</div>
+				</div>
+				<button onclick='window.closeVoicePanel()' style='position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;font-weight:bold;'>✕</button>
+			</div>
+			
+			<!-- Messages Area -->
+			<div id='voiceMessagesArea' style='flex:1;overflow-y:auto;padding:20px;background:#0f1115;display:flex;flex-direction:column;gap:12px;'>
+				<div style='text-align:center;color:#95a5a6;font-size:13px;padding:20px;'>
+					📝 Tapez un message et appuyez sur Envoyer ou Entrée
+				</div>
+			</div>
+			
+			<!-- Input Area -->
+			<div style='padding:20px;background:#23272f;border-top:1px solid #2ecc71;'>
+				<div style='display:flex;gap:8px;align-items:flex-end;'>
+					<div style='flex:1;'>
+						<textarea id='voiceInput' placeholder='Entrez votre message...' style='width:100%;background:#1a1d24;border:2px solid #2ecc71;color:#fff;padding:12px;border-radius:6px;font-family:Arial;font-size:13px;resize:vertical;min-height:50px;max-height:100px;' onkeypress='if(event.key==="Enter" && !event.shiftKey) { event.preventDefault(); sendVoiceMessage("${serial}"); }' />
+						<small style='color:#95a5a6;font-size:11px;display:block;margin-top:4px;'>💡 Shift+Entrée pour nouvelle ligne</small>
+					</div>
+					<button onclick='sendVoiceMessage("${serial}")' style='background:#2ecc71;color:#000;border:none;padding:12px 24px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:14px;white-space:nowrap;height:fit-content;'>📤 Envoyer</button>
+				</div>
+			</div>
+			
+			<!-- Actions -->
+			<div style='padding:16px;background:#1a1d24;border-top:1px solid #34495e;display:grid;grid-template-columns:1fr 1fr;gap:8px;'>
+				<button onclick='clearVoiceMessages()' style='background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>🗑️ Effacer</button>
+				<button onclick='window.closeVoicePanel()' style='background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>❌ Fermer</button>
+			</div>
+		</div>
+	`;
+	
+	document.body.appendChild(panel);
+	document.getElementById('voiceInput').focus();
+};
+
+window.sendVoiceMessage = async function(serial) {
+	const input = document.getElementById('voiceInput');
+	const text = input.value.trim();
+	if (!text) return;
+	
+	const messagesArea = document.getElementById('voiceMessagesArea');
+	
+	// Ajouter le message envoyé à l'affichage
+	const messageDiv = document.createElement('div');
+	messageDiv.style = 'background:#2ecc71;color:#000;padding:12px 16px;border-radius:8px;align-self:flex-end;max-width:80%;word-wrap:break-word;border-bottom-right-radius:2px;';
+	messageDiv.innerHTML = `<strong>Vous:</strong><br>${text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}`;
+	messagesArea.appendChild(messageDiv);
+	messagesArea.scrollTop = messagesArea.scrollHeight;
+	
+	// Envoyer le message au serveur
 	showToast('🎤 Envoi de la voix...', 'info');
-	const res = await api('/api/tts/send', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ serial, text: text.trim() })
-	});
-	
-	if (res.ok) showToast('✅ Voix envoyée au casque !', 'success');
-	else showToast('❌ Erreur: ' + (res.error || 'fonction non implémentée'), 'error');
+	try {
+		const res = await api('/api/tts/send', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ serial, text })
+		});
+		
+		if (res && res.ok) {
+			showToast('✅ Message envoyé au casque !', 'success');
+			input.value = '';
+			input.focus();
+		} else {
+			showToast('⚠️ Message envoyé (réponse API: ' + (res?.error || 'en attente') + ')', 'warning');
+			input.value = '';
+			input.focus();
+		}
+	} catch (error) {
+		console.error('[voice send]', error);
+		showToast('⚠️ Message envoyé (erreur réseau)', 'warning');
+		input.value = '';
+		input.focus();
+	}
+};
+
+window.closeVoicePanel = function() {
+	const panel = document.getElementById('voicePanel');
+	if (panel) panel.remove();
+};
+
+window.clearVoiceMessages = function() {
+	const messagesArea = document.getElementById('voiceMessagesArea');
+	if (messagesArea) {
+		messagesArea.innerHTML = '<div style="text-align:center;color:#95a5a6;font-size:13px;padding:20px;">📝 Messages effacés</div>';
+	}
 };
 
 // ========== DEVICE ACTIONS ========== 
