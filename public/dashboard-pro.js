@@ -908,7 +908,6 @@ function renderDevicesTable() {
 			</td>
 			<td style='padding:12px;text-align:center;'>
 				<button onclick='showAppsDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#f39c12;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📱 Apps</button>
-				<button onclick='sendHomeButtonToHeadset("${d.serial}")' style='background:#27ae60;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin:4px 0;display:block;' title="Ouvrir le menu home du casque">🏠 Accueil</button>
 				<button onclick='showFavoritesDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#e67e22;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin-top:4px;'>⭐ Favoris</button>
 			</td>
 			<td style='padding:12px;text-align:center;'>
@@ -972,9 +971,8 @@ function renderDevicesCards() {
 					<button onclick='stopStreamFromTable("${d.serial}")' style='width:100%;background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>⏹️ Stop Stream</button>
 				`}
 			</div>
-			<div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px;'>
+			<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;'>
 				<button onclick='showAppsDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#f39c12;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>📱 Apps</button>
-				<button onclick='sendHomeButtonToHeadset("${d.serial}")' style='background:#27ae60;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;' title="Ouvrir le menu home du casque">🏠 Accueil</button>
 				<button onclick='showFavoritesDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#e67e22;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>⭐ Favoris</button>
 			</div>
 			<button onclick='sendVoiceToHeadset("${d.serial}")' style='width:100%;background:#1abc9c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>🎤 Voix PC→Casque</button>
@@ -1267,54 +1265,6 @@ window.connectWifiAuto = async function(serial) {
 	setTimeout(loadDevices, 1000);
 };
 
-// ========== HOME BUTTON (OCULUS MENU) ========== 
-window.sendHomeButtonToHeadset = async function(serial) {
-	try {
-		showToast('📱 Ouverture du menu home...', 'info');
-		
-		// Try primary endpoint first
-		try {
-			const res = await api('/api/device/home-button', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ serial })
-			});
-			
-			console.log('[sendHomeButtonToHeadset] Primary endpoint response:', res);
-			
-			if (res && res.ok) {
-				showToast('✅ Menu home ouvert sur le casque!', 'success');
-				return;
-			}
-		} catch (error) {
-			console.warn('[sendHomeButtonToHeadset] Primary endpoint error:', error);
-		}
-		
-		// Fallback: Use generic ADB command endpoint
-		console.log('[sendHomeButtonToHeadset] Trying fallback via /api/adb/command');
-		const fallbackRes = await api('/api/adb/command', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ 
-				serial, 
-				command: ['shell', 'input', 'keyevent', 'KEYCODE_HOME']
-			})
-		});
-		
-		console.log('[sendHomeButtonToHeadset] Fallback response:', fallbackRes);
-		
-		if (fallbackRes && fallbackRes.ok) {
-			showToast('✅ Menu home ouvert sur le casque!', 'success');
-		} else {
-			console.error('[sendHomeButtonToHeadset] Fallback failed:', fallbackRes);
-			showToast('⚠️ Erreur d\'ouverture du menu home', 'error');
-		}
-	} catch (error) {
-		console.error('[home button]', error);
-		showToast('⚠️ Erreur communication avec le casque', 'error');
-	}
-};
-
 // ========== VOICE TO HEADSET (TTS) ========== 
 window.sendVoiceToHeadset = async function(serial) {
 	// Créer un modal pour l'interface de messages vocaux
@@ -1544,11 +1494,6 @@ window.stopGame = async function(serial, pkg) {
 		} else {
 			console.warn('[stopGame] Stop app failed:', stopRes);
 		}
-		
-		// Return to Oculus home menu (wait a bit to let the app stop first)
-		setTimeout(() => {
-			sendHomeButtonToHeadset(serial);
-		}, 500);
 		
 	} catch (error) {
 		console.error('[stopGame]', error);
