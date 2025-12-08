@@ -40,7 +40,7 @@ function createNavbar() {
 	document.body.appendChild(nav);
 	document.body.style.paddingTop = '56px';
 	
-	document.getElementById('homeBtn').onclick = () => window.location.href = '/';
+	document.getElementById('homeBtn').onclick = () => window.location.href = '/vhr-dashboard-app.html';
 	document.getElementById('toggleViewBtn').onclick = toggleView;
 	document.getElementById('installerBtn').onclick = showInstallerPanel;
 	document.getElementById('favoritesBtn').onclick = addDashboardToFavorites;
