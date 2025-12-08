@@ -3547,6 +3547,10 @@ app.post('/api/android/compile', async (req, res) => {
       helpText = '\n\n🚀 SOLUTION RAPIDE:\n' +
                  'Téléchargez et exécutez le script d\'installation automatique:\n' +
                  'PowerShell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest https://raw.githubusercontent.com/regatpeter-source/vhr-dashboard-site/main/scripts/install-build-tools.ps1 -OutFile install-tools.ps1; .\\install-tools.ps1"\n' +
+                 '\n💻 OU LOCALEMENT (Plus simple):\n' +
+                 '1. Clonez le repo: git clone https://github.com/regatpeter-source/vhr-dashboard-site.git\n' +
+                 '2. Exécutez: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fix-build-env.ps1\n' +
+                 '3. Redémarrez une nouvelle fenêtre PowerShell\n' +
                  '\n📖 OU installez manuellement:\n' +
                  '1. Java JDK 11+: https://adoptium.net/\n' +
                  '2. Gradle 8.7+: https://gradle.org/releases/\n' +
