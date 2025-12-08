@@ -307,6 +307,19 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Serve style and script root assets from public root as well (so /style.css and /script.js work)
 app.use('/style.css', express.static(path.join(__dirname, 'public', 'style.css')));
 app.use('/script.js', express.static(path.join(__dirname, 'public', 'script.js')));
+
+// Serve sitemap.xml from root directory
+app.get('/sitemap.xml', (req, res) => {
+  res.type('application/xml');
+  res.sendFile(path.join(__dirname, 'sitemap.xml'));
+});
+
+// Serve robots.txt from root directory
+app.get('/robots.txt', (req, res) => {
+  res.type('text/plain');
+  res.sendFile(path.join(__dirname, 'robots.txt'));
+});
+
 // Expose site-vitrine directory too for local tests
 app.use('/site-vitrine', express.static(path.join(__dirname, 'site-vitrine'), {
   setHeaders: (res, filePath) => {
