@@ -1200,7 +1200,7 @@ window.sendVoiceToHeadset = async function(serial) {
 						<p style='margin:4px 0 0 0;font-size:12px;opacity:0.9;'>Envoyez des messages au ${deviceName}</p>
 					</div>
 				</div>
-				<button onclick='window.closeVoicePanel()' style='position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;font-weight:bold;'>✕</button>
+				<button id='voiceCloseBtn' style='position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;font-weight:bold;'>✕</button>
 			</div>
 			
 			<!-- Messages Area -->
@@ -1214,23 +1214,43 @@ window.sendVoiceToHeadset = async function(serial) {
 			<div style='padding:20px;background:#23272f;border-top:1px solid #2ecc71;'>
 				<div style='display:flex;gap:8px;align-items:flex-end;'>
 					<div style='flex:1;'>
-						<textarea id='voiceInput' placeholder='Entrez votre message...' style='width:100%;background:#1a1d24;border:2px solid #2ecc71;color:#fff;padding:12px;border-radius:6px;font-family:Arial;font-size:13px;resize:vertical;min-height:50px;max-height:100px;' onkeypress='if(event.key==="Enter" && !event.shiftKey) { event.preventDefault(); sendVoiceMessage("${serial}"); }' />
+						<textarea id='voiceInput' placeholder='Entrez votre message...' style='width:100%;background:#1a1d24;border:2px solid #2ecc71;color:#fff;padding:12px;border-radius:6px;font-family:Arial;font-size:13px;resize:vertical;min-height:50px;max-height:100px;' />
 						<small style='color:#95a5a6;font-size:11px;display:block;margin-top:4px;'>💡 Shift+Entrée pour nouvelle ligne</small>
 					</div>
-					<button onclick='sendVoiceMessage("${serial}")' style='background:#2ecc71;color:#000;border:none;padding:12px 24px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:14px;white-space:nowrap;height:fit-content;'>📤 Envoyer</button>
+					<button id='voiceSendBtn' style='background:#2ecc71;color:#000;border:none;padding:12px 24px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:14px;white-space:nowrap;height:fit-content;'>📤 Envoyer</button>
 				</div>
 			</div>
 			
 			<!-- Actions -->
 			<div style='padding:16px;background:#1a1d24;border-top:1px solid #34495e;display:grid;grid-template-columns:1fr 1fr;gap:8px;'>
-				<button onclick='clearVoiceMessages()' style='background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>🗑️ Effacer</button>
-				<button onclick='window.closeVoicePanel()' style='background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>❌ Fermer</button>
+				<button id='voiceClearBtn' style='background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>🗑️ Effacer</button>
+				<button id='voiceCloseBtn2' style='background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>❌ Fermer</button>
 			</div>
 		</div>
 	`;
 	
 	document.body.appendChild(panel);
-	document.getElementById('voiceInput').focus();
+	
+	// Attacher les événements
+	const inputField = document.getElementById('voiceInput');
+	const sendBtn = document.getElementById('voiceSendBtn');
+	const clearBtn = document.getElementById('voiceClearBtn');
+	const closeBtn1 = document.getElementById('voiceCloseBtn');
+	const closeBtn2 = document.getElementById('voiceCloseBtn2');
+	
+	inputField.addEventListener('keypress', (e) => {
+		if (e.key === 'Enter' && !e.shiftKey) {
+			e.preventDefault();
+			window.sendVoiceMessage(serial);
+		}
+	});
+	
+	sendBtn.addEventListener('click', () => window.sendVoiceMessage(serial));
+	clearBtn.addEventListener('click', window.clearVoiceMessages);
+	closeBtn1.addEventListener('click', window.closeVoicePanel);
+	closeBtn2.addEventListener('click', window.closeVoicePanel);
+	
+	inputField.focus();
 };
 
 window.sendVoiceMessage = async function(serial) {
