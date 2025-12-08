@@ -1477,26 +1477,51 @@ window.launchApp = async function(serial, pkg) {
 	closeModal();
 };
 
-// Stop game and return to Oculus menu
+// Stop game
 window.stopGame = async function(serial, pkg) {
 	try {
 		showToast('⏹️ Arrêt du jeu...', 'info');
 		
-		// Stop the app
-		const stopRes = await api(`/api/apps/${serial}/stop`, {
+		// Try primary endpoint first
+		try {
+			const stopRes = await api(`/api/apps/${serial}/stop`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ package: pkg })
+			});
+			
+			console.log('[stopGame] Primary endpoint response:', stopRes);
+			
+			if (stopRes && stopRes.ok) {
+				showToast('✅ Jeu arrêté!', 'success');
+				return;
+			}
+		} catch (error) {
+			console.warn('[stopGame] Primary endpoint error:', error);
+		}
+		
+		// Fallback: Use generic ADB command endpoint
+		console.log('[stopGame] Trying fallback via /api/adb/command');
+		const fallbackRes = await api('/api/adb/command', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ package: pkg })
+			body: JSON.stringify({ 
+				serial, 
+				command: ['shell', 'am', 'force-stop', pkg]
+			})
 		});
 		
-		if (stopRes && stopRes.ok) {
+		console.log('[stopGame] Fallback response:', fallbackRes);
+		
+		if (fallbackRes && fallbackRes.ok) {
 			showToast('✅ Jeu arrêté!', 'success');
 		} else {
-			console.warn('[stopGame] Stop app failed:', stopRes);
+			console.error('[stopGame] Fallback failed:', fallbackRes);
+			showToast('⚠️ Erreur lors de l\'arrêt du jeu', 'error');
 		}
 		
 	} catch (error) {
-		console.error('[stopGame]', error);
+		console.error('[stopGame] Unexpected error:', error);
 		showToast('⚠️ Erreur lors de l\'arrêt du jeu', 'error');
 	}
 };
