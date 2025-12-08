@@ -20,6 +20,9 @@ function createNavbar() {
 			🥽 VHR DASHBOARD PRO
 		</div>
 		<div style='flex:1'></div>
+		<button id="homeBtn" style="margin-right:15px;background:#27ae60;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;" title="Retour à l'accueil">
+			🏠 Accueil
+		</button>
 		<button id="toggleViewBtn" style="margin-right:15px;background:#2ecc71;color:#000;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			📊 Vue: Tableau
 		</button>
@@ -37,6 +40,7 @@ function createNavbar() {
 	document.body.appendChild(nav);
 	document.body.style.paddingTop = '56px';
 	
+	document.getElementById('homeBtn').onclick = () => window.location.href = '/';
 	document.getElementById('toggleViewBtn').onclick = toggleView;
 	document.getElementById('installerBtn').onclick = showInstallerPanel;
 	document.getElementById('favoritesBtn').onclick = addDashboardToFavorites;
