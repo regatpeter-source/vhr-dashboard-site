@@ -1278,7 +1278,134 @@ window.showFavoritesDialog = async function(device) {
 };
 
 window.showStorageDialog = async function(device) {
-	showToast('💾 Fonction stockage à venir...', 'info');
+	try {
+		// Récupérer l'espace disque du casque
+		const res = await api('/api/device-storage', { serial: device.serial });
+		
+		if (!res || !res.ok) {
+			showToast('❌ Impossible de récupérer l\'espace disque', 'error');
+			return;
+		}
+		
+		const storage = res.storage || {};
+		const totalGB = (storage.total / (1024 * 1024 * 1024)).toFixed(2);
+		const usedGB = (storage.used / (1024 * 1024 * 1024)).toFixed(2);
+		const freeGB = (storage.free / (1024 * 1024 * 1024)).toFixed(2);
+		const usagePercent = storage.total > 0 ? ((storage.used / storage.total) * 100).toFixed(1) : 0;
+		
+		const storageHTML = `
+			<div style='margin-bottom:20px;'>
+				<h3 style='color:#2ecc71;margin-top:0;'>💾 Stockage du casque: ${device.name}</h3>
+				
+				<div style='background:#2c3e50;padding:16px;border-radius:8px;margin-bottom:16px;'>
+					<div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;'>
+						<div style='background:rgba(46,204,113,0.2);padding:12px;border-radius:6px;border-left:4px solid #2ecc71;'>
+							<div style='font-size:11px;color:#95a5a6;text-transform:uppercase;margin-bottom:4px;'>Utilisé</div>
+							<div style='font-size:18px;font-weight:bold;color:#2ecc71;'>${usedGB} GB</div>
+						</div>
+						<div style='background:rgba(52,152,219,0.2);padding:12px;border-radius:6px;border-left:4px solid #3498db;'>
+							<div style='font-size:11px;color:#95a5a6;text-transform:uppercase;margin-bottom:4px;'>Libre</div>
+							<div style='font-size:18px;font-weight:bold;color:#3498db;'>${freeGB} GB</div>
+						</div>
+						<div style='background:rgba(155,89,182,0.2);padding:12px;border-radius:6px;border-left:4px solid #9b59b6;'>
+							<div style='font-size:11px;color:#95a5a6;text-transform:uppercase;margin-bottom:4px;'>Total</div>
+							<div style='font-size:18px;font-weight:bold;color:#9b59b6;'>${totalGB} GB</div>
+						</div>
+					</div>
+					
+					<div style='margin-top:16px;'>
+						<div style='font-size:12px;margin-bottom:6px;'>Utilisation: <strong>${usagePercent}%</strong></div>
+						<div style='background:#1a1d24;border-radius:4px;height:24px;overflow:hidden;border:1px solid #34495e;'>
+							<div style='background:linear-gradient(90deg, #2ecc71 0%, #27ae60 100%);height:100%;width:${usagePercent}%;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:bold;'>
+								${usagePercent > 5 ? usagePercent + '%' : ''}
+							</div>
+						</div>
+					</div>
+				</div>
+				
+				<div style='background:#2c3e50;padding:16px;border-radius:8px;margin-bottom:16px;border-left:4px solid #e74c3c;'>
+					<h4 style='margin-top:0;margin-bottom:12px;color:#fff;'>📦 Installer des jeux développeur</h4>
+					<div style='display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;'>
+						<button onclick='uploadDevGameToHeadset("${device.serial}", "${device.name}")' style='background:#9b59b6;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>
+							📤 Uploader APK
+						</button>
+						<button onclick='installDevGameOnHeadset("${device.serial}", "${device.name}")' style='background:#3498db;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>
+							⚙️ Installer APK
+						</button>
+					</div>
+					<div style='font-size:12px;color:#ecf0f1;background:#1a1d24;padding:12px;border-radius:6px;'>
+						<strong>Comment installer des jeux développeur:</strong>
+						<ol style='margin:8px 0;padding-left:20px;'>
+							<li>Cliquez sur "Uploader APK" pour sélectionner un fichier APK depuis votre PC</li>
+							<li>Attendez que le fichier soit transféré au casque</li>
+							<li>Cliquez sur "Installer APK" pour installer le jeu</li>
+							<li>Le jeu apparaîtra dans votre bibliothèque</li>
+						</ol>
+					</div>
+				</div>
+			</div>
+		`;
+		
+		showModal(storageHTML);
+		
+	} catch (error) {
+		console.error('[storage dialog]', error);
+		showToast('❌ Erreur lors de l\'accès au stockage', 'error');
+	}
+};
+
+window.uploadDevGameToHeadset = async function(serial, deviceName) {
+	// Créer un input file
+	const input = document.createElement('input');
+	input.type = 'file';
+	input.accept = '.apk';
+	input.onchange = async (e) => {
+		const file = e.target.files[0];
+		if (!file) return;
+		
+		const formData = new FormData();
+		formData.append('serial', serial);
+		formData.append('apk', file);
+		
+		try {
+			showToast('📤 Envoi du fichier en cours...', 'info');
+			const res = await fetch('/api/upload-dev-game', {
+				method: 'POST',
+				body: formData
+			});
+			
+			const data = await res.json();
+			if (data.ok) {
+				showToast(`✅ APK envoyé avec succès: ${file.name}`, 'success');
+				setTimeout(() => showStorageDialog({ serial, name: deviceName }), 1000);
+			} else {
+				showToast(`❌ ${data.error || 'Erreur lors de l\'envoi'}`, 'error');
+			}
+		} catch (error) {
+			console.error('[upload dev game]', error);
+			showToast('❌ Erreur lors de l\'envoi du fichier', 'error');
+		}
+	};
+	input.click();
+};
+
+window.installDevGameOnHeadset = async function(serial, deviceName) {
+	try {
+		showToast('⚙️ Installation en cours...', 'info');
+		const res = await api('/api/install-dev-game', { serial });
+		
+		if (!res || !res.ok) {
+			showToast(`❌ ${res?.error || 'Erreur lors de l\'installation'}`, 'error');
+			return;
+		}
+		
+		showToast(`✅ APK installé avec succès sur ${deviceName}`, 'success');
+		setTimeout(() => showStorageDialog({ serial, name: deviceName }), 1500);
+		
+	} catch (error) {
+		console.error('[install dev game]', error);
+		showToast('❌ Erreur lors de l\'installation', 'error');
+	}
 };
 
 // ========== MODAL ========== 
