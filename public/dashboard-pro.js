@@ -802,7 +802,18 @@ async function api(path, opts = {}) {
 			opts.credentials = 'include';
 		}
 		const res = await fetch(path, opts);
-		return await res.json();
+		
+		// Check if response is JSON
+		const contentType = res.headers.get('content-type');
+		if (!contentType || !contentType.includes('application/json')) {
+			console.error('[api] Invalid content-type:', contentType, 'Status:', res.status);
+			return { ok: false, error: `Invalid response type: ${contentType}, Status: ${res.status}` };
+		}
+		
+		const data = await res.json();
+		// Attach status code to response for better error checking
+		data._status = res.status;
+		return data;
 	} catch (e) {
 		console.error('[api]', path, e);
 		return { ok: false, error: e.message };
@@ -1260,18 +1271,42 @@ window.connectWifiAuto = async function(serial) {
 window.sendHomeButtonToHeadset = async function(serial) {
 	try {
 		showToast('📱 Ouverture du menu home...', 'info');
-		const res = await api('/api/device/home-button', {
+		
+		// Try primary endpoint first
+		try {
+			const res = await api('/api/device/home-button', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ serial })
+			});
+			
+			console.log('[sendHomeButtonToHeadset] Primary endpoint response:', res);
+			
+			if (res && res.ok) {
+				showToast('✅ Menu home ouvert sur le casque!', 'success');
+				return;
+			}
+		} catch (error) {
+			console.warn('[sendHomeButtonToHeadset] Primary endpoint error:', error);
+		}
+		
+		// Fallback: Use generic ADB command endpoint
+		console.log('[sendHomeButtonToHeadset] Trying fallback via /api/adb/command');
+		const fallbackRes = await api('/api/adb/command', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ serial })
+			body: JSON.stringify({ 
+				serial, 
+				command: ['shell', 'input', 'keyevent', 'KEYCODE_HOME']
+			})
 		});
 		
-		console.log('[sendHomeButtonToHeadset] Response:', res);
+		console.log('[sendHomeButtonToHeadset] Fallback response:', fallbackRes);
 		
-		if (res && res.ok) {
+		if (fallbackRes && fallbackRes.ok) {
 			showToast('✅ Menu home ouvert sur le casque!', 'success');
 		} else {
-			console.error('[sendHomeButtonToHeadset] Failed:', res);
+			console.error('[sendHomeButtonToHeadset] Fallback failed:', fallbackRes);
 			showToast('⚠️ Erreur d\'ouverture du menu home', 'error');
 		}
 	} catch (error) {
