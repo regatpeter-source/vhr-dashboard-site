@@ -862,6 +862,7 @@ function renderDevicesTable() {
 			<tr style='background:#23272f;'>
 				<th style='padding:14px;text-align:left;border-bottom:2px solid #2ecc71;font-size:15px;'>Casque</th>
 				<th style='padding:14px;text-align:left;border-bottom:2px solid #2ecc71;font-size:15px;'>Statut</th>
+				<th style='padding:14px;text-align:center;border-bottom:2px solid #2ecc71;font-size:15px;'>Jeu en cours</th>
 				<th style='padding:14px;text-align:center;border-bottom:2px solid #2ecc71;font-size:15px;'>Streaming</th>
 				<th style='padding:14px;text-align:center;border-bottom:2px solid #2ecc71;font-size:15px;'>WiFi</th>
 				<th style='padding:14px;text-align:center;border-bottom:2px solid #2ecc71;font-size:15px;'>Apps</th>
@@ -875,6 +876,8 @@ function renderDevicesTable() {
 		const bgColor = idx % 2 === 0 ? '#1a1d24' : '#23272f';
 		const statusColor = d.status === 'device' ? '#2ecc71' : d.status === 'streaming' ? '#3498db' : '#e74c3c';
 		const statusIcon = d.status === 'device' ? '✅' : d.status === 'streaming' ? '🟢' : '❌';
+		const runningGamesList = runningApps[d.serial] || [];
+		const runningGameDisplay = runningGamesList.length > 0 ? `<span style='background:#27ae60;color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;font-weight:bold;'>🎮 ${runningGamesList.join(', ')}</span>` : `<span style='color:#95a5a6;'>-</span>`;
 		
 		table += `<tr style='background:${bgColor};border-bottom:1px solid #34495e;'>
 			<td style='padding:12px;'>
@@ -885,6 +888,9 @@ function renderDevicesTable() {
 				<span style='background:${statusColor};color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:bold;'>
 					${statusIcon} ${d.status}
 				</span>
+			</td>
+			<td style='padding:12px;text-align:center;'>
+				${runningGameDisplay}
 			</td>
 			<td style='padding:12px;text-align:center;'>
 				${d.status !== 'streaming' ? `
@@ -947,6 +953,8 @@ function renderDevicesCards() {
 		card.style = 'background:#1a1d24;border:2px solid #2ecc71;border-radius:12px;padding:18px;box-shadow:0 4px 16px #000;color:#fff;';
 		
 		const statusColor = d.status === 'device' ? '#2ecc71' : d.status === 'streaming' ? '#3498db' : '#e74c3c';
+		const runningGamesList = runningApps[d.serial] || [];
+		const runningGameDisplay = runningGamesList.length > 0 ? `<div style='background:#27ae60;color:#fff;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:bold;margin-bottom:10px;'>🎮 ${runningGamesList.join(', ')}</div>` : '';
 		
 		card.innerHTML = `
 			<div style='font-weight:bold;font-size:18px;color:#2ecc71;margin-bottom:8px;'>${d.name}</div>
@@ -956,6 +964,7 @@ function renderDevicesCards() {
 					${d.status === 'device' ? '✅' : d.status === 'streaming' ? '🟢' : '❌'} ${d.status}
 				</span>
 			</div>
+			${runningGameDisplay}
 			<div style='margin-bottom:10px;'>
 					${d.status !== 'streaming' ? `
 					<select id='profile_card_${d.serial}' style='width:100%;background:#34495e;color:#fff;border:1px solid #2ecc71;padding:8px;border-radius:6px;margin-bottom:6px;'>
