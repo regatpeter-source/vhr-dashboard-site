@@ -2623,6 +2623,39 @@ app.post('/api/apps/:serial/launch', async (req, res) => {
   }
 });
 
+// Stop app and return to Oculus home
+app.post('/api/apps/:serial/stop', async (req, res) => {
+  const serial = req.params.serial;
+  const pkg = req.body?.package;
+  if (!serial || !pkg) {
+    return res.status(400).json({ ok: false, error: 'serial and package required' });
+  }
+
+  try {
+    console.log(`[stop] Arrêt de: ${pkg}`);
+    
+    // Stop the app using am force-stop
+    const stopResult = await runAdbCommand(serial, [
+      'shell', 'am', 'force-stop', pkg
+    ]);
+    
+    const success = stopResult.code === 0;
+    
+    if (success) {
+      console.log(`[stop] ${pkg} arrêté avec succès`);
+      try { io.emit('app-stop', { serial, package: pkg, success: true, stoppedAt: Date.now() }); } catch (e) {}
+      res.json({ ok: true, msg: `Jeu arrêté: ${pkg}` });
+    } else {
+      console.log(`[stop] ${pkg} - Erreur lors de l'arrêt:\n${stopResult.stderr}`);
+      try { io.emit('app-stop', { serial, package: pkg, success: false, error: stopResult.stderr }); } catch(e) {}
+      res.json({ ok: false, msg: 'Échec de l\'arrêt', details: stopResult.stderr });
+    }
+  } catch (e) {
+    console.error('[api] stop:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 app.post('/api/devices/rename', (req, res) => {
   const { serial, name } = req.body || {};
   if (!serial || !name) {
