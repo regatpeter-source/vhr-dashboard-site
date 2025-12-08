@@ -794,6 +794,7 @@ const socket = io();
 let devices = [];
 let games = [];
 let favorites = [];
+let runningApps = {}; // Track running apps: { serial: [pkg1, pkg2, ...] }
 
 async function api(path, opts = {}) {
 	try {
@@ -1448,15 +1449,18 @@ window.showAppsDialog = async function(device) {
 	if (!res.ok) return showToast('❌ Erreur chargement apps', 'error');
 	const apps = res.apps || [];
 	const favs = JSON.parse(localStorage.getItem('vhr_favorites_' + device.serial) || '[]');
+	const running = runningApps[device.serial] || [];
 	let html = `<h3 style='color:#2ecc71;'>Apps installées sur ${device.name}</h3>`;
 	html += `<div style='max-height:400px;overflow-y:auto;'>`;
 	apps.forEach(pkg => {
 		const isFav = favs.includes(pkg);
-		html += `<div style='padding:8px;margin:4px 0;background:#23272f;border-radius:6px;display:flex;justify-content:space-between;align-items:center;'>
-			<span style='color:#fff;flex:1;'>${pkg}</span>
+		const isRunning = running.includes(pkg);
+		const statusBg = isRunning ? '#27ae60' : '#23272f';
+		const statusIndicator = isRunning ? '🟢 En cours' : '';
+		html += `<div style='padding:8px;margin:4px 0;background:${statusBg};border-radius:6px;display:flex;justify-content:space-between;align-items:center;border-left:4px solid ${isRunning ? '#2ecc71' : '#555'};'>
+			<span style='color:#fff;flex:1;'>${pkg}${statusIndicator ? ' ' + statusIndicator : ''}</span>
 			<button onclick="toggleFavorite('${device.serial}','${pkg}')" style='background:${isFav ? '#f39c12' : '#555'};color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-weight:bold;margin-right:4px;'>⭐</button>
-			<button onclick="launchApp('${device.serial}','${pkg}')" style='background:#2ecc71;color:#000;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;margin-right:4px;'>▶️ Lancer</button>
-			<button onclick="stopGame('${device.serial}','${pkg}')" style='background:#e74c3c;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;'>⏹️ Stop</button>
+			${isRunning ? `<button onclick="stopGame('${device.serial}','${pkg}')" style='background:#e74c3c;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;'>⏹️ Stop</button>` : `<button onclick="launchApp('${device.serial}','${pkg}')" style='background:#2ecc71;color:#000;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;margin-right:4px;'>▶️ Lancer</button>`}
 		</div>`;
 	});
 	html += `</div>`;
@@ -1472,9 +1476,16 @@ window.launchApp = async function(serial, pkg) {
 	if (res.ok) {
 		showToast('✅ App lancée !', 'success');
 		incrementStat('appsLaunched');
+		// Add to running apps
+		if (!runningApps[serial]) runningApps[serial] = [];
+		if (!runningApps[serial].includes(pkg)) {
+			runningApps[serial].push(pkg);
+		}
+		// Refresh the apps dialog
+		const device = { serial, name: 'Device' };
+		showAppsDialog(device);
 	}
 	else showToast('❌ Erreur lancement', 'error');
-	closeModal();
 };
 
 // Stop game
@@ -1494,6 +1505,13 @@ window.stopGame = async function(serial, pkg) {
 			
 			if (stopRes && stopRes.ok) {
 				showToast('✅ Jeu arrêté!', 'success');
+				// Remove from running apps
+				if (runningApps[serial]) {
+					runningApps[serial] = runningApps[serial].filter(p => p !== pkg);
+				}
+				// Refresh the apps dialog
+				const device = { serial, name: 'Device' };
+				showAppsDialog(device);
 				return;
 			}
 		} catch (error) {
@@ -1515,6 +1533,13 @@ window.stopGame = async function(serial, pkg) {
 		
 		if (fallbackRes && fallbackRes.ok) {
 			showToast('✅ Jeu arrêté!', 'success');
+			// Remove from running apps
+			if (runningApps[serial]) {
+				runningApps[serial] = runningApps[serial].filter(p => p !== pkg);
+			}
+			// Refresh the apps dialog
+			const device = { serial, name: 'Device' };
+			showAppsDialog(device);
 		} else {
 			console.error('[stopGame] Fallback failed:', fallbackRes);
 			showToast('⚠️ Erreur lors de l\'arrêt du jeu', 'error');
