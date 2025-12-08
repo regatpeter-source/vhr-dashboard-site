@@ -11,9 +11,14 @@ let licenseStatus = { licensed: false, trial: false, expired: false };
 
 // ========== NAVBAR ========== 
 function createNavbar() {
-	if (document.getElementById('mainNavbar')) return;
-	const nav = document.createElement('nav');
-	nav.id = 'mainNavbar';
+	let nav = document.getElementById('mainNavbar');
+	if (!nav) {
+		nav = document.createElement('nav');
+		nav.id = 'mainNavbar';
+		document.body.appendChild(nav);
+		document.body.style.paddingTop = '56px';
+	}
+	
 	nav.style = 'position:fixed;top:0;left:0;width:100vw;height:50px;background:#1a1d24;color:#fff;z-index:1100;display:flex;align-items:center;box-shadow:0 2px 8px #000;border-bottom:2px solid #2ecc71;';
 	nav.innerHTML = `
 		<div style='display:flex;align-items:center;font-size:22px;font-weight:bold;margin-left:20px;color:#2ecc71;'>
@@ -26,6 +31,9 @@ function createNavbar() {
 		<button id="toggleViewBtn" style="margin-right:15px;background:#2ecc71;color:#000;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			📊 Vue: Tableau
 		</button>
+		<button id="storageBtn" style="margin-right:15px;background:#e74c3c;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;" title="Voir le stockage utilisé">
+			💾 Stockage
+		</button>
 		<button id="installerBtn" style="margin-right:15px;background:#9b59b6;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;" title="Installer l'application vocale sur votre Meta Quest">
 			🚀 Voix vers Casque
 		</button>
@@ -37,11 +45,10 @@ function createNavbar() {
 		</button>
 		<div id='navbarUser' style='margin-right:24px;display:flex;gap:12px;align-items:center;'></div>
 	`;
-	document.body.appendChild(nav);
-	document.body.style.paddingTop = '56px';
 	
 	document.getElementById('homeBtn').onclick = () => window.location.href = '/vhr-dashboard-app.html';
 	document.getElementById('toggleViewBtn').onclick = toggleView;
+	document.getElementById('storageBtn').onclick = showStoragePanel;
 	document.getElementById('installerBtn').onclick = showInstallerPanel;
 	document.getElementById('favoritesBtn').onclick = addDashboardToFavorites;
 	document.getElementById('accountBtn').onclick = showAccountPanel;
@@ -539,6 +546,89 @@ window.closeInstallerPanel = function() {
 
 window.closeAccountPanel = function() {
 	const panel = document.getElementById('accountPanel');
+	if (panel) panel.remove();
+};
+
+window.showStoragePanel = function() {
+	let panel = document.getElementById('storagePanel');
+	if (panel) panel.remove();
+	
+	const localStorageSize = Object.keys(localStorage).reduce((total, key) => {
+		return total + localStorage.getItem(key).length;
+	}, 0);
+	
+	const localStorageSizeKB = (localStorageSize / 1024).toFixed(2);
+	const localStorageSizeMB = (localStorageSize / (1024 * 1024)).toFixed(4);
+	
+	const storageItems = Object.keys(localStorage).filter(key => key.startsWith('vhr_')).map(key => {
+		const size = (localStorage.getItem(key).length / 1024).toFixed(2);
+		return `
+			<tr style='border-bottom:1px solid #2ecc71;'>
+				<td style='padding:12px;font-size:13px;'>${key}</td>
+				<td style='padding:12px;font-size:13px;text-align:right;'>${size} KB</td>
+				<td style='padding:12px;text-align:center;'>
+					<button onclick="localStorage.removeItem('${key}'); window.showStoragePanel();" style='background:#e74c3c;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:bold;'>Supprimer</button>
+				</td>
+			</tr>
+		`;
+	}).join('');
+	
+	panel = document.createElement('div');
+	panel.id = 'storagePanel';
+	panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:2000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
+	panel.onclick = (e) => { if (e.target === panel) window.closeStoragePanel(); };
+	
+	panel.innerHTML = `
+		<div style='background:#1a1d24;border:3px solid #e74c3c;border-radius:16px;padding:0;max-width:800px;width:90%;max-height:85vh;overflow-y:auto;box-shadow:0 8px 32px #000;color:#fff;'>
+			<!-- Header -->
+			<div style='background:linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);padding:24px;border-radius:13px 13px 0 0;position:relative;'>
+				<button onclick='window.closeStoragePanel()' style='position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;font-weight:bold;'>✕</button>
+				<div style='display:flex;align-items:center;gap:16px;'>
+					<div style='font-size:40px;'>💾</div>
+					<div>
+						<h2 style='margin:0;font-size:28px;color:#fff;'>Gestion du Stockage</h2>
+						<p style='margin:6px 0 0 0;font-size:13px;opacity:0.9;'>Taille totale: <strong>${localStorageSizeMB} MB</strong> (${localStorageSizeKB} KB)</p>
+					</div>
+				</div>
+			</div>
+			
+			<!-- Content -->
+			<div style='padding:24px;'>
+				<h3 style='margin-top:0;color:#2ecc71;margin-bottom:16px;'>Fichiers stockés:</h3>
+				<div style='overflow-x:auto;'>
+					<table style='width:100%;border-collapse:collapse;font-size:13px;'>
+						<thead>
+							<tr style='background:#2ecc71;color:#000;font-weight:bold;'>
+								<th style='padding:12px;text-align:left;'>Clé de stockage</th>
+								<th style='padding:12px;text-align:right;'>Taille</th>
+								<th style='padding:12px;text-align:center;'>Action</th>
+							</tr>
+						</thead>
+						<tbody>
+							${storageItems || '<tr><td colspan="3" style="padding:12px;text-align:center;color:#95a5a6;">Aucun stockage VHR détecté</td></tr>'}
+						</tbody>
+					</table>
+				</div>
+				
+				<div style='margin-top:24px;padding:16px;background:#2c3e50;border-radius:8px;border-left:4px solid #e74c3c;'>
+					<p style='margin:0;font-size:12px;color:#ecf0f1;'>
+						<strong>Note:</strong> Le localStorage du navigateur peut stocker jusqu'à 5-10 MB selon votre navigateur. 
+						Vous pouvez supprimer des éléments individuellement pour libérer de l'espace.
+					</p>
+				</div>
+				
+				<div style='margin-top:24px;display:flex;gap:12px;justify-content:center;'>
+					<button onclick='window.closeStoragePanel()' style='background:#3498db;color:#fff;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-weight:bold;'>Fermer</button>
+					<button onclick='localStorage.clear(); alert("Stockage vidé!"); window.showStoragePanel();' style='background:#e74c3c;color:#fff;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-weight:bold;'>Vider tout</button>
+				</div>
+			</div>
+		</div>
+	`;
+	document.body.appendChild(panel);
+};
+
+window.closeStoragePanel = function() {
+	const panel = document.getElementById('storagePanel');
 	if (panel) panel.remove();
 };
 
