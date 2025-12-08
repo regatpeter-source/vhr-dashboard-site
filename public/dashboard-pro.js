@@ -897,7 +897,7 @@ function renderDevicesTable() {
 			</td>
 			<td style='padding:12px;text-align:center;'>
 				<button onclick='showAppsDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#f39c12;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📱 Apps</button>
-				<button onclick='window.location.href="/vhr-dashboard-app.html";' style='background:#27ae60;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin:4px 0;display:block;' title="Retour à l'accueil">🏠 Accueil</button>
+				<button onclick='window.location.href="/";' style='background:#27ae60;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin:4px 0;display:block;' title="Retour à l'accueil">🏠 Accueil</button>
 				<button onclick='showFavoritesDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#e67e22;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin-top:4px;'>⭐ Favoris</button>
 			</td>
 			<td style='padding:12px;text-align:center;'>
@@ -963,7 +963,7 @@ function renderDevicesCards() {
 			</div>
 			<div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px;'>
 				<button onclick='showAppsDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#f39c12;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>📱 Apps</button>
-				<button onclick='window.location.href="/vhr-dashboard-app.html";' style='background:#27ae60;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;' title="Retour à l'accueil">🏠 Accueil</button>
+				<button onclick='window.location.href="/";' style='background:#27ae60;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;' title="Retour à l'accueil">🏠 Accueil</button>
 				<button onclick='showFavoritesDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#e67e22;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>⭐ Favoris</button>
 			</div>
 			<button onclick='sendVoiceToHeadset("${d.serial}")' style='width:100%;background:#1abc9c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>🎤 Voix PC→Casque</button>
@@ -1049,9 +1049,19 @@ window.showStreamViewer = function(serial) {
 	
 	modal.innerHTML = `
 		<div style='width:90%;max-width:960px;background:#1a1d24;border-radius:12px;overflow:hidden;box-shadow:0 8px 32px #000;'>
-			<div style='background:#23272f;padding:16px;display:flex;justify-content:space-between;align-items:center;'>
+			<div style='background:#23272f;padding:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;'>
 				<h2 style='color:#2ecc71;margin:0;'>📹 Stream - ${serial}</h2>
-				<button onclick='closeStreamViewer()' style='background:#e74c3c;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;'>✕ Fermer</button>
+				<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;'>
+					<label style='color:#fff;font-size:12px;display:flex;align-items:center;gap:6px;'>
+						🔊 Son:
+						<select id='audioOutputSelect' style='background:#1a1d24;color:#fff;border:1px solid #2ecc71;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;'>
+							<option value='headset'>📱 Casque</option>
+							<option value='pc'>💻 PC</option>
+							<option value='both'>🔊 Les deux</option>
+						</select>
+					</label>
+					<button onclick='closeStreamViewer()' style='background:#e74c3c;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>✕ Fermer</button>
+				</div>
 			</div>
 			<div id='streamContainer' style='width:100%;background:#000;position:relative;padding-bottom:56.25%;'>
 				<canvas id='streamCanvas' style='position:absolute;top:0;left:0;width:100%;height:100%;display:block;'></canvas>
@@ -1059,8 +1069,14 @@ window.showStreamViewer = function(serial) {
 					⏳ Connexion au stream...
 				</div>
 			</div>
-			<div style='background:#23272f;padding:16px;text-align:center;color:#95a5a6;font-size:12px;'>
-				🟢 En direct - ${new Date().toLocaleTimeString('fr-FR')}
+			<div style='background:#23272f;padding:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;'>
+				<div style='color:#95a5a6;font-size:12px;'>
+					🟢 En direct - <span id='streamTime'>${new Date().toLocaleTimeString('fr-FR')}</span>
+				</div>
+				<div style='display:flex;gap:8px;font-size:12px;'>
+					<button onclick='toggleStreamFullscreen()' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>⛶ Plein écran</button>
+					<button onclick='captureStreamScreenshot()' style='background:#2ecc71;color:#000;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>📸 Capture</button>
+				</div>
 			</div>
 		</div>
 	`;
@@ -1068,9 +1084,60 @@ window.showStreamViewer = function(serial) {
 	
 	// Attendre 1 seconde que le stream soit bien lancé côté serveur avant de connecter le player
 	console.log('[stream] Modal opened, waiting for stream to stabilize...');
+	
+	// Ajouter event listener au select audio
+	const audioSelect = document.getElementById('audioOutputSelect');
+	if (audioSelect) {
+		audioSelect.addEventListener('change', (e) => {
+			const audioMode = e.target.value;
+			console.log('[stream] Audio mode changed to:', audioMode);
+			showToast('🔊 Audio: ' + (audioMode === 'headset' ? 'Casque' : audioMode === 'pc' ? 'PC' : 'Les deux'), 'info');
+			// Envoyer au serveur si nécessaire
+			api('/api/stream/audio-output', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ serial, audioOutput: audioMode })
+			}).catch(err => console.error('[stream audio]', err));
+		});
+	}
+	
+	// Mettre à jour l'heure en temps réel
+	setInterval(() => {
+		const timeEl = document.getElementById('streamTime');
+		if (timeEl) timeEl.textContent = new Date().toLocaleTimeString('fr-FR');
+	}, 1000);
+	
 	setTimeout(() => {
 		initStreamPlayer(serial);
 	}, 1000);
+};
+
+window.toggleStreamFullscreen = function() {
+	const container = document.getElementById('streamContainer');
+	if (!document.fullscreenElement) {
+		container.requestFullscreen().catch(err => console.error('[fullscreen]', err));
+	} else {
+		document.exitFullscreen();
+	}
+};
+
+window.captureStreamScreenshot = function() {
+	const canvas = document.getElementById('streamCanvas');
+	if (!canvas) {
+		showToast('❌ Canvas non disponible', 'error');
+		return;
+	}
+	
+	try {
+		const link = document.createElement('a');
+		link.href = canvas.toDataURL('image/png');
+		link.download = 'screenshot-' + new Date().getTime() + '.png';
+		link.click();
+		showToast('📸 Capture enregistrée!', 'success');
+	} catch (err) {
+		console.error('[screenshot]', err);
+		showToast('❌ Erreur capture', 'error');
+	}
 };
 
 window.closeStreamViewer = function() {
