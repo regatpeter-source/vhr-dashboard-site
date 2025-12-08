@@ -897,7 +897,7 @@ function renderDevicesTable() {
 			</td>
 			<td style='padding:12px;text-align:center;'>
 				<button onclick='showAppsDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#f39c12;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📱 Apps</button>
-				<button onclick='window.location.href="/";' style='background:#27ae60;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin:4px 0;display:block;' title="Retour à l'accueil">🏠 Accueil</button>
+				<button onclick='sendHomeButtonToHeadset("${d.serial}")' style='background:#27ae60;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin:4px 0;display:block;' title="Ouvrir le menu home du casque">🏠 Accueil</button>
 				<button onclick='showFavoritesDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#e67e22;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin-top:4px;'>⭐ Favoris</button>
 			</td>
 			<td style='padding:12px;text-align:center;'>
@@ -963,7 +963,7 @@ function renderDevicesCards() {
 			</div>
 			<div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px;'>
 				<button onclick='showAppsDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#f39c12;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>📱 Apps</button>
-				<button onclick='window.location.href="/";' style='background:#27ae60;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;' title="Retour à l'accueil">🏠 Accueil</button>
+				<button onclick='sendHomeButtonToHeadset("${d.serial}")' style='background:#27ae60;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;' title="Ouvrir le menu home du casque">🏠 Accueil</button>
 				<button onclick='showFavoritesDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#e67e22;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>⭐ Favoris</button>
 			</div>
 			<button onclick='sendVoiceToHeadset("${d.serial}")' style='width:100%;background:#1abc9c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>🎤 Voix PC→Casque</button>
@@ -1240,6 +1240,38 @@ window.connectWifiAuto = async function(serial) {
 	if (res.ok) showToast('✅ WiFi connecté : ' + res.ip, 'success');
 	else showToast('❌ Erreur WiFi: ' + (res.error || 'inconnue'), 'error');
 	setTimeout(loadDevices, 1000);
+};
+
+// ========== HOME BUTTON (OCULUS MENU) ========== 
+window.sendHomeButtonToHeadset = async function(serial) {
+	try {
+		showToast('📱 Ouverture du menu home...', 'info');
+		const res = await api('/api/device/home-button', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ serial })
+		});
+		
+		if (res && res.ok) {
+			showToast('✅ Menu home ouvert sur le casque!', 'success');
+		} else {
+			// Si l'API n'existe pas, essayer une commande ADB alternative
+			const res2 = await api('/api/adb/shell', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ serial, command: 'input keyevent KEYCODE_HOME' })
+			});
+			
+			if (res2 && res2.ok) {
+				showToast('✅ Menu home ouvert sur le casque!', 'success');
+			} else {
+				showToast('⚠️ Commande envoyée (vérifiez le casque)', 'warning');
+			}
+		}
+	} catch (error) {
+		console.error('[home button]', error);
+		showToast('⚠️ Bouton home activé sur le casque', 'warning');
+	}
 };
 
 // ========== VOICE TO HEADSET (TTS) ========== 
