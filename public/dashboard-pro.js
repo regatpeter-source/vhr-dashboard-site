@@ -25,14 +25,8 @@ function createNavbar() {
 			🥽 VHR DASHBOARD PRO
 		</div>
 		<div style='flex:1'></div>
-		<button id="homeBtn" style="margin-right:15px;background:#27ae60;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;" title="Retour à l'accueil">
-			🏠 Accueil
-		</button>
 		<button id="toggleViewBtn" style="margin-right:15px;background:#2ecc71;color:#000;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			📊 Vue: Tableau
-		</button>
-		<button id="storageBtn" style="margin-right:15px;background:#e74c3c;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;" title="Voir le stockage utilisé">
-			💾 Stockage
 		</button>
 		<button id="installerBtn" style="margin-right:15px;background:#9b59b6;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;" title="Installer l'application vocale sur votre Meta Quest">
 			🚀 Voix vers Casque
@@ -46,9 +40,7 @@ function createNavbar() {
 		<div id='navbarUser' style='margin-right:24px;display:flex;gap:12px;align-items:center;'></div>
 	`;
 	
-	document.getElementById('homeBtn').onclick = () => window.location.href = '/vhr-dashboard-app.html';
 	document.getElementById('toggleViewBtn').onclick = toggleView;
-	document.getElementById('storageBtn').onclick = showStoragePanel;
 	document.getElementById('installerBtn').onclick = showInstallerPanel;
 	document.getElementById('favoritesBtn').onclick = addDashboardToFavorites;
 	document.getElementById('accountBtn').onclick = showAccountPanel;
@@ -968,8 +960,9 @@ function renderDevicesCards() {
 					<button onclick='stopStreamFromTable("${d.serial}")' style='width:100%;background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>⏹️ Stop Stream</button>
 				`}
 			</div>
-			<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;'>
+			<div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px;'>
 				<button onclick='showAppsDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#f39c12;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>📱 Apps</button>
+				<button onclick='window.location.href="/vhr-dashboard-app.html";' style='background:#27ae60;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;' title="Retour à l'accueil">🏠 Accueil</button>
 				<button onclick='showFavoritesDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#e67e22;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>⭐ Favoris</button>
 			</div>
 			<button onclick='sendVoiceToHeadset("${d.serial}")' style='width:100%;background:#1abc9c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>🎤 Voix PC→Casque</button>
