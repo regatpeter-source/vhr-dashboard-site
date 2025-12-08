@@ -81,31 +81,222 @@ nav ul li a.cta-nav:hover {
   margin-bottom: 18px;
 }
 
+.hero-subtitle {
+  font-size: 1.3em;
+  margin-bottom: 28px;
+  line-height: 1.6;
+}
+
+.hero-buttons {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* Features Grid */
+.features-preview h2 {
+  font-size: 2em;
+  margin-bottom: 40px;
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+  margin: 40px auto;
+  max-width: 1200px;
+  padding: 0 20px;
+}
+
+.feature-card {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 2px 12px #0001;
+  padding: 32px 24px;
+  transition: transform 0.3s, box-shadow 0.3s;
+  text-align: left;
+}
+
+.feature-card:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 8px 24px #0002;
+}
+
+.feature-icon {
+  font-size: 3em;
+  margin-bottom: 16px;
+  display: block;
+}
+
+.feature-card h3 {
+  font-size: 1.3em;
+  margin-bottom: 12px;
+  color: #2196f3;
+}
+
+.feature-card p {
+  color: #666;
+  line-height: 1.6;
+  margin: 0;
+}
+
 /* Download/Demo section */
 .download-demo {
-  background: #fff;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border-radius: 18px;
-  box-shadow: 0 2px 16px #0001;
   margin: 40px auto 0 auto;
   max-width: 900px;
-  padding: 36px 28px 32px 28px;
+  padding: 48px 28px 32px 28px;
   text-align: center;
+  color: #fff;
 }
+
+.download-demo h2 {
+  color: #fff;
+  font-size: 2em;
+}
+
 .download-demo-content {
   display: flex;
   flex-wrap: wrap;
-  gap: 32px;
+  gap: 24px;
   justify-content: center;
   margin: 32px 0 18px 0;
 }
+
 .download-block {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 14px;
+  box-shadow: 0 4px 16px #0002;
+  padding: 28px 24px;
+  width: 260px;
+  min-width: 220px;
+  max-width: 320px;
+  color: #23272f;
+  transition: transform 0.3s, box-shadow 0.3s;
+  text-align: center;
+}
+
+.download-block:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 8px 24px #0003;
+}
+
+.download-block.featured {
+  background: #fff;
+  box-shadow: 0 8px 32px #0003;
+  transform: scale(1.05);
+}
+
+.block-icon {
+  font-size: 2.5em;
+  margin-bottom: 12px;
+  display: block;
+}
+
+/* Compatibility section */
+.compatibility-section {
+  background: #fff;
+  border-radius: 18px;
+  box-shadow: 0 2px 16px #0001;
+  margin: 48px auto 0 auto;
+  max-width: 1000px;
+  padding: 48px 28px 32px 28px;
+  text-align: center;
+}
+
+.compatibility-section h2 {
+  font-size: 2em;
+  margin-top: 0;
+  margin-bottom: 40px;
+}
+
+.compatibility-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 24px;
+  margin: 0 auto;
+}
+
+.compat-box {
   background: #f7f8fa;
   border-radius: 12px;
-  box-shadow: 0 1px 6px #0001;
-  padding: 24px 18px;
-  width: 260px;
-  min-width: 200px;
-  max-width: 320px;
+  padding: 24px 20px;
+  text-align: left;
+}
+
+.compat-box h3 {
+  color: #2196f3;
+  margin-bottom: 16px;
+}
+
+.compat-box ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.compat-box li {
+  padding: 8px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.compat-box li:last-child {
+  border-bottom: none;
+}
+
+/* Benefits section */
+.benefits-section {
+  background: linear-gradient(120deg, #e3f2fd 0%, #e8f5e9 100%);
+  border-radius: 18px;
+  margin: 40px auto;
+  max-width: 1000px;
+  padding: 48px 28px 32px 28px;
+  text-align: center;
+}
+
+.benefits-section h2 {
+  font-size: 2em;
+  margin-bottom: 40px;
+}
+
+.benefits-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 24px;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.benefit-item {
+  background: #fff;
+  border-radius: 12px;
+  padding: 28px 20px;
+  box-shadow: 0 2px 8px #0001;
+  transition: transform 0.3s;
+}
+
+.benefit-item:hover {
+  transform: translateY(-4px);
+}
+
+.benefit-number {
+  font-size: 2.5em;
+  margin-bottom: 12px;
+  display: block;
+}
+
+.benefit-item h4 {
+  color: #2196f3;
+  margin: 12px 0;
+  font-size: 1.2em;
+}
+
+.benefit-item p {
+  color: #666;
+  font-size: 0.95em;
+  line-height: 1.5;
 }
 .badge {
   display: inline-block;
@@ -197,5 +388,22 @@ nav ul li a.cta-nav:hover {
   .testimonial {
     width: 95%;
     max-width: 98vw;
+  }
+  .hero-buttons {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .features-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .benefits-grid {
+    grid-template-columns: 1fr;
+  }
+  .compatibility-grid {
+    grid-template-columns: 1fr;
+  }
+  .download-block.featured {
+    transform: scale(1);
   }
 }
