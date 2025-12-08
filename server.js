@@ -3544,31 +3544,42 @@ app.post('/api/android/compile', async (req, res) => {
         e.message.includes('java: command not found') ||
         e.message.includes('gradle: command not found')) {
       errorMsg = 'Gradle ou Java JDK non trouvé sur le système';
-      helpText = '\n\n🚀 SOLUTION RAPIDE:\n' +
-                 'Téléchargez et exécutez le script d\'installation automatique:\n' +
-                 'PowerShell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest https://raw.githubusercontent.com/regatpeter-source/vhr-dashboard-site/main/scripts/install-build-tools.ps1 -OutFile install-tools.ps1; .\\install-tools.ps1"\n' +
-                 '\n💻 OU LOCALEMENT (Plus simple):\n' +
-                 '1. Clonez le repo: git clone https://github.com/regatpeter-source/vhr-dashboard-site.git\n' +
-                 '2. Exécutez: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fix-build-env.ps1\n' +
-                 '3. Redémarrez une nouvelle fenêtre PowerShell\n' +
-                 '\n📖 OU installez manuellement:\n' +
-                 '1. Java JDK 11+: https://adoptium.net/\n' +
-                 '2. Gradle 8.7+: https://gradle.org/releases/\n' +
-                 '3. Définissez JAVA_HOME dans les variables d\'environnement\n' +
-                 '4. Redémarrez le serveur et réessayez';
+      helpText = '\n\n🚀 SOLUTION LA PLUS RAPIDE (Recommandé):\n' +
+                 '1. Ouvrez PowerShell en mode Administrateur\n' +
+                 '2. Exécutez cette commande:\n' +
+                 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest https://raw.githubusercontent.com/regatpeter-source/vhr-dashboard-site/main/scripts/install-build-tools.ps1 -OutFile install-tools.ps1; .\\install-tools.ps1"\n' +
+                 '\n⚡ Alternative (Offline):\n' +
+                 'powershell -NoProfile -ExecutionPolicy Bypass -File "' + process.cwd() + '/scripts/install-build-tools.ps1"\n' +
+                 '\n📖 Installation manuelle:\n' +
+                 '1. Java JDK 11: https://adoptium.net/ (Télécharger et installer)\n' +
+                 '2. Gradle 8.7: https://gradle.org/releases/ (Télécharger gradle-8.7-bin.zip)\n' +
+                 '3. Décompresser Gradle dans C:\\Gradle\\\n' +
+                 '4. Ajouter C:\\Gradle\\gradle-8.7\\bin au PATH Windows\n' +
+                 '5. Définir JAVA_HOME = chemin du JDK installé\n' +
+                 '\n✓ Après installation:\n' +
+                 '1. Fermer TOUTES les fenêtres PowerShell\n' +
+                 '2. Ouvrir une NOUVELLE fenêtre PowerShell\n' +
+                 '3. Redémarrer le serveur VHR\n' +
+                 '4. Réessayer le téléchargement';
     } else if (e.message.includes('JAVA_HOME')) {
-      errorMsg = 'JAVA_HOME non configuré';
+      errorMsg = 'JAVA_HOME non configuré correctement';
       helpText = '\n\n📖 CORRECTION:\n' +
-                 '1. Installez Java JDK 11+: https://adoptium.net/\n' +
-                 '2. Définissez JAVA_HOME = "C:\\Java\\jdk-11.0.29+7"\n' +
-                 '3. Redémarrez le serveur';
+                 '1. Vérifiez que Java JDK 11+ est installé\n' +
+                 '2. Définissez la variable d\'environnement JAVA_HOME:\n' +
+                 '   - Clic droit sur "Ce PC" → Propriétés\n' +
+                 '   - Variables d\'environnement → Nouvelle variable\n' +
+                 '   - JAVA_HOME = C:\\Java\\jdk-11... (ou chemin de votre JDK)\n' +
+                 '3. Fermer TOUTES les fenêtres PowerShell\n' +
+                 '4. Ouvrir une NOUVELLE fenêtre et redémarrer le serveur';
     } else if (e.message.includes('timeout')) {
-      errorMsg = 'La compilation a dépassé le délai imparti';
-      helpText = '\n\nℹ️  La première compilation peut prendre 10-20 minutes. Réessayez.';
+      errorMsg = 'La compilation a dépassé le délai imparti (dépassement du timeout)';
+      helpText = '\n\nℹ️  La première compilation peut prendre 10-20 minutes.\n' +
+                 'Vérifiez votre connexion Internet et réessayez.';
     } else if (e.message.includes('plugin') || e.message.includes('Plugin')) {
       // Les plugins manquants sont téléchargés à la première build
       errorMsg = 'Les dépendances Android sont en cours de téléchargement...';
-      helpText = '\n\nℹ️  Relancez la compilation dans 2-3 minutes. Cela peut prendre du temps la première fois.';
+      helpText = '\n\nℹ️  Ceci est normal pour la première compilation.\n' +
+                 'Attendez 2-5 minutes et relancez la compilation.';
     }
     
     res.status(500).json({ 
