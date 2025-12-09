@@ -20,7 +20,7 @@ if (form) {
     const message = document.getElementById('message').value.trim();
     
     if (!name || !email || !subject || !message) {
-      status.innerHTML = '<p style="color: red; font-weight: bold;">⚠️ Tous les champs sont requis.</p>';
+      status.innerHTML = '<p style="color: red; font-weight: bold;">Tous les champs sont requis.</p>';
       return;
     }
     
@@ -38,7 +38,7 @@ if (form) {
       const data = await response.json();
       
       if (data.ok) {
-        status.innerHTML = '<p style="color: green; font-weight: bold;">✅ Message reçu! Nous vous répondrons très bientôt.</p>';
+        status.innerHTML = '<p style="color: green; font-weight: bold;">Message reçu! Nous vous répondrons très bientôt.</p>';
         form.reset();
       } else {
         status.innerHTML = `<p style="color: red; font-weight: bold;">❌ Erreur: ${data.error}</p>`;
