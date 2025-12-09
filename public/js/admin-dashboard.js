@@ -153,6 +153,69 @@ async function loadMessages() {
   }
 }
 
+// View subscription detail
+async function viewSubscription(subscriptionId) {
+  try {
+    const res = await authFetch(`${API_BASE}/admin/subscriptions`);
+    const data = await res.json();
+    const sub = data.subscriptions.find(s => s.id == subscriptionId);
+    if (sub) {
+      const modalBody = document.getElementById('messageModalBody');
+      const startDate = new Date(sub.startDate).toLocaleString();
+      const endDate = sub.endDate ? new Date(sub.endDate).toLocaleString() : 'N/A';
+      const status = sub.status === 'active' ? 'badge-active' : 'badge-inactive';
+      
+      modalBody.innerHTML = `
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+          <p style="margin: 0 0 10px 0;"><strong>Username:</strong> ${sub.username}</p>
+          <p style="margin: 0 0 10px 0;"><strong>Email:</strong> ${sub.email}</p>
+          <p style="margin: 0 0 10px 0;"><strong>Plan:</strong> ${sub.planName || 'N/A'}</p>
+          <p style="margin: 0 0 10px 0;"><strong>Status:</strong> <span class="badge ${status}">${sub.status}</span></p>
+          <p style="margin: 0 0 10px 0;"><strong>Start Date:</strong> ${startDate}</p>
+          <p style="margin: 0;"><strong>End Date:</strong> ${endDate}</p>
+        </div>
+      `;
+      document.getElementById('messageModal').classList.add('active');
+    }
+  } catch (e) {
+    console.error('Error viewing subscription:', e);
+    alert('Error loading subscription details');
+  }
+}
+
+// View user detail
+async function viewUser(username) {
+  try {
+    const res = await authFetch(`${API_BASE}/admin/users`);
+    const data = await res.json();
+    const user = data.users.find(u => u.username === username);
+    if (user) {
+      const modalBody = document.getElementById('messageModalBody');
+      const createdDate = new Date(user.createdAt).toLocaleString();
+      const updatedDate = new Date(user.updatedAt).toLocaleString();
+      
+      modalBody.innerHTML = `
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+          <p style="margin: 0 0 10px 0;"><strong>Username:</strong> ${user.username}</p>
+          <p style="margin: 0 0 10px 0;"><strong>Email:</strong> ${user.email || 'N/A'}</p>
+          <p style="margin: 0 0 10px 0;"><strong>Role:</strong> <span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></p>
+          <p style="margin: 0 0 10px 0;"><strong>Created:</strong> ${createdDate}</p>
+          <p style="margin: 0 0 0 0;"><strong>Updated:</strong> ${updatedDate}</p>
+        </div>
+        <div style="padding: 15px; background: #fff; border-radius: 8px; border: 1px solid #e0e0e0;">
+          <h4 style="margin-top: 0;">Subscription Info</h4>
+          <p style="margin: 0 0 5px 0;"><strong>Status:</strong> ${user.subscriptionStatus || 'None'}</p>
+          <p style="margin: 0;"><strong>Subscription ID:</strong> ${user.subscriptionId || 'N/A'}</p>
+        </div>
+      `;
+      document.getElementById('messageModal').classList.add('active');
+    }
+  } catch (e) {
+    console.error('Error viewing user:', e);
+    alert('Error loading user details');
+  }
+}
+
 // View message detail
 async function viewMessage(messageId) {
   try {
