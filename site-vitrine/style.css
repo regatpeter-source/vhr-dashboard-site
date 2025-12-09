@@ -1,20 +1,21 @@
-/* Centrage des descriptifs */
+/* Professional Neutral Palette */
 .centered {
   text-align: center;
   margin-left: auto;
   margin-right: auto;
 }
-/* Accessibilité : focus visible sur liens et boutons */
+
 a:focus, button:focus, .cta:focus, .cta-secondary:focus {
-  outline: 2px solid #2196f3;
+  outline: 2px solid #333;
   outline-offset: 2px;
-  background: #e3f2fd;
-  color: #0d47a1;
+  background: #f0f0f0;
+  color: #000;
 }
+
 body {
-  font-family: 'Segoe UI', Arial, sans-serif;
-  color: #23272f;
-  background: #f7f8fa;
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+  color: #333;
+  background: #ffffff;
   text-align: center;
   font-size: 1.1em;
   font-weight: 400;
@@ -22,9 +23,10 @@ body {
 }
 
 header {
-  background: linear-gradient(120deg, #2196f3 0%, #43a047 100%);
-  color: #fff;
+  background: #ffffff;
+  color: #000;
   padding-bottom: 30px;
+  border-bottom: 1px solid #e0e0e0;
 }
 
 nav {
@@ -33,8 +35,8 @@ nav {
   justify-content: space-between;
   padding: 0 32px;
   height: 64px;
-  background: rgba(24,28,36,0.95);
-  box-shadow: 0 2px 8px #0002;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
 nav ul {
@@ -45,29 +47,32 @@ nav ul {
 }
 
 nav ul li a {
-  color: #fff;
+  color: #333;
   text-decoration: none;
   font-size: 1.1em;
   padding: 6px 14px;
-  border-radius: 6px;
+  border-radius: 4px;
   transition: background .2s;
+  font-weight: 500;
 }
 
 nav ul li a.active,
 nav ul li a:hover {
-  background: #2196f3;
+  background: #f0f0f0;
+  color: #000;
 }
 
 nav ul li a.cta-nav {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #333;
+  color: #fff;
   padding: 8px 16px;
   font-weight: 600;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
 
 nav ul li a.cta-nav:hover {
-  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
-  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+  background: #555;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
   transform: translateY(-1px);
 }
 
@@ -79,18 +84,20 @@ nav ul li a.cta-nav:hover {
 .hero h1 {
   font-size: 2.5em;
   margin-bottom: 18px;
+  color: #000;
 }
 
 /* Download/Demo section */
 .download-demo {
-  background: #fff;
-  border-radius: 18px;
-  box-shadow: 0 2px 16px #0001;
+  background: #f9f9f9;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
   margin: 40px auto 0 auto;
   max-width: 900px;
   padding: 36px 28px 32px 28px;
   text-align: center;
 }
+
 .download-demo-content {
   display: flex;
   flex-wrap: wrap;
@@ -98,48 +105,55 @@ nav ul li a.cta-nav:hover {
   justify-content: center;
   margin: 32px 0 18px 0;
 }
+
 .download-block {
-  background: #f7f8fa;
-  border-radius: 12px;
-  box-shadow: 0 1px 6px #0001;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
   padding: 24px 18px;
   width: 260px;
   min-width: 200px;
   max-width: 320px;
 }
+
 .badge {
   display: inline-block;
   font-size: 0.9em;
   padding: 4px 12px;
-  border-radius: 8px;
+  border-radius: 4px;
   margin-top: 10px;
-  background: #e3f2fd;
-  color: #2196f3;
+  background: #f0f0f0;
+  color: #333;
   font-weight: bold;
+  border: 1px solid #ddd;
 }
+
 .badge-demo {
-  background: #e8f5e9;
-  color: #43a047;
+  background: #f0f0f0;
+  color: #333;
 }
+
 .badge-support {
-  background: #fffde7;
-  color: #fbc02d;
+  background: #f0f0f0;
+  color: #333;
 }
+
 .badge-secu {
-  background: #e3f2fd;
-  color: #1976d2;
+  background: #f0f0f0;
+  color: #333;
 }
 
 /* Testimonials */
 .testimonials {
-  background: #f7f8fa;
-  border-radius: 18px;
-  box-shadow: 0 2px 16px #0001;
+  background: #f9f9f9;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
   margin: 40px auto 0 auto;
   max-width: 900px;
   padding: 36px 28px 32px 28px;
   text-align: center;
 }
+
 .testimonials-list {
   display: flex;
   flex-wrap: wrap;
@@ -147,21 +161,23 @@ nav ul li a.cta-nav:hover {
   justify-content: center;
   margin: 32px 0 18px 0;
 }
+
 .testimonial {
   background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 1px 6px #0001;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
   padding: 24px 18px;
   width: 260px;
   min-width: 200px;
   max-width: 320px;
   font-style: italic;
 }
+
 .testimonial span {
   display: block;
   margin-top: 10px;
   font-size: 0.95em;
-  color: #888;
+  color: #666;
 }
 
 .footer-content {
@@ -174,6 +190,7 @@ nav ul li a.cta-nav:hover {
   font-size: 1em;
   gap: 12px;
 }
+
 .footer-badges {
   display: flex;
   gap: 10px;
