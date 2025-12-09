@@ -309,4 +309,5 @@ async function init() {
   await checkAuth();
   await loadStats();
   await loadUsers();
+  await loadMessages();
 }
