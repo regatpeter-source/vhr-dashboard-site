@@ -1097,6 +1097,99 @@ app.get('/api/me', authMiddleware, (req, res) => {
   res.json({ ok: true, user });
 });
 
+// ========== LICENSE VERIFICATION FOR FEATURES ==========
+
+/**
+ * Vérifie si l'utilisateur a accès à une fonctionnalité payante
+ * Retourne true si:
+ * - Abonnement actif OU
+ * - Licence d'achat perpétuel OU
+ * - En période de démo (7 jours)
+ */
+function checkFeatureAccess(user) {
+  if (!user) return false;
+  
+  // Récupérer les données utilisateur complètes
+  reloadUsers();
+  const fullUser = getUserByUsername(user.username);
+  if (!fullUser) return false;
+  
+  // 1. Vérifier abonnement actif
+  if (fullUser.subscriptionStatus === 'active') {
+    return true;
+  }
+  
+  // 2. Vérifier licence perpétuelle
+  const licenses = loadLicenses();
+  const hasPerpetualLicense = licenses.some(l => 
+    l.userId === fullUser.id && 
+    l.type === 'perpetual' && 
+    l.status === 'active'
+  );
+  if (hasPerpetualLicense) {
+    return true;
+  }
+  
+  // 3. Vérifier démo (7 jours)
+  if (fullUser.demoStartDate && demoConfig.MODE === 'database') {
+    const startDate = new Date(fullUser.demoStartDate);
+    const expirationDate = new Date(startDate.getTime() + demoConfig.DEMO_DURATION_MS);
+    const now = new Date();
+    if (now <= expirationDate) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+/**
+ * Middleware pour vérifier l'accès aux fonctionnalités payantes
+ */
+function requireLicense(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ ok: false, error: 'Authentication required' });
+  }
+  
+  if (!checkFeatureAccess(req.user)) {
+    return res.status(403).json({ 
+      ok: false, 
+      error: 'License required',
+      reason: 'subscription_required',
+      message: 'Vous devez un abonnement VHR Dashboard PRO pour accéder à cette fonctionnalité',
+      pricing: {
+        price: '29€',
+        frequency: 'par mois',
+        description: 'Accès complet à tous les outils VHR Dashboard'
+      }
+    });
+  }
+  
+  next();
+}
+
+/**
+ * GET /api/feature/android-tts/access - Vérifier l'accès à la fonctionnalité TTS
+ */
+app.get('/api/feature/android-tts/access', authMiddleware, (req, res) => {
+  const hasAccess = checkFeatureAccess(req.user);
+  
+  res.json({
+    ok: true,
+    hasAccess,
+    user: req.user.username,
+    reason: !hasAccess ? 'subscription_required' : 'active',
+    pricing: {
+      price: '29€',
+      frequency: 'par mois',
+      description: 'Accès complet à tous les outils VHR Dashboard'
+    },
+    message: hasAccess 
+      ? 'Vous avez accès à la compilation Android'
+      : 'Vous devez un abonnement VHR Dashboard PRO pour compiler l\'APK'
+  });
+});
+
 // ========== NEW AUTHENTICATION ROUTES (for dashboard auth modal) ==========
 
 // POST /api/auth/login - Login with email + password
@@ -3691,9 +3784,9 @@ app.post('/api/installer/check-permission', async (req, res) => {
 
 /**
  * POST /api/android/compile - Compile l'APK (debug ou release)
- * ⚠️ REQUIRES AUTHENTICATION - Protected endpoint
+ * ⚠️ REQUIRES AUTHENTICATION + LICENSE - Protected endpoint
  */
-app.post('/api/android/compile', authMiddleware, async (req, res) => {
+app.post('/api/android/compile', authMiddleware, requireLicense, async (req, res) => {
   const { buildType = 'debug' } = req.body;
   const appDir = path.join(__dirname, 'tts-receiver-app');
 
@@ -3861,9 +3954,9 @@ app.post('/api/android/compile', authMiddleware, async (req, res) => {
 
 /**
  * POST /api/android/install - Installe l'APK sur l'appareil
- * ⚠️ REQUIRES AUTHENTICATION - Protected endpoint
+ * ⚠️ REQUIRES AUTHENTICATION + LICENSE - Protected endpoint
  */
-app.post('/api/android/install', authMiddleware, async (req, res) => {
+app.post('/api/android/install', authMiddleware, requireLicense, async (req, res) => {
   const { deviceSerial, buildType = 'debug' } = req.body;
 
   if (!deviceSerial) {
