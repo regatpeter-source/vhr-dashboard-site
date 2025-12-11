@@ -1945,6 +1945,8 @@ app.get('/api/admin/subscriptions/active', authMiddleware, (req, res) => {
 app.get('/api/admin/messages', authMiddleware, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
   try {
+    console.log('[api/admin/messages] User:', req.user.username, 'Messages count:', messages.length);
+    console.log('[api/admin/messages] Messages:', JSON.stringify(messages, null, 2));
     res.json({ ok: true, messages });
   } catch (e) {
     console.error('[api] admin/messages:', e);
