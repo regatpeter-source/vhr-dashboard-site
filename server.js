@@ -1319,6 +1319,114 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
+// ========== ADMIN ROUTES ==========
+
+/**
+ * POST /api/admin/grant-subscription - Give a user an active subscription
+ * Admin only - requires authentication
+ */
+app.post('/api/admin/grant-subscription', authMiddleware, async (req, res) => {
+  const { targetUsername } = req.body;
+  
+  // Verify requester is admin
+  const adminUser = getUserByUsername(req.user.username);
+  if (!adminUser || adminUser.role !== 'admin') {
+    return res.status(403).json({ ok: false, error: 'Admin access required' });
+  }
+  
+  if (!targetUsername) {
+    return res.status(400).json({ ok: false, error: 'targetUsername required' });
+  }
+  
+  try {
+    // Find the target user
+    const targetUser = getUserByUsername(targetUsername);
+    if (!targetUser) {
+      return res.status(404).json({ ok: false, error: `User '${targetUsername}' not found` });
+    }
+    
+    // Set subscription to active
+    targetUser.subscriptionStatus = 'active';
+    targetUser.subscriptionId = `sub_admin_${Date.now()}`;
+    
+    // Save back to file
+    reloadUsers();
+    const allUsers = loadUsers();
+    const index = allUsers.findIndex(u => u.username === targetUsername);
+    if (index >= 0) {
+      allUsers[index] = targetUser;
+      fs.writeFileSync(USERS_FILE, JSON.stringify(allUsers, null, 2));
+      console.log(`[admin] Granted active subscription to ${targetUsername}`);
+    }
+    
+    res.json({
+      ok: true,
+      message: `✅ Subscription granted to ${targetUsername}`,
+      user: {
+        username: targetUser.username,
+        email: targetUser.email,
+        subscriptionStatus: targetUser.subscriptionStatus
+      }
+    });
+  } catch (e) {
+    console.error('[admin] grant-subscription error:', e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/**
+ * POST /api/admin/revoke-subscription - Revoke a user's subscription
+ * Admin only - requires authentication
+ */
+app.post('/api/admin/revoke-subscription', authMiddleware, async (req, res) => {
+  const { targetUsername } = req.body;
+  
+  // Verify requester is admin
+  const adminUser = getUserByUsername(req.user.username);
+  if (!adminUser || adminUser.role !== 'admin') {
+    return res.status(403).json({ ok: false, error: 'Admin access required' });
+  }
+  
+  if (!targetUsername) {
+    return res.status(400).json({ ok: false, error: 'targetUsername required' });
+  }
+  
+  try {
+    // Find the target user
+    const targetUser = getUserByUsername(targetUsername);
+    if (!targetUser) {
+      return res.status(404).json({ ok: false, error: `User '${targetUsername}' not found` });
+    }
+    
+    // Set subscription to null
+    targetUser.subscriptionStatus = null;
+    targetUser.subscriptionId = null;
+    
+    // Save back to file
+    reloadUsers();
+    const allUsers = loadUsers();
+    const index = allUsers.findIndex(u => u.username === targetUsername);
+    if (index >= 0) {
+      allUsers[index] = targetUser;
+      fs.writeFileSync(USERS_FILE, JSON.stringify(allUsers, null, 2));
+      console.log(`[admin] Revoked subscription for ${targetUsername}`);
+    }
+    
+    res.json({
+      ok: true,
+      message: `✅ Subscription revoked for ${targetUsername}`,
+      user: {
+        username: targetUser.username,
+        email: targetUser.email,
+        subscriptionStatus: targetUser.subscriptionStatus
+      }
+    });
+  } catch (e) {
+    console.error('[admin] revoke-subscription error:', e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // Get demo/trial status - also check Stripe subscription status
 app.get('/api/demo/status', authMiddleware, async (req, res) => {
   try {
