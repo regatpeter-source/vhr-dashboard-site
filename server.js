@@ -3653,13 +3653,16 @@ app.post('/api/android/compile', async (req, res) => {
                  '4. Ouvrir une NOUVELLE fenêtre et redémarrer le serveur';
     } else if (e.message.includes('timeout')) {
       errorMsg = 'La compilation a dépassé le délai imparti (dépassement du timeout)';
-      helpText = '\n\nℹ️  La première compilation peut prendre 10-20 minutes.\n' +
-                 'Vérifiez votre connexion Internet et réessayez.';
+      helpText = '\n\nℹ️  La première compilation peut prendre 5-15 minutes.\n' +
+                 'Les dépendances Gradle seront téléchargées automatiquement.\n' +
+                 'Les compilations suivantes seront plus rapides (cache).\n' +
+                 'Vérifiez que Java JDK 11+ est installé et réessayez.';
     } else if (e.message.includes('plugin') || e.message.includes('Plugin')) {
       // Les plugins manquants sont téléchargés à la première build
       errorMsg = 'Les dépendances Android sont en cours de téléchargement...';
       helpText = '\n\nℹ️  Ceci est normal pour la première compilation.\n' +
-                 'Attendez 2-5 minutes et relancez la compilation.';
+                 'Attendez 5-15 minutes et relancez la compilation.\n' +
+                 'Assurez-vous d\'avoir Java JDK 11+ installé.';
     }
     
     res.status(500).json({ 
