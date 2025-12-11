@@ -17,7 +17,177 @@ const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const https = require('https');
+const http_module = require('http');
+const unzipper = require('unzipper');
+const fetch = require('node-fetch');
 
+// ========== JAVA & GRADLE MANAGEMENT ==========
+
+/**
+ * Vérifie et installe automatiquement Java/Gradle si nécessaire
+ */
+async function ensureJavaAndGradle() {
+  try {
+    // Vérifier Java
+    try {
+      await execp('java -version', { timeout: 5000 });
+      console.log('[Setup] ✓ Java trouvé');
+    } catch (e) {
+      console.log('[Setup] Java manquant, installation en cours...');
+      await installJava();
+    }
+
+    // Vérifier Gradle
+    try {
+      await execp('gradle -v', { timeout: 5000 });
+      console.log('[Setup] ✓ Gradle trouvé');
+    } catch (e) {
+      console.log('[Setup] Gradle manquant, installation en cours...');
+      await installGradle();
+    }
+
+    // Configurer les variables d'environnement
+    configureEnvironmentVariables();
+    
+    return { success: true };
+  } catch (e) {
+    console.error('[Setup] Erreur:', e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Télécharge et installe Java JDK 11
+ */
+async function installJava() {
+  try {
+    const javaDir = 'C:\\Java';
+    const javaZip = path.join(javaDir, 'jdk.zip');
+    
+    if (!fs.existsSync(javaDir)) {
+      fs.mkdirSync(javaDir, { recursive: true });
+    }
+
+    // Vérifier si déjà installé
+    const jdkPath = path.join(javaDir, 'jdk-11.0.29+7');
+    if (fs.existsSync(jdkPath)) {
+      console.log('[Setup] Java déjà installé à:', jdkPath);
+      return;
+    }
+
+    console.log('[Setup] Téléchargement de Java JDK 11 (~200MB)...');
+    
+    // Télécharger depuis Adoptium (source fiable) - fetch gère les redirects automatiquement
+    const downloadUrl = 'https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.29%2B7/OpenJDK11U-jdk_x64_windows_hotspot_11.0.29_7.zip';
+    
+    const response = await fetch(downloadUrl, { timeout: 120000 });
+    if (!response.ok) {
+      throw new Error(`Download failed with status ${response.status}`);
+    }
+
+    // Écrire le contenu du zip
+    const arrayBuffer = await response.buffer();
+    fs.writeFileSync(javaZip, arrayBuffer);
+    
+    console.log('[Setup] Extraction de Java (peut prendre 1-2 minutes)...');
+    
+    // Extraire
+    await new Promise((resolve, reject) => {
+      fs.createReadStream(javaZip)
+        .pipe(unzipper.Extract({ path: javaDir }))
+        .on('finish', () => {
+          console.log('[Setup] Extraction terminée');
+          resolve();
+        })
+        .on('error', reject);
+    });
+
+    // Nettoyer le zip
+    fs.unlinkSync(javaZip);
+    
+    console.log('[Setup] ✓ Java JDK 11 installé avec succès');
+  } catch (e) {
+    console.error('[Setup] Erreur installation Java:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * Télécharge et installe Gradle 8.7
+ */
+async function installGradle() {
+  try {
+    const gradleDir = 'C:\\Gradle';
+    const gradleZip = path.join(gradleDir, 'gradle.zip');
+    
+    if (!fs.existsSync(gradleDir)) {
+      fs.mkdirSync(gradleDir, { recursive: true });
+    }
+
+    // Vérifier si déjà installé
+    const gradlePath = path.join(gradleDir, 'gradle-8.7');
+    if (fs.existsSync(gradlePath)) {
+      console.log('[Setup] Gradle déjà installé à:', gradlePath);
+      return;
+    }
+
+    console.log('[Setup] Téléchargement de Gradle 8.7 (~240MB)...');
+    
+    const downloadUrl = 'https://services.gradle.org/distributions/gradle-8.7-bin.zip';
+    
+    const response = await fetch(downloadUrl, { timeout: 120000 });
+    if (!response.ok) {
+      throw new Error(`Download failed with status ${response.status}`);
+    }
+
+    // Écrire le contenu du zip
+    const arrayBuffer = await response.buffer();
+    fs.writeFileSync(gradleZip, arrayBuffer);
+
+    console.log('[Setup] Extraction de Gradle (peut prendre 1-2 minutes)...');
+    
+    // Extraire
+    await new Promise((resolve, reject) => {
+      fs.createReadStream(gradleZip)
+        .pipe(unzipper.Extract({ path: gradleDir }))
+        .on('finish', () => {
+          console.log('[Setup] Extraction terminée');
+          resolve();
+        })
+        .on('error', reject);
+    });
+
+    // Nettoyer le zip
+    fs.unlinkSync(gradleZip);
+    
+    console.log('[Setup] ✓ Gradle 8.7 installé avec succès');
+  } catch (e) {
+    console.error('[Setup] Erreur installation Gradle:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * Configure les variables d'environnement pour Java et Gradle
+ */
+function configureEnvironmentVariables() {
+  const javaHome = 'C:\\Java\\jdk-11.0.29+7';
+  const javaPath = path.join(javaHome, 'bin');
+  const gradlePath = 'C:\\Gradle\\gradle-8.7\\bin';
+
+  process.env.JAVA_HOME = javaHome;
+  
+  // Ajouter au PATH du processus
+  if (!process.env.PATH.includes(javaPath)) {
+    process.env.PATH = javaPath + ';' + process.env.PATH;
+  }
+  if (!process.env.PATH.includes(gradlePath)) {
+    process.env.PATH = gradlePath + ';' + process.env.PATH;
+  }
+
+  console.log('[Setup] Variables d\'environnement configurées');
+}
 
 const app = express();
 // Helmet with custom CSP: allow own scripts and the botpress CDN. Do not enable 'unsafe-inline'.
@@ -3521,8 +3691,9 @@ app.post('/api/installer/check-permission', async (req, res) => {
 
 /**
  * POST /api/android/compile - Compile l'APK (debug ou release)
+ * ⚠️ REQUIRES AUTHENTICATION - Protected endpoint
  */
-app.post('/api/android/compile', async (req, res) => {
+app.post('/api/android/compile', authMiddleware, async (req, res) => {
   const { buildType = 'debug' } = req.body;
   const appDir = path.join(__dirname, 'tts-receiver-app');
 
@@ -3536,6 +3707,15 @@ app.post('/api/android/compile', async (req, res) => {
     }
 
     console.log(`[Android] Starting ${buildType} build...`);
+    
+    // S'assurer que Java et Gradle sont disponibles (installation automatique si nécessaire)
+    console.log('[Android] Checking Java and Gradle availability...');
+    const setupResult = await ensureJavaAndGradle();
+    if (!setupResult.success) {
+      console.error('[Android] Setup failed:', setupResult.error);
+      // Continue anyway - compilation error will be more specific
+    }
+
     const startTime = Date.now();
 
     // Déterminer la commande selon le système d'exploitation
@@ -3681,8 +3861,9 @@ app.post('/api/android/compile', async (req, res) => {
 
 /**
  * POST /api/android/install - Installe l'APK sur l'appareil
+ * ⚠️ REQUIRES AUTHENTICATION - Protected endpoint
  */
-app.post('/api/android/install', async (req, res) => {
+app.post('/api/android/install', authMiddleware, async (req, res) => {
   const { deviceSerial, buildType = 'debug' } = req.body;
 
   if (!deviceSerial) {
