@@ -2290,6 +2290,39 @@ async function checkJWTAuth() {
 // ========== INIT ========== 
 console.log('[Dashboard PRO] Init');
 
+// Function to show dashboard content
+function showDashboardContent() {
+	const overlay = document.getElementById('authOverlay');
+	if (overlay) {
+		overlay.style.display = 'none';
+	}
+	const deviceGrid = document.getElementById('deviceGrid');
+	if (deviceGrid) {
+		deviceGrid.style.opacity = '1';
+		deviceGrid.style.pointerEvents = 'auto';
+	}
+}
+
+// Function to hide dashboard content (for auth)
+function hideDashboardContent() {
+	const overlay = document.getElementById('authOverlay');
+	if (overlay) {
+		overlay.style.display = 'flex';
+		overlay.innerHTML = `
+			<div style="text-align: center; color: #fff;">
+				<div style="font-size: 48px; margin-bottom: 20px;">🔐</div>
+				<h2>Authentification requise</h2>
+				<p style="color: #999;">Veuillez vous connecter pour accéder au dashboard...</p>
+			</div>
+		`;
+	}
+	const deviceGrid = document.getElementById('deviceGrid');
+	if (deviceGrid) {
+		deviceGrid.style.opacity = '0';
+		deviceGrid.style.pointerEvents = 'none';
+	}
+}
+
 // Check JWT authentication FIRST - this will show auth modal if needed
 checkJWTAuth().then(isAuth => {
 	if (isAuth) {
@@ -2297,11 +2330,16 @@ checkJWTAuth().then(isAuth => {
 		checkLicense().then(hasAccess => {
 			if (hasAccess) {
 				// User has access (demo valid or active subscription)
+				showDashboardContent();
 				createNavbar();
 				loadDevices();
 			}
 			// else: Access blocked - unlock modal already shown by checkLicense()
 		});
+	} else {
+		// Auth failed - show auth overlay
+		hideDashboardContent();
+		// Auth modal is already shown by checkJWTAuth()
 	}
-	// else: Auth modal is already shown by checkJWTAuth()
 });
+
