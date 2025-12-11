@@ -133,7 +133,7 @@ async function sendPurchaseSuccessEmail(user, purchaseData) {
       <h2 style="color: #2ecc71; margin-top: 30px;">🔑 Votre Clé de Licence</h2>
       
       <div class="license-box">
-        <p style="margin-top: 0; color: #666;">Conservez cette clé précieusement. Elle vous permettra d'accéder à VHR Dashboard sans limite.</p>
+        <p style="margin-top: 0; color: #666;">Conservez cette clé précieusement. Elle vous permettra d'accéder à VHR Dashboard en permanence.</p>
         <div class="license-key">${licenseKey}</div>
         <p style="margin-bottom: 0; color: #666; font-size: 12px; text-align: center; margin-top: 10px;">Durée: ${purchaseData.licenseDuration}</p>
       </div>
@@ -151,7 +151,7 @@ async function sendPurchaseSuccessEmail(user, purchaseData) {
       <ul style="color: #666;">
         <li>✅ Accès perpétuel (jamais expirer)</li>
         <li>✅ Gestion de casques VR illimitée</li>
-        <li>✅ Streaming vidéo sans limite</li>
+        <li>✅ Streaming vidéo illimitée</li>
         <li>✅ Mises à jour incluses à vie</li>
         <li>✅ Support utilisateur prioritaire</li>
       </ul>
@@ -280,7 +280,7 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
       <ul class="features-list">
         <li>Accès complet à toutes les fonctionnalités</li>
         <li>Gestion de casques VR illimitée</li>
-        <li>Streaming vidéo sans limite</li>
+        <li>Streaming vidéo illimitée</li>
         <li>Mises à jour automatiques incluses</li>
         <li>Support utilisateur prioritaire</li>
         <li>Synchronisation cloud sécurisée</li>
