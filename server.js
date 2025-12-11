@@ -91,11 +91,15 @@ async function ensureJavaAndGradle() {
   // Configurer les variables d'environnement
   configureEnvironmentVariables();
   
-  const success = javaFound && gradleFound;
+  // Vérifier Android SDK
+  console.log('[Setup] Vérification d\'Android SDK...');
+  let sdkFound = await ensureAndroidSDK();
+  
+  const success = javaFound && gradleFound && sdkFound;
   if (success) {
-    console.log('[Setup] ✅ Java et Gradle sont disponibles');
+    console.log('[Setup] ✅ Java, Gradle et SDK Android sont disponibles');
   } else {
-    console.error('[Setup] ❌ Java ou Gradle indisponible (Java: ' + (javaFound ? '✓' : '✗') + ', Gradle: ' + (gradleFound ? '✓' : '✗') + ')');
+    console.error('[Setup] ⚠️ Certains outils manquent (Java: ' + (javaFound ? '✓' : '✗') + ', Gradle: ' + (gradleFound ? '✓' : '✗') + ', SDK: ' + (sdkFound ? '✓' : '✗') + ')');
   }
   
   return { success, javaFound, gradleFound };
@@ -236,6 +240,121 @@ async function installGradle() {
 }
 
 /**
+ * Télécharge et installe Android SDK Command Line Tools
+ */
+async function ensureAndroidSDK() {
+  const sdkDir = 'C:\\Android\\SDK';
+  const cmdlineToolsDir = path.join(sdkDir, 'cmdline-tools', 'latest');
+  
+  // Vérifier si déjà installé
+  if (fs.existsSync(cmdlineToolsDir)) {
+    console.log('[Setup] Android SDK déjà installé à:', sdkDir);
+    return true;
+  }
+
+  try {
+    console.log('[Setup] Téléchargement d\'Android SDK Command Line Tools (~120MB)...');
+    
+    // Créer les répertoires
+    if (!fs.existsSync(sdkDir)) {
+      fs.mkdirSync(sdkDir, { recursive: true });
+    }
+
+    const cmdlineToolsParent = path.join(sdkDir, 'cmdline-tools');
+    if (!fs.existsSync(cmdlineToolsParent)) {
+      fs.mkdirSync(cmdlineToolsParent, { recursive: true });
+    }
+
+    // Télécharger depuis Google (Windows version)
+    const downloadUrl = 'https://dl.google.com/android/repository/commandlinetools-win-9477386_latest.zip';
+    const tempZip = path.join(sdkDir, 'cmdline-tools.zip');
+    
+    console.log('[Setup] Téléchargement en cours...');
+    const response = await fetch(downloadUrl, { timeout: 180000 });
+    if (!response.ok) {
+      throw new Error(`Download failed with status ${response.status}`);
+    }
+
+    const arrayBuffer = await response.buffer();
+    fs.writeFileSync(tempZip, arrayBuffer);
+    
+    console.log('[Setup] Extraction d\'Android SDK (peut prendre 1-2 minutes)...');
+    
+    // Extraire dans un répertoire temporaire
+    const tempExtractDir = path.join(sdkDir, 'cmdline-tools-temp');
+    await new Promise((resolve, reject) => {
+      fs.createReadStream(tempZip)
+        .pipe(unzipper.Extract({ path: tempExtractDir }))
+        .on('finish', () => {
+          console.log('[Setup] Extraction terminée');
+          resolve();
+        })
+        .on('error', reject);
+    });
+
+    // Le zip contient un dossier "cmdline-tools", on le renomme en "latest"
+    const extractedDir = path.join(tempExtractDir, 'cmdline-tools');
+    const latestDir = path.join(cmdlineToolsParent, 'latest');
+    
+    if (fs.existsSync(extractedDir)) {
+      // Supprimer le dossier destination s'il existe
+      if (fs.existsSync(latestDir)) {
+        fs.rmSync(latestDir, { recursive: true, force: true });
+      }
+      // Copier le dossier (plus fiable que renommer sur Windows)
+      const copyDir = (src, dst) => {
+        if (!fs.existsSync(dst)) {
+          fs.mkdirSync(dst, { recursive: true });
+        }
+        const files = fs.readdirSync(src);
+        files.forEach(file => {
+          const srcFile = path.join(src, file);
+          const dstFile = path.join(dst, file);
+          const stat = fs.statSync(srcFile);
+          if (stat.isDirectory()) {
+            copyDir(srcFile, dstFile);
+          } else {
+            fs.copyFileSync(srcFile, dstFile);
+          }
+        });
+      };
+      copyDir(extractedDir, latestDir);
+    }
+
+    // Nettoyer le zip et le dossier temporaire
+    fs.unlinkSync(tempZip);
+    if (fs.existsSync(tempExtractDir)) {
+      fs.rmSync(tempExtractDir, { recursive: true });
+    }
+
+    // Ajouter au PATH
+    const binPath = path.join(latestDir, 'bin');
+    if (!process.env.PATH.includes(binPath)) {
+      process.env.PATH = binPath + ';' + process.env.PATH;
+    }
+
+    console.log('[Setup] ✓ Android SDK Command Line Tools installé');
+    
+    // Créer les répertoires SDK standards que Gradle attend
+    const platformsDir = path.join(sdkDir, 'platforms');
+    const buildToolsDir = path.join(sdkDir, 'build-tools');
+    
+    if (!fs.existsSync(platformsDir)) {
+      fs.mkdirSync(platformsDir, { recursive: true });
+    }
+    if (!fs.existsSync(buildToolsDir)) {
+      fs.mkdirSync(buildToolsDir, { recursive: true });
+    }
+
+    return true;
+    
+  } catch (e) {
+    console.error('[Setup] ❌ Installation Android SDK échouée:', e.message);
+    return false;
+  }
+}
+
+/**
  * Configure les variables d'environnement pour Java et Gradle
  */
 function configureEnvironmentVariables() {
@@ -284,6 +403,15 @@ function ensureLocalProperties() {
 console.log('[Server] Initialisation des chemins Java/Gradle...');
 configureEnvironmentVariables();
 ensureLocalProperties();
+
+// Démarrer l'installation de Java/Gradle/SDK en arrière-plan (ne bloque pas le serveur)
+(async () => {
+  try {
+    await ensureJavaAndGradle();
+  } catch (e) {
+    console.error('[Setup] Erreur lors de l\'initialisation:', e.message);
+  }
+})();
 
 const app = express();
 // Helmet with custom CSP: allow own scripts and the botpress CDN. Do not enable 'unsafe-inline'.
