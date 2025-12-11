@@ -235,6 +235,22 @@ class AndroidInstaller {
       return;
     }
 
+    // Vérifier l'accès à la licence AVANT de commencer
+    try {
+      const accessResponse = await fetch('/api/feature/android-tts/access');
+      const accessData = await accessResponse.json();
+      
+      if (!accessData.hasAccess) {
+        // Afficher le modal de licence
+        this.showSubscriptionModal(accessData);
+        return;
+      }
+    } catch (e) {
+      console.error('Erreur vérification licence:', e);
+      alert('Erreur lors de la vérification de l\'abonnement');
+      return;
+    }
+
     const buildType = document.querySelector('input[name="buildType"]:checked').value;
     const autoStart = document.getElementById('autoStartCheck').checked;
     const keepAPK = document.getElementById('keepAPKCheck').checked;
@@ -464,6 +480,177 @@ class AndroidInstaller {
       document.getElementById('cancelBtn').style.display = 'none';
       document.getElementById('startInstallBtn').disabled = false;
     }
+  }
+
+  /**
+   * Affiche le modal d'abonnement
+   */
+  showSubscriptionModal(accessData) {
+    // Créer le modal s'il n'existe pas
+    let modal = document.getElementById('subscriptionModal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'subscriptionModal';
+      modal.className = 'modal-subscription';
+      document.body.appendChild(modal);
+      
+      // Ajouter le CSS
+      const style = document.createElement('style');
+      style.textContent = `
+        .modal-subscription {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0,0,0,0.7);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 10000;
+        }
+        .modal-subscription.hidden {
+          display: none;
+        }
+        .modal-content {
+          background: white;
+          border-radius: 12px;
+          padding: 40px;
+          max-width: 600px;
+          width: 90%;
+          box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+          text-align: center;
+          animation: slideUp 0.3s ease;
+        }
+        @keyframes slideUp {
+          from { transform: translateY(20px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+        .modal-content h2 {
+          font-size: 28px;
+          margin: 0 0 10px 0;
+          color: #333;
+        }
+        .modal-subtitle {
+          font-size: 16px;
+          color: #666;
+          margin-bottom: 30px;
+          font-weight: 300;
+        }
+        .feature-box {
+          background: #f5f7fa;
+          border-radius: 8px;
+          padding: 25px;
+          margin-bottom: 30px;
+          text-align: left;
+        }
+        .feature-list {
+          list-style: none;
+          padding: 0;
+          margin: 0;
+        }
+        .feature-list li {
+          padding: 10px 0;
+          border-bottom: 1px solid #ddd;
+          color: #555;
+        }
+        .feature-list li:last-child {
+          border-bottom: none;
+        }
+        .feature-list li:before {
+          content: "✓ ";
+          color: #00b86c;
+          font-weight: bold;
+          margin-right: 10px;
+        }
+        .pricing-box {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          border-radius: 12px;
+          padding: 30px;
+          margin-bottom: 25px;
+        }
+        .price {
+          font-size: 48px;
+          font-weight: bold;
+          margin: 0;
+        }
+        .price-period {
+          font-size: 14px;
+          opacity: 0.9;
+        }
+        .price-desc {
+          font-size: 14px;
+          margin-top: 15px;
+          opacity: 0.95;
+        }
+        .modal-buttons {
+          display: flex;
+          gap: 15px;
+          justify-content: center;
+        }
+        .btn-subscribe {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          border: none;
+          padding: 14px 32px;
+          border-radius: 6px;
+          font-size: 16px;
+          font-weight: bold;
+          cursor: pointer;
+          transition: transform 0.2s;
+        }
+        .btn-subscribe:hover {
+          transform: scale(1.05);
+        }
+        .btn-close {
+          background: #f0f0f0;
+          color: #333;
+          border: none;
+          padding: 14px 32px;
+          border-radius: 6px;
+          font-size: 16px;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+        .btn-close:hover {
+          background: #e0e0e0;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    // Remplir le contenu du modal
+    modal.innerHTML = `
+      <div class="modal-content">
+        <h2>🎧 VOIX VERS CASQUE</h2>
+        <p class="modal-subtitle">Streaming Audio Immersif pour Meta Quest</p>
+        
+        <div class="feature-box">
+          <h3 style="margin-top: 0; text-align: center;">✨ Avantages</h3>
+          <ul class="feature-list">
+            <li>Son immersif en temps réel (latence &lt;50ms)</li>
+            <li>Intégration totale avec vos apps VR</li>
+            <li>Qualité audio optimisée 24-bit/48kHz</li>
+            <li>Contrôle depuis le dashboard</li>
+            <li>Compatible Quest 3 & Quest Pro</li>
+          </ul>
+        </div>
+
+        <div class="pricing-box">
+          <p class="price">29€</p>
+          <p class="price-period">par mois</p>
+          <p class="price-desc">Accès complet à tous les outils VHR Dashboard</p>
+        </div>
+
+        <div class="modal-buttons">
+          <button class="btn-subscribe" onclick="window.location.href='/pricing'">S'abonner maintenant</button>
+          <button class="btn-close" onclick="document.getElementById('subscriptionModal').classList.add('hidden')">Fermer</button>
+        </div>
+      </div>
+    `;
+    
+    modal.classList.remove('hidden');
   }
 
   /**
