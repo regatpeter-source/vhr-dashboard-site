@@ -286,11 +286,12 @@ class AndroidInstaller {
   async compileAPK(buildType) {
     this.updateStep('compile', 'in-progress');
     this.addLog(`📦 Compilation ${buildType} APK en cours...`, 'info');
-    this.addLog(`💡 Première compilation: peut prendre 5-15 minutes`, 'warning');
+    this.addLog(`💡 Vérification de l'environnement (Java, Gradle)...`, 'info');
+    this.addLog(`   • Si manquant, installation automatique en cours`, 'info');
+    this.addLog(`📥 Première compilation: peut prendre 10-20 minutes`, 'warning');
     this.addLog(`   • Les dépendances Gradle seront téléchargées automatiquement`, 'info');
     this.addLog(`   • Les compilations suivantes seront plus rapides (cache)`, 'info');
-    this.addLog(`   • Assurez-vous d'avoir Java JDK 11+ installé`, 'info');
-    this.addLog(`   • L'APK sera sauvegardé après la compilation`, 'info');
+    this.addLog(`   • Veuillez patienter...`, 'info');
 
     const startTime = Date.now();
 
