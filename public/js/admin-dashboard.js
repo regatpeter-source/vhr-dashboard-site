@@ -114,9 +114,20 @@ async function loadSubscriptions() {
 // Load messages
 async function loadMessages() {
   try {
+    console.log('[messages] Loading messages...');
     const res = await authFetch(`${API_BASE}/admin/messages`);
+    console.log('[messages] Response status:', res.status);
     const data = await res.json();
-    if (data.ok && data.messages.length > 0) {
+    console.log('[messages] Response data:', data);
+    
+    if (!res.ok) {
+      console.error('[messages] API error:', data.error);
+      document.getElementById('messagesMessage').innerHTML = `<div class="error">Error: ${data.error}</div>`;
+      return;
+    }
+    
+    if (data.ok && data.messages && data.messages.length > 0) {
+      console.log('[messages] Found', data.messages.length, 'messages');
       const tbody = document.getElementById('messagesList');
       tbody.innerHTML = '';
       data.messages.forEach(msg => {
@@ -145,11 +156,12 @@ async function loadMessages() {
         `;
       });
     } else {
-      document.getElementById('messagesMessage').innerHTML = '<div class="empty-state"><p>📭 No messages found</p></div>';
+      console.log('[messages] No messages or empty response');
+      document.getElementById('messagesMessage').innerHTML = '<div class="empty-state"><p>No messages found</p></div>';
     }
   } catch (e) {
-    console.error('Error loading messages:', e);
-    document.getElementById('messagesMessage').innerHTML = `<div class="error">❌ Error loading messages</div>`;
+    console.error('[messages] Error:', e);
+    document.getElementById('messagesMessage').innerHTML = `<div class="error">Error loading messages: ${e.message}</div>`;
   }
 }
 
@@ -369,8 +381,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Initialize
 async function init() {
+  console.log('[admin-dashboard] Initializing...');
   await checkAuth();
+  console.log('[admin-dashboard] Auth checked');
   await loadStats();
+  console.log('[admin-dashboard] Stats loaded');
   await loadUsers();
+  console.log('[admin-dashboard] Users loaded');
   await loadMessages();
+  console.log('[admin-dashboard] Messages loaded - Init complete');
 }
