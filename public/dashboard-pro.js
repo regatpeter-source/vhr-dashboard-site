@@ -2305,16 +2305,10 @@ function showDashboardContent() {
 
 // Function to hide dashboard content (for auth)
 function hideDashboardContent() {
+	// Simply hide the overlay - the auth modal will appear on top
 	const overlay = document.getElementById('authOverlay');
 	if (overlay) {
-		overlay.style.display = 'flex';
-		overlay.innerHTML = `
-			<div style="text-align: center; color: #fff;">
-				<div style="font-size: 48px; margin-bottom: 20px;">🔐</div>
-				<h2>Authentification requise</h2>
-				<p style="color: #999;">Veuillez vous connecter pour accéder au dashboard...</p>
-			</div>
-		`;
+		overlay.style.display = 'none';
 	}
 	const deviceGrid = document.getElementById('deviceGrid');
 	if (deviceGrid) {
@@ -2337,7 +2331,7 @@ checkJWTAuth().then(isAuth => {
 			// else: Access blocked - unlock modal already shown by checkLicense()
 		});
 	} else {
-		// Auth failed - show auth overlay
+		// Auth failed - hide the loading overlay, auth modal will show
 		hideDashboardContent();
 		// Auth modal is already shown by checkJWTAuth()
 	}
