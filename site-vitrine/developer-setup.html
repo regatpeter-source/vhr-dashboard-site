@@ -25,10 +25,35 @@
     <h1>Guide Developpeur</h1>
     <p>Instructions essentielles pour configurer votre environnement de developpement et connecter des casques VR via ADB.</p>
 
+    <section style="background:#e8f8f5;border-left:4px solid #2ecc71;padding:20px;margin-bottom:30px;border-radius:4px;">
+      <h2 style="color:#27ae60;margin-top:0;">🚀 Installation Rapide (Recommendee)</h2>
+      <p><strong>La facon la plus facile:</strong> Utilisez notre installateur automatique qui configure tout en 1 clic!</p>
+      <ul>
+        <li>✅ Telecharge automatiquement Java JDK 11</li>
+        <li>✅ Configure Gradle automatiquement</li>
+        <li>✅ Compile l'APK (5-15 minutes)</li>
+        <li>✅ Installe sur votre Meta Quest</li>
+      </ul>
+      <p><strong>Pour commencer:</strong></p>
+      <ol>
+        <li>Connectez votre Meta Quest en USB</li>
+        <li><strong><a href="https://github.com/regatpeter-source/vhr-dashboard-site/releases/latest" target="_blank" rel="noopener noreferrer">Telecharger VHR-TTS-Installer.zip</a></strong></li>
+        <li>Decompressez et double-cliquez sur <code>VHR-TTS-Installer.bat</code></li>
+        <li>C'est tout! L'installation se fait automatiquement</li>
+      </ol>
+      <p><strong>Documentation complète:</strong> <a href="https://github.com/regatpeter-source/vhr-dashboard-site/blob/main/TTS_ONE_CLICK_INSTALLER.md" target="_blank" rel="noopener noreferrer">Voir le guide d'installation</a></p>
+    </section>
+
+    <hr style="margin:40px 0;">
+
     <section>
-      <h2>Prerequis</h2>
+      <h2>Installation Manuelle (Avancee)</h2>
+      <p>Pour les developpeurs qui veulent configurer manuellement leur environnement.</p>
+
+      <h3>Prerequis</h3>
       <ul>
         <li><strong>ADB (Android Platform Tools)</strong> - Installes et configures dans le PATH. <a href="https://developer.android.com/studio/releases/platform-tools" target="_blank" rel="noopener noreferrer">Telecharger ici</a>.</li>
+        <li><strong>Java JDK 11+</strong> - <a href="https://adoptopenjdk.net/" target="_blank" rel="noopener noreferrer">Telecharger OpenJDK 11</a> et configurer JAVA_HOME.</li>
         <li><strong>Casque VR compatible</strong> - Meta Quest, Pico, HTC Vive Focus, ou tout casque Android avec ADB.</li>
         <li><strong>Cable USB</strong> - Pour la connexion initiale et le debogage.</li>
         <li><strong>Mode developpeur</strong> - Activer depuis l'app mobile du casque (si applicable).</li>
