@@ -30,33 +30,61 @@ const fetch = require('node-fetch');
 async function ensureJavaAndGradle() {
   console.log('[Setup] Vérification de Java et Gradle...');
   
-  // Vérifier Java
+  // Vérifier Java - d'abord vérifier le dossier
   console.log('[Setup] Vérification de Java...');
   let javaFound = false;
-  try {
-    const result = await execp('java -version', { timeout: 5000 });
-    console.log('[Setup] ✓ Java trouvé');
+  const javaDir = 'C:\\Java\\jdk-11.0.29+7';
+  
+  if (fs.existsSync(javaDir)) {
+    console.log('[Setup] ✓ Dossier Java trouvé:', javaDir);
     javaFound = true;
-  } catch (e) {
-    console.log('[Setup] ⚠️ Java non trouvé, tentative d\'installation...');
-    javaFound = await installJava();
-    if (javaFound) {
-      console.log('[Setup] ✓ Java installé et configuré');
+    // S'assurer que process.env a le PATH correct
+    const javaPath = path.join(javaDir, 'bin');
+    if (!process.env.PATH.includes(javaPath)) {
+      process.env.PATH = javaPath + ';' + process.env.PATH;
+      console.log('[Setup] ✓ Java ajouté au PATH du processus');
+    }
+  } else {
+    // Essayer la commande comme fallback
+    try {
+      await execp('java -version', { timeout: 5000 });
+      console.log('[Setup] ✓ Java trouvé via PATH système');
+      javaFound = true;
+    } catch (e) {
+      console.log('[Setup] ⚠️ Java non trouvé, tentative d\'installation...');
+      javaFound = await installJava();
+      if (javaFound) {
+        console.log('[Setup] ✓ Java installé et configuré');
+      }
     }
   }
 
-  // Vérifier Gradle
+  // Vérifier Gradle - d'abord vérifier le dossier
   console.log('[Setup] Vérification de Gradle...');
   let gradleFound = false;
-  try {
-    const result = await execp('gradle -v', { timeout: 5000 });
-    console.log('[Setup] ✓ Gradle trouvé');
+  const gradleDir = 'C:\\Gradle\\gradle-8.7';
+  
+  if (fs.existsSync(gradleDir)) {
+    console.log('[Setup] ✓ Dossier Gradle trouvé:', gradleDir);
     gradleFound = true;
-  } catch (e) {
-    console.log('[Setup] ⚠️ Gradle non trouvé, tentative d\'installation...');
-    gradleFound = await installGradle();
-    if (gradleFound) {
-      console.log('[Setup] ✓ Gradle installé et configuré');
+    // S'assurer que process.env a le PATH correct
+    const gradlePath = path.join(gradleDir, 'bin');
+    if (!process.env.PATH.includes(gradlePath)) {
+      process.env.PATH = gradlePath + ';' + process.env.PATH;
+      console.log('[Setup] ✓ Gradle ajouté au PATH du processus');
+    }
+  } else {
+    // Essayer la commande comme fallback
+    try {
+      await execp('gradle -v', { timeout: 5000 });
+      console.log('[Setup] ✓ Gradle trouvé via PATH système');
+      gradleFound = true;
+    } catch (e) {
+      console.log('[Setup] ⚠️ Gradle non trouvé, tentative d\'installation...');
+      gradleFound = await installGradle();
+      if (gradleFound) {
+        console.log('[Setup] ✓ Gradle installé et configuré');
+      }
     }
   }
 
@@ -227,6 +255,10 @@ function configureEnvironmentVariables() {
 
   console.log('[Setup] Variables d\'environnement configurées');
 }
+
+// === INITIALISER JAVA/GRADLE AU DÉMARRAGE ===
+console.log('[Server] Initialisation des chemins Java/Gradle...');
+configureEnvironmentVariables();
 
 const app = express();
 // Helmet with custom CSP: allow own scripts and the botpress CDN. Do not enable 'unsafe-inline'.
