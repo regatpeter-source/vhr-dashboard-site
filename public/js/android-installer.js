@@ -38,6 +38,10 @@ class AndroidInstaller {
             <h4>📋 Prérequis</h4>
             <ul class="requirements-list">
               <li>
+                <input type="checkbox" id="javaCheck" />
+                <label>Java JDK 11+ installé</label>
+              </li>
+              <li>
                 <input type="checkbox" id="androidStudioCheck" />
                 <label>Android Studio installé</label>
               </li>
@@ -282,7 +286,11 @@ class AndroidInstaller {
   async compileAPK(buildType) {
     this.updateStep('compile', 'in-progress');
     this.addLog(`📦 Compilation ${buildType} APK en cours...`, 'info');
-    this.addLog(`💡 Note: La première compilation peut prendre 2-5 minutes (téléchargement des dépendances Gradle)`, 'warning');
+    this.addLog(`💡 Première compilation: peut prendre 5-15 minutes`, 'warning');
+    this.addLog(`   • Les dépendances Gradle seront téléchargées automatiquement`, 'info');
+    this.addLog(`   • Les compilations suivantes seront plus rapides (cache)`, 'info');
+    this.addLog(`   • Assurez-vous d'avoir Java JDK 11+ installé`, 'info');
+    this.addLog(`   • L'APK sera sauvegardé après la compilation`, 'info');
 
     const startTime = Date.now();
 
