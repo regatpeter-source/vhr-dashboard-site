@@ -2263,8 +2263,10 @@ window.registerUser = async function() {
 
 // ========== CHECK JWT ON LOAD ========== 
 async function checkJWTAuth() {
+	console.log('[auth] Checking JWT authentication...');
 	try {
 		const res = await api('/api/me');
+		console.log('[auth] API response:', res);
 		
 		if (res && res.ok && res.user) {
 			// User is authenticated
@@ -2274,13 +2276,29 @@ async function checkJWTAuth() {
 			return true;
 		} else {
 			// No valid JWT - show auth modal
-			console.log('[auth] No valid JWT token');
+			console.log('[auth] ❌ No valid JWT - res.ok =', res?.ok);
+			console.log('[auth] Showing auth modal...');
+			
+			// Hide the loading overlay immediately
+			const overlay = document.getElementById('authOverlay');
+			if (overlay) {
+				overlay.style.display = 'none';
+			}
+			
+			// Show auth modal
 			showAuthModal('login');
 			return false;
 		}
 	} catch (e) {
 		console.error('[auth] JWT check error:', e);
-		console.log('[auth] ❌ Showing login modal');
+		console.log('[auth] ❌ Showing login modal due to exception');
+		
+		// Hide the loading overlay immediately
+		const overlay = document.getElementById('authOverlay');
+		if (overlay) {
+			overlay.style.display = 'none';
+		}
+		
 		showAuthModal('login');
 		return false;
 	}
