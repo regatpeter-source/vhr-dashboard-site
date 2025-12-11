@@ -2268,16 +2268,19 @@ async function checkJWTAuth() {
 		
 		if (res && res.ok && res.user) {
 			// User is authenticated
-			currentUser = res.user.name || res.user.email;
+			currentUser = res.user.username || res.user.name || res.user.email;
 			localStorage.setItem('vhr_current_user', currentUser);
+			console.log('[auth] ✓ JWT valid for user:', currentUser);
 			return true;
 		} else {
 			// No valid JWT - show auth modal
+			console.log('[auth] No valid JWT token');
 			showAuthModal('login');
 			return false;
 		}
 	} catch (e) {
 		console.error('[auth] JWT check error:', e);
+		console.log('[auth] ❌ Showing login modal');
 		showAuthModal('login');
 		return false;
 	}
