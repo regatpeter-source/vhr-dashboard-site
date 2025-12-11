@@ -28,57 +28,71 @@ const fetch = require('node-fetch');
  * Vérifie et installe automatiquement Java/Gradle si nécessaire
  */
 async function ensureJavaAndGradle() {
+  console.log('[Setup] Vérification de Java et Gradle...');
+  
+  // Vérifier Java
+  console.log('[Setup] Vérification de Java...');
+  let javaFound = false;
   try {
-    // Vérifier Java
-    try {
-      await execp('java -version', { timeout: 5000 });
-      console.log('[Setup] ✓ Java trouvé');
-    } catch (e) {
-      console.log('[Setup] Java manquant, installation en cours...');
-      await installJava();
-    }
-
-    // Vérifier Gradle
-    try {
-      await execp('gradle -v', { timeout: 5000 });
-      console.log('[Setup] ✓ Gradle trouvé');
-    } catch (e) {
-      console.log('[Setup] Gradle manquant, installation en cours...');
-      await installGradle();
-    }
-
-    // Configurer les variables d'environnement
-    configureEnvironmentVariables();
-    
-    return { success: true };
+    const result = await execp('java -version', { timeout: 5000 });
+    console.log('[Setup] ✓ Java trouvé');
+    javaFound = true;
   } catch (e) {
-    console.error('[Setup] Erreur:', e.message);
-    return { success: false, error: e.message };
+    console.log('[Setup] ⚠️ Java non trouvé, tentative d\'installation...');
+    javaFound = await installJava();
+    if (javaFound) {
+      console.log('[Setup] ✓ Java installé et configuré');
+    }
   }
+
+  // Vérifier Gradle
+  console.log('[Setup] Vérification de Gradle...');
+  let gradleFound = false;
+  try {
+    const result = await execp('gradle -v', { timeout: 5000 });
+    console.log('[Setup] ✓ Gradle trouvé');
+    gradleFound = true;
+  } catch (e) {
+    console.log('[Setup] ⚠️ Gradle non trouvé, tentative d\'installation...');
+    gradleFound = await installGradle();
+    if (gradleFound) {
+      console.log('[Setup] ✓ Gradle installé et configuré');
+    }
+  }
+
+  // Configurer les variables d'environnement
+  configureEnvironmentVariables();
+  
+  const success = javaFound && gradleFound;
+  if (success) {
+    console.log('[Setup] ✅ Java et Gradle sont disponibles');
+  } else {
+    console.error('[Setup] ❌ Java ou Gradle indisponible (Java: ' + (javaFound ? '✓' : '✗') + ', Gradle: ' + (gradleFound ? '✓' : '✗') + ')');
+  }
+  
+  return { success, javaFound, gradleFound };
 }
 
 /**
  * Télécharge et installe Java JDK 11
  */
 async function installJava() {
+  const javaDir = 'C:\\Java';
+  const jdkPath = path.join(javaDir, 'jdk-11.0.29+7');
+  
+  // Vérifier si déjà installé
+  if (fs.existsSync(jdkPath)) {
+    console.log('[Setup] Java déjà installé à:', jdkPath);
+    process.env.JAVA_HOME = jdkPath;
+    return true;
+  }
+
   try {
-    const javaDir = 'C:\\Java';
-    const javaZip = path.join(javaDir, 'jdk.zip');
-    
     if (!fs.existsSync(javaDir)) {
       fs.mkdirSync(javaDir, { recursive: true });
     }
 
-    // Vérifier si déjà installé
-    const jdkPath = path.join(javaDir, 'jdk-11.0.29+7');
-    if (fs.existsSync(jdkPath)) {
-      console.log('[Setup] Java déjà installé à:', jdkPath);
-      return;
-    }
-
     console.log('[Setup] Téléchargement de Java JDK 11 (~200MB)...');
-    
-    // Télécharger depuis Adoptium (source fiable) - fetch gère les redirects automatiquement
     const downloadUrl = 'https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.29%2B7/OpenJDK11U-jdk_x64_windows_hotspot_11.0.29_7.zip';
     
     const response = await fetch(downloadUrl, { timeout: 120000 });
@@ -86,13 +100,12 @@ async function installJava() {
       throw new Error(`Download failed with status ${response.status}`);
     }
 
-    // Écrire le contenu du zip
+    const javaZip = path.join(javaDir, 'jdk.zip');
     const arrayBuffer = await response.buffer();
     fs.writeFileSync(javaZip, arrayBuffer);
     
     console.log('[Setup] Extraction de Java (peut prendre 1-2 minutes)...');
     
-    // Extraire
     await new Promise((resolve, reject) => {
       fs.createReadStream(javaZip)
         .pipe(unzipper.Extract({ path: javaDir }))
@@ -103,13 +116,28 @@ async function installJava() {
         .on('error', reject);
     });
 
-    // Nettoyer le zip
     fs.unlinkSync(javaZip);
-    
+    process.env.JAVA_HOME = jdkPath;
     console.log('[Setup] ✓ Java JDK 11 installé avec succès');
+    return true;
+    
   } catch (e) {
-    console.error('[Setup] Erreur installation Java:', e.message);
-    throw e;
+    console.error('[Setup] ❌ Installation automatique Java échouée:', e.message);
+    console.log('[Setup] Tentative avec le script PowerShell...');
+    
+    try {
+      const scriptPath = path.join(__dirname, 'scripts', 'install-build-tools.ps1');
+      if (fs.existsSync(scriptPath)) {
+        console.log('[Setup] Lancement du script PowerShell...');
+        await execp(`powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}" -SkipGradle`, { timeout: 600000 });
+        console.log('[Setup] ✓ Script PowerShell terminé');
+        return true;
+      }
+    } catch (psErr) {
+      console.error('[Setup] Script PowerShell échoué:', psErr.message);
+    }
+    
+    return false;
   }
 }
 
@@ -117,23 +145,21 @@ async function installJava() {
  * Télécharge et installe Gradle 8.7
  */
 async function installGradle() {
+  const gradleDir = 'C:\\Gradle';
+  const gradlePath = path.join(gradleDir, 'gradle-8.7');
+  
+  // Vérifier si déjà installé
+  if (fs.existsSync(gradlePath)) {
+    console.log('[Setup] Gradle déjà installé à:', gradlePath);
+    return true;
+  }
+
   try {
-    const gradleDir = 'C:\\Gradle';
-    const gradleZip = path.join(gradleDir, 'gradle.zip');
-    
     if (!fs.existsSync(gradleDir)) {
       fs.mkdirSync(gradleDir, { recursive: true });
     }
 
-    // Vérifier si déjà installé
-    const gradlePath = path.join(gradleDir, 'gradle-8.7');
-    if (fs.existsSync(gradlePath)) {
-      console.log('[Setup] Gradle déjà installé à:', gradlePath);
-      return;
-    }
-
     console.log('[Setup] Téléchargement de Gradle 8.7 (~240MB)...');
-    
     const downloadUrl = 'https://services.gradle.org/distributions/gradle-8.7-bin.zip';
     
     const response = await fetch(downloadUrl, { timeout: 120000 });
@@ -141,13 +167,12 @@ async function installGradle() {
       throw new Error(`Download failed with status ${response.status}`);
     }
 
-    // Écrire le contenu du zip
+    const gradleZip = path.join(gradleDir, 'gradle.zip');
     const arrayBuffer = await response.buffer();
     fs.writeFileSync(gradleZip, arrayBuffer);
 
     console.log('[Setup] Extraction de Gradle (peut prendre 1-2 minutes)...');
     
-    // Extraire
     await new Promise((resolve, reject) => {
       fs.createReadStream(gradleZip)
         .pipe(unzipper.Extract({ path: gradleDir }))
@@ -158,13 +183,27 @@ async function installGradle() {
         .on('error', reject);
     });
 
-    // Nettoyer le zip
     fs.unlinkSync(gradleZip);
-    
     console.log('[Setup] ✓ Gradle 8.7 installé avec succès');
+    return true;
+    
   } catch (e) {
-    console.error('[Setup] Erreur installation Gradle:', e.message);
-    throw e;
+    console.error('[Setup] ❌ Installation automatique Gradle échouée:', e.message);
+    console.log('[Setup] Tentative avec le script PowerShell...');
+    
+    try {
+      const scriptPath = path.join(__dirname, 'scripts', 'install-build-tools.ps1');
+      if (fs.existsSync(scriptPath)) {
+        console.log('[Setup] Lancement du script PowerShell...');
+        await execp(`powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}" -SkipJava`, { timeout: 600000 });
+        console.log('[Setup] ✓ Script PowerShell terminé');
+        return true;
+      }
+    } catch (psErr) {
+      console.error('[Setup] Script PowerShell échoué:', psErr.message);
+    }
+    
+    return false;
   }
 }
 
@@ -3912,9 +3951,24 @@ app.post('/api/android/compile', authMiddleware, requireLicense, async (req, res
     // S'assurer que Java et Gradle sont disponibles (installation automatique si nécessaire)
     console.log('[Android] Checking Java and Gradle availability...');
     const setupResult = await ensureJavaAndGradle();
+    
+    // ❌ BLOQUER si Java ou Gradle indisponible
     if (!setupResult.success) {
-      console.error('[Android] Setup failed:', setupResult.error);
-      // Continue anyway - compilation error will be more specific
+      const missing = [];
+      if (!setupResult.javaFound) missing.push('Java JDK 11');
+      if (!setupResult.gradleFound) missing.push('Gradle 8.7');
+      
+      const errorMsg = 'Installation de ' + missing.join(' et ') + ' échouée. Veuillez installer manuellement.';
+      console.error('[Android] ❌', errorMsg);
+      
+      return res.status(503).json({ 
+        ok: false, 
+        error: errorMsg,
+        details: {
+          javaFound: setupResult.javaFound,
+          gradleFound: setupResult.gradleFound
+        }
+      });
     }
 
     const startTime = Date.now();
