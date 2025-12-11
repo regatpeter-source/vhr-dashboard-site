@@ -242,8 +242,11 @@ function configureEnvironmentVariables() {
   const javaHome = 'C:\\Java\\jdk-11.0.29+7';
   const javaPath = path.join(javaHome, 'bin');
   const gradlePath = 'C:\\Gradle\\gradle-8.7\\bin';
+  const androidHome = 'C:\\Android\\SDK';
 
   process.env.JAVA_HOME = javaHome;
+  process.env.ANDROID_HOME = androidHome;
+  process.env.ANDROID_SDK_ROOT = androidHome;
   
   // Ajouter au PATH du processus
   if (!process.env.PATH.includes(javaPath)) {
@@ -256,9 +259,31 @@ function configureEnvironmentVariables() {
   console.log('[Setup] Variables d\'environnement configurées');
 }
 
+/**
+ * Crée le fichier local.properties pour la compilation Android
+ */
+function ensureLocalProperties() {
+  const appDir = path.join(__dirname, 'tts-receiver-app');
+  const localPropsPath = path.join(appDir, 'local.properties');
+  
+  const androidHome = 'C:\\Android\\SDK';
+  
+  // Créer le contenu du fichier
+  const content = `sdk.dir=${androidHome}\nndk.dir=C:\\Android\\NDK\nandroid.useAndroidX=true\n`;
+  
+  try {
+    // Créer si n'existe pas ou mettre à jour
+    fs.writeFileSync(localPropsPath, content, 'utf8');
+    console.log('[Setup] ✓ local.properties créé');
+  } catch (e) {
+    console.error('[Setup] ⚠️ Impossible de créer local.properties:', e.message);
+  }
+}
+
 // === INITIALISER JAVA/GRADLE AU DÉMARRAGE ===
 console.log('[Server] Initialisation des chemins Java/Gradle...');
 configureEnvironmentVariables();
+ensureLocalProperties();
 
 const app = express();
 // Helmet with custom CSP: allow own scripts and the botpress CDN. Do not enable 'unsafe-inline'.
