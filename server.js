@@ -3566,11 +3566,18 @@ app.post('/api/android/compile', async (req, res) => {
     console.log(`[Android] Executing: ${buildCommand}`);
 
     // Compiler avec un timeout très long pour la première build
+    const javaHome = process.env.JAVA_HOME || 'C:\\Java\\jdk-11.0.29+7';
+    const javaPath = javaHome + '\\bin';
+    const gradlePath = 'C:\\Gradle\\gradle-8.7\\bin';
+    
     const env = {
       ...process.env,
-      JAVA_HOME: process.env.JAVA_HOME || 'C:\\Java\\jdk-11.0.29+7',
-      PATH: (process.env.JAVA_HOME || 'C:\\Java\\jdk-11.0.29+7') + '\\bin;C:\\Gradle\\gradle-8.7\\bin;' + process.env.PATH
+      JAVA_HOME: javaHome,
+      PATH: javaPath + ';' + gradlePath + ';' + (process.env.PATH || '')
     };
+    
+    console.log(`[Android] JAVA_HOME: ${env.JAVA_HOME}`);
+    console.log(`[Android] Java path in PATH: ${javaPath}`);
     
     const { stdout, stderr } = await execp(
       buildCommand,
