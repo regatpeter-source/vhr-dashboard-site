@@ -365,6 +365,88 @@ class VHRAudioStream {
   }
 
   /**
+   * Start relaying audio via WebSocket to headset receiver
+   * Used to send audio to headset over WebSocket (alternative to WebRTC)
+   */
+  async startAudioRelay(targetSerial) {
+    try {
+      this._log('Starting audio relay to ' + targetSerial);
+      
+      if (!this.localStream) {
+        throw new Error('No local audio stream available');
+      }
+      
+      // Create MediaRecorder to encode audio
+      const mediaRecorder = new MediaRecorder(this.localStream, {
+        mimeType: 'audio/webm;codecs=opus',
+        audioBitsPerSecond: 128000 // 128 kbps
+      });
+      
+      // Build WebSocket URL
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${window.location.host}/api/audio/stream?serial=${encodeURIComponent(targetSerial)}&mode=sender`;
+      
+      this._log('Connecting to relay: ' + wsUrl);
+      
+      const relayWs = new WebSocket(wsUrl);
+      relayWs.binaryType = 'arraybuffer';
+      
+      relayWs.onopen = () => {
+        this._log('Relay WebSocket connected, starting recording');
+        mediaRecorder.start(100); // Collect data every 100ms for real-time streaming
+      };
+      
+      mediaRecorder.ondataavailable = (event) => {
+        if (relayWs.readyState === WebSocket.OPEN && event.data.size > 0) {
+          relayWs.send(event.data);
+        }
+      };
+      
+      mediaRecorder.onerror = (event) => {
+        this._log('MediaRecorder error: ' + event.error);
+      };
+      
+      relayWs.onerror = (error) => {
+        this._log('Relay WebSocket error');
+        mediaRecorder.stop();
+      };
+      
+      relayWs.onclose = () => {
+        this._log('Relay WebSocket closed');
+        mediaRecorder.stop();
+      };
+      
+      // Store reference for cleanup
+      this.relayWs = relayWs;
+      this.mediaRecorder = mediaRecorder;
+      
+      this._log('Audio relay started');
+      return true;
+      
+    } catch (error) {
+      this._handleError('Failed to start audio relay', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Stop audio relay
+   */
+  stopAudioRelay() {
+    try {
+      if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+        this.mediaRecorder.stop();
+      }
+      if (this.relayWs && this.relayWs.readyState === WebSocket.OPEN) {
+        this.relayWs.close();
+      }
+      this._log('Audio relay stopped');
+    } catch (error) {
+      this._log('Error stopping audio relay: ' + error.message);
+    }
+  }
+
+  /**
    * Private: Generate unique session ID
    */
   _generateSessionId() {

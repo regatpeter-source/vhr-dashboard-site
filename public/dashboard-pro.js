@@ -555,6 +555,15 @@ window.sendVoiceToHeadset = async function(serial) {
 			signalingPath: '/api/audio/signal'
 		});
 		await activeAudioStream.start(serial);
+		
+		// Also start audio relay to headset via WebSocket for simple receivers
+		try {
+			await activeAudioStream.startAudioRelay(serial);
+			console.log('[sendVoiceToHeadset] Audio relay started for simple headset receivers');
+		} catch (relayError) {
+			console.warn('[sendVoiceToHeadset] Audio relay failed (WebRTC will still work):', relayError);
+		}
+		
 		window.animateAudioVisualizer();
 		showToast(`🎤 Streaming vers ${deviceName}`, 'success');
 	} catch (e) {
@@ -1340,6 +1349,14 @@ let activeAudioStream = null;  // Global audio stream instance
 window.closeAudioStream = async function() {
 	try {
 		if (activeAudioStream) {
+			// Stop audio relay first
+			try {
+				activeAudioStream.stopAudioRelay();
+			} catch (e) {
+				console.warn('[closeAudioStream] Error stopping relay:', e);
+			}
+			
+			// Then stop main WebRTC stream
 			await activeAudioStream.stop();
 			activeAudioStream = null;
 		}
