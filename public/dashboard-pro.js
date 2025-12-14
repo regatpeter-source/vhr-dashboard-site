@@ -611,6 +611,8 @@ window.downloadVHRApp = async function(type = 'apk') {
 			});
 			
 			xhr.addEventListener('load', () => {
+				console.log(`[downloadVHRApp] XHR load event - status: ${xhr.status}, response type: ${typeof xhr.response}, response length: ${xhr.response ? xhr.response.byteLength : 0}`);
+				
 				if (xhr.status === 200) {
 					resolve({ 
 						blob: new Blob([xhr.response]),
@@ -618,19 +620,29 @@ window.downloadVHRApp = async function(type = 'apk') {
 						contentDisposition: xhr.getResponseHeader('content-disposition')
 					});
 				} else {
-					// Handle specific HTTP error codes
+					// Try to parse error response as JSON
 					let errorMessage = 'Téléchargement échoué';
 					
-					if (xhr.status === 403) {
-						errorMessage = 'Accès refusé - Vous n\'êtes pas autorisé à télécharger ce fichier';
-					} else if (xhr.status === 404) {
-						errorMessage = 'Fichier non trouvé sur le serveur';
-					} else if (xhr.status === 401) {
-						errorMessage = 'Authentification requise - Veuillez vous reconnecter';
-					} else if (xhr.status >= 500) {
-						errorMessage = 'Erreur serveur - Veuillez réessayer dans quelques minutes';
-					} else {
-						errorMessage = `Erreur HTTP ${xhr.status} - Veuillez réessayer`;
+					try {
+						// Try to read response as text then parse JSON
+						const decoder = new TextDecoder();
+						const text = decoder.decode(new Uint8Array(xhr.response));
+						console.log(`[downloadVHRApp] Error response text: ${text.substring(0, 200)}`);
+						const errorData = JSON.parse(text);
+						errorMessage = errorData.message || errorData.error || errorMessage;
+					} catch (parseErr) {
+						// If not JSON, use status-based error message
+						if (xhr.status === 403) {
+							errorMessage = 'Accès refusé - Vous n\'êtes pas autorisé à télécharger ce fichier';
+						} else if (xhr.status === 404) {
+							errorMessage = 'Fichier non trouvé sur le serveur';
+						} else if (xhr.status === 401) {
+							errorMessage = 'Authentification requise - Veuillez vous reconnecter';
+						} else if (xhr.status >= 500) {
+							errorMessage = 'Erreur serveur - Veuillez réessayer dans quelques minutes';
+						} else {
+							errorMessage = `Erreur HTTP ${xhr.status} - Veuillez réessayer`;
+						}
 					}
 					
 					reject(new Error(errorMessage));

@@ -4364,6 +4364,37 @@ app.post('/api/installer/check-permission', async (req, res) => {
   }
 });
 
+// ===== GLOBAL ERROR HANDLERS =====
+
+// Handle 404 - Not Found
+app.use((req, res) => {
+  console.log('[404] Route not found:', req.method, req.path);
+  res.status(404).json({
+    ok: false,
+    error: 'Route not found',
+    path: req.path,
+    method: req.method
+  });
+});
+
+// Global error handler - must be last
+app.use((err, req, res, next) => {
+  console.error('[Error Handler] Unhandled error:', err.message);
+  console.error('[Error Handler] Stack:', err.stack);
+  
+  // Don't send response twice
+  if (res.headersSent) {
+    return next(err);
+  }
+  
+  // Always return JSON for API errors
+  res.status(err.status || 500).json({
+    ok: false,
+    error: err.message || 'Internal server error',
+    details: process.env.NODE_ENV === 'production' ? undefined : err.stack
+  });
+});
+
 // ⚠️ NOTE: Local Android compilation routes removed
 // Use GitHub Actions for automated builds instead:
 // 1. User downloads APK + Voice via /api/download/vhr-app (authenticated)
