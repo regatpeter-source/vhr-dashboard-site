@@ -721,17 +721,193 @@ window.updateDownloadButtons = function() {
 	const btnVoice = document.getElementById('btnDownloadVoice');
 	if (!btnVoice) return;
 	
-	// Enable voice button only if APK is downloaded
-	if (window.downloadProgress.apk) {
-		btnVoice.disabled = false;
-		btnVoice.style.opacity = '1';
-		btnVoice.style.background = 'linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)';
-		btnVoice.style.cursor = 'pointer';
+	// Voice button is always enabled (user can try to connect even without downloading APK first)
+	btnVoice.disabled = false;
+	btnVoice.style.opacity = '1';
+	btnVoice.style.background = 'linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)';
+	btnVoice.style.cursor = 'pointer';
+};
+
+// Voice streaming state
+window.voiceStreaming = {
+	isActive: false,
+	mediaStream: null,
+	audioContext: null,
+	analyser: null,
+	dataArray: null,
+	currentDevice: null,
+	serviceUrl: null
+};
+
+/**
+ * Start/Stop voice streaming to OpenTalkie service on casque
+ */
+window.startVoiceStreaming = async function() {
+	try {
+		const btn = event.target;
+		
+		// Get list of connected ADB devices
+		const devicesRes = await fetch('/api/adb/devices', {
+			method: 'GET',
+			credentials: 'include'
+		});
+		const devicesData = await devicesRes.json();
+		
+		if (!devicesData.ok || !devicesData.devices || devicesData.devices.length === 0) {
+			alert('❌ Aucun casque VR connecté. Veuillez connecter un appareil.');
+			return;
+		}
+
+		// Use first device (Meta Quest 2)
+		const device = devicesData.devices[0];
+		window.voiceStreaming.currentDevice = device;
+
+		if (window.voiceStreaming.isActive) {
+			// Stop streaming
+			stopVoiceStreaming();
+			return;
+		}
+
+		btn.disabled = true;
+		btn.innerHTML = '🔄 Connexion...';
+
+		// Get OpenTalkie service info from casque
+		const serviceRes = await fetch(`/api/opentalkie/service-info?device=${device.serial}`, {
+			method: 'GET',
+			credentials: 'include'
+		});
+		const serviceData = await serviceRes.json();
+
+		if (!serviceData.ok) {
+			alert(`❌ Impossible de se connecter à OpenTalkie: ${serviceData.message}`);
+			btn.disabled = false;
+			btn.innerHTML = '🎤 Voix vers Casque';
+			return;
+		}
+
+		window.voiceStreaming.serviceUrl = serviceData.serviceUrl;
+		console.log(`[Voice Streaming] Service URL: ${serviceData.serviceUrl}`);
+
+		// Request microphone access
+		btn.innerHTML = '🎤 Accès au micro...';
+
+		const mediaStream = await navigator.mediaDevices.getUserMedia({
+			audio: {
+				echoCancellation: true,
+				noiseSuppression: true,
+				autoGainControl: true
+			},
+			video: false
+		});
+
+		window.voiceStreaming.mediaStream = mediaStream;
+
+		// Create audio context
+		const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+		window.voiceStreaming.audioContext = audioContext;
+
+		const source = audioContext.createMediaStreamSource(mediaStream);
+		const analyser = audioContext.createAnalyser();
+		analyser.fftSize = 2048;
+
+		source.connect(analyser);
+
+		window.voiceStreaming.analyser = analyser;
+		window.voiceStreaming.dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+		// Mark as active
+		window.voiceStreaming.isActive = true;
+
+		btn.innerHTML = '🎤 ◉ EN DIRECT (Cliquez pour arrêter)';
+		btn.style.background = 'linear-gradient(135deg, #27ae60 0%, #229954 100%)';
+		btn.style.boxShadow = '0 0 15px rgba(39, 174, 96, 0.6)';
+
+		// Log successful connection
+		console.log(`[Voice Streaming] Active - Device: ${device.serial}, Service: ${window.voiceStreaming.serviceUrl}`);
+
+		// Display status
+		showVoiceStreamingStatus(`🎤 Streaming vers ${device.name}`, true);
+
+	} catch (e) {
+		console.error('[Voice Streaming] Error:', e);
+		alert(`❌ Erreur: ${e.message}`);
+		
+		if (event && event.target) {
+			event.target.disabled = false;
+			event.target.innerHTML = '🎤 Voix vers Casque';
+		}
+	}
+};
+
+/**
+ * Stop voice streaming
+ */
+window.stopVoiceStreaming = function() {
+	try {
+		if (!window.voiceStreaming.isActive) return;
+
+		// Stop microphone
+		if (window.voiceStreaming.mediaStream) {
+			window.voiceStreaming.mediaStream.getTracks().forEach(track => track.stop());
+			window.voiceStreaming.mediaStream = null;
+		}
+
+		// Close audio context
+		if (window.voiceStreaming.audioContext && window.voiceStreaming.audioContext.state !== 'closed') {
+			window.voiceStreaming.audioContext.close();
+			window.voiceStreaming.audioContext = null;
+		}
+
+		window.voiceStreaming.isActive = false;
+		window.voiceStreaming.analyser = null;
+		window.voiceStreaming.dataArray = null;
+
+		const btn = document.getElementById('btnDownloadVoice');
+		if (btn) {
+			btn.disabled = false;
+			btn.innerHTML = '🎤 Voix vers Casque';
+			btn.style.background = 'linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)';
+			btn.style.boxShadow = 'none';
+		}
+
+		console.log('[Voice Streaming] Stopped');
+		showVoiceStreamingStatus('Streaming arrêté', false);
+
+	} catch (e) {
+		console.error('[Voice Streaming] Error stopping:', e);
+	}
+};
+
+/**
+ * Display voice streaming status in UI
+ */
+window.showVoiceStreamingStatus = function(message, isActive) {
+	let statusElement = document.getElementById('voiceStreamingStatus');
+	
+	if (!statusElement) {
+		statusElement = document.createElement('div');
+		statusElement.id = 'voiceStreamingStatus';
+		statusElement.style = `
+			position: fixed;
+			top: 20px;
+			right: 20px;
+			padding: 15px 20px;
+			border-radius: 8px;
+			font-weight: bold;
+			z-index: 10000;
+			box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+			animation: slideIn 0.3s ease;
+		`;
+		document.body.appendChild(statusElement);
+	}
+
+	if (isActive) {
+		statusElement.innerHTML = `🎤 ${message}`;
+		statusElement.style.background = 'linear-gradient(135deg, #27ae60 0%, #229954 100%)';
+		statusElement.style.color = '#fff';
+		statusElement.style.display = 'block';
 	} else {
-		btnVoice.disabled = true;
-		btnVoice.style.opacity = '0.6';
-		btnVoice.style.background = 'linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%)';
-		btnVoice.style.cursor = 'not-allowed';
+		statusElement.style.display = 'none';
 	}
 };
 
@@ -1017,7 +1193,7 @@ window.addDownloadSection = function() {
 			' onmouseover='this.style.transform="scale(1.05)";this.style.boxShadow="0 4px 12px rgba(46,204,113,0.4)"' onmouseout='this.style.transform="scale(1)";this.style.boxShadow="none"'>
 				📱 Télécharger APK
 			</button>
-			<button onclick='window.downloadVHRApp("voice-data")' id='btnDownloadVoice' style='
+			<button onclick='window.startVoiceStreaming()' id='btnDownloadVoice' style='
 				background:linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
 				color:#fff;
 				border:none;
@@ -1028,8 +1204,8 @@ window.addDownloadSection = function() {
 				cursor:pointer;
 				transition:all 0.3s;
 				opacity:0.6;
-			' disabled onmouseover='this.style.transform="scale(1.05)";this.style.boxShadow="0 4px 12px rgba(149,165,166,0.4)"' onmouseout='this.style.transform="scale(1)";this.style.boxShadow="none"'>
-				🎵 Télécharger Voix
+			' onmouseover='this.style.transform="scale(1.05)";this.style.boxShadow="0 4px 12px rgba(149,165,166,0.4)"' onmouseout='this.style.transform="scale(1)";this.style.boxShadow="none"'>
+				🎤 Voix vers Casque
 			</button>
 		</div>
 		
@@ -1915,163 +2091,257 @@ window.connectWifiAuto = async function(serial) {
 };
 
 // ========== VOICE TO HEADSET (TTS) ========== 
+// ========== AUDIO STREAMING (WebRTC) ==========
+let activeAudioStream = null;  // Global audio stream instance
+
 window.sendVoiceToHeadset = async function(serial) {
-	// Créer un modal pour l'interface de messages vocaux
-	let panel = document.getElementById('voicePanel');
-	if (panel) panel.remove();
-	
+	// Check if stream already active
+	if (activeAudioStream && activeAudioStream.targetSerial === serial) {
+		showToast('🎤 Streaming déjà actif pour ce casque', 'warning');
+		return;
+	}
+
 	const device = devices.find(d => d.serial === serial);
 	const deviceName = device ? device.name : 'Casque';
 	
-	panel = document.createElement('div');
-	panel.id = 'voicePanel';
-	panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:2000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
-	panel.onclick = (e) => { if (e.target === panel) window.closeVoicePanel(); };
+	// Create audio control panel
+	let panel = document.getElementById('audioStreamPanel');
+	if (panel) panel.remove();
 	
-	// Créer la structure HTML
+	panel = document.createElement('div');
+	panel.id = 'audioStreamPanel';
+	panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.90);z-index:2000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
+	panel.onclick = (e) => { if (e.target === panel) window.closeAudioStream(); };
+	
 	const container = document.createElement('div');
-	container.style = 'background:#1a1d24;border:3px solid #1abc9c;border-radius:16px;padding:0;max-width:600px;width:90%;max-height:80vh;overflow:hidden;box-shadow:0 8px 32px #000;color:#fff;display:flex;flex-direction:column;';
+	container.style = 'background:#1a1d24;border:3px solid #1abc9c;border-radius:16px;padding:0;width:90%;max-width:500px;box-shadow:0 8px 32px #000;color:#fff;overflow:hidden;';
 	
 	// Header
 	const header = document.createElement('div');
-	header.style = 'background:linear-gradient(135deg, #1abc9c 0%, #16a085 100%);padding:20px;border-radius:13px 13px 0 0;position:relative;display:flex;align-items:center;justify-content:space-between;';
-	header.innerHTML = '<div style="display:flex;align-items:center;gap:12px;"><div style="font-size:32px;">🎤</div><div><h2 style="margin:0;font-size:24px;color:#fff;">Voix vers Casque</h2><p style="margin:4px 0 0 0;font-size:12px;opacity:0.9;">Envoyez des messages au ' + deviceName + '</p></div></div>';
+	header.style = 'background:linear-gradient(135deg, #1abc9c 0%, #16a085 100%);padding:24px;display:flex;align-items:center;justify-content:space-between;';
+	header.innerHTML = `
+		<div style="display:flex;align-items:center;gap:16px;">
+			<div style="font-size:40px;">🎤</div>
+			<div>
+				<h2 style="margin:0;font-size:24px;">Audio en Direct</h2>
+				<p style="margin:4px 0 0 0;font-size:12px;opacity:0.9;">Vers ${deviceName}</p>
+			</div>
+		</div>
+	`;
 	
-	const closeBtn1 = document.createElement('button');
-	closeBtn1.id = 'voiceCloseBtn';
-	closeBtn1.style = 'position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;font-weight:bold;';
-	closeBtn1.textContent = '✕';
-	header.appendChild(closeBtn1);
+	const closeBtn = document.createElement('button');
+	closeBtn.style = 'background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:20px;';
+	closeBtn.textContent = '✕';
+	closeBtn.onclick = window.closeAudioStream;
+	header.appendChild(closeBtn);
 	
-	// Messages Area
-	const messagesArea = document.createElement('div');
-	messagesArea.id = 'voiceMessagesArea';
-	messagesArea.style = 'flex:1;overflow-y:auto;padding:20px;background:#0f1115;display:flex;flex-direction:column;gap:12px;';
-	const placeholderMsg = document.createElement('div');
-	placeholderMsg.style = 'text-align:center;color:#95a5a6;font-size:13px;padding:20px;';
-	placeholderMsg.textContent = '📝 Tapez un message et appuyez sur Envoyer ou Entrée';
-	messagesArea.appendChild(placeholderMsg);
+	// Main content
+	const content = document.createElement('div');
+	content.style = 'padding:30px;text-align:center;';
 	
-	// Input Area
-	const inputContainer = document.createElement('div');
-	inputContainer.style = 'padding:20px;background:#23272f;border-top:1px solid #2ecc71;';
+	// Status indicator
+	const statusDiv = document.createElement('div');
+	statusDiv.id = 'audioStreamStatus';
+	statusDiv.style = 'margin-bottom:24px;';
+	statusDiv.innerHTML = '<div style="font-size:14px;color:#95a5a6;margin-bottom:12px;">Statut:</div><div style="font-size:28px;">⏳ Initialisation...</div>';
 	
-	const inputWrapper = document.createElement('div');
-	inputWrapper.style = 'display:flex;gap:8px;align-items:flex-end;';
+	// Audio level visualizer
+	const vizContainer = document.createElement('div');
+	vizContainer.id = 'audioVizContainer';
+	vizContainer.style = 'height:60px;background:#0f1115;border-radius:8px;margin-bottom:24px;display:flex;align-items:flex-end;gap:2px;padding:8px;';
 	
-	const textareaWrapper = document.createElement('div');
-	textareaWrapper.style = 'flex:1;';
+	// Add 20 frequency bars
+	for (let i = 0; i < 20; i++) {
+		const bar = document.createElement('div');
+		bar.style = 'flex:1;background:linear-gradient(to top, #1abc9c, #2ecc71);border-radius:2px;transition:height 100ms ease;height:10%;';
+		vizContainer.appendChild(bar);
+	}
 	
-	const textarea = document.createElement('textarea');
-	textarea.id = 'voiceInput';
-	textarea.placeholder = 'Entrez votre message...';
-	textarea.style = 'width:100%;background:#1a1d24;border:2px solid #2ecc71;color:#fff;padding:12px;border-radius:6px;font-family:Arial;font-size:13px;resize:vertical;min-height:50px;max-height:100px;';
+	// Control buttons
+	const buttonContainer = document.createElement('div');
+	buttonContainer.style = 'display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px;';
 	
-	const hint = document.createElement('small');
-	hint.style = 'color:#95a5a6;font-size:11px;display:block;margin-top:4px;';
-	hint.textContent = '💡 Shift+Entrée pour nouvelle ligne';
+	const startBtn = document.createElement('button');
+	startBtn.id = 'audioStreamStartBtn';
+	startBtn.style = 'background:#2ecc71;color:#000;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;transition:all 200ms;';
+	startBtn.innerHTML = '🎯 Démarrer le Stream';
+	startBtn.onclick = () => window.startAudioStream(serial, startBtn);
 	
-	textareaWrapper.appendChild(textarea);
-	textareaWrapper.appendChild(hint);
+	const pauseBtn = document.createElement('button');
+	pauseBtn.id = 'audioStreamPauseBtn';
+	pauseBtn.style = 'background:#f39c12;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;opacity:0.5;transition:all 200ms;';
+	pauseBtn.innerHTML = '⏸️ Pause';
+	pauseBtn.disabled = true;
+	pauseBtn.onclick = () => window.toggleAudioPause(pauseBtn);
 	
-	const sendBtn = document.createElement('button');
-	sendBtn.id = 'voiceSendBtn';
-	sendBtn.style = 'background:#2ecc71;color:#000;border:none;padding:12px 24px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:14px;white-space:nowrap;height:fit-content;';
-	sendBtn.textContent = '📤 Envoyer';
+	buttonContainer.appendChild(startBtn);
+	buttonContainer.appendChild(pauseBtn);
 	
-	inputWrapper.appendChild(textareaWrapper);
-	inputWrapper.appendChild(sendBtn);
-	inputContainer.appendChild(inputWrapper);
+	// Stop button
+	const stopBtn = document.createElement('button');
+	stopBtn.id = 'audioStreamStopBtn';
+	stopBtn.style = 'background:#e74c3c;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;grid-column:1/-1;transition:all 200ms;';
+	stopBtn.innerHTML = '⏹️ Arrêter le Streaming';
+	stopBtn.disabled = true;
+	stopBtn.onclick = window.closeAudioStream;
 	
-	// Actions
-	const actionsContainer = document.createElement('div');
-	actionsContainer.style = 'padding:16px;background:#1a1d24;border-top:1px solid #34495e;display:grid;grid-template-columns:1fr 1fr;gap:8px;';
+	buttonContainer.appendChild(stopBtn);
 	
-	const clearBtn = document.createElement('button');
-	clearBtn.id = 'voiceClearBtn';
-	clearBtn.style = 'background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;';
-	clearBtn.textContent = '🗑️ Effacer';
+	// Settings
+	const settingsDiv = document.createElement('div');
+	settingsDiv.style = 'background:#0f1115;padding:16px;border-radius:8px;';
 	
-	const closeBtn2 = document.createElement('button');
-	closeBtn2.id = 'voiceCloseBtn2';
-	closeBtn2.style = 'background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;';
-	closeBtn2.textContent = '❌ Fermer';
+	const volumeLabel = document.createElement('label');
+	volumeLabel.style = 'display:flex;align-items:center;gap:12px;margin-bottom:12px;font-size:13px;';
+	volumeLabel.innerHTML = '🔊 Volume Micro:';
 	
-	actionsContainer.appendChild(clearBtn);
-	actionsContainer.appendChild(closeBtn2);
-	
-	// Assembler le panel
-	container.appendChild(header);
-	container.appendChild(messagesArea);
-	container.appendChild(inputContainer);
-	container.appendChild(actionsContainer);
-	panel.appendChild(container);
-	
-	document.body.appendChild(panel);
-	
-	// Attacher les événements
-	textarea.addEventListener('keypress', (e) => {
-		if (e.key === 'Enter' && !e.shiftKey) {
-			e.preventDefault();
-			window.sendVoiceMessage(serial);
+	const volumeSlider = document.createElement('input');
+	volumeSlider.type = 'range';
+	volumeSlider.id = 'audioStreamVolume';
+	volumeSlider.min = '0';
+	volumeSlider.max = '200';
+	volumeSlider.value = '100';
+	volumeSlider.style = 'flex:1;cursor:pointer;';
+	volumeSlider.onchange = (e) => {
+		if (activeAudioStream) {
+			activeAudioStream.setMicVolume(e.target.value / 100);
 		}
-	});
+	};
 	
-	sendBtn.addEventListener('click', () => window.sendVoiceMessage(serial));
-	clearBtn.addEventListener('click', window.clearVoiceMessages);
-	closeBtn1.addEventListener('click', window.closeVoicePanel);
-	closeBtn2.addEventListener('click', window.closeVoicePanel);
+	const volumeValue = document.createElement('span');
+	volumeValue.id = 'audioStreamVolumeValue';
+	volumeValue.style = 'min-width:30px;text-align:right;';
+	volumeValue.textContent = '100%';
 	
-	textarea.focus();
+	volumeSlider.onchange = (e) => {
+		const val = parseInt(e.target.value);
+		volumeValue.textContent = val + '%';
+		if (activeAudioStream) activeAudioStream.setMicVolume(val / 100);
+	};
+	
+	volumeLabel.appendChild(volumeSlider);
+	volumeLabel.appendChild(volumeValue);
+	settingsDiv.appendChild(volumeLabel);
+	
+	content.appendChild(statusDiv);
+	content.appendChild(vizContainer);
+	content.appendChild(buttonContainer);
+	content.appendChild(settingsDiv);
+	
+	container.appendChild(header);
+	container.appendChild(content);
+	panel.appendChild(container);
+	document.body.appendChild(panel);
 };
 
-window.sendVoiceMessage = async function(serial) {
-	const input = document.getElementById('voiceInput');
-	const text = input.value.trim();
-	if (!text) return;
-	
-	const messagesArea = document.getElementById('voiceMessagesArea');
-	
-	// Ajouter le message envoyé à l'affichage
-	const messageDiv = document.createElement('div');
-	messageDiv.style = 'background:#2ecc71;color:#000;padding:12px 16px;border-radius:8px;align-self:flex-end;max-width:80%;word-wrap:break-word;border-bottom-right-radius:2px;';
-	messageDiv.innerHTML = `<strong>Vous:</strong><br>${text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}`;
-	messagesArea.appendChild(messageDiv);
-	messagesArea.scrollTop = messagesArea.scrollHeight;
-	
-	// Envoyer le message au serveur
-	showToast('🎤 Envoi de la voix...', 'info');
+window.startAudioStream = async function(serial, startBtn) {
 	try {
-		const res = await api('/api/tts/send', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ serial, text })
+		showToast('🎤 Demande d\'accès au microphone...', 'info');
+		
+		// Create new audio stream
+		activeAudioStream = new VHRAudioStream({
+			signalingServer: window.location.origin,
+			signalingPath: '/api/audio/signal'
 		});
 		
-		if (res && res.ok) {
-			showToast('✅ Message envoyé au casque !', 'success');
-			input.value = '';
-			input.focus();
-		} else {
-			showToast('⚠️ Message envoyé (réponse API: ' + (res?.error || 'en attente') + ')', 'warning');
-			input.value = '';
-			input.focus();
-		}
+		// Setup callbacks
+		activeAudioStream.onStateChange = (state) => {
+			window.updateAudioStreamStatus(state);
+		};
+		
+		activeAudioStream.onError = (error) => {
+			showToast('❌ Erreur Audio: ' + error, 'error');
+			window.closeAudioStream();
+		};
+		
+		// Start streaming
+		await activeAudioStream.start(serial);
+		
+		// Update UI
+		startBtn.disabled = true;
+		startBtn.style.opacity = '0.5';
+		document.getElementById('audioStreamPauseBtn').disabled = false;
+		document.getElementById('audioStreamPauseBtn').style.opacity = '1';
+		document.getElementById('audioStreamStopBtn').disabled = false;
+		
+		showToast('🎤 Microphone activé - En attente de connexion...', 'success');
+		
+		// Start animation loop for visualizer
+		window.animateAudioVisualizer();
+		
 	} catch (error) {
-		console.error('[voice send]', error);
-		showToast('⚠️ Message envoyé (erreur réseau)', 'warning');
-		input.value = '';
-		input.focus();
+		console.error('[Audio Stream] Error:', error);
+		showToast('❌ Erreur: ' + error.message, 'error');
+		activeAudioStream = null;
 	}
 };
 
-window.closeVoicePanel = function() {
-	const panel = document.getElementById('voicePanel');
-	if (panel) panel.remove();
+window.updateAudioStreamStatus = function(state) {
+	const statusEl = document.getElementById('audioStreamStatus');
+	if (!statusEl) return;
+	
+	const states = {
+		'calling': { emoji: '📞', text: 'Appel en cours...' },
+		'connected': { emoji: '✅', text: 'Connecté et Streaming' },
+		'paused': { emoji: '⏸️', text: 'En Pause' },
+		'stopped': { emoji: '⏹️', text: 'Arrêté' },
+		'failed': { emoji: '❌', text: 'Erreur de Connexion' }
+	};
+	
+	const info = states[state] || states['calling'];
+	statusEl.innerHTML = `
+		<div style="font-size:14px;color:#95a5a6;margin-bottom:12px;">Statut:</div>
+		<div style="font-size:28px;">${info.emoji} ${info.text}</div>
+	`;
 };
 
-window.clearVoiceMessages = function() {
-	const messagesArea = document.getElementById('voiceMessagesArea');
+window.toggleAudioPause = function(pauseBtn) {
+	if (!activeAudioStream) return;
+	
+	const isPaused = activeAudioStream.isPaused || false;
+	activeAudioStream.setPaused(!isPaused);
+	activeAudioStream.isPaused = !isPaused;
+	
+	pauseBtn.innerHTML = isPaused ? '⏸️ Pause' : '▶️ Reprendre';
+	showToast(isPaused ? '▶️ Streaming repris' : '⏸️ Streaming en pause', 'info');
+};
+
+window.animateAudioVisualizer = function() {
+	if (!activeAudioStream || !document.getElementById('audioVizContainer')) return;
+	
+	const bars = document.querySelectorAll('#audioVizContainer > div');
+	const freqData = activeAudioStream.getFrequencyData();
+	
+	if (freqData) {
+		const barCount = bars.length;
+		for (let i = 0; i < barCount; i++) {
+			const idx = Math.floor((i / barCount) * freqData.length);
+			const height = (freqData[idx] / 255) * 100;
+			bars[i].style.height = height + '%';
+		}
+	}
+	
+	requestAnimationFrame(window.animateAudioVisualizer);
+};
+
+window.closeAudioStream = async function() {
+	try {
+		if (activeAudioStream) {
+			await activeAudioStream.stop();
+			activeAudioStream = null;
+		}
+		
+		const panel = document.getElementById('audioStreamPanel');
+		if (panel) panel.remove();
+		
+		showToast('⏹️ Streaming arrêté', 'success');
+	} catch (error) {
+		console.error('[Audio Stream] Error closing:', error);
+		const panel = document.getElementById('audioStreamPanel');
+		if (panel) panel.remove();
+	}
+};
+
 	if (messagesArea) {
 		messagesArea.innerHTML = '<div style="text-align:center;color:#95a5a6;font-size:13px;padding:20px;">📝 Messages effacés</div>';
 	}

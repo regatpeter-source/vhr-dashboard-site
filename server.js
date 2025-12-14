@@ -4537,6 +4537,280 @@ app.post('/api/installer/check-permission', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/opentalkie/service-info - Récupère l'IP et le port du service OpenTalkie
+ */
+app.get('/api/opentalkie/service-info', authMiddleware, async (req, res) => {
+  try {
+    const { device } = req.query;
+    
+    if (!device) {
+      return res.status(400).json({ 
+        ok: false, 
+        message: 'Device serial not provided' 
+      });
+    }
+
+    console.log(`[OpenTalkie] Getting service info for device: ${device}`);
+
+    // OpenTalkie écoute sur le port 5000 par défaut
+    // On récupère l'IP du casque via ADB shell
+    const commands = [
+      `adb -s ${device} shell "ip addr show | grep -o 'inet [0-9.]*' | head -1"`,
+      `adb -s ${device} shell "ip route | grep -o 'via [^ ]* dev' | head -1"`,
+      `adb -s ${device} shell "getprop dhcp.wlan0.ipaddress"`
+    ];
+
+    let ipAddress = null;
+
+    for (const cmd of commands) {
+      try {
+        const { stdout } = await execp(cmd, { timeout: 5000 });
+        const match = stdout.match(/\d+\.\d+\.\d+\.\d+/);
+        if (match) {
+          ipAddress = match[0];
+          break;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+
+    if (!ipAddress) {
+      console.warn('[OpenTalkie] Could not determine device IP address');
+      return res.status(500).json({
+        ok: false,
+        message: 'Could not determine device IP address. Ensure device is connected via WiFi.'
+      });
+    }
+
+    const port = 5000; // Port par défaut d'OpenTalkie
+    const serviceUrl = `http://${ipAddress}:${port}`;
+
+    console.log(`[OpenTalkie] Service info retrieved - IP: ${ipAddress}, Port: ${port}`);
+
+    res.json({
+      ok: true,
+      device,
+      ip: ipAddress,
+      port,
+      serviceUrl,
+      message: `OpenTalkie service available at ${serviceUrl}`
+    });
+
+  } catch (e) {
+    console.error('[OpenTalkie] Error getting service info:', e.message);
+    res.status(500).json({
+      ok: false,
+      error: 'Failed to get OpenTalkie service information',
+      message: e.message
+    });
+  }
+});
+
+/**
+ * POST /api/opentalkie/start-streaming - Démarre le streaming audio vers OpenTalkie
+ */
+app.post('/api/opentalkie/start-streaming', authMiddleware, async (req, res) => {
+  try {
+    const { device, audioData } = req.body;
+    
+    if (!device) {
+      return res.status(400).json({ 
+        ok: false, 
+        message: 'Device serial not provided' 
+      });
+    }
+
+    console.log(`[OpenTalkie] Starting audio stream to device: ${device}`);
+
+    // Obtenir l'IP d'OpenTalkie sur le casque
+    const commands = [
+      `adb -s ${device} shell "getprop dhcp.wlan0.ipaddress"`,
+      `adb -s ${device} shell "ip addr show wlan0 | grep -o 'inet [0-9.]*' | cut -d' ' -f2"`
+    ];
+
+    let ipAddress = null;
+
+    for (const cmd of commands) {
+      try {
+        const { stdout } = await execp(cmd, { timeout: 5000 });
+        const match = stdout.match(/\d+\.\d+\.\d+\.\d+/);
+        if (match) {
+          ipAddress = match[0];
+          break;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+
+    if (!ipAddress) {
+      return res.status(500).json({
+        ok: false,
+        message: 'Could not determine device IP address'
+      });
+    }
+
+    const port = 5000;
+    const serviceUrl = `http://${ipAddress}:${port}`;
+
+    console.log(`[OpenTalkie] Streaming audio to ${serviceUrl}`);
+
+    res.json({
+      ok: true,
+      device,
+      serviceUrl,
+      message: `Audio stream started to ${serviceUrl}`
+    });
+
+  } catch (e) {
+    console.error('[OpenTalkie] Error starting stream:', e.message);
+    res.status(500).json({
+      ok: false,
+      error: 'Failed to start audio stream',
+      message: e.message
+    });
+  }
+});
+
+// ===== WEBRTC AUDIO SIGNALING =====
+
+// Store active audio sessions (in-memory, single-instance server)
+const audioSessions = new Map();
+
+/**
+ * POST /api/audio/signal - WebRTC Signaling for audio streaming
+ * Handles: offer, answer, ice-candidate, close
+ */
+app.post('/api/audio/signal', authMiddleware, async (req, res) => {
+  try {
+    const { type, offer, answer, candidate, sessionId, initiator, targetSerial } = req.body;
+    const username = req.user.username;
+
+    console.log(`[WebRTC] ${type} signal from ${username}`, { sessionId, initiator });
+
+    if (type === 'offer') {
+      // PC initiates call to headset
+      const session = {
+        id: sessionId,
+        initiator: username,
+        targetSerial,
+        offer,
+        createdAt: Date.now(),
+        candidates: []
+      };
+
+      audioSessions.set(sessionId, session);
+
+      // Store for 30 seconds waiting for answer
+      setTimeout(() => {
+        if (audioSessions.has(sessionId) && !audioSessions.get(sessionId).answer) {
+          audioSessions.delete(sessionId);
+          console.log(`[WebRTC] Session ${sessionId} expired (no answer)`);
+        }
+      }, 30000);
+
+      res.json({
+        ok: true,
+        sessionId,
+        message: 'Offer stored, waiting for remote answer'
+      });
+
+    } else if (type === 'answer') {
+      // Headset responds with answer
+      const session = audioSessions.get(sessionId);
+      if (!session) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Session not found or expired'
+        });
+      }
+
+      session.answer = answer;
+      session.answeredAt = Date.now();
+
+      res.json({
+        ok: true,
+        sessionId,
+        message: 'Answer stored'
+      });
+
+    } else if (type === 'ice-candidate') {
+      // Store ICE candidate
+      const session = audioSessions.get(sessionId);
+      if (session) {
+        session.candidates = session.candidates || [];
+        session.candidates.push(candidate);
+      }
+
+      res.json({
+        ok: true,
+        message: 'ICE candidate stored'
+      });
+
+    } else if (type === 'close') {
+      // Close session
+      audioSessions.delete(sessionId);
+      console.log(`[WebRTC] Session ${sessionId} closed`);
+
+      res.json({
+        ok: true,
+        message: 'Session closed'
+      });
+
+    } else {
+      res.status(400).json({
+        ok: false,
+        error: 'Unknown signal type: ' + type
+      });
+    }
+
+  } catch (error) {
+    console.error('[WebRTC] Signaling error:', error.message);
+    res.status(500).json({
+      ok: false,
+      error: 'Signaling error: ' + error.message
+    });
+  }
+});
+
+/**
+ * GET /api/audio/session/:sessionId - Poll for remote signals
+ * Used by client to retrieve offer/answer/candidates
+ */
+app.get('/api/audio/session/:sessionId', authMiddleware, (req, res) => {
+  try {
+    const session = audioSessions.get(req.params.sessionId);
+    
+    if (!session) {
+      return res.json({
+        ok: false,
+        error: 'Session not found'
+      });
+    }
+
+    const elapsed = Date.now() - session.createdAt;
+    const response = {
+      ok: true,
+      sessionId: session.id,
+      offer: session.offer,
+      answer: session.answer || null,
+      candidates: session.candidates || [],
+      elapsed
+    };
+
+    res.json(response);
+
+  } catch (error) {
+    console.error('[WebRTC] Error retrieving session:', error.message);
+    res.status(500).json({
+      ok: false,
+      error: error.message
+    });
+  }
+});
+
 // ===== GLOBAL ERROR HANDLERS =====
 
 // Handle 404 - Not Found
