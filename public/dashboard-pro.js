@@ -571,6 +571,11 @@ window.showInstallerPanel = async function() {
 // Download protected resources
 window.downloadVHRApp = async function(type = 'apk') {
 	try {
+		// Initialize downloadProgress if not exists
+		if (!window.downloadProgress) {
+			window.downloadProgress = { apk: false, voice: false, compilationStarted: false, compilationInProgress: false, compilationDone: false };
+		}
+		
 		const btn = event.target;
 		btn.disabled = true;
 		btn.innerHTML = '⏳ Téléchargement...';
@@ -718,6 +723,11 @@ window.startAutomaticCompilation = async function() {
 
 // Add download section to installer panel
 window.addDownloadSection = function() {
+	// Initialize downloadProgress if not exists
+	if (!window.downloadProgress) {
+		window.downloadProgress = { apk: false, voice: false, compilationStarted: false, compilationInProgress: false, compilationDone: false };
+	}
+	
 	const container = document.getElementById('adminInstallerContainer');
 	if (!container) return;
 
@@ -846,6 +856,11 @@ window.addDownloadSection = function() {
 };
 
 window.updateDownloadStatus = function() {
+	// Initialize downloadProgress if not exists
+	if (!window.downloadProgress) {
+		window.downloadProgress = { apk: false, voice: false, compilationStarted: false, compilationInProgress: false, compilationDone: false };
+	}
+	
 	const statusDiv = document.getElementById('downloadStatus');
 	if (!statusDiv) return;
 	
