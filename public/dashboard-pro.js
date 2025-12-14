@@ -613,8 +613,19 @@ window.downloadVHRApp = async function(type = 'apk') {
 		window.URL.revokeObjectURL(url);
 		a.remove();
 		
+		// Mark download as completed
+		if (type === 'apk') {
+			window.downloadProgress.apk = true;
+		} else if (type === 'voice-data') {
+			window.downloadProgress.voice = true;
+		}
+		
 		console.log(`✅ Downloaded: ${fileName}`);
 		alert(`✅ Téléchargement réussi!\n\nFichier: ${fileName}\nTaille: ${(blob.size / (1024*1024)).toFixed(2)} MB`);
+		
+		// Update UI after successful download
+		window.updateDownloadButtons();
+		window.updateDownloadStatus();
 		
 	} catch (e) {
 		console.error('Download error:', e);
@@ -626,6 +637,67 @@ window.downloadVHRApp = async function(type = 'apk') {
 		}
 	}
 };
+
+window.updateDownloadButtons = function() {
+	const btnVoice = document.getElementById('btnDownloadVoice');
+	if (!btnVoice) return;
+	
+	// Enable voice button only if APK is downloaded
+	if (window.downloadProgress.apk) {
+		btnVoice.disabled = false;
+		btnVoice.style.opacity = '1';
+		btnVoice.style.background = 'linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)';
+		btnVoice.style.cursor = 'pointer';
+	} else {
+		btnVoice.disabled = true;
+		btnVoice.style.opacity = '0.6';
+		btnVoice.style.background = 'linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%)';
+		btnVoice.style.cursor = 'not-allowed';
+	}
+};
+
+window.updateDownloadStatus = function() {
+	const statusDiv = document.getElementById('downloadStatus');
+	if (!statusDiv) return;
+	
+	let html = '';
+	
+	if (window.downloadProgress.apk) {
+		html += `
+			<div style='padding:10px;margin-bottom:10px;background:rgba(46,204,113,0.2);border-left:4px solid #2ecc71;border-radius:4px;color:#2ecc71;font-size:12px;font-weight:bold;'>
+				✅ Étape 1: APK téléchargée avec succès!
+			</div>
+		`;
+	}
+	
+	if (window.downloadProgress.apk && !window.downloadProgress.voice) {
+		html += `
+			<div style='padding:10px;margin-bottom:10px;background:rgba(52,152,219,0.2);border-left:4px solid #3498db;border-radius:4px;color:#3498db;font-size:12px;font-weight:bold;'>
+				➡️ Vous pouvez maintenant télécharger les données vocales
+			</div>
+		`;
+	}
+	
+	if (window.downloadProgress.voice && window.downloadProgress.apk) {
+		html += `
+			<div style='padding:10px;margin-bottom:10px;background:rgba(46,204,113,0.2);border-left:4px solid #2ecc71;border-radius:4px;color:#2ecc71;font-size:12px;font-weight:bold;'>
+				✅ Étape 2: Données vocales téléchargées avec succès!
+			</div>
+		`;
+		html += `
+			<div style='padding:10px;margin-bottom:10px;background:rgba(241,196,15,0.2);border-left:4px solid #f39c12;border-radius:4px;color:#f39c12;font-size:12px;font-weight:bold;'>
+				🎉 Les deux fichiers sont téléchargés!<br>
+				Prochaine étape: Compiler via GitHub Actions<br>
+				Consultez le guide: APK_VOICE_DOWNLOAD_WORKFLOW.md
+			</div>
+		`;
+	}
+	
+	statusDiv.innerHTML = html;
+};
+
+window.downloadProgress = { apk: false, voice: false };
+
 
 window.addDownloadSection = function() {
 	const container = document.getElementById('adminInstallerContainer');
@@ -640,13 +712,64 @@ window.addDownloadSection = function() {
 	
 	downloadSection.innerHTML = `
 		<h3 style='margin-top:0;color:#2ecc71;display:flex;align-items:center;gap:8px;'>
-			📥 Télécharger l'Application
+			📥 Télécharger l'Application VHR
 		</h3>
-		<p style='color:#bdc3c7;font-size:14px;margin:10px 0;'>
-			Accédez aux fichiers nécessaires pour installer l'application VHR sur votre Meta Quest.
-		</p>
-		<div style='display:grid;grid-template-columns:1fr 1fr;gap:15px;'>
-			<button onclick='window.downloadVHRApp("apk")' style='
+		
+		<!-- Instructions et Workflow -->
+		<div style='margin-bottom:20px;padding:15px;background:rgba(52,152,219,0.1);border-left:4px solid #3498db;border-radius:4px;'>
+			<p style='margin:0;font-size:12px;color:#bdc3c7;line-height:1.6;'>
+				<strong>📋 Ordre d'exécution (Important):</strong><br>
+				1️⃣ Télécharger l'APK ci-dessous<br>
+				2️⃣ Attendre la confirmation "✅ Téléchargement réussi!"<br>
+				3️⃣ Puis télécharger les données vocales<br>
+				4️⃣ Attendre la confirmation complète<br>
+				5️⃣ Compiler via GitHub Actions (voir guide complet)
+			</p>
+		</div>
+		
+		<!-- Workflow Visuel -->
+		<div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;position:relative;'>
+			<!-- Étape 1 -->
+			<div style='text-align:center;flex:1;'>
+				<div id='step1Indicator' style='width:50px;height:50px;margin:0 auto 10px;border-radius:50%;background:#2ecc71;display:flex;align-items:center;justify-content:center;font-size:24px;'>
+					📱
+				</div>
+				<div style='font-size:12px;color:#bdc3c7;font-weight:bold;'>Étape 1</div>
+				<div style='font-size:10px;color:#95a5a6;'>APK</div>
+			</div>
+			
+			<!-- Flèche 1 -->
+			<div style='flex:0;width:40px;height:2px;background:#95a5a6;position:relative;margin:0 10px;'>
+				<div style='position:absolute;right:-8px;top:-4px;color:#95a5a6;'>→</div>
+			</div>
+			
+			<!-- Étape 2 -->
+			<div style='text-align:center;flex:1;'>
+				<div id='step2Indicator' style='width:50px;height:50px;margin:0 auto 10px;border-radius:50%;background:#95a5a6;display:flex;align-items:center;justify-content:center;font-size:24px;'>
+					🎵
+				</div>
+				<div style='font-size:12px;color:#bdc3c7;font-weight:bold;'>Étape 2</div>
+				<div style='font-size:10px;color:#95a5a6;'>Voix</div>
+			</div>
+			
+			<!-- Flèche 2 -->
+			<div style='flex:0;width:40px;height:2px;background:#95a5a6;position:relative;margin:0 10px;'>
+				<div style='position:absolute;right:-8px;top:-4px;color:#95a5a6;'>→</div>
+			</div>
+			
+			<!-- Étape 3 -->
+			<div style='text-align:center;flex:1;'>
+				<div id='step3Indicator' style='width:50px;height:50px;margin:0 auto 10px;border-radius:50%;background:#95a5a6;display:flex;align-items:center;justify-content:center;font-size:24px;'>
+					⚙️
+				</div>
+				<div style='font-size:12px;color:#bdc3c7;font-weight:bold;'>Étape 3</div>
+				<div style='font-size:10px;color:#95a5a6;'>Compiler</div>
+			</div>
+		</div>
+		
+		<!-- Boutons de Téléchargement -->
+		<div style='display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:20px;'>
+			<button onclick='window.downloadVHRApp("apk")' id='btnDownloadAPK' style='
 				background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
 				color:#000;
 				border:none;
@@ -659,8 +782,8 @@ window.addDownloadSection = function() {
 			' onmouseover='this.style.transform="scale(1.05)";this.style.boxShadow="0 4px 12px rgba(46,204,113,0.4)"' onmouseout='this.style.transform="scale(1)";this.style.boxShadow="none"'>
 				📱 Télécharger APK
 			</button>
-			<button onclick='window.downloadVHRApp("voice-data")' style='
-				background:linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+			<button onclick='window.downloadVHRApp("voice-data")' id='btnDownloadVoice' style='
+				background:linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
 				color:#fff;
 				border:none;
 				padding:15px 20px;
@@ -669,18 +792,41 @@ window.addDownloadSection = function() {
 				font-size:14px;
 				cursor:pointer;
 				transition:all 0.3s;
-			' onmouseover='this.style.transform="scale(1.05)";this.style.boxShadow="0 4px 12px rgba(231,76,60,0.4)"' onmouseout='this.style.transform="scale(1)";this.style.boxShadow="none"'>
+				opacity:0.6;
+			' disabled onmouseover='this.style.transform="scale(1.05)";this.style.boxShadow="0 4px 12px rgba(149,165,166,0.4)"' onmouseout='this.style.transform="scale(1)";this.style.boxShadow="none"'>
 				🎵 Télécharger Voix
 			</button>
 		</div>
-		<div style='margin-top:15px;padding:12px;background:rgba(46,204,113,0.1);border-left:4px solid #2ecc71;border-radius:4px;'>
+		
+		<!-- Messages de Statut -->
+		<div id='downloadStatus' style='margin-bottom:15px;'></div>
+		
+		<!-- Authentification -->
+		<div style='padding:12px;background:rgba(46,204,113,0.1);border-left:4px solid #2ecc71;border-radius:4px;'>
 			<p style='margin:0;font-size:12px;color:#bdc3c7;'>
 				✅ <strong>Authentifié en tant que:</strong> ${currentUser}
 			</p>
 		</div>
+		
+		<!-- Informations de Fichiers -->
+		<div style='margin-top:15px;display:grid;grid-template-columns:1fr 1fr;gap:15px;font-size:11px;color:#95a5a6;'>
+			<div style='padding:10px;background:rgba(46,204,113,0.05);border-radius:4px;'>
+				<strong>APK:</strong><br>
+				Taille: 50-100 MB<br>
+				Durée: 2-5 min
+			</div>
+			<div style='padding:10px;background:rgba(231,76,60,0.05);border-radius:4px;'>
+				<strong>Données Vocales:</strong><br>
+				Taille: ~500 MB<br>
+				Durée: 5-15 min
+			</div>
+		</div>
 	`;
 	
 	container.insertBefore(downloadSection, container.firstChild);
+	
+	// Update button states if APK already downloaded in this session
+	window.updateDownloadButtons();
 };
 
 window.closeInstallerPanel = function() {
