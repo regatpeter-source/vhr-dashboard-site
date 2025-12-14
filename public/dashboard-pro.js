@@ -498,7 +498,41 @@ window.switchAccountTab = function(tab) {
 };
 
 // ========== INSTALLER PANEL (Admin) ==========
-window.showInstallerPanel = function() {
+window.showInstallerPanel = async function() {
+	// First check if user is authenticated
+	if (!currentUser) {
+		alert('❌ Veuillez vous connecter d\'abord');
+		return showAccountPanel();
+	}
+	
+	// Check eligibility for download
+	try {
+		const eligibilityRes = await fetch('/api/download/check-eligibility', {
+			method: 'GET',
+			credentials: 'include',
+			headers: { 'Content-Type': 'application/json' }
+		});
+		
+		const eligibilityData = await eligibilityRes.json();
+		
+		if (!eligibilityData.ok) {
+			alert('❌ Erreur: ' + eligibilityData.error);
+			return;
+		}
+		
+		if (!eligibilityData.canDownload) {
+			// Show subscription modal
+			alert(`❌ ${eligibilityData.reason}\n\nVeuillez vous abonner pour accéder à cette fonctionnalité.\n\n${eligibilityData.demoExpired ? '✅ Jours d\'essai restants: ' + eligibilityData.remainingDays : ''}`);
+			showAccountPanel(); // Show account panel with subscription option
+			return;
+		}
+	} catch (e) {
+		console.error('Error checking eligibility:', e);
+		alert('❌ Erreur lors de la vérification d\'accès');
+		return;
+	}
+	
+	// User is eligible - show installer panel
 	let panel = document.getElementById('installerPanel');
 	if (panel) panel.remove();
 	
@@ -529,6 +563,124 @@ window.showInstallerPanel = function() {
 		const installer = new AdminAndroidInstaller();
 		installer.initializeUI();
 	}
+	
+	// Add download section to installer panel
+	addDownloadSection();
+};
+
+// Download protected resources
+window.downloadVHRApp = async function(type = 'apk') {
+	try {
+		const btn = event.target;
+		btn.disabled = true;
+		btn.innerHTML = '⏳ Téléchargement...';
+		
+		const response = await fetch('/api/download/vhr-app', {
+			method: 'POST',
+			credentials: 'include',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ type })
+		});
+		
+		if (!response.ok) {
+			const errorData = await response.json();
+			if (response.status === 403 && errorData.needsSubscription) {
+				alert(`❌ ${errorData.message}\n\nRedirigé vers l'abonnement...`);
+				closeInstallerPanel();
+				showAccountPanel();
+				return;
+			}
+			throw new Error(errorData.error || 'Download failed');
+		}
+		
+		// Get filename from Content-Disposition header
+		const contentDisposition = response.headers.get('content-disposition');
+		let fileName = type === 'apk' ? 'vhr-dashboard.apk' : 'voice-data.zip';
+		
+		if (contentDisposition) {
+			const fileNameMatch = contentDisposition.match(/filename="?(.+?)"?$/);
+			if (fileNameMatch) fileName = fileNameMatch[1];
+		}
+		
+		// Trigger download
+		const blob = await response.blob();
+		const url = window.URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = fileName;
+		document.body.appendChild(a);
+		a.click();
+		window.URL.revokeObjectURL(url);
+		a.remove();
+		
+		console.log(`✅ Downloaded: ${fileName}`);
+		alert(`✅ Téléchargement réussi!\n\nFichier: ${fileName}\nTaille: ${(blob.size / (1024*1024)).toFixed(2)} MB`);
+		
+	} catch (e) {
+		console.error('Download error:', e);
+		alert(`❌ Erreur de téléchargement: ${e.message}`);
+	} finally {
+		if (event.target) {
+			event.target.disabled = false;
+			event.target.innerHTML = type === 'apk' ? '📱 Télécharger APK' : '🎵 Télécharger Voix';
+		}
+	}
+};
+
+window.addDownloadSection = function() {
+	const container = document.getElementById('adminInstallerContainer');
+	if (!container) return;
+	
+	// Check if download section already exists
+	if (document.getElementById('downloadSection')) return;
+	
+	const downloadSection = document.createElement('div');
+	downloadSection.id = 'downloadSection';
+	downloadSection.style = 'margin-bottom:30px;padding:20px;background:#2a2d34;border:2px solid #2ecc71;border-radius:10px;';
+	
+	downloadSection.innerHTML = `
+		<h3 style='margin-top:0;color:#2ecc71;display:flex;align-items:center;gap:8px;'>
+			📥 Télécharger l'Application
+		</h3>
+		<p style='color:#bdc3c7;font-size:14px;margin:10px 0;'>
+			Accédez aux fichiers nécessaires pour installer l'application VHR sur votre Meta Quest.
+		</p>
+		<div style='display:grid;grid-template-columns:1fr 1fr;gap:15px;'>
+			<button onclick='window.downloadVHRApp("apk")' style='
+				background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+				color:#000;
+				border:none;
+				padding:15px 20px;
+				border-radius:8px;
+				font-weight:bold;
+				font-size:14px;
+				cursor:pointer;
+				transition:all 0.3s;
+			' onmouseover='this.style.transform="scale(1.05)";this.style.boxShadow="0 4px 12px rgba(46,204,113,0.4)"' onmouseout='this.style.transform="scale(1)";this.style.boxShadow="none"'>
+				📱 Télécharger APK
+			</button>
+			<button onclick='window.downloadVHRApp("voice-data")' style='
+				background:linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+				color:#fff;
+				border:none;
+				padding:15px 20px;
+				border-radius:8px;
+				font-weight:bold;
+				font-size:14px;
+				cursor:pointer;
+				transition:all 0.3s;
+			' onmouseover='this.style.transform="scale(1.05)";this.style.boxShadow="0 4px 12px rgba(231,76,60,0.4)"' onmouseout='this.style.transform="scale(1)";this.style.boxShadow="none"'>
+				🎵 Télécharger Voix
+			</button>
+		</div>
+		<div style='margin-top:15px;padding:12px;background:rgba(46,204,113,0.1);border-left:4px solid #2ecc71;border-radius:4px;'>
+			<p style='margin:0;font-size:12px;color:#bdc3c7;'>
+				✅ <strong>Authentifié en tant que:</strong> ${currentUser}
+			</p>
+		</div>
+	`;
+	
+	container.insertBefore(downloadSection, container.firstChild);
 };
 
 window.closeInstallerPanel = function() {

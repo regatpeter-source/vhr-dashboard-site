@@ -1740,6 +1740,138 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
   }
 });
 
+// ========== PROTECTED DOWNLOADS (VHR PRO) ==========
+
+// Download APK/Voice file - requires authentication and valid subscription or active demo
+app.post('/api/download/vhr-app', authMiddleware, async (req, res) => {
+  try {
+    const user = getUserByUsername(req.user.username);
+    if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+    
+    const { type = 'apk' } = req.body; // 'apk' or 'voice-data'
+    
+    // Check if user has valid access (demo or subscription)
+    const demoExpired = isDemoExpired(user);
+    let hasValidSubscription = false;
+    
+    if (demoExpired) {
+      // Demo expired - check subscription
+      if (user.stripeCustomerId) {
+        try {
+          const stripeSubs = await stripe.subscriptions.list({
+            customer: user.stripeCustomerId,
+            status: 'active',
+            limit: 1
+          });
+          hasValidSubscription = stripeSubs.data && stripeSubs.data.length > 0;
+        } catch (e) {
+          console.error('[download] Stripe check error:', e.message);
+        }
+      }
+      
+      if (!hasValidSubscription) {
+        return res.status(403).json({
+          ok: false,
+          error: 'Access denied',
+          message: '❌ Essai expiré et aucun abonnement actif. Veuillez vous abonner pour continuer.',
+          needsSubscription: true
+        });
+      }
+    }
+    
+    // User has access - prepare file download
+    let filePath, fileName, contentType;
+    
+    if (type === 'apk') {
+      // Check if APK exists
+      filePath = path.join(__dirname, 'dist', 'demo', 'vhr-dashboard-demo.apk');
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({
+          ok: false,
+          error: 'APK file not found',
+          message: 'L\'APK n\'est pas encore disponible. Veuillez réessayer dans quelques minutes.'
+        });
+      }
+      fileName = 'vhr-dashboard.apk';
+      contentType = 'application/vnd.android.package-archive';
+    } else if (type === 'voice-data') {
+      filePath = path.join(__dirname, 'data', 'voice-models');
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({
+          ok: false,
+          error: 'Voice data not found',
+          message: 'Les données vocales ne sont pas disponibles.'
+        });
+      }
+      fileName = 'voice-data.zip';
+      contentType = 'application/zip';
+    } else {
+      return res.status(400).json({ ok: false, error: 'Invalid file type' });
+    }
+    
+    // Log download access
+    console.log(`[download] User ${user.username} downloading ${type}`);
+    
+    // Send file
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    
+    return res.sendFile(filePath);
+    
+  } catch (e) {
+    console.error('[download/vhr-app] error:', e);
+    res.status(500).json({ ok: false, error: 'Server error', details: e.message });
+  }
+});
+
+// Check download eligibility without downloading
+app.get('/api/download/check-eligibility', authMiddleware, async (req, res) => {
+  try {
+    const user = getUserByUsername(req.user.username);
+    if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+    
+    const demoExpired = isDemoExpired(user);
+    const remainingDays = getDemoRemainingDays(user);
+    let hasValidSubscription = false;
+    let subscriptionStatus = 'none';
+    
+    if (demoExpired && user.stripeCustomerId) {
+      try {
+        const stripeSubs = await stripe.subscriptions.list({
+          customer: user.stripeCustomerId,
+          status: 'active',
+          limit: 1
+        });
+        hasValidSubscription = stripeSubs.data && stripeSubs.data.length > 0;
+        if (stripeSubs.data && stripeSubs.data.length > 0) {
+          subscriptionStatus = stripeSubs.data[0].status;
+        }
+      } catch (e) {
+        console.error('[check-eligibility] Stripe error:', e.message);
+      }
+    }
+    
+    const canDownload = !demoExpired || hasValidSubscription;
+    
+    res.json({
+      ok: true,
+      canDownload,
+      demoExpired,
+      remainingDays,
+      hasValidSubscription,
+      subscriptionStatus,
+      reason: canDownload 
+        ? (demoExpired ? 'Valid subscription' : `Demo valid - ${remainingDays} days remaining`)
+        : 'Demo expired and no valid subscription'
+    });
+    
+  } catch (e) {
+    console.error('[check-eligibility] error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
 // ========== SUBSCRIPTION MANAGEMENT ==========
 
 // Get available subscription plans
