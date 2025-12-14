@@ -1783,8 +1783,8 @@ app.post('/api/download/vhr-app', authMiddleware, async (req, res) => {
     let filePath, fileName, contentType;
     
     if (type === 'apk') {
-      // Check if APK exists
-      filePath = path.join(__dirname, 'dist', 'demo', 'vhr-dashboard-demo.apk');
+      // Serve the pre-built ZIP (contains APK)
+      filePath = path.join(__dirname, 'dist', 'demo', 'vhr-dashboard-demo.zip');
       if (!fs.existsSync(filePath)) {
         return res.status(404).json({
           ok: false,
@@ -1793,31 +1793,55 @@ app.post('/api/download/vhr-app', authMiddleware, async (req, res) => {
         });
       }
       fileName = 'vhr-dashboard.apk';
-      contentType = 'application/vnd.android.package-archive';
+      contentType = 'application/octet-stream';
+      
+      // Log file size
+      const stats = fs.statSync(filePath);
+      console.log(`[download] APK file size: ${(stats.size / (1024*1024)).toFixed(2)} MB`);
+      
     } else if (type === 'voice-data') {
-      filePath = path.join(__dirname, 'data', 'voice-models');
+      // Serve voice models ZIP (pre-created)
+      filePath = path.join(__dirname, 'data', 'voice-models.zip');
+      
       if (!fs.existsSync(filePath)) {
+        console.warn('[download] Voice models ZIP not found at:', filePath);
         return res.status(404).json({
           ok: false,
           error: 'Voice data not found',
-          message: 'Les données vocales ne sont pas disponibles.'
+          message: 'Les données vocales ne sont pas disponibles pour le moment.'
         });
       }
+      
       fileName = 'voice-data.zip';
       contentType = 'application/zip';
+      
+      // Log file size
+      const stats = fs.statSync(filePath);
+      console.log(`[download] Voice ZIP file size: ${(stats.size / 1024).toFixed(2)} KB`);
+      
     } else {
       return res.status(400).json({ ok: false, error: 'Invalid file type' });
     }
     
     // Log download access
-    console.log(`[download] User ${user.username} downloading ${type}`);
+    console.log(`[download] User ${user.username} downloading ${type} from ${filePath}`);
     
-    // Send file
+    // Send file with proper headers
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     
-    return res.sendFile(filePath);
+    // Use sendFile with error handling
+    return res.sendFile(filePath, (err) => {
+      if (err) {
+        console.error('[download] File send error:', err);
+        if (!res.headersSent) {
+          res.status(500).json({ ok: false, error: 'Failed to send file' });
+        }
+      }
+    });
     
   } catch (e) {
     console.error('[download/vhr-app] error:', e);
