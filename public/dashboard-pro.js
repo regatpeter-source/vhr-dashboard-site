@@ -550,8 +550,11 @@ window.sendVoiceToHeadset = async function(serial) {
 	
 	// Start audio streaming
 	try {
-		activeAudioStream = new window.VHRAudioStream(serial);
-		activeAudioStream.start();
+		activeAudioStream = new window.VHRAudioStream({
+			signalingServer: window.location.origin,
+			signalingPath: '/api/audio/signal'
+		});
+		await activeAudioStream.start(serial);
 		window.animateAudioVisualizer();
 		showToast(`🎤 Streaming vers ${deviceName}`, 'success');
 	} catch (e) {
@@ -564,7 +567,10 @@ window.sendVoiceToHeadset = async function(serial) {
 window.toggleAudioStreamPause = function() {
 	if (!activeAudioStream) return;
 	
-	const isPaused = activeAudioStream.togglePause();
+	const isPaused = activeAudioStream.isPaused || false;
+	activeAudioStream.setPaused(!isPaused);
+	activeAudioStream.isPaused = !isPaused;
+	
 	const pauseBtn = document.getElementById('pauseAudioBtn');
 	if (pauseBtn) pauseBtn.innerHTML = isPaused ? '⏸️ Pause' : '▶️ Reprendre';
 	showToast(isPaused ? '▶️ Streaming repris' : '⏸️ Streaming en pause', 'info');
@@ -1330,236 +1336,6 @@ window.connectWifiAuto = async function(serial) {
 // ========== VOICE TO HEADSET (TTS) ========== 
 // ========== AUDIO STREAMING (WebRTC) ==========
 let activeAudioStream = null;  // Global audio stream instance
-
-window.sendVoiceToHeadset = async function(serial) {
-	// Check if stream already active
-	if (activeAudioStream && activeAudioStream.targetSerial === serial) {
-		showToast('🎤 Streaming déjà actif pour ce casque', 'warning');
-		return;
-	}
-
-	const device = devices.find(d => d.serial === serial);
-	const deviceName = device ? device.name : 'Casque';
-	
-	// Create audio control panel
-	let panel = document.getElementById('audioStreamPanel');
-	if (panel) panel.remove();
-	
-	panel = document.createElement('div');
-	panel.id = 'audioStreamPanel';
-	panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.90);z-index:2000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
-	panel.onclick = (e) => { if (e.target === panel) window.closeAudioStream(); };
-	
-	const container = document.createElement('div');
-	container.style = 'background:#1a1d24;border:3px solid #1abc9c;border-radius:16px;padding:0;width:90%;max-width:500px;box-shadow:0 8px 32px #000;color:#fff;overflow:hidden;';
-	
-	// Header
-	const header = document.createElement('div');
-	header.style = 'background:linear-gradient(135deg, #1abc9c 0%, #16a085 100%);padding:24px;display:flex;align-items:center;justify-content:space-between;';
-	header.innerHTML = `
-		<div style="display:flex;align-items:center;gap:16px;">
-			<div style="font-size:40px;">🎤</div>
-			<div>
-				<h2 style="margin:0;font-size:24px;">Audio en Direct</h2>
-				<p style="margin:4px 0 0 0;font-size:12px;opacity:0.9;">Vers ${deviceName}</p>
-			</div>
-		</div>
-	`;
-	
-	const closeBtn = document.createElement('button');
-	closeBtn.style = 'background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:20px;';
-	closeBtn.textContent = '✕';
-	closeBtn.onclick = window.closeAudioStream;
-	header.appendChild(closeBtn);
-	
-	// Main content
-	const content = document.createElement('div');
-	content.style = 'padding:30px;text-align:center;';
-	
-	// Status indicator
-	const statusDiv = document.createElement('div');
-	statusDiv.id = 'audioStreamStatus';
-	statusDiv.style = 'margin-bottom:24px;';
-	statusDiv.innerHTML = '<div style="font-size:14px;color:#95a5a6;margin-bottom:12px;">Statut:</div><div style="font-size:28px;">⏳ Initialisation...</div>';
-	
-	// Audio level visualizer
-	const vizContainer = document.createElement('div');
-	vizContainer.id = 'audioVizContainer';
-	vizContainer.style = 'height:60px;background:#0f1115;border-radius:8px;margin-bottom:24px;display:flex;align-items:flex-end;gap:2px;padding:8px;';
-	
-	// Add 20 frequency bars
-	for (let i = 0; i < 20; i++) {
-		const bar = document.createElement('div');
-		bar.style = 'flex:1;background:linear-gradient(to top, #1abc9c, #2ecc71);border-radius:2px;transition:height 100ms ease;height:10%;';
-		vizContainer.appendChild(bar);
-	}
-	
-	// Control buttons
-	const buttonContainer = document.createElement('div');
-	buttonContainer.style = 'display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px;';
-	
-	const startBtn = document.createElement('button');
-	startBtn.id = 'audioStreamStartBtn';
-	startBtn.style = 'background:#2ecc71;color:#000;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;transition:all 200ms;';
-	startBtn.innerHTML = '🎯 Démarrer le Stream';
-	startBtn.onclick = () => window.startAudioStream(serial, startBtn);
-	
-	const pauseBtn = document.createElement('button');
-	pauseBtn.id = 'audioStreamPauseBtn';
-	pauseBtn.style = 'background:#f39c12;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;opacity:0.5;transition:all 200ms;';
-	pauseBtn.innerHTML = '⏸️ Pause';
-	pauseBtn.disabled = true;
-	pauseBtn.onclick = () => window.toggleAudioPause(pauseBtn);
-	
-	buttonContainer.appendChild(startBtn);
-	buttonContainer.appendChild(pauseBtn);
-	
-	// Stop button
-	const stopBtn = document.createElement('button');
-	stopBtn.id = 'audioStreamStopBtn';
-	stopBtn.style = 'background:#e74c3c;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;grid-column:1/-1;transition:all 200ms;';
-	stopBtn.innerHTML = '⏹️ Arrêter le Streaming';
-	stopBtn.disabled = true;
-	stopBtn.onclick = window.closeAudioStream;
-	
-	buttonContainer.appendChild(stopBtn);
-	
-	// Settings
-	const settingsDiv = document.createElement('div');
-	settingsDiv.style = 'background:#0f1115;padding:16px;border-radius:8px;';
-	
-	const volumeLabel = document.createElement('label');
-	volumeLabel.style = 'display:flex;align-items:center;gap:12px;margin-bottom:12px;font-size:13px;';
-	volumeLabel.innerHTML = '🔊 Volume Micro:';
-	
-	const volumeSlider = document.createElement('input');
-	volumeSlider.type = 'range';
-	volumeSlider.id = 'audioStreamVolume';
-	volumeSlider.min = '0';
-	volumeSlider.max = '200';
-	volumeSlider.value = '100';
-	volumeSlider.style = 'flex:1;cursor:pointer;';
-	volumeSlider.onchange = (e) => {
-		if (activeAudioStream) {
-			activeAudioStream.setMicVolume(e.target.value / 100);
-		}
-	};
-	
-	const volumeValue = document.createElement('span');
-	volumeValue.id = 'audioStreamVolumeValue';
-	volumeValue.style = 'min-width:30px;text-align:right;';
-	volumeValue.textContent = '100%';
-	
-	volumeSlider.onchange = (e) => {
-		const val = parseInt(e.target.value);
-		volumeValue.textContent = val + '%';
-		if (activeAudioStream) activeAudioStream.setMicVolume(val / 100);
-	};
-	
-	volumeLabel.appendChild(volumeSlider);
-	volumeLabel.appendChild(volumeValue);
-	settingsDiv.appendChild(volumeLabel);
-	
-	content.appendChild(statusDiv);
-	content.appendChild(vizContainer);
-	content.appendChild(buttonContainer);
-	content.appendChild(settingsDiv);
-	
-	container.appendChild(header);
-	container.appendChild(content);
-	panel.appendChild(container);
-	document.body.appendChild(panel);
-};
-
-window.startAudioStream = async function(serial, startBtn) {
-	try {
-		showToast('🎤 Demande d\'accès au microphone...', 'info');
-		
-		// Create new audio stream
-		activeAudioStream = new VHRAudioStream({
-			signalingServer: window.location.origin,
-			signalingPath: '/api/audio/signal'
-		});
-		
-		// Setup callbacks
-		activeAudioStream.onStateChange = (state) => {
-			window.updateAudioStreamStatus(state);
-		};
-		
-		activeAudioStream.onError = (error) => {
-			showToast('❌ Erreur Audio: ' + error, 'error');
-			window.closeAudioStream();
-		};
-		
-		// Start streaming
-		await activeAudioStream.start(serial);
-		
-		// Update UI
-		startBtn.disabled = true;
-		startBtn.style.opacity = '0.5';
-		document.getElementById('audioStreamPauseBtn').disabled = false;
-		document.getElementById('audioStreamPauseBtn').style.opacity = '1';
-		document.getElementById('audioStreamStopBtn').disabled = false;
-		
-		showToast('🎤 Microphone activé - En attente de connexion...', 'success');
-		
-		// Start animation loop for visualizer
-		window.animateAudioVisualizer();
-		
-	} catch (error) {
-		console.error('[Audio Stream] Error:', error);
-		showToast('❌ Erreur: ' + error.message, 'error');
-		activeAudioStream = null;
-	}
-};
-
-window.updateAudioStreamStatus = function(state) {
-	const statusEl = document.getElementById('audioStreamStatus');
-	if (!statusEl) return;
-	
-	const states = {
-		'calling': { emoji: '📞', text: 'Appel en cours...' },
-		'connected': { emoji: '✅', text: 'Connecté et Streaming' },
-		'paused': { emoji: '⏸️', text: 'En Pause' },
-		'stopped': { emoji: '⏹️', text: 'Arrêté' },
-		'failed': { emoji: '❌', text: 'Erreur de Connexion' }
-	};
-	
-	const info = states[state] || states['calling'];
-	statusEl.innerHTML = `
-		<div style="font-size:14px;color:#95a5a6;margin-bottom:12px;">Statut:</div>
-		<div style="font-size:28px;">${info.emoji} ${info.text}</div>
-	`;
-};
-
-window.toggleAudioPause = function(pauseBtn) {
-	if (!activeAudioStream) return;
-	
-	const isPaused = activeAudioStream.isPaused || false;
-	activeAudioStream.setPaused(!isPaused);
-	activeAudioStream.isPaused = !isPaused;
-	
-	pauseBtn.innerHTML = isPaused ? '⏸️ Pause' : '▶️ Reprendre';
-	showToast(isPaused ? '▶️ Streaming repris' : '⏸️ Streaming en pause', 'info');
-};
-
-window.animateAudioVisualizer = function() {
-	if (!activeAudioStream || !document.getElementById('audioVizContainer')) return;
-	
-	const bars = document.querySelectorAll('#audioVizContainer > div');
-	const freqData = activeAudioStream.getFrequencyData();
-	
-	if (freqData) {
-		const barCount = bars.length;
-		for (let i = 0; i < barCount; i++) {
-			const idx = Math.floor((i / barCount) * freqData.length);
-			const height = (freqData[idx] / 255) * 100;
-			bars[i].style.height = height + '%';
-		}
-	}
-	
-	requestAnimationFrame(window.animateAudioVisualizer);
-};
 
 window.closeAudioStream = async function() {
 	try {
