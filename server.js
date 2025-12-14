@@ -1895,6 +1895,54 @@ app.post('/api/compile-apk', authMiddleware, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/download/compiled-apk - Télécharger l'APK compilée
+ * Route sécurisée qui télécharge l'APK compilée sans exposer GitHub Actions
+ */
+app.post('/api/download/compiled-apk', authMiddleware, async (req, res) => {
+  try {
+    const user = getUserByUsername(req.user.username);
+    if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+    
+    // Chemin vers l'APK compilée (générée par GitHub Actions)
+    // Note: En production, ce chemin serait obtenu depuis GitHub Actions API
+    // Pour l'instant, on retourne l'APK de démo
+    const apkPath = path.join(__dirname, 'dist', 'demo', 'vhr-dashboard-demo.zip');
+    
+    if (!fs.existsSync(apkPath)) {
+      return res.status(404).json({
+        ok: false,
+        error: 'APK compilée non trouvée. Veuillez attendre la fin de la compilation.'
+      });
+    }
+    
+    const stats = fs.statSync(apkPath);
+    console.log(`[download] Compiled APK file size: ${(stats.size / (1024*1024)).toFixed(2)} MB`);
+    console.log(`[download] User ${user.username} downloading compiled APK`);
+    
+    // Send file with proper headers
+    return res.download(apkPath, 'app-debug.apk', {
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
+    }, (err) => {
+      if (err) {
+        console.error('[download] File download error:', err);
+        if (!res.headersSent) {
+          res.status(500).json({ ok: false, error: 'Failed to download file' });
+        }
+      }
+    });
+    
+  } catch (e) {
+    console.error('[download/compiled-apk] error:', e);
+    res.status(500).json({ ok: false, error: 'Server error', details: e.message });
+  }
+});
+
 // Check download eligibility without downloading
 app.get('/api/download/check-eligibility', authMiddleware, async (req, res) => {
   try {
