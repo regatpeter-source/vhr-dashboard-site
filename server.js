@@ -732,7 +732,7 @@ app.get('/ping', (req, res) => {
 // Expose site-vitrine and top-level HTML files so they can be accessed via http://localhost:PORT/
 app.use('/site-vitrine', express.static(path.join(__dirname, 'site-vitrine')));
 // Serve top-level HTML files that are not in public
-const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact.html', 'account.html', 'START-HERE.html', 'developer-setup.html', 'mentions.html', 'admin-dashboard.html'];
+const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact.html', 'account.html', 'START-HERE.html', 'developer-setup.html', 'mentions.html', 'admin-dashboard.html', 'audio-receiver.html'];
 exposedTopFiles.forEach(f => {
   app.get(`/${f}`, (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -3184,6 +3184,10 @@ let streams = new Map();
 
 const wssMpeg1 = new WebSocket.Server({ noServer: true });
 
+// Audio streaming: Map<serial, { sender: ws, receivers: [ws] }>
+const audioStreams = new Map();
+const wssAudio = new WebSocket.Server({ noServer: true });
+
 function startAdbTrack() {
   let debounceTimer = null;
   
@@ -3403,8 +3407,128 @@ function stopStream(serial) {
   return true;
 }
 
+// ---------- Audio WebSocket Handler ----------
+/**
+ * Relays audio chunks from PC sender to headset receiver
+ * Endpoint: /api/audio/stream?serial=<device-serial>&mode=sender|receiver
+ * 
+ * sender: PC sends audio chunks (Blob binary data)
+ * receiver: Headset receives and plays audio chunks
+ */
+function handleAudioWebSocket(serial, ws, req) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const mode = url.searchParams.get('mode') || 'receiver'; // 'sender' or 'receiver'
+  
+  console.log(`[Audio] ${mode} connected for serial: ${serial}`);
+  
+  // Get or create audio stream entry for this serial
+  if (!audioStreams.has(serial)) {
+    audioStreams.set(serial, { sender: null, receivers: new Set() });
+  }
+  
+  const audioEntry = audioStreams.get(serial);
+  
+  if (mode === 'sender') {
+    // PC sending audio
+    audioEntry.sender = ws;
+    console.log(`[Audio] Sender connected: ${serial}`);
+    
+    ws.on('message', (data) => {
+      // Relay audio chunk to all connected receivers
+      const receivers = audioEntry.receivers;
+      console.log(`[Audio] Sender relaying chunk (${data.length} bytes) to ${receivers.size} receiver(s)`);
+      
+      for (const receiverWs of receivers) {
+        if (receiverWs.readyState === WebSocket.OPEN) {
+          try {
+            receiverWs.send(data);
+          } catch (e) {
+            console.error(`[Audio] Failed to send to receiver:`, e.message);
+            receivers.delete(receiverWs);
+          }
+        }
+      }
+    });
+    
+    ws.on('close', () => {
+      console.log(`[Audio] Sender disconnected: ${serial}`);
+      audioEntry.sender = null;
+      // Notify all receivers that sender disconnected
+      for (const receiverWs of audioEntry.receivers) {
+        if (receiverWs.readyState === WebSocket.OPEN) {
+          try {
+            receiverWs.send(JSON.stringify({ type: 'sender-disconnected' }));
+          } catch (e) {}
+        }
+      }
+    });
+    
+    ws.on('error', (err) => {
+      console.error(`[Audio] Sender error:`, err.message);
+      audioEntry.sender = null;
+    });
+    
+  } else if (mode === 'receiver') {
+    // Headset receiving audio
+    audioEntry.receivers.add(ws);
+    console.log(`[Audio] Receiver connected: ${serial}, total receivers: ${audioEntry.receivers.size}`);
+    
+    // If sender already connected, notify receiver
+    if (audioEntry.sender && audioEntry.sender.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: 'sender-connected' }));
+      } catch (e) {}
+    }
+    
+    ws.on('message', (data) => {
+      // Receivers shouldn't send messages (just receive audio from sender)
+      console.warn(`[Audio] Unexpected message from receiver: ${serial}`);
+    });
+    
+    ws.on('close', () => {
+      console.log(`[Audio] Receiver disconnected: ${serial}`);
+      audioEntry.receivers.delete(ws);
+      
+      // If no more receivers and no sender, clean up
+      if (!audioEntry.sender && audioEntry.receivers.size === 0) {
+        audioStreams.delete(serial);
+      }
+    });
+    
+    ws.on('error', (err) => {
+      console.error(`[Audio] Receiver error:`, err.message);
+      audioEntry.receivers.delete(ws);
+    });
+  }
+}
+
 // ---------- WebSocket ----------
 server.on('upgrade', (req, res, head) => {
+  // Audio streaming endpoint
+  if (req.url.startsWith('/api/audio/stream')) {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const serial = url.searchParams.get('serial');
+      
+      if (!serial) {
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end('serial parameter required');
+        return;
+      }
+      
+      wssAudio.handleUpgrade(req, res, head, (ws) => {
+        handleAudioWebSocket(serial, ws, req);
+      });
+      return;
+    } catch (err) {
+      console.error('[Audio] Upgrade error:', err);
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end('Internal server error');
+      return;
+    }
+  }
+  
+  // Video streaming endpoint (existing code)
   if (req.url.startsWith('/api/stream/ws')) {
     try {
       const url = new URL(req.url, `http://${req.headers.host}`);

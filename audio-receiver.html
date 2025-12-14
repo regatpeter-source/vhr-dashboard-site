@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VHR Audio Receiver</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #0d0f14 0%, #1a1d24 100%);
+      color: #ecf0f1;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    
+    .container {
+      width: 100%;
+      max-width: 600px;
+      background: #1a1d24;
+      border-radius: 12px;
+      padding: 40px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      border: 1px solid #2c3e50;
+    }
+    
+    .header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    
+    .header h1 {
+      font-size: 28px;
+      color: #2ecc71;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+    
+    .header p {
+      color: #95a5a6;
+      font-size: 14px;
+    }
+    
+    .form-group {
+      margin-bottom: 30px;
+    }
+    
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      color: #ecf0f1;
+      font-weight: 500;
+      font-size: 14px;
+    }
+    
+    .form-group input {
+      width: 100%;
+      padding: 12px;
+      background: #2c3e50;
+      border: 2px solid #34495e;
+      border-radius: 8px;
+      color: #ecf0f1;
+      font-size: 14px;
+      transition: all 0.3s ease;
+    }
+    
+    .form-group input:focus {
+      outline: none;
+      border-color: #3498db;
+      box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+    }
+    
+    .form-group input::placeholder {
+      color: #7f8c8d;
+    }
+    
+    .status-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 15px;
+      background: #2c3e50;
+      border-radius: 8px;
+      margin-bottom: 30px;
+      border-left: 4px solid #e74c3c;
+    }
+    
+    .status-indicator {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      animation: pulse-red 2s infinite;
+    }
+    
+    .status-indicator.connected {
+      background: #2ecc71;
+      animation: pulse-green 2s infinite;
+    }
+    
+    .status-text {
+      flex: 1;
+      font-size: 14px;
+    }
+    
+    .status-text strong {
+      color: #ecf0f1;
+    }
+    
+    @keyframes pulse-red {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    @keyframes pulse-green {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    .visualizer {
+      margin: 30px 0;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      gap: 4px;
+      height: 120px;
+      background: #2c3e50;
+      border-radius: 8px;
+      padding: 20px;
+      border: 1px solid #34495e;
+    }
+    
+    .frequency-bar {
+      width: 12px;
+      background: linear-gradient(to top, #e74c3c, #3498db);
+      border-radius: 2px;
+      transition: height 0.05s ease;
+      min-height: 4px;
+      max-height: 80px;
+    }
+    
+    .frequency-bar.active {
+      background: linear-gradient(to top, #2ecc71, #27ae60);
+    }
+    
+    .buttons {
+      display: flex;
+      gap: 12px;
+      margin: 30px 0;
+    }
+    
+    button {
+      flex: 1;
+      padding: 12px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    button.primary {
+      background: #3498db;
+      color: white;
+    }
+    
+    button.primary:hover {
+      background: #2980b9;
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(52, 152, 219, 0.3);
+    }
+    
+    button.primary:disabled {
+      background: #7f8c8d;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    button.secondary {
+      background: #2c3e50;
+      color: #ecf0f1;
+      border: 2px solid #34495e;
+    }
+    
+    button.secondary:hover:not(:disabled) {
+      border-color: #3498db;
+      color: #3498db;
+    }
+    
+    button.secondary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .info-box {
+      background: #2c3e50;
+      border-left: 4px solid #3498db;
+      padding: 15px;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #bdc3c7;
+      margin-top: 30px;
+    }
+    
+    .info-box strong {
+      color: #3498db;
+    }
+    
+    audio {
+      display: none;
+    }
+    
+    .error-box {
+      background: #c0392b;
+      border-left: 4px solid #e74c3c;
+      padding: 12px 15px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin: 20px 0;
+      display: none;
+    }
+    
+    .error-box.show {
+      display: block;
+    }
+    
+    @media (max-width: 600px) {
+      .container {
+        padding: 20px;
+      }
+      
+      .header h1 {
+        font-size: 24px;
+      }
+      
+      .visualizer {
+        height: 80px;
+      }
+      
+      .frequency-bar {
+        width: 8px;
+        max-height: 60px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🎧 VHR Audio Receiver</h1>
+      <p>Simple audio streaming receiver for VR headsets</p>
+    </div>
+    
+    <div class="form-group">
+      <label for="serverInput">Server Address</label>
+      <input 
+        type="text" 
+        id="serverInput" 
+        placeholder="e.g., ws://192.168.1.100:3000"
+        value="ws://localhost:3000"
+      >
+    </div>
+    
+    <div class="form-group">
+      <label for="serialInput">Device Serial</label>
+      <input 
+        type="text" 
+        id="serialInput" 
+        placeholder="e.g., FA123456789 or Quest2"
+      >
+    </div>
+    
+    <div class="status-group">
+      <div class="status-indicator" id="statusIndicator"></div>
+      <div class="status-text">
+        Status: <strong id="statusText">Disconnected</strong>
+      </div>
+    </div>
+    
+    <div class="error-box" id="errorBox"></div>
+    
+    <div class="visualizer" id="visualizer"></div>
+    
+    <div class="buttons">
+      <button class="primary" id="connectBtn" onclick="connect()">
+        🔗 Connect
+      </button>
+      <button class="secondary" id="disconnectBtn" onclick="disconnect()" disabled>
+        ✖️ Disconnect
+      </button>
+    </div>
+    
+    <div class="info-box">
+      <strong>How to use:</strong><br>
+      1. Enter your server address (usually your PC's IP)<br>
+      2. Enter the device serial or custom name<br>
+      3. Click "Connect" to start receiving audio<br>
+      4. Use the visualizer to monitor audio levels<br>
+      5. Audio will play automatically when received
+    </div>
+  </div>
+  
+  <audio id="audioPlayer" crossorigin="anonymous"></audio>
+  
+  <script>
+    // ========== Configuration ==========
+    let ws = null;
+    let audioContext = null;
+    let analyser = null;
+    let dataArray = null;
+    let animationId = null;
+    
+    const elements = {
+      serverInput: document.getElementById('serverInput'),
+      serialInput: document.getElementById('serialInput'),
+      connectBtn: document.getElementById('connectBtn'),
+      disconnectBtn: document.getElementById('disconnectBtn'),
+      statusIndicator: document.getElementById('statusIndicator'),
+      statusText: document.getElementById('statusText'),
+      visualizer: document.getElementById('visualizer'),
+      audioPlayer: document.getElementById('audioPlayer'),
+      errorBox: document.getElementById('errorBox')
+    };
+    
+    // ========== Initialization ==========
+    
+    // Initialize Web Audio API
+    function initAudioContext() {
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      
+      if (!analyser) {
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256; // 128 bars in frequency domain
+        
+        // Get audio from the audio element
+        const audioSource = audioContext.createMediaElementAudioSource(elements.audioPlayer);
+        audioSource.connect(analyser);
+        analyser.connect(audioContext.destination);
+        
+        const bufferLength = analyser.frequencyBinCount;
+        dataArray = new Uint8Array(bufferLength);
+      }
+      
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+    }
+    
+    // Create visualizer bars
+    function createVisualizer() {
+      elements.visualizer.innerHTML = '';
+      for (let i = 0; i < 20; i++) {
+        const bar = document.createElement('div');
+        bar.className = 'frequency-bar';
+        bar.id = `bar-${i}`;
+        elements.visualizer.appendChild(bar);
+      }
+    }
+    
+    // Update visualizer with frequency data
+    function updateVisualizer() {
+      if (!analyser || !dataArray) return;
+      
+      analyser.getByteFrequencyData(dataArray);
+      
+      const barCount = 20;
+      const samplesPerBar = Math.floor(dataArray.length / barCount);
+      
+      for (let i = 0; i < barCount; i++) {
+        let sum = 0;
+        for (let j = 0; j < samplesPerBar; j++) {
+          sum += dataArray[i * samplesPerBar + j];
+        }
+        const average = sum / samplesPerBar;
+        const height = (average / 255) * 100;
+        
+        const bar = document.getElementById(`bar-${i}`);
+        if (bar) {
+          bar.style.height = height + '%';
+          bar.classList.toggle('active', average > 50);
+        }
+      }
+      
+      animationId = requestAnimationFrame(updateVisualizer);
+    }
+    
+    // Load persisted serial from localStorage
+    function loadSerialFromStorage() {
+      const stored = localStorage.getItem('vhr-audio-serial');
+      if (stored) {
+        elements.serialInput.value = stored;
+      }
+    }
+    
+    // ========== Connection Functions ==========
+    
+    function connect() {
+      const server = elements.serverInput.value.trim();
+      const serial = elements.serialInput.value.trim();
+      
+      if (!server || !serial) {
+        showError('Please enter both server address and device serial');
+        return;
+      }
+      
+      // Save serial to localStorage
+      localStorage.setItem('vhr-audio-serial', serial);
+      
+      // Initialize Web Audio
+      initAudioContext();
+      
+      // Create visualizer if not exists
+      if (elements.visualizer.children.length === 0) {
+        createVisualizer();
+      }
+      
+      // Build WebSocket URL
+      // Support both ws:// and http:// formats
+      let wsUrl = server;
+      if (!wsUrl.startsWith('ws')) {
+        wsUrl = wsUrl.replace(/^https?:\/\//, '');
+        wsUrl = 'ws://' + wsUrl;
+      }
+      
+      // Ensure no trailing slash and add path
+      wsUrl = wsUrl.replace(/\/$/, '');
+      wsUrl += `/api/audio/stream?serial=${encodeURIComponent(serial)}&mode=receiver`;
+      
+      console.log('Connecting to:', wsUrl);
+      updateStatus('connecting', 'Connecting...');
+      
+      try {
+        ws = new WebSocket(wsUrl);
+        ws.binaryType = 'arraybuffer'; // Accept binary data
+        
+        ws.onopen = () => {
+          console.log('WebSocket connected');
+          updateStatus('connected', 'Connected - Waiting for audio...');
+          clearError();
+          
+          // Start visualization even before audio arrives
+          updateVisualizer();
+        };
+        
+        ws.onmessage = (event) => {
+          if (typeof event.data === 'string') {
+            try {
+              const msg = JSON.parse(event.data);
+              console.log('Message from server:', msg);
+              if (msg.type === 'sender-connected') {
+                updateStatus('connected', 'Sender connected - Receiving audio...');
+              } else if (msg.type === 'sender-disconnected') {
+                updateStatus('disconnected', 'Sender disconnected');
+              }
+            } catch (e) {
+              console.error('Failed to parse message:', e);
+            }
+          } else {
+            // Binary data - audio chunk
+            console.log('Received audio chunk:', event.data.byteLength, 'bytes');
+            playAudioChunk(event.data);
+          }
+        };
+        
+        ws.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          showError('Connection error: ' + (error.message || 'Unknown error'));
+          updateStatus('error', 'Error');
+        };
+        
+        ws.onclose = () => {
+          console.log('WebSocket closed');
+          updateStatus('disconnected', 'Disconnected');
+          if (animationId) {
+            cancelAnimationFrame(animationId);
+          }
+        };
+        
+      } catch (e) {
+        showError('Failed to create WebSocket: ' + e.message);
+        updateStatus('error', 'Error');
+      }
+    }
+    
+    function disconnect() {
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+      updateStatus('disconnected', 'Disconnected');
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+      }
+    }
+    
+    // Play received audio chunk
+    function playAudioChunk(arrayBuffer) {
+      try {
+        // Create a Blob from the audio data
+        const blob = new Blob([arrayBuffer], { type: 'audio/wav' });
+        const url = URL.createObjectURL(blob);
+        
+        // Play the audio
+        elements.audioPlayer.src = url;
+        elements.audioPlayer.play().catch(e => {
+          console.warn('Auto-play prevented by browser:', e);
+        });
+        
+        // Clean up previous URLs to avoid memory leak
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        
+      } catch (e) {
+        console.error('Failed to play audio chunk:', e);
+      }
+    }
+    
+    // Update UI status
+    function updateStatus(state, message) {
+      elements.statusText.textContent = message;
+      
+      if (state === 'connected') {
+        elements.statusIndicator.classList.add('connected');
+        elements.statusIndicator.style.borderColor = '#2ecc71';
+      } else if (state === 'connecting') {
+        elements.statusIndicator.classList.remove('connected');
+        elements.statusIndicator.style.borderColor = '#f39c12';
+      } else {
+        elements.statusIndicator.classList.remove('connected');
+        elements.statusIndicator.style.borderColor = '#e74c3c';
+      }
+      
+      // Update buttons
+      const isConnected = state === 'connected';
+      elements.connectBtn.disabled = isConnected || state === 'connecting';
+      elements.disconnectBtn.disabled = !isConnected;
+    }
+    
+    // Show error message
+    function showError(message) {
+      elements.errorBox.textContent = message;
+      elements.errorBox.classList.add('show');
+    }
+    
+    // Clear error message
+    function clearError() {
+      elements.errorBox.classList.remove('show');
+    }
+    
+    // ========== Startup ==========
+    
+    // Load saved serial on page load
+    loadSerialFromStorage();
+    
+    // Set initial state
+    updateStatus('disconnected', 'Disconnected');
+  </script>
+</body>
+</html>
