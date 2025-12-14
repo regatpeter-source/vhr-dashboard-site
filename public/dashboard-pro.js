@@ -681,66 +681,18 @@ window.updateDownloadButtons = function() {
 	}
 };
 
-window.updateDownloadStatus = function() {
-	const statusDiv = document.getElementById('downloadStatus');
-	if (!statusDiv) return;
-	
-	let html = '';
-	
-	if (window.downloadProgress.apk) {
-		html += `
-			<div style='padding:10px;margin-bottom:10px;background:rgba(46,204,113,0.2);border-left:4px solid #2ecc71;border-radius:4px;color:#2ecc71;font-size:12px;font-weight:bold;'>
-				✅ Étape 1: APK téléchargée avec succès!
-			</div>
-		`;
-	}
-	
-	if (window.downloadProgress.apk && !window.downloadProgress.voice) {
-		html += `
-			<div style='padding:10px;margin-bottom:10px;background:rgba(52,152,219,0.2);border-left:4px solid #3498db;border-radius:4px;color:#3498db;font-size:12px;font-weight:bold;'>
-				➡️ Vous pouvez maintenant télécharger les données vocales
-			</div>
-		`;
-	}
-	
-	if (window.downloadProgress.voice && window.downloadProgress.apk) {
-		html += `
-			<div style='padding:10px;margin-bottom:10px;background:rgba(46,204,113,0.2);border-left:4px solid #2ecc71;border-radius:4px;color:#2ecc71;font-size:12px;font-weight:bold;'>
-				✅ Étape 2: Données vocales téléchargées avec succès!
-			</div>
-		`;
-		html += `
-			<div style='padding:10px;margin-bottom:10px;background:rgba(241,196,15,0.2);border-left:4px solid #f39c12;border-radius:4px;color:#f39c12;font-size:12px;font-weight:bold;'>
-				🎉 Les deux fichiers sont prêts!<br>
-				✅ APK téléchargée: Ne rien faire, c'est un fichier d'installation<br>
-				✅ Voix téléchargée: Ne pas extraire, laissez le système gérer<br>
-				<br>
-				⏭️ Prochaine étape: Exécutez git push origin main<br>
-				GitHub Actions compilera l'APK finale automatiquement (15-20 min)
-			</div>
-		`;
-		
-		// Mark step 3 as active/complete
-		setTimeout(() => {
-			const step3 = document.getElementById('step3Indicator');
-			if (step3) {
-				step3.style.background = '#2ecc71';
-				step3.textContent = '✅';
-			}
-		}, 100);
-	}
-	
-	statusDiv.innerHTML = html;
+// Add download section to installer panel
+window.addDownloadSection = function() {
 	const container = document.getElementById('adminInstallerContainer');
 	if (!container) return;
-	
+
 	// Check if download section already exists
 	if (document.getElementById('downloadSection')) return;
-	
+
 	const downloadSection = document.createElement('div');
 	downloadSection.id = 'downloadSection';
 	downloadSection.style = 'margin-bottom:30px;padding:20px;background:#2a2d34;border:2px solid #2ecc71;border-radius:10px;';
-	
+
 	downloadSection.innerHTML = `
 		<h3 style='margin-top:0;color:#2ecc71;display:flex;align-items:center;gap:8px;'>
 			📥 Télécharger l'Application VHR
@@ -835,7 +787,7 @@ window.updateDownloadStatus = function() {
 		<!-- Authentification -->
 		<div style='padding:12px;background:rgba(46,204,113,0.1);border-left:4px solid #2ecc71;border-radius:4px;'>
 			<p style='margin:0;font-size:12px;color:#bdc3c7;'>
-				✅ <strong>Authentifié en tant que:</strong> ${currentUser}
+				✅ <strong>Authentifié en tant que:</strong> ${window.currentUser || 'Utilisateur'}
 			</p>
 		</div>
 		
@@ -853,11 +805,61 @@ window.updateDownloadStatus = function() {
 			</div>
 		</div>
 	`;
-	
+
 	container.insertBefore(downloadSection, container.firstChild);
-	
-	// Update button states if APK already downloaded in this session
 	window.updateDownloadButtons();
+};
+
+window.updateDownloadStatus = function() {
+	const statusDiv = document.getElementById('downloadStatus');
+	if (!statusDiv) return;
+	
+	let html = '';
+	
+	if (window.downloadProgress.apk) {
+		html += `
+			<div style='padding:10px;margin-bottom:10px;background:rgba(46,204,113,0.2);border-left:4px solid #2ecc71;border-radius:4px;color:#2ecc71;font-size:12px;font-weight:bold;'>
+				✅ Étape 1: APK téléchargée avec succès!
+			</div>
+		`;
+	}
+	
+	if (window.downloadProgress.apk && !window.downloadProgress.voice) {
+		html += `
+			<div style='padding:10px;margin-bottom:10px;background:rgba(52,152,219,0.2);border-left:4px solid #3498db;border-radius:4px;color:#3498db;font-size:12px;font-weight:bold;'>
+				➡️ Vous pouvez maintenant télécharger les données vocales
+			</div>
+		`;
+	}
+	
+	if (window.downloadProgress.voice && window.downloadProgress.apk) {
+		html += `
+			<div style='padding:10px;margin-bottom:10px;background:rgba(46,204,113,0.2);border-left:4px solid #2ecc71;border-radius:4px;color:#2ecc71;font-size:12px;font-weight:bold;'>
+				✅ Étape 2: Données vocales téléchargées avec succès!
+			</div>
+		`;
+		html += `
+			<div style='padding:10px;margin-bottom:10px;background:rgba(241,196,15,0.2);border-left:4px solid #f39c12;border-radius:4px;color:#f39c12;font-size:12px;font-weight:bold;'>
+				🎉 Les deux fichiers sont prêts!<br>
+				✅ APK téléchargée: Ne rien faire, c'est un fichier d'installation<br>
+				✅ Voix téléchargée: Ne pas extraire, laissez le système gérer<br>
+				<br>
+				⏭️ Prochaine étape: Exécutez git push origin main<br>
+				GitHub Actions compilera l'APK finale automatiquement (15-20 min)
+			</div>
+		`;
+		
+		// Mark step 3 as active/complete
+		setTimeout(() => {
+			const step3 = document.getElementById('step3Indicator');
+			if (step3) {
+				step3.style.background = '#2ecc71';
+				step3.textContent = '✅';
+			}
+		}, 100);
+	}
+	
+	statusDiv.innerHTML = html;
 };
 
 window.closeInstallerPanel = function() {
