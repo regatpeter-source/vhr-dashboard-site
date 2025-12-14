@@ -1067,8 +1067,11 @@ function loadMessages() {
         if (messages.length > 0) {
           messageIdCounter = Math.max(...messages.map(m => m.id || 0)) + 1;
         }
+        console.log(`[messages] Loaded ${messages.length} messages from ${MESSAGES_FILE}`);
         return messages;
       }
+    } else {
+      console.log('[messages] No messages file found, starting with empty array');
     }
   } catch (e) {
     console.error('[messages] load error', e && e.message);
@@ -2786,7 +2789,18 @@ app.get('/api/admin/subscriptions/active', authMiddleware, (req, res) => {
   }
 });
 
-// Get all messages
+// Get all messages (TEST - public endpoint)
+app.get('/api/test/messages', (req, res) => {
+  try {
+    console.log('[api/test/messages] Test endpoint - Messages count:', messages.length);
+    res.json({ ok: true, messages, count: messages.length });
+  } catch (e) {
+    console.error('[api/test/messages] error:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Get all messages (AUTHENTICATED)
 app.get('/api/admin/messages', authMiddleware, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
   try {
