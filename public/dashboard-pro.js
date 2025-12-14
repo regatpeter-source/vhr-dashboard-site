@@ -721,6 +721,52 @@ window.startAutomaticCompilation = async function() {
 	}
 };
 
+// Download compiled APK from GitHub Actions
+window.downloadCompiledAPK = async function() {
+	try {
+		const btn = event.target;
+		btn.disabled = true;
+		btn.innerHTML = '⏳ Téléchargement...';
+		
+		const response = await fetch('/api/download/compiled-apk', {
+			method: 'POST',
+			credentials: 'include',
+			headers: { 'Content-Type': 'application/json' }
+		});
+		
+		if (!response.ok) {
+			const error = await response.json();
+			throw new Error(error.message || 'Téléchargement échoué');
+		}
+		
+		const blob = await response.blob();
+		
+		if (blob.size === 0) {
+			throw new Error('APK vide reçue du serveur');
+		}
+		
+		const url = window.URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = 'app-debug.apk';
+		document.body.appendChild(a);
+		a.click();
+		window.URL.revokeObjectURL(url);
+		a.remove();
+		
+		alert('✅ APK compilée téléchargée avec succès!\n\nVous pouvez maintenant l\'installer sur votre téléphone/casque.');
+		btn.disabled = false;
+		btn.innerHTML = '📥 Télécharger l\'APK Compilée';
+		
+	} catch (e) {
+		console.error('[Download Compiled] Error:', e.message);
+		alert('❌ Erreur lors du téléchargement: ' + e.message);
+		const btn = event.target;
+		btn.disabled = false;
+		btn.innerHTML = '📥 Télécharger l\'APK Compilée';
+	}
+};
+
 // Add download section to installer panel
 window.addDownloadSection = function() {
 	// Initialize downloadProgress if not exists
@@ -914,8 +960,9 @@ window.updateDownloadStatus = function() {
 					✅ Prête pour l'installation<br>
 					<br>
 					⏭️ <strong>Prochaine étape:</strong><br>
-					Téléchargez l'APK compilée depuis GitHub Actions:<br>
-					<code style='background:#1a1d22;padding:4px 8px;border-radius:3px;display:block;margin:8px 0;font-family:monospace;color:#2ecc71;'>https://github.com/regatpeter-source/vhr-dashboard-site/actions</code>
+					<button onclick='window.downloadCompiledAPK()' style='background:#27ae60;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;margin:8px 0;'>
+						📥 Télécharger l'APK Compilée
+					</button>
 					<br>
 					Puis installez sur votre téléphone/casque
 				</div>
