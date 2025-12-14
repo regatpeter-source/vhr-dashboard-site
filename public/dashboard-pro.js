@@ -841,9 +841,10 @@ window.showInstallOnDevicePanel = async function() {
 		panel.onclick = (e) => { if (e.target === panel) closeInstallDevicePanel(); };
 		
 		let devicesList = devices.map((device, idx) => `
-			<div style='padding:12px;margin:8px 0;background:#2a2d34;border:1px solid #2ecc71;border-radius:6px;cursor:pointer;' onclick='window.installAPKOnDevice("${device}")'>
-				<strong>📱 ${device}</strong>
-				<div style='font-size:11px;color:#95a5a6;margin-top:4px;'>Cliquez pour installer</div>
+			<div style='padding:12px;margin:8px 0;background:#2a2d34;border:1px solid #2ecc71;border-radius:6px;cursor:pointer;' onclick='window.installAPKOnDevice("${device.serial}")'>
+				<strong>📱 ${device.serial}</strong>
+				<div style='font-size:11px;color:#95a5a6;margin-top:4px;'>${device.name}</div>
+				<div style='font-size:10px;color:#7f8c8d;'>Status: ${device.status}</div>
 			</div>
 		`).join('');
 		
