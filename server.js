@@ -1899,6 +1899,72 @@ app.post('/api/compile-apk', authMiddleware, async (req, res) => {
 });
 
 /**
+ * Helper: Download APK from GitHub Release
+ */
+async function downloadApkFromGitHub() {
+  try {
+    const owner = 'regatpeter-source';
+    const repo = 'vhr-dashboard-site';
+    
+    // Get latest release
+    const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/latest`, {
+      headers: {
+        'Accept': 'application/vnd.github.v3+json'
+      }
+    });
+    
+    if (!response.ok) {
+      console.error('[GitHub] Latest release not found:', response.status);
+      return null;
+    }
+    
+    const release = await response.json();
+    
+    // Find APK asset
+    const apkAsset = release.assets.find(asset => 
+      asset.name.endsWith('.apk') && !asset.name.includes('test')
+    );
+    
+    if (!apkAsset) {
+      console.warn('[GitHub] No APK asset found in release');
+      return null;
+    }
+    
+    console.log(`[GitHub] Found APK: ${apkAsset.name} (${(apkAsset.size / (1024*1024)).toFixed(2)} MB)`);
+    
+    // Download APK
+    const downloadUrl = apkAsset.browser_download_url;
+    const apkDir = path.join(__dirname, 'dist', 'demo');
+    const apkPath = path.join(apkDir, 'vhr-dashboard-demo.apk');
+    
+    // Create directory if not exists
+    if (!fs.existsSync(apkDir)) {
+      fs.mkdirSync(apkDir, { recursive: true });
+    }
+    
+    // Download file
+    console.log(`[GitHub] Downloading APK from: ${downloadUrl}`);
+    const apkResponse = await fetch(downloadUrl);
+    
+    if (!apkResponse.ok) {
+      console.error('[GitHub] Failed to download APK:', apkResponse.status);
+      return null;
+    }
+    
+    // Write to file
+    const buffer = await apkResponse.arrayBuffer();
+    fs.writeFileSync(apkPath, Buffer.from(buffer));
+    
+    console.log(`[GitHub] ✅ APK saved to: ${apkPath} (${(buffer.byteLength / (1024*1024)).toFixed(2)} MB)`);
+    return apkPath;
+    
+  } catch (e) {
+    console.error('[GitHub] Error downloading APK:', e.message);
+    return null;
+  }
+}
+
+/**
  * POST /api/download/compiled-apk - Télécharger l'APK compilée
  * Route sécurisée qui télécharge l'APK compilée sans exposer GitHub Actions
  */
@@ -1907,15 +1973,26 @@ app.post('/api/download/compiled-apk', authMiddleware, async (req, res) => {
     const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
     
-    // Chemin vers l'APK compilée (générée par GitHub Actions)
-    // Note: En production, ce chemin serait obtenu depuis GitHub Actions API
-    // Pour l'instant, on retourne l'APK de démo
-    const apkPath = path.join(__dirname, 'dist', 'demo', 'vhr-dashboard-demo.zip');
+    let apkPath = path.join(__dirname, 'dist', 'demo', 'vhr-dashboard-demo.apk');
     
-    if (!fs.existsSync(apkPath)) {
+    // Check if local APK exists and is valid (not placeholder)
+    let apkExists = fs.existsSync(apkPath);
+    let fileSize = apkExists ? fs.statSync(apkPath).size : 0;
+    
+    // If local APK is missing or invalid (placeholder), download from GitHub
+    if (!apkExists || fileSize < 1000) {
+      console.log('[download] Local APK missing/invalid, trying to download from GitHub...');
+      const downloadedPath = await downloadApkFromGitHub();
+      if (downloadedPath) {
+        apkPath = downloadedPath;
+        apkExists = true;
+      }
+    }
+    
+    if (!apkExists) {
       return res.status(404).json({
         ok: false,
-        error: 'APK compilée non trouvée. Veuillez attendre la fin de la compilation.'
+        error: 'APK compilée non trouvée. Veuillez attendre la fin de la compilation ou réessayer.'
       });
     }
     
@@ -1924,7 +2001,7 @@ app.post('/api/download/compiled-apk', authMiddleware, async (req, res) => {
     console.log(`[download] User ${user.username} downloading compiled APK`);
     
     // Send file with proper headers
-    return res.download(apkPath, 'app-debug.apk', {
+    return res.download(apkPath, 'vhr-dashboard.apk', {
       headers: {
         'Content-Type': 'application/octet-stream',
         'Cache-Control': 'no-cache, no-store, must-revalidate',

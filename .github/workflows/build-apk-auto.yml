@@ -1,0 +1,84 @@
+name: Build APK Automatically
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'tts-receiver-app/**'
+      - '.github/workflows/build-apk-auto.yml'
+      - '!tts-receiver-app/build/**'
+      - '!tts-receiver-app/.gradle/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+      
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      
+      - name: Setup Gradle cache
+        uses: gradle/gradle-build-action@v2
+      
+      - name: Build APK (Debug)
+        working-directory: ./tts-receiver-app
+        run: |
+          chmod +x gradlew
+          ./gradlew assemble
+      
+      - name: Find APK files
+        id: find_apk
+        run: |
+          APK_PATH=$(find tts-receiver-app/app/build/outputs/apk -name "*.apk" -type f | head -1)
+          if [ -z "$APK_PATH" ]; then
+            echo "No APK found!"
+            exit 1
+          fi
+          echo "APK_PATH=$APK_PATH" >> $GITHUB_OUTPUT
+          echo "APK_NAME=$(basename $APK_PATH)" >> $GITHUB_OUTPUT
+          echo "Found APK: $APK_PATH"
+      
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: apk-${{ github.run_number }}-${{ github.sha }}
+          release_name: 'APK Build #${{ github.run_number }}'
+          body: 'Automatic APK build from ${{ github.sha }}'
+          draft: false
+          prerelease: false
+      
+      - name: Upload APK to Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.find_apk.outputs.APK_PATH }}
+          asset_name: ${{ steps.find_apk.outputs.APK_NAME }}
+          asset_content_type: application/vnd.android.package-archive
+      
+      - name: Upload APK as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vhr-apk-${{ github.run_number }}
+          path: ${{ steps.find_apk.outputs.APK_PATH }}
+          retention-days: 30
+      
+      - name: Notify Build Success
+        run: |
+          echo "✅ APK built successfully!"
+          echo "APK: ${{ steps.find_apk.outputs.APK_NAME }}"
+          echo "Release: ${{ steps.create_release.outputs.html_url }}"
