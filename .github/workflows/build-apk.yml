@@ -1,0 +1,54 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      debug_mode:
+        description: 'Build type'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+      
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
+      
+      - name: Build APK
+        working-directory: ./tts-receiver-app
+        run: |
+          chmod +x gradlew
+          ./gradlew assemble${{ inputs.debug_mode == 'debug' && 'Debug' || 'Release' }}
+      
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: apk-${{ inputs.debug_mode }}
+          path: tts-receiver-app/build/outputs/apk/${{ inputs.debug_mode }}/
+          retention-days: 30
+      
+      - name: Upload to Server
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H $DEPLOY_HOST >> ~/.ssh/known_hosts
+          scp -i ~/.ssh/deploy_key -r tts-receiver-app/build/outputs/apk/${{ inputs.debug_mode }}/app-${{ inputs.debug_mode }}.apk deploy@$DEPLOY_HOST:/var/www/vhr/dist/apk/

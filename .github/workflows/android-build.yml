@@ -1,0 +1,65 @@
+name: Build & Release Android APK
+
+on:
+  push:
+    paths:
+      - 'tts-receiver-app/**'
+      - '.github/workflows/android-build.yml'
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Java 11
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+      
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: 32
+          build-tools-version: 32.0.0
+      
+      - name: Build APK
+        working-directory: ./tts-receiver-app
+        run: |
+          chmod +x gradlew
+          BUILD_TYPE=${{ inputs.build_type || 'debug' }}
+          ./gradlew assemble${BUILD_TYPE^} \
+            -Dorg.gradle.jvmargs="-Xmx4096m" \
+            --no-daemon \
+            -x test
+      
+      - name: Upload APK to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ inputs.build_type || 'debug' }}
+          path: tts-receiver-app/build/outputs/apk/${{ inputs.build_type || 'debug' }}/
+          retention-days: 30
+      
+      - name: Create Release
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: tts-receiver-app/build/outputs/apk/${{ inputs.build_type || 'debug' }}/app-${{ inputs.build_type || 'debug' }}.apk
+          tag_name: apk-${{ inputs.build_type || 'debug' }}-${{ github.run_number }}
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
