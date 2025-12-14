@@ -582,15 +582,27 @@ window.downloadVHRApp = async function(type = 'apk') {
 			body: JSON.stringify({ type })
 		});
 		
+		// Handle non-OK responses
 		if (!response.ok) {
-			const errorData = await response.json();
-			if (response.status === 403 && errorData.needsSubscription) {
-				alert(`❌ ${errorData.message}\n\nRedirigé vers l'abonnement...`);
-				closeInstallerPanel();
-				showAccountPanel();
-				return;
+			// Try to parse JSON error
+			let errorMessage = 'Téléchargement échoué';
+			try {
+				const errorData = await response.json();
+				errorMessage = errorData.message || errorData.error || errorMessage;
+				
+				if (response.status === 403 && errorData.needsSubscription) {
+					alert(`❌ ${errorMessage}\n\nRedirigé vers l'abonnement...`);
+					closeInstallerPanel();
+					showAccountPanel();
+					return;
+				}
+			} catch (parseErr) {
+				// If response is not JSON, it might be HTML error page
+				errorMessage = `Erreur serveur (${response.status}): Veuillez réessayer dans quelques minutes`;
+				console.error('Server error response:', await response.text());
 			}
-			throw new Error(errorData.error || 'Download failed');
+			
+			throw new Error(errorMessage);
 		}
 		
 		// Get filename from Content-Disposition header
@@ -598,12 +610,20 @@ window.downloadVHRApp = async function(type = 'apk') {
 		let fileName = type === 'apk' ? 'vhr-dashboard.apk' : 'voice-data.zip';
 		
 		if (contentDisposition) {
-			const fileNameMatch = contentDisposition.match(/filename="?(.+?)"?$/);
-			if (fileNameMatch) fileName = fileNameMatch[1];
+			const fileNameMatch = contentDisposition.match(/filename="?([^"]*)"?$/);
+			if (fileNameMatch && fileNameMatch[1]) {
+				fileName = fileNameMatch[1];
+			}
+		}
+		
+		// Get blob and check size
+		const blob = await response.blob();
+		
+		if (blob.size === 0) {
+			throw new Error(`Fichier vide reçu (${fileName}). Le serveur n'a pas envoyé de données.`);
 		}
 		
 		// Trigger download
-		const blob = await response.blob();
 		const url = window.URL.createObjectURL(blob);
 		const a = document.createElement('a');
 		a.href = url;
@@ -620,8 +640,12 @@ window.downloadVHRApp = async function(type = 'apk') {
 			window.downloadProgress.voice = true;
 		}
 		
-		console.log(`✅ Downloaded: ${fileName}`);
-		alert(`✅ Téléchargement réussi!\n\nFichier: ${fileName}\nTaille: ${(blob.size / (1024*1024)).toFixed(2)} MB`);
+		const sizeKB = (blob.size / 1024).toFixed(2);
+		const sizeMB = (blob.size / (1024*1024)).toFixed(2);
+		const displaySize = blob.size > 1024*1024 ? `${sizeMB} MB` : `${sizeKB} KB`;
+		
+		console.log(`✅ Downloaded: ${fileName} (${displaySize})`);
+		alert(`✅ Téléchargement réussi!\n\nFichier: ${fileName}\nTaille: ${displaySize}`);
 		
 		// Update UI after successful download
 		window.updateDownloadButtons();
@@ -629,9 +653,9 @@ window.downloadVHRApp = async function(type = 'apk') {
 		
 	} catch (e) {
 		console.error('Download error:', e);
-		alert(`❌ Erreur de téléchargement: ${e.message}`);
+		alert(`❌ Erreur de téléchargement:\n${e.message}`);
 	} finally {
-		if (event.target) {
+		if (event && event.target) {
 			event.target.disabled = false;
 			event.target.innerHTML = type === 'apk' ? '📱 Télécharger APK' : '🎵 Télécharger Voix';
 		}
