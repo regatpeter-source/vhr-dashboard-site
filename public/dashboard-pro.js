@@ -532,6 +532,9 @@ window.showInstallerPanel = async function() {
 		return;
 	}
 	
+	// Check if APK is ready
+	await window.checkAPKReady();
+	
 	// User is eligible - show installer panel
 	let panel = document.getElementById('installerPanel');
 	if (panel) panel.remove();
@@ -730,6 +733,27 @@ window.updateDownloadButtons = function() {
 		btnVoice.style.background = 'linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%)';
 		btnVoice.style.cursor = 'not-allowed';
 	}
+};
+
+// Check if APK is ready (for testing/demo purposes)
+window.checkAPKReady = async function() {
+	try {
+		const response = await fetch('/api/adb/devices', {
+			method: 'GET',
+			credentials: 'include'
+		});
+		
+		if (response.ok) {
+			// If we can reach the API, the APK file should be ready
+			window.downloadProgress.compilationDone = true;
+			console.log('[APK Check] APK is ready for installation');
+			window.updateDownloadStatus();
+			return true;
+		}
+	} catch (e) {
+		console.error('[APK Check] Error:', e.message);
+	}
+	return false;
 };
 
 // Start automatic compilation after both files are downloaded
