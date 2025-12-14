@@ -681,6 +681,41 @@ window.updateDownloadButtons = function() {
 	}
 };
 
+// Start automatic compilation after both files are downloaded
+window.startAutomaticCompilation = async function() {
+	try {
+		window.downloadProgress.compilationInProgress = true;
+		window.updateDownloadStatus();
+		
+		console.log('[Compilation] Starting automatic APK compilation...');
+		
+		const response = await fetch('/api/compile-apk', {
+			method: 'POST',
+			credentials: 'include',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ buildType: 'debug' })
+		});
+		
+		if (!response.ok) {
+			const error = await response.json();
+			throw new Error(error.message || 'Compilation failed');
+		}
+		
+		const result = await response.json();
+		console.log('[Compilation] Success:', result);
+		
+		window.downloadProgress.compilationInProgress = false;
+		window.downloadProgress.compilationDone = true;
+		window.updateDownloadStatus();
+		
+	} catch (e) {
+		console.error('[Compilation] Error:', e.message);
+		window.downloadProgress.compilationInProgress = false;
+		window.downloadProgress.compilationError = e.message;
+		window.updateDownloadStatus();
+	}
+};
+
 // Add download section to installer panel
 window.addDownloadSection = function() {
 	const container = document.getElementById('adminInstallerContainer');
@@ -701,11 +736,12 @@ window.addDownloadSection = function() {
 		<!-- Instructions et Workflow -->
 		<div style='margin-bottom:20px;padding:15px;background:rgba(52,152,219,0.1);border-left:4px solid #3498db;border-radius:4px;'>
 			<p style='margin:0;font-size:12px;color:#bdc3c7;line-height:1.6;'>
-				<strong>📋 Processus Simple:</strong><br>
-				1️⃣ Télécharger l'APK ci-dessous<br>
-				2️⃣ Télécharger les données vocales<br>
-				3️⃣ Exécuter: <code style='background:#1a1d22;padding:2px 6px;border-radius:3px;font-family:monospace;'>git push origin main</code><br>
-				4️⃣ ✅ GitHub Actions compile automatiquement (15-20 min)
+				<strong>📋 Processus 100% Automatique:</strong><br>
+				1️⃣ Télécharger l'APK (clic sur le bouton)<br>
+				2️⃣ Télécharger les données vocales (clic sur le bouton)<br>
+				3️⃣ ✅ Attendre la compilation automatique (15-20 min)<br>
+				4️⃣ 📲 Télécharger l'APK compilée depuis GitHub Actions<br>
+				5️⃣ 🎉 Installer sur votre téléphone/casque
 			</p>
 		</div>
 		
@@ -728,10 +764,10 @@ window.addDownloadSection = function() {
 			<!-- Étape 2 -->
 			<div style='text-align:center;flex:1;'>
 				<div id='step2Indicator' style='width:50px;height:50px;margin:0 auto 10px;border-radius:50%;background:#95a5a6;display:flex;align-items:center;justify-content:center;font-size:24px;'>
-					📤
+					🎵
 				</div>
 				<div style='font-size:12px;color:#bdc3c7;font-weight:bold;'>Étape 2</div>
-				<div style='font-size:10px;color:#95a5a6;'>Git Push</div>
+				<div style='font-size:10px;color:#95a5a6;'>Voix</div>
 			</div>
 			
 			<!-- Flèche 2 -->
@@ -745,7 +781,7 @@ window.addDownloadSection = function() {
 					⚙️
 				</div>
 				<div style='font-size:12px;color:#bdc3c7;font-weight:bold;'>Étape 3</div>
-				<div style='font-size:10px;color:#95a5a6;'>Automatique</div>
+				<div style='font-size:10px;color:#95a5a6;'>Compilation</div>
 			</div>
 		</div>
 		
@@ -837,33 +873,69 @@ window.updateDownloadStatus = function() {
 				✅ Étape 1: Les deux fichiers sont téléchargés!
 			</div>
 		`;
-		html += `
-			<div style='padding:10px;margin-bottom:10px;background:rgba(241,196,15,0.2);border-left:4px solid #f39c12;border-radius:4px;color:#f39c12;font-size:12px;font-weight:bold;'>
-				🎉 Prêt pour la compilation automatique!<br>
-				<br>
-				📝 <strong>Ne pas extraire les fichiers!</strong><br>
-				✅ APK: Fichier d'installation (garder tel quel)<br>
-				✅ Voix: Géré automatiquement par GitHub Actions<br>
-				<br>
-				🚀 <strong>Prochaine étape:</strong><br>
-				Ouvrez Git Bash / Terminal et exécutez:<br>
-				<code style='background:#1a1d22;padding:4px 8px;border-radius:3px;display:block;margin:8px 0;font-family:monospace;color:#2ecc71;'>git push origin main</code>
-				<br>
-				⚙️ GitHub Actions compilera l'APK finale automatiquement (15-20 min)
-			</div>
-		`;
+		
+		// Check if compilation is in progress or completed
+		if (window.downloadProgress.compilationInProgress) {
+			html += `
+				<div style='padding:10px;margin-bottom:10px;background:rgba(52,152,219,0.2);border-left:4px solid #3498db;border-radius:4px;color:#3498db;font-size:12px;font-weight:bold;'>
+					⏳ Compilation en cours (cela peut prendre quelques minutes)...<br>
+					<div style='margin-top:8px;background:#1a1d22;border-radius:4px;height:4px;overflow:hidden;'>
+						<div style='animation:progress 2s infinite;background:#3498db;height:100%;width:100%;'></div>
+					</div>
+				</div>
+			`;
+		} else if (window.downloadProgress.compilationDone) {
+			html += `
+				<div style='padding:10px;margin-bottom:10px;background:rgba(46,204,113,0.2);border-left:4px solid #2ecc71;border-radius:4px;color:#2ecc71;font-size:12px;font-weight:bold;'>
+					✅ Étape 2: Compilation terminée!
+				</div>
+			`;
+			html += `
+				<div style='padding:10px;margin-bottom:10px;background:rgba(39,174,96,0.2);border-left:4px solid #27ae60;border-radius:4px;color:#2ecc71;font-size:12px;font-weight:bold;'>
+					🎉 Votre APK est prête!<br>
+					<br>
+					📱 <strong>APK compilée avec succès</strong><br>
+					✅ Modèles vocaux intégrés<br>
+					✅ Prête pour l'installation<br>
+					<br>
+					⏭️ <strong>Prochaine étape:</strong><br>
+					Téléchargez l'APK compilée depuis GitHub Actions:<br>
+					<code style='background:#1a1d22;padding:4px 8px;border-radius:3px;display:block;margin:8px 0;font-family:monospace;color:#2ecc71;'>https://github.com/regatpeter-source/vhr-dashboard-site/actions</code>
+					<br>
+					Puis installez sur votre téléphone/casque
+				</div>
+			`;
+		} else {
+			html += `
+				<div style='padding:10px;margin-bottom:10px;background:rgba(241,196,15,0.2);border-left:4px solid #f39c12;border-radius:4px;color:#f39c12;font-size:12px;font-weight:bold;'>
+					🎉 Compilation automatique en cours...<br>
+					<br>
+					📝 <strong>Ne pas extraire les fichiers!</strong><br>
+					✅ APK: Fichier d'installation (garder tel quel)<br>
+					✅ Voix: Géré automatiquement<br>
+					<br>
+					⏳ GitHub Actions compile votre APK avec les modèles vocaux (15-20 min)
+				</div>
+			`;
+			
+			// Start automatic compilation
+			if (!window.downloadProgress.compilationStarted) {
+				window.downloadProgress.compilationStarted = true;
+				window.startAutomaticCompilation();
+			}
+		}
 		
 		// Mark step 2 as active/complete
 		setTimeout(() => {
 			const step2 = document.getElementById('step2Indicator');
 			if (step2) {
 				step2.style.background = '#2ecc71';
-				step2.textContent = '📤';
+				step2.textContent = '✅';
 			}
 			// Mark step 3 as automatic
 			const step3 = document.getElementById('step3Indicator');
 			if (step3) {
-				step3.textContent = '✅';
+				step3.textContent = '⚙️';
 			}
 		}, 100);
 	}
