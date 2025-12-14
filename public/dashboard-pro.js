@@ -618,11 +618,26 @@ window.downloadVHRApp = async function(type = 'apk') {
 						contentDisposition: xhr.getResponseHeader('content-disposition')
 					});
 				} else {
-					reject(new Error(`HTTP ${xhr.status}`));
+					// Handle specific HTTP error codes
+					let errorMessage = 'Téléchargement échoué';
+					
+					if (xhr.status === 403) {
+						errorMessage = 'Accès refusé - Vous n\'êtes pas autorisé à télécharger ce fichier';
+					} else if (xhr.status === 404) {
+						errorMessage = 'Fichier non trouvé sur le serveur';
+					} else if (xhr.status === 401) {
+						errorMessage = 'Authentification requise - Veuillez vous reconnecter';
+					} else if (xhr.status >= 500) {
+						errorMessage = 'Erreur serveur - Veuillez réessayer dans quelques minutes';
+					} else {
+						errorMessage = `Erreur HTTP ${xhr.status} - Veuillez réessayer`;
+					}
+					
+					reject(new Error(errorMessage));
 				}
 			});
 			
-			xhr.addEventListener('error', () => reject(new Error('Network error')));
+			xhr.addEventListener('error', () => reject(new Error('Erreur réseau - Vérifiez votre connexion Internet')));
 			
 			xhr.open('POST', '/api/download/vhr-app', true);
 			xhr.setRequestHeader('Content-Type', 'application/json');
