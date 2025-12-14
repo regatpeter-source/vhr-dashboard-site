@@ -4330,7 +4330,7 @@ app.post('/api/adb/install-apk', authMiddleware, async (req, res) => {
 
     // Path to the compiled APK (demo version for testing)
     // In production, this should be the actual compiled APK from GitHub Actions
-    const apkPath = path.join(__dirname, 'dist', 'demo', 'vhr-dashboard-demo.zip');
+    const apkPath = path.join(__dirname, 'dist', 'demo', 'vhr-dashboard-demo.apk');
     
     if (!fs.existsSync(apkPath)) {
       console.warn('[ADB Install] APK not found at:', apkPath);
