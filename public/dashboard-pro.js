@@ -28,9 +28,6 @@ function createNavbar() {
 		<button id="toggleViewBtn" style="margin-right:15px;background:#2ecc71;color:#000;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			📊 Vue: Tableau
 		</button>
-		<button id="installerBtn" style="margin-right:15px;background:#9b59b6;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;" title="Installer l'application vocale sur votre Meta Quest">
-			🚀 Voix vers Casque
-		</button>
 		<button id="favoritesBtn" style="margin-right:15px;background:#f39c12;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			⭐ Ajouter aux favoris
 		</button>
@@ -41,7 +38,6 @@ function createNavbar() {
 	`;
 	
 	document.getElementById('toggleViewBtn').onclick = toggleView;
-	document.getElementById('installerBtn').onclick = showInstallerPanel;
 	document.getElementById('favoritesBtn').onclick = addDashboardToFavorites;
 	document.getElementById('accountBtn').onclick = showAccountPanel;
 	updateUserUI();
@@ -497,858 +493,99 @@ window.switchAccountTab = function(tab) {
 	else if (tab === 'settings') content.innerHTML = getSettingsContent();
 };
 
-// ========== INSTALLER PANEL (Admin) ==========
-window.showInstallerPanel = async function() {
-	// First check if user is authenticated
-	if (!currentUser) {
-		alert('❌ Veuillez vous connecter d\'abord');
-		return showAccountPanel();
-	}
-	
-	// Check eligibility for download
-	try {
-		const eligibilityRes = await fetch('/api/download/check-eligibility', {
-			method: 'GET',
-			credentials: 'include',
-			headers: { 'Content-Type': 'application/json' }
-		});
-		
-		const eligibilityData = await eligibilityRes.json();
-		
-		if (!eligibilityData.ok) {
-			alert('❌ Erreur: ' + eligibilityData.error);
-			return;
-		}
-		
-		if (!eligibilityData.canDownload) {
-			// Show subscription modal
-			alert(`❌ ${eligibilityData.reason}\n\nVeuillez vous abonner pour accéder à cette fonctionnalité.\n\n${eligibilityData.demoExpired ? '✅ Jours d\'essai restants: ' + eligibilityData.remainingDays : ''}`);
-			showAccountPanel(); // Show account panel with subscription option
-			return;
-		}
-	} catch (e) {
-		console.error('Error checking eligibility:', e);
-		alert('❌ Erreur lors de la vérification d\'accès');
+// ========== AUDIO STREAMING (WebRTC) ==========
+
+window.sendVoiceToHeadset = async function(serial) {
+	// Check if stream already active
+	if (activeAudioStream && activeAudioStream.targetSerial === serial) {
+		showToast('🎤 Streaming déjà actif pour ce casque', 'warning');
 		return;
 	}
+
+	const device = devices.find(d => d.serial === serial);
+	const deviceName = device ? device.name : 'Casque';
 	
-	// Check if APK is ready
-	await window.checkAPKReady();
-	
-	// User is eligible - show installer panel
-	let panel = document.getElementById('installerPanel');
+	// Create audio control panel
+	let panel = document.getElementById('audioStreamPanel');
 	if (panel) panel.remove();
-	
+
 	panel = document.createElement('div');
-	panel.id = 'installerPanel';
+	panel.id = 'audioStreamPanel';
 	panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:2000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
-	panel.onclick = (e) => { if (e.target === panel) closeInstallerPanel(); };
+	panel.onclick = (e) => { if (e.target === panel) closeAudioStream(); };
 	
 	panel.innerHTML = `
-		<div style='background:#1a1d24;border:3px solid #9b59b6;border-radius:16px;padding:0;max-width:1200px;width:95%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px #000;color:#fff;'>
+		<div style='background:#1a1d24;border:3px solid #2ecc71;border-radius:16px;padding:0;max-width:900px;width:95%;max-height:85vh;overflow-y:auto;box-shadow:0 8px 32px #000;color:#fff;'>
 			<!-- Header -->
-			<div style='background:linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);padding:24px;border-radius:13px 13px 0 0;position:relative;display:flex;justify-content:space-between;align-items:center;'>
-				<h2 style='margin:0;font-size:28px;color:#fff;display:flex;align-items:center;gap:12px;'>
-					🚀 Installer l'App Android TTS
+			<div style='background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);padding:24px;border-radius:13px 13px 0 0;position:relative;display:flex;justify-content:space-between;align-items:center;'>
+				<h2 style='margin:0;font-size:24px;color:#fff;display:flex;align-items:center;gap:12px;'>
+					🎤 Streaming Audio WebRTC vers ${deviceName}
 				</h2>
-				<button onclick='closeInstallerPanel()' style='background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;font-weight:bold;'>✕</button>
+				<button onclick='closeAudioStream()' style='background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;font-weight:bold;'>✕</button>
 			</div>
 			
-			<!-- Content -->
-			<div id='adminInstallerContainer' style='padding:24px;'></div>
+			<!-- Visualizer -->
+			<div id='audioVizContainer' style='padding:20px;display:flex;align-items:flex-end;justify-content:center;gap:3px;height:200px;background:#0d0f14;'>
+				${Array(32).fill(0).map((_, i) => `<div style='width:8px;background:linear-gradient(to top, #2ecc71, #27ae60);border-radius:2px;flex:1;min-height:4px;'></div>`).join('')}
+			</div>
+			
+			<!-- Controls -->
+			<div style='padding:20px;background:#2a2d34;border-top:1px solid #444;'>
+				<div style='display:grid;grid-template-columns:1fr 1fr;gap:12px;'>
+					<button id='pauseAudioBtn' onclick='window.toggleAudioStreamPause()' style='background:linear-gradient(135deg, #3498db 0%, #2980b9 100%);color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:13px;'>
+						⏸️ Pause
+					</button>
+					<button onclick='closeAudioStream()' style='background:linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:13px;'>
+						🛑 Arrêter
+					</button>
+				</div>
+				<div style='margin-top:15px;padding:12px;background:rgba(46,204,113,0.1);border-left:4px solid #2ecc71;border-radius:4px;font-size:12px;color:#bdc3c7;'>
+					<strong>📊 Status:</strong> Streaming en direct depuis votre micro vers ${deviceName}
+				</div>
+			</div>
 		</div>
 	`;
 	
 	document.body.appendChild(panel);
 	
-	// Initialiser l'interface d'installation (admin)
-	if (window.AdminAndroidInstaller) {
-		const installer = new AdminAndroidInstaller();
-		installer.initializeUI();
-	}
-	
-	// Add download section to installer panel
-	addDownloadSection();
-};
-
-// Download protected resources
-window.downloadVHRApp = async function(type = 'apk') {
+	// Start audio streaming
 	try {
-		// Initialize downloadProgress if not exists
-		if (!window.downloadProgress) {
-			window.downloadProgress = { apk: false, voice: false, compilationStarted: false, compilationInProgress: false, compilationDone: false };
-		}
-		
-		const btn = event.target;
-		btn.disabled = true;
-		const originalText = btn.innerHTML;
-		
-		// Create progress container
-		const progressId = `progress-${type}`;
-		const existingProgress = document.getElementById(progressId);
-		if (existingProgress) existingProgress.remove();
-		
-		const progressContainer = document.createElement('div');
-		progressContainer.id = progressId;
-		progressContainer.style = 'margin:10px 0;padding:10px;background:rgba(52,152,219,0.1);border-radius:4px;';
-		progressContainer.innerHTML = `
-			<div style='font-size:11px;color:#bdc3c7;margin-bottom:5px;'>Progression: <span id='${type}-percent'>0</span>%</div>
-			<div style='background:#1a1d22;border-radius:3px;height:6px;overflow:hidden;'>
-				<div id='${type}-bar' style='background:#3498db;height:100%;width:0%;transition:width 0.3s;'></div>
-			</div>
-		`;
-		btn.parentElement.insertBefore(progressContainer, btn.nextSibling);
-		
-		btn.innerHTML = '⏳ Téléchargement...';
-		
-		// Use XMLHttpRequest for progress tracking
-		const downloadData = await new Promise((resolve, reject) => {
-			const xhr = new XMLHttpRequest();
-			
-			xhr.upload.addEventListener('progress', (event) => {
-				if (event.lengthComputable) {
-					const percentComplete = Math.round((event.loaded / event.total) * 100);
-					document.getElementById(`${type}-percent`).textContent = percentComplete;
-					document.getElementById(`${type}-bar`).style.width = percentComplete + '%';
-				}
-			});
-			
-			xhr.addEventListener('load', () => {
-				console.log(`[downloadVHRApp] XHR load event - status: ${xhr.status}, response type: ${typeof xhr.response}, response length: ${xhr.response ? xhr.response.byteLength : 0}`);
-				
-				if (xhr.status === 200) {
-					resolve({ 
-						blob: new Blob([xhr.response]),
-						headers: xhr.getAllResponseHeaders(),
-						contentDisposition: xhr.getResponseHeader('content-disposition')
-					});
-				} else {
-					// Try to parse error response as JSON
-					let errorMessage = 'Téléchargement échoué';
-					
-					try {
-						// Try to read response as text then parse JSON
-						const decoder = new TextDecoder();
-						const text = decoder.decode(new Uint8Array(xhr.response));
-						console.log(`[downloadVHRApp] Error response text: ${text.substring(0, 200)}`);
-						const errorData = JSON.parse(text);
-						errorMessage = errorData.message || errorData.error || errorMessage;
-					} catch (parseErr) {
-						// If not JSON, use status-based error message
-						if (xhr.status === 403) {
-							errorMessage = 'Accès refusé - Vous n\'êtes pas autorisé à télécharger ce fichier';
-						} else if (xhr.status === 404) {
-							errorMessage = 'Fichier non trouvé sur le serveur';
-						} else if (xhr.status === 401) {
-							errorMessage = 'Authentification requise - Veuillez vous reconnecter';
-						} else if (xhr.status >= 500) {
-							errorMessage = 'Erreur serveur - Veuillez réessayer dans quelques minutes';
-						} else {
-							errorMessage = `Erreur HTTP ${xhr.status} - Veuillez réessayer`;
-						}
-					}
-					
-					reject(new Error(errorMessage));
-				}
-			});
-			
-			xhr.addEventListener('error', () => reject(new Error('Erreur réseau - Vérifiez votre connexion Internet')));
-			
-			xhr.open('POST', '/api/download/vhr-app', true);
-			xhr.setRequestHeader('Content-Type', 'application/json');
-			xhr.responseType = 'arraybuffer';
-			xhr.withCredentials = true;
-			xhr.send(JSON.stringify({ type }));
-		});
-		
-		// Extract filename
-		let fileName = type === 'apk' ? 'vhr-dashboard.apk' : 'voice-data.zip';
-		if (downloadData.contentDisposition) {
-			const fileNameMatch = downloadData.contentDisposition.match(/filename="?([^"]*)"?$/);
-			if (fileNameMatch && fileNameMatch[1]) {
-				fileName = fileNameMatch[1];
-			}
-		}
-		
-		const blob = downloadData.blob;
-		
-		if (blob.size === 0) {
-			throw new Error(`Fichier vide reçu (${fileName}). Le serveur n'a pas envoyé de données.`);
-		}
-		
-		// Mark as 100% downloaded
-		document.getElementById(`${type}-percent`).textContent = '100';
-		document.getElementById(`${type}-bar`).style.width = '100%';
-		
-		// Trigger download
-		const url = window.URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = fileName;
-		document.body.appendChild(a);
-		a.click();
-		window.URL.revokeObjectURL(url);
-		a.remove();
-		
-		// Mark download as completed
-		if (type === 'apk') {
-			window.downloadProgress.apk = true;
-		} else if (type === 'voice-data') {
-			window.downloadProgress.voice = true;
-		}
-		
-		// Hide progress container after successful download
-		setTimeout(() => {
-			progressContainer.style.display = 'none';
-		}, 1000);
-		
-		// Update UI after successful download
-		window.updateDownloadButtons();
-		window.updateDownloadStatus();
-		
+		activeAudioStream = new window.VHRAudioStream(serial);
+		activeAudioStream.start();
+		window.animateAudioVisualizer();
+		showToast(`🎤 Streaming vers ${deviceName}`, 'success');
 	} catch (e) {
-		console.error('Download error:', e);
-		alert(`❌ Erreur de téléchargement:\n${e.message}`);
-	} finally {
-		if (event && event.target) {
-			event.target.disabled = false;
-			event.target.innerHTML = type === 'apk' ? '📱 Télécharger APK' : '🎵 Télécharger Voix';
-		}
+		console.error('[sendVoiceToHeadset] Error:', e);
+		closeAudioStream();
+		showToast(`❌ Erreur: ${e.message}`, 'error');
 	}
 };
 
-window.updateDownloadButtons = function() {
-	const btnVoice = document.getElementById('btnDownloadVoice');
-	if (!btnVoice) return;
+window.toggleAudioStreamPause = function() {
+	if (!activeAudioStream) return;
 	
-	// Voice button is always enabled (user can try to connect even without downloading APK first)
-	btnVoice.disabled = false;
-	btnVoice.style.opacity = '1';
-	btnVoice.style.background = 'linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)';
-	btnVoice.style.cursor = 'pointer';
+	const isPaused = activeAudioStream.togglePause();
+	const pauseBtn = document.getElementById('pauseAudioBtn');
+	if (pauseBtn) pauseBtn.innerHTML = isPaused ? '⏸️ Pause' : '▶️ Reprendre';
+	showToast(isPaused ? '▶️ Streaming repris' : '⏸️ Streaming en pause', 'info');
 };
 
-// Voice streaming state
-window.voiceStreaming = {
-	isActive: false,
-	mediaStream: null,
-	audioContext: null,
-	analyser: null,
-	dataArray: null,
-	currentDevice: null,
-	serviceUrl: null
-};
-
-/**
- * Start/Stop voice streaming to OpenTalkie service on casque
- */
-window.startVoiceStreaming = async function() {
-	try {
-		const btn = event.target;
-		
-		// Get list of connected ADB devices
-		const devicesRes = await fetch('/api/adb/devices', {
-			method: 'GET',
-			credentials: 'include'
-		});
-		const devicesData = await devicesRes.json();
-		
-		if (!devicesData.ok || !devicesData.devices || devicesData.devices.length === 0) {
-			alert('❌ Aucun casque VR connecté. Veuillez connecter un appareil.');
-			return;
-		}
-
-		// Use first device (Meta Quest 2)
-		const device = devicesData.devices[0];
-		window.voiceStreaming.currentDevice = device;
-
-		if (window.voiceStreaming.isActive) {
-			// Stop streaming
-			stopVoiceStreaming();
-			return;
-		}
-
-		btn.disabled = true;
-		btn.innerHTML = '🔄 Connexion...';
-
-		// Get OpenTalkie service info from casque
-		const serviceRes = await fetch(`/api/opentalkie/service-info?device=${device.serial}`, {
-			method: 'GET',
-			credentials: 'include'
-		});
-		const serviceData = await serviceRes.json();
-
-		if (!serviceData.ok) {
-			alert(`❌ Impossible de se connecter à OpenTalkie: ${serviceData.message}`);
-			btn.disabled = false;
-			btn.innerHTML = '🎤 Voix vers Casque';
-			return;
-		}
-
-		window.voiceStreaming.serviceUrl = serviceData.serviceUrl;
-		console.log(`[Voice Streaming] Service URL: ${serviceData.serviceUrl}`);
-
-		// Request microphone access
-		btn.innerHTML = '🎤 Accès au micro...';
-
-		const mediaStream = await navigator.mediaDevices.getUserMedia({
-			audio: {
-				echoCancellation: true,
-				noiseSuppression: true,
-				autoGainControl: true
-			},
-			video: false
-		});
-
-		window.voiceStreaming.mediaStream = mediaStream;
-
-		// Create audio context
-		const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-		window.voiceStreaming.audioContext = audioContext;
-
-		const source = audioContext.createMediaStreamSource(mediaStream);
-		const analyser = audioContext.createAnalyser();
-		analyser.fftSize = 2048;
-
-		source.connect(analyser);
-
-		window.voiceStreaming.analyser = analyser;
-		window.voiceStreaming.dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-		// Mark as active
-		window.voiceStreaming.isActive = true;
-
-		btn.innerHTML = '🎤 ◉ EN DIRECT (Cliquez pour arrêter)';
-		btn.style.background = 'linear-gradient(135deg, #27ae60 0%, #229954 100%)';
-		btn.style.boxShadow = '0 0 15px rgba(39, 174, 96, 0.6)';
-
-		// Log successful connection
-		console.log(`[Voice Streaming] Active - Device: ${device.serial}, Service: ${window.voiceStreaming.serviceUrl}`);
-
-		// Display status
-		showVoiceStreamingStatus(`🎤 Streaming vers ${device.name}`, true);
-
-	} catch (e) {
-		console.error('[Voice Streaming] Error:', e);
-		alert(`❌ Erreur: ${e.message}`);
-		
-		if (event && event.target) {
-			event.target.disabled = false;
-			event.target.innerHTML = '🎤 Voix vers Casque';
-		}
-	}
-};
-
-/**
- * Stop voice streaming
- */
-window.stopVoiceStreaming = function() {
-	try {
-		if (!window.voiceStreaming.isActive) return;
-
-		// Stop microphone
-		if (window.voiceStreaming.mediaStream) {
-			window.voiceStreaming.mediaStream.getTracks().forEach(track => track.stop());
-			window.voiceStreaming.mediaStream = null;
-		}
-
-		// Close audio context
-		if (window.voiceStreaming.audioContext && window.voiceStreaming.audioContext.state !== 'closed') {
-			window.voiceStreaming.audioContext.close();
-			window.voiceStreaming.audioContext = null;
-		}
-
-		window.voiceStreaming.isActive = false;
-		window.voiceStreaming.analyser = null;
-		window.voiceStreaming.dataArray = null;
-
-		const btn = document.getElementById('btnDownloadVoice');
-		if (btn) {
-			btn.disabled = false;
-			btn.innerHTML = '🎤 Voix vers Casque';
-			btn.style.background = 'linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)';
-			btn.style.boxShadow = 'none';
-		}
-
-		console.log('[Voice Streaming] Stopped');
-		showVoiceStreamingStatus('Streaming arrêté', false);
-
-	} catch (e) {
-		console.error('[Voice Streaming] Error stopping:', e);
-	}
-};
-
-/**
- * Display voice streaming status in UI
- */
-window.showVoiceStreamingStatus = function(message, isActive) {
-	let statusElement = document.getElementById('voiceStreamingStatus');
+window.animateAudioVisualizer = function() {
+	if (!activeAudioStream || !document.getElementById('audioVizContainer')) return;
 	
-	if (!statusElement) {
-		statusElement = document.createElement('div');
-		statusElement.id = 'voiceStreamingStatus';
-		statusElement.style = `
-			position: fixed;
-			top: 20px;
-			right: 20px;
-			padding: 15px 20px;
-			border-radius: 8px;
-			font-weight: bold;
-			z-index: 10000;
-			box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-			animation: slideIn 0.3s ease;
-		`;
-		document.body.appendChild(statusElement);
-	}
-
-	if (isActive) {
-		statusElement.innerHTML = `🎤 ${message}`;
-		statusElement.style.background = 'linear-gradient(135deg, #27ae60 0%, #229954 100%)';
-		statusElement.style.color = '#fff';
-		statusElement.style.display = 'block';
-	} else {
-		statusElement.style.display = 'none';
-	}
-};
-
-// Check if APK is ready (for testing/demo purposes)
-window.checkAPKReady = async function() {
-	try {
-		const response = await fetch('/api/adb/devices', {
-			method: 'GET',
-			credentials: 'include'
-		});
-		
-		if (response.ok) {
-			// If we can reach the API, the APK file should be ready
-			window.downloadProgress.compilationDone = true;
-			console.log('[APK Check] APK is ready for installation');
-			window.updateDownloadStatus();
-			return true;
+	const bars = document.querySelectorAll('#audioVizContainer > div');
+	const freqData = activeAudioStream.getFrequencyData();
+	
+	if (freqData) {
+		const barCount = bars.length;
+		for (let i = 0; i < barCount; i++) {
+			const idx = Math.floor((i / barCount) * freqData.length);
+			const height = (freqData[idx] / 255) * 100;
+			bars[i].style.height = height + '%';
 		}
-	} catch (e) {
-		console.error('[APK Check] Error:', e.message);
-	}
-	return false;
-};
-
-// Start automatic compilation after both files are downloaded
-window.startAutomaticCompilation = async function() {
-	try {
-		window.downloadProgress.compilationInProgress = true;
-		window.updateDownloadStatus();
-		
-		console.log('[Compilation] Starting automatic APK compilation...');
-		
-		const response = await fetch('/api/compile-apk', {
-			method: 'POST',
-			credentials: 'include',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ buildType: 'debug' })
-		});
-		
-		if (!response.ok) {
-			const error = await response.json();
-			throw new Error(error.message || 'Compilation failed');
-		}
-		
-		const result = await response.json();
-		console.log('[Compilation] Success:', result);
-		
-		window.downloadProgress.compilationInProgress = false;
-		window.downloadProgress.compilationDone = true;
-		window.updateDownloadStatus();
-		
-	} catch (e) {
-		console.error('[Compilation] Error:', e.message);
-		window.downloadProgress.compilationInProgress = false;
-		window.downloadProgress.compilationError = e.message;
-		window.updateDownloadStatus();
-	}
-};
-
-// Download compiled APK from GitHub Actions
-window.downloadCompiledAPK = async function() {
-	try {
-		const btn = event.target;
-		btn.disabled = true;
-		btn.innerHTML = '⏳ Téléchargement...';
-		
-		const response = await fetch('/api/download/compiled-apk', {
-			method: 'POST',
-			credentials: 'include',
-			headers: { 'Content-Type': 'application/json' }
-		});
-		
-		if (!response.ok) {
-			const error = await response.json();
-			throw new Error(error.message || 'Téléchargement échoué');
-		}
-		
-		const blob = await response.blob();
-		
-		if (blob.size === 0) {
-			throw new Error('APK vide reçue du serveur');
-		}
-		
-		const url = window.URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = 'app-debug.apk';
-		document.body.appendChild(a);
-		a.click();
-		window.URL.revokeObjectURL(url);
-		a.remove();
-		
-		alert('✅ APK compilée téléchargée avec succès!\n\nVous pouvez maintenant l\'installer sur votre téléphone/casque.');
-		btn.disabled = false;
-		btn.innerHTML = '📥 Télécharger l\'APK Compilée';
-		
-	} catch (e) {
-		console.error('[Download Compiled] Error:', e.message);
-		alert('❌ Erreur lors du téléchargement: ' + e.message);
-		const btn = event.target;
-		btn.disabled = false;
-		btn.innerHTML = '📥 Télécharger l\'APK Compilée';
-	}
-};
-
-// Install APK on connected devices
-window.showInstallOnDevicePanel = async function() {
-	try {
-		// Get list of connected devices
-		const devicesRes = await fetch('/api/adb/devices', {
-			method: 'GET',
-			credentials: 'include',
-			headers: { 'Content-Type': 'application/json' }
-		});
-		
-		const devicesData = await devicesRes.json();
-		let devices = devicesData.devices || [];
-		
-		if (!devices.length) {
-			alert('❌ Aucun appareil détecté.\n\nAssurez-vous que:\n1. Votre casque/téléphone est connecté via USB\n2. ADB est activé sur l\'appareil\n3. L\'appareil a accepté le débogage ADB');
-			return;
-		}
-		
-		// Create panel to select device
-		let panel = document.getElementById('installDevicePanel');
-		if (panel) panel.remove();
-		
-		panel = document.createElement('div');
-		panel.id = 'installDevicePanel';
-		panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:3000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
-		panel.onclick = (e) => { if (e.target === panel) closeInstallDevicePanel(); };
-		
-		let devicesList = devices.map((device, idx) => `
-			<div style='padding:12px;margin:8px 0;background:#2a2d34;border:1px solid #2ecc71;border-radius:6px;cursor:pointer;' onclick='window.installAPKOnDevice("${device.serial}")'>
-				<strong>📱 ${device.serial}</strong>
-				<div style='font-size:11px;color:#95a5a6;margin-top:4px;'>${device.name}</div>
-				<div style='font-size:10px;color:#7f8c8d;'>Status: ${device.status}</div>
-			</div>
-		`).join('');
-		
-		panel.innerHTML = `
-			<div style='background:#1a1d24;border:3px solid #9b59b6;border-radius:16px;padding:24px;max-width:500px;width:90%;box-shadow:0 8px 32px #000;color:#fff;'>
-				<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;'>
-					<h3 style='margin:0;color:#2ecc71;'>🚀 Sélectionnez un appareil</h3>
-					<button onclick='closeInstallDevicePanel()' style='background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;'>✕</button>
-				</div>
-				
-				<p style='color:#bdc3c7;margin-bottom:15px;'>Appareils détectés (${devices.length}):</p>
-				${devicesList}
-				
-				<div style='margin-top:20px;padding:12px;background:rgba(52,152,219,0.1);border-left:4px solid #3498db;border-radius:4px;'>
-					<p style='margin:0;font-size:12px;color:#bdc3c7;'>
-						💡 <strong>Conseil:</strong> Assurez-vous que l\'appareil n\'exécute rien de critique
-					</p>
-				</div>
-			</div>
-		`;
-		
-		document.body.appendChild(panel);
-		
-	} catch (e) {
-		console.error('[Install] Error getting devices:', e.message);
-		alert('❌ Erreur lors de la récupération des appareils: ' + e.message);
-	}
-};
-
-// Install APK on specific device
-window.installAPKOnDevice = async function(device) {
-	try {
-		const response = await fetch('/api/adb/install-apk', {
-			method: 'POST',
-			credentials: 'include',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ device })
-		});
-		
-		const result = await response.json();
-		
-		if (!result.ok) {
-			throw new Error(result.message || 'Installation échouée');
-		}
-		
-		alert(`✅ Installation réussie sur ${device}!\n\n${result.message}`);
-		closeInstallDevicePanel();
-		
-	} catch (e) {
-		console.error('[Install APK] Error:', e.message);
-		alert('❌ Erreur lors de l\'installation:\n' + e.message);
-	}
-};
-
-window.closeInstallDevicePanel = function() {
-	const panel = document.getElementById('installDevicePanel');
-	if (panel) panel.remove();
-};
-
-// Add download section to installer panel
-window.addDownloadSection = function() {
-	// Initialize downloadProgress if not exists
-	if (!window.downloadProgress) {
-		window.downloadProgress = { apk: false, voice: false, compilationStarted: false, compilationInProgress: false, compilationDone: false };
 	}
 	
-	const container = document.getElementById('adminInstallerContainer');
-	if (!container) return;
-
-	// Check if download section already exists
-	if (document.getElementById('downloadSection')) return;
-
-	const downloadSection = document.createElement('div');
-	downloadSection.id = 'downloadSection';
-	downloadSection.style = 'margin-bottom:30px;padding:20px;background:#2a2d34;border:2px solid #2ecc71;border-radius:10px;';
-
-	downloadSection.innerHTML = `
-		<h3 style='margin-top:0;color:#2ecc71;display:flex;align-items:center;gap:8px;'>
-			📥 Télécharger l'Application VHR
-		</h3>
-		
-		<!-- Instructions et Workflow -->
-		<div style='margin-bottom:20px;padding:15px;background:rgba(52,152,219,0.1);border-left:4px solid #3498db;border-radius:4px;'>
-			<p style='margin:0;font-size:12px;color:#bdc3c7;line-height:1.6;'>
-				<strong>📋 Processus 100% Automatique:</strong><br>
-				1️⃣ Télécharger l'APK (clic sur le bouton)<br>
-				2️⃣ Télécharger les données vocales (clic sur le bouton)<br>
-				3️⃣ ✅ Attendre la compilation automatique (15-20 min)<br>
-				4️⃣ 📲 Télécharger l'APK compilée depuis GitHub Actions<br>
-				5️⃣ 🎉 Installer sur votre téléphone/casque
-			</p>
-		</div>
-		
-		<!-- Workflow Visuel -->
-		<div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;position:relative;'>
-			<!-- Étape 1 -->
-			<div style='text-align:center;flex:1;'>
-				<div id='step1Indicator' style='width:50px;height:50px;margin:0 auto 10px;border-radius:50%;background:#2ecc71;display:flex;align-items:center;justify-content:center;font-size:24px;'>
-					📱
-				</div>
-				<div style='font-size:12px;color:#bdc3c7;font-weight:bold;'>Étape 1</div>
-				<div style='font-size:10px;color:#95a5a6;'>Télécharger</div>
-			</div>
-			
-			<!-- Flèche 1 -->
-			<div style='flex:0;width:40px;height:2px;background:#95a5a6;position:relative;margin:0 10px;'>
-				<div style='position:absolute;right:-8px;top:-4px;color:#95a5a6;'>→</div>
-			</div>
-			
-			<!-- Étape 2 -->
-			<div style='text-align:center;flex:1;'>
-				<div id='step2Indicator' style='width:50px;height:50px;margin:0 auto 10px;border-radius:50%;background:#95a5a6;display:flex;align-items:center;justify-content:center;font-size:24px;'>
-					🎵
-				</div>
-				<div style='font-size:12px;color:#bdc3c7;font-weight:bold;'>Étape 2</div>
-				<div style='font-size:10px;color:#95a5a6;'>Voix</div>
-			</div>
-			
-			<!-- Flèche 2 -->
-			<div style='flex:0;width:40px;height:2px;background:#95a5a6;position:relative;margin:0 10px;'>
-				<div style='position:absolute;right:-8px;top:-4px;color:#95a5a6;'>→</div>
-			</div>
-			
-			<!-- Étape 3 -->
-			<div style='text-align:center;flex:1;'>
-				<div id='step3Indicator' style='width:50px;height:50px;margin:0 auto 10px;border-radius:50%;background:#95a5a6;display:flex;align-items:center;justify-content:center;font-size:24px;'>
-					⚙️
-				</div>
-				<div style='font-size:12px;color:#bdc3c7;font-weight:bold;'>Étape 3</div>
-				<div style='font-size:10px;color:#95a5a6;'>Compilation</div>
-			</div>
-		</div>
-		
-		<!-- Boutons de Téléchargement -->
-		<div style='display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:20px;'>
-			<button onclick='window.downloadVHRApp("apk")' id='btnDownloadAPK' style='
-				background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
-				color:#000;
-				border:none;
-				padding:15px 20px;
-				border-radius:8px;
-				font-weight:bold;
-				font-size:14px;
-				cursor:pointer;
-				transition:all 0.3s;
-			' onmouseover='this.style.transform="scale(1.05)";this.style.boxShadow="0 4px 12px rgba(46,204,113,0.4)"' onmouseout='this.style.transform="scale(1)";this.style.boxShadow="none"'>
-				📱 Télécharger APK
-			</button>
-			<button onclick='window.startVoiceStreaming()' id='btnDownloadVoice' style='
-				background:linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
-				color:#fff;
-				border:none;
-				padding:15px 20px;
-				border-radius:8px;
-				font-weight:bold;
-				font-size:14px;
-				cursor:pointer;
-				transition:all 0.3s;
-				opacity:0.6;
-			' onmouseover='this.style.transform="scale(1.05)";this.style.boxShadow="0 4px 12px rgba(149,165,166,0.4)"' onmouseout='this.style.transform="scale(1)";this.style.boxShadow="none"'>
-				🎤 Voix vers Casque
-			</button>
-		</div>
-		
-		<!-- Messages de Statut -->
-		<div id='downloadStatus' style='margin-bottom:15px;'></div>
-		
-		<!-- Authentification -->
-		<div style='padding:12px;background:rgba(46,204,113,0.1);border-left:4px solid #2ecc71;border-radius:4px;'>
-			<p style='margin:0;font-size:12px;color:#bdc3c7;'>
-				✅ <strong>Authentifié en tant que:</strong> ${window.currentUser || 'Utilisateur'}
-			</p>
-		</div>
-		
-		<!-- Informations de Fichiers -->
-		<div style='margin-top:15px;display:grid;grid-template-columns:1fr 1fr;gap:15px;font-size:11px;color:#95a5a6;'>
-			<div style='padding:10px;background:rgba(46,204,113,0.05);border-radius:4px;'>
-				<strong>APK:</strong><br>
-				Taille: 50-100 MB<br>
-				Durée: 2-5 min
-			</div>
-			<div style='padding:10px;background:rgba(231,76,60,0.05);border-radius:4px;'>
-				<strong>Données Vocales:</strong><br>
-				Taille: ~500 MB<br>
-				Durée: 5-15 min
-			</div>
-		</div>
-	`;
-
-	container.insertBefore(downloadSection, container.firstChild);
-	window.updateDownloadButtons();
-};
-
-window.updateDownloadStatus = function() {
-	// Initialize downloadProgress if not exists
-	if (!window.downloadProgress) {
-		window.downloadProgress = { apk: false, voice: false, compilationStarted: false, compilationInProgress: false, compilationDone: false };
-	}
-	
-	const statusDiv = document.getElementById('downloadStatus');
-	if (!statusDiv) return;
-	
-	let html = '';
-	
-	if (window.downloadProgress.apk) {
-		html += `
-			<div style='padding:10px;margin-bottom:10px;background:rgba(46,204,113,0.2);border-left:4px solid #2ecc71;border-radius:4px;color:#2ecc71;font-size:12px;font-weight:bold;'>
-				✅ Étape 1: APK téléchargée avec succès!
-			</div>
-		`;
-	}
-	
-	if (window.downloadProgress.apk && !window.downloadProgress.voice) {
-		html += `
-			<div style='padding:10px;margin-bottom:10px;background:rgba(52,152,219,0.2);border-left:4px solid #3498db;border-radius:4px;color:#3498db;font-size:12px;font-weight:bold;'>
-				➡️ Vous pouvez maintenant télécharger les données vocales
-			</div>
-		`;
-	}
-	
-	if (window.downloadProgress.voice && window.downloadProgress.apk) {
-		html += `
-			<div style='padding:10px;margin-bottom:10px;background:rgba(46,204,113,0.2);border-left:4px solid #2ecc71;border-radius:4px;color:#2ecc71;font-size:12px;font-weight:bold;'>
-				✅ Étape 1: Les deux fichiers sont téléchargés!
-			</div>
-		`;
-		
-		// Check if compilation is in progress or completed
-		if (window.downloadProgress.compilationInProgress) {
-			html += `
-				<div style='padding:10px;margin-bottom:10px;background:rgba(52,152,219,0.2);border-left:4px solid #3498db;border-radius:4px;color:#3498db;font-size:12px;font-weight:bold;'>
-					⏳ Compilation en cours (cela peut prendre quelques minutes)...<br>
-					<div style='margin-top:8px;background:#1a1d22;border-radius:4px;height:4px;overflow:hidden;'>
-						<div style='animation:progress 2s infinite;background:#3498db;height:100%;width:100%;'></div>
-					</div>
-				</div>
-			`;
-		} else if (window.downloadProgress.compilationDone) {
-			html += `
-				<div style='padding:10px;margin-bottom:10px;background:rgba(46,204,113,0.2);border-left:4px solid #2ecc71;border-radius:4px;color:#2ecc71;font-size:12px;font-weight:bold;'>
-					✅ Étape 2: Compilation terminée!
-				</div>
-			`;
-			html += `
-				<div style='padding:10px;margin-bottom:10px;background:rgba(39,174,96,0.2);border-left:4px solid #27ae60;border-radius:4px;color:#2ecc71;font-size:12px;font-weight:bold;'>
-					🎉 Votre APK est prête!<br>
-					<br>
-					📱 <strong>APK compilée avec succès</strong><br>
-					✅ Modèles vocaux intégrés<br>
-					✅ Prête pour l'installation<br>
-					<br>
-					⏭️ <strong>Prochaine étape:</strong><br>
-					<button onclick='window.downloadCompiledAPK()' style='background:#27ae60;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;margin:8px 0;'>
-						📥 Télécharger l'APK Compilée
-					</button>
-					<br>
-					<button onclick='window.showInstallOnDevicePanel()' style='background:#9b59b6;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;margin:8px 0;margin-left:0;'>
-						🚀 Installer sur Casque/Téléphone
-					</button>
-					<br>
-					<span style='font-size:11px;color:#95a5a6;'>Ou installez manuellement sur votre téléphone/casque</span>
-				</div>
-			`;
-		} else {
-			html += `
-				<div style='padding:10px;margin-bottom:10px;background:rgba(241,196,15,0.2);border-left:4px solid #f39c12;border-radius:4px;color:#f39c12;font-size:12px;font-weight:bold;'>
-					🎉 Compilation automatique en cours...<br>
-					<br>
-					📝 <strong>Ne pas extraire les fichiers!</strong><br>
-					✅ APK: Fichier d'installation (garder tel quel)<br>
-					✅ Voix: Géré automatiquement<br>
-					<br>
-					⏳ GitHub Actions compile votre APK avec les modèles vocaux (15-20 min)
-				</div>
-			`;
-			
-			// Start automatic compilation
-			if (!window.downloadProgress.compilationStarted) {
-				window.downloadProgress.compilationStarted = true;
-				window.startAutomaticCompilation();
-			}
-		}
-		
-		// Mark step 2 as active/complete
-		setTimeout(() => {
-			const step2 = document.getElementById('step2Indicator');
-			if (step2) {
-				step2.style.background = '#2ecc71';
-				step2.textContent = '✅';
-			}
-			// Mark step 3 as automatic
-			const step3 = document.getElementById('step3Indicator');
-			if (step3) {
-				step3.textContent = '⚙️';
-			}
-		}, 100);
-	}
-	
-	statusDiv.innerHTML = html;
-};
-
-window.closeInstallerPanel = function() {
-	const panel = document.getElementById('installerPanel');
-	if (panel) panel.remove();
+	requestAnimationFrame(window.animateAudioVisualizer);
 };
 
 window.closeAccountPanel = function() {
@@ -2342,11 +1579,6 @@ window.closeAudioStream = async function() {
 	}
 };
 
-	if (messagesArea) {
-		messagesArea.innerHTML = '<div style="text-align:center;color:#95a5a6;font-size:13px;padding:20px;">📝 Messages effacés</div>';
-	}
-};
-
 // ========== DEVICE ACTIONS ========== 
 window.renameDevice = async function(device) {
 	const name = prompt('Nouveau nom pour le casque', device.name);
@@ -3174,10 +2406,10 @@ window.registerUser = async function() {
 async function checkJWTAuth() {
 	console.log('[auth] Checking JWT authentication...');
 	try {
-		const res = await api('/api/me');
+		const res = await api('/api/check-auth');
 		console.log('[auth] API response:', res);
 		
-		if (res && res.ok && res.user) {
+		if (res && res.ok && res.authenticated && res.user) {
 			// User is authenticated
 			currentUser = res.user.username || res.user.name || res.user.email;
 			localStorage.setItem('vhr_current_user', currentUser);
@@ -3185,7 +2417,7 @@ async function checkJWTAuth() {
 			return true;
 		} else {
 			// No valid JWT - show auth modal
-			console.log('[auth] ❌ No valid JWT - res.ok =', res?.ok);
+			console.log('[auth] ❌ No valid JWT - authenticated =', res?.authenticated);
 			console.log('[auth] Showing auth modal...');
 			
 			// Hide the loading overlay immediately

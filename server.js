@@ -1324,6 +1324,31 @@ app.get('/api/me', authMiddleware, (req, res) => {
   res.json({ ok: true, user });
 });
 
+// --- Route pour vérifier l'authentification (optionnelle - pas de middleware requis) ---
+app.get('/api/check-auth', (req, res) => {
+  // Accept token from Authorization header (Bearer) OR cookie 'vhr_token'
+  let token = null;
+  if (req.headers && req.headers.authorization && req.headers.authorization.split(' ')[1]) {
+    token = req.headers.authorization.split(' ')[1];
+  } else if (req.cookies && req.cookies.vhr_token) {
+    token = req.cookies.vhr_token;
+  }
+  
+  if (!token) {
+    // No token - user not authenticated
+    return res.json({ ok: false, authenticated: false, user: null });
+  }
+  
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    // Token is valid
+    res.json({ ok: true, authenticated: true, user: { username: decoded.username, role: decoded.role } });
+  } catch (e) {
+    // Token is invalid or expired
+    res.json({ ok: false, authenticated: false, user: null });
+  }
+});
+
 // ========== LICENSE VERIFICATION FOR FEATURES ==========
 
 /**
