@@ -86,6 +86,13 @@ class VHRAudioStream {
       console.log('[VHRAudio] Requesting microphone access...');
       this.localStream = await navigator.mediaDevices.getUserMedia(this.config.audioConstraints);
       
+      // Connect local mic to audio graph for visualization
+      const micSource = this.audioContext.createMediaStreamSource(this.localStream);
+      micSource.connect(this.micGain);
+      this.micGain.connect(this.compressor);
+      this.compressor.connect(this.analyser);
+      this.analyser.connect(this.audioContext.destination);
+      
       // Setup peer connection
       await this._setupPeerConnection();
       
