@@ -584,7 +584,7 @@ window.downloadVHRApp = async function(type = 'apk') {
 		
 		// Handle non-OK responses
 		if (!response.ok) {
-			// Try to parse JSON error
+			// Try to parse JSON error first
 			let errorMessage = 'Téléchargement échoué';
 			try {
 				const errorData = await response.json();
@@ -598,8 +598,9 @@ window.downloadVHRApp = async function(type = 'apk') {
 				}
 			} catch (parseErr) {
 				// If response is not JSON, it might be HTML error page
+				// Don't try to read response again, just use status code
 				errorMessage = `Erreur serveur (${response.status}): Veuillez réessayer dans quelques minutes`;
-				console.error('Server error response:', await response.text());
+				console.error('Server error - Status:', response.status);
 			}
 			
 			throw new Error(errorMessage);
