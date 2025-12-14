@@ -578,56 +578,77 @@ window.downloadVHRApp = async function(type = 'apk') {
 		
 		const btn = event.target;
 		btn.disabled = true;
+		const originalText = btn.innerHTML;
+		
+		// Create progress container
+		const progressId = `progress-${type}`;
+		const existingProgress = document.getElementById(progressId);
+		if (existingProgress) existingProgress.remove();
+		
+		const progressContainer = document.createElement('div');
+		progressContainer.id = progressId;
+		progressContainer.style = 'margin:10px 0;padding:10px;background:rgba(52,152,219,0.1);border-radius:4px;';
+		progressContainer.innerHTML = `
+			<div style='font-size:11px;color:#bdc3c7;margin-bottom:5px;'>Progression: <span id='${type}-percent'>0</span>%</div>
+			<div style='background:#1a1d22;border-radius:3px;height:6px;overflow:hidden;'>
+				<div id='${type}-bar' style='background:#3498db;height:100%;width:0%;transition:width 0.3s;'></div>
+			</div>
+		`;
+		btn.parentElement.insertBefore(progressContainer, btn.nextSibling);
+		
 		btn.innerHTML = '⏳ Téléchargement...';
 		
-		const response = await fetch('/api/download/vhr-app', {
-			method: 'POST',
-			credentials: 'include',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ type })
+		// Use XMLHttpRequest for progress tracking
+		const downloadData = await new Promise((resolve, reject) => {
+			const xhr = new XMLHttpRequest();
+			
+			xhr.upload.addEventListener('progress', (event) => {
+				if (event.lengthComputable) {
+					const percentComplete = Math.round((event.loaded / event.total) * 100);
+					document.getElementById(`${type}-percent`).textContent = percentComplete;
+					document.getElementById(`${type}-bar`).style.width = percentComplete + '%';
+				}
+			});
+			
+			xhr.addEventListener('load', () => {
+				if (xhr.status === 200) {
+					resolve({ 
+						blob: new Blob([xhr.response]),
+						headers: xhr.getAllResponseHeaders(),
+						contentDisposition: xhr.getResponseHeader('content-disposition')
+					});
+				} else {
+					reject(new Error(`HTTP ${xhr.status}`));
+				}
+			});
+			
+			xhr.addEventListener('error', () => reject(new Error('Network error')));
+			
+			xhr.open('POST', '/api/download/vhr-app', true);
+			xhr.setRequestHeader('Content-Type', 'application/json');
+			xhr.responseType = 'arraybuffer';
+			xhr.withCredentials = true;
+			xhr.send(JSON.stringify({ type }));
 		});
 		
-		// Handle non-OK responses
-		if (!response.ok) {
-			// Try to parse JSON error first
-			let errorMessage = 'Téléchargement échoué';
-			try {
-				const errorData = await response.json();
-				errorMessage = errorData.message || errorData.error || errorMessage;
-				
-				if (response.status === 403 && errorData.needsSubscription) {
-					alert(`❌ ${errorMessage}\n\nRedirigé vers l'abonnement...`);
-					closeInstallerPanel();
-					showAccountPanel();
-					return;
-				}
-			} catch (parseErr) {
-				// If response is not JSON, it might be HTML error page
-				// Don't try to read response again, just use status code
-				errorMessage = `Erreur serveur (${response.status}): Veuillez réessayer dans quelques minutes`;
-				console.error('Server error - Status:', response.status);
-			}
-			
-			throw new Error(errorMessage);
-		}
-		
-		// Get filename from Content-Disposition header
-		const contentDisposition = response.headers.get('content-disposition');
+		// Extract filename
 		let fileName = type === 'apk' ? 'vhr-dashboard.apk' : 'voice-data.zip';
-		
-		if (contentDisposition) {
-			const fileNameMatch = contentDisposition.match(/filename="?([^"]*)"?$/);
+		if (downloadData.contentDisposition) {
+			const fileNameMatch = downloadData.contentDisposition.match(/filename="?([^"]*)"?$/);
 			if (fileNameMatch && fileNameMatch[1]) {
 				fileName = fileNameMatch[1];
 			}
 		}
 		
-		// Get blob and check size
-		const blob = await response.blob();
+		const blob = downloadData.blob;
 		
 		if (blob.size === 0) {
 			throw new Error(`Fichier vide reçu (${fileName}). Le serveur n'a pas envoyé de données.`);
 		}
+		
+		// Mark as 100% downloaded
+		document.getElementById(`${type}-percent`).textContent = '100';
+		document.getElementById(`${type}-bar`).style.width = '100%';
 		
 		// Trigger download
 		const url = window.URL.createObjectURL(blob);
@@ -646,12 +667,10 @@ window.downloadVHRApp = async function(type = 'apk') {
 			window.downloadProgress.voice = true;
 		}
 		
-		const sizeKB = (blob.size / 1024).toFixed(2);
-		const sizeMB = (blob.size / (1024*1024)).toFixed(2);
-		const displaySize = blob.size > 1024*1024 ? `${sizeMB} MB` : `${sizeKB} KB`;
-		
-		console.log(`✅ Downloaded: ${fileName} (${displaySize})`);
-		alert(`✅ Téléchargement réussi!\n\nFichier: ${fileName}\nTaille: ${displaySize}`);
+		// Hide progress container after successful download
+		setTimeout(() => {
+			progressContainer.style.display = 'none';
+		}, 1000);
 		
 		// Update UI after successful download
 		window.updateDownloadButtons();
