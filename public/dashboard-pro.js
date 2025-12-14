@@ -703,10 +703,9 @@ window.addDownloadSection = function() {
 			<p style='margin:0;font-size:12px;color:#bdc3c7;line-height:1.6;'>
 				<strong>📋 Processus Simple:</strong><br>
 				1️⃣ Télécharger l'APK ci-dessous<br>
-				2️⃣ Attendre la confirmation "✅ Téléchargement réussi!"<br>
-				3️⃣ Télécharger les données vocales<br>
-				4️⃣ Attendre la confirmation complète<br>
-				5️⃣ ✅ C'est tout! GitHub Actions compile automatiquement
+				2️⃣ Télécharger les données vocales<br>
+				3️⃣ Exécuter: <code style='background:#1a1d22;padding:2px 6px;border-radius:3px;font-family:monospace;'>git push origin main</code><br>
+				4️⃣ ✅ GitHub Actions compile automatiquement (15-20 min)
 			</p>
 		</div>
 		
@@ -718,7 +717,7 @@ window.addDownloadSection = function() {
 					📱
 				</div>
 				<div style='font-size:12px;color:#bdc3c7;font-weight:bold;'>Étape 1</div>
-				<div style='font-size:10px;color:#95a5a6;'>APK</div>
+				<div style='font-size:10px;color:#95a5a6;'>Télécharger</div>
 			</div>
 			
 			<!-- Flèche 1 -->
@@ -729,10 +728,10 @@ window.addDownloadSection = function() {
 			<!-- Étape 2 -->
 			<div style='text-align:center;flex:1;'>
 				<div id='step2Indicator' style='width:50px;height:50px;margin:0 auto 10px;border-radius:50%;background:#95a5a6;display:flex;align-items:center;justify-content:center;font-size:24px;'>
-					🎵
+					📤
 				</div>
 				<div style='font-size:12px;color:#bdc3c7;font-weight:bold;'>Étape 2</div>
-				<div style='font-size:10px;color:#95a5a6;'>Voix</div>
+				<div style='font-size:10px;color:#95a5a6;'>Git Push</div>
 			</div>
 			
 			<!-- Flèche 2 -->
@@ -746,7 +745,7 @@ window.addDownloadSection = function() {
 					⚙️
 				</div>
 				<div style='font-size:12px;color:#bdc3c7;font-weight:bold;'>Étape 3</div>
-				<div style='font-size:10px;color:#95a5a6;'>Compiler</div>
+				<div style='font-size:10px;color:#95a5a6;'>Automatique</div>
 			</div>
 		</div>
 		
@@ -835,25 +834,35 @@ window.updateDownloadStatus = function() {
 	if (window.downloadProgress.voice && window.downloadProgress.apk) {
 		html += `
 			<div style='padding:10px;margin-bottom:10px;background:rgba(46,204,113,0.2);border-left:4px solid #2ecc71;border-radius:4px;color:#2ecc71;font-size:12px;font-weight:bold;'>
-				✅ Étape 2: Données vocales téléchargées avec succès!
+				✅ Étape 1: Les deux fichiers sont téléchargés!
 			</div>
 		`;
 		html += `
 			<div style='padding:10px;margin-bottom:10px;background:rgba(241,196,15,0.2);border-left:4px solid #f39c12;border-radius:4px;color:#f39c12;font-size:12px;font-weight:bold;'>
-				🎉 Les deux fichiers sont prêts!<br>
-				✅ APK téléchargée: Ne rien faire, c'est un fichier d'installation<br>
-				✅ Voix téléchargée: Ne pas extraire, laissez le système gérer<br>
+				🎉 Prêt pour la compilation automatique!<br>
 				<br>
-				⏭️ Prochaine étape: Exécutez git push origin main<br>
-				GitHub Actions compilera l'APK finale automatiquement (15-20 min)
+				📝 <strong>Ne pas extraire les fichiers!</strong><br>
+				✅ APK: Fichier d'installation (garder tel quel)<br>
+				✅ Voix: Géré automatiquement par GitHub Actions<br>
+				<br>
+				🚀 <strong>Prochaine étape:</strong><br>
+				Ouvrez Git Bash / Terminal et exécutez:<br>
+				<code style='background:#1a1d22;padding:4px 8px;border-radius:3px;display:block;margin:8px 0;font-family:monospace;color:#2ecc71;'>git push origin main</code>
+				<br>
+				⚙️ GitHub Actions compilera l'APK finale automatiquement (15-20 min)
 			</div>
 		`;
 		
-		// Mark step 3 as active/complete
+		// Mark step 2 as active/complete
 		setTimeout(() => {
+			const step2 = document.getElementById('step2Indicator');
+			if (step2) {
+				step2.style.background = '#2ecc71';
+				step2.textContent = '📤';
+			}
+			// Mark step 3 as automatic
 			const step3 = document.getElementById('step3Indicator');
 			if (step3) {
-				step3.style.background = '#2ecc71';
 				step3.textContent = '✅';
 			}
 		}, 100);
