@@ -1826,19 +1826,20 @@ app.post('/api/download/vhr-app', authMiddleware, async (req, res) => {
     // Log download access
     console.log(`[download] User ${user.username} downloading ${type} from ${filePath}`);
     
-    // Send file with proper headers
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    
-    // Use sendFile with error handling
-    return res.sendFile(filePath, (err) => {
+    // Send file with proper headers and options
+    // sendFile() resets some headers, so we use options instead
+    return res.download(filePath, fileName, {
+      headers: {
+        'Content-Type': contentType,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
+    }, (err) => {
       if (err) {
-        console.error('[download] File send error:', err);
+        console.error('[download] File download error:', err);
         if (!res.headersSent) {
-          res.status(500).json({ ok: false, error: 'Failed to send file' });
+          res.status(500).json({ ok: false, error: 'Failed to download file' });
         }
       }
     });
