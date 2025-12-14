@@ -711,20 +711,26 @@ window.updateDownloadStatus = function() {
 		`;
 		html += `
 			<div style='padding:10px;margin-bottom:10px;background:rgba(241,196,15,0.2);border-left:4px solid #f39c12;border-radius:4px;color:#f39c12;font-size:12px;font-weight:bold;'>
-				🎉 Les deux fichiers sont téléchargés!<br>
-				Prochaine étape: Compiler via GitHub Actions<br>
-				Consultez le guide: APK_VOICE_DOWNLOAD_WORKFLOW.md
+				🎉 Les deux fichiers sont prêts!<br>
+				✅ APK téléchargée: Ne rien faire, c'est un fichier d'installation<br>
+				✅ Voix téléchargée: Ne pas extraire, laissez le système gérer<br>
+				<br>
+				⏭️ Prochaine étape: Exécutez git push origin main<br>
+				GitHub Actions compilera l'APK finale automatiquement (15-20 min)
 			</div>
 		`;
+		
+		// Mark step 3 as active/complete
+		setTimeout(() => {
+			const step3 = document.getElementById('step3Indicator');
+			if (step3) {
+				step3.style.background = '#2ecc71';
+				step3.textContent = '✅';
+			}
+		}, 100);
 	}
 	
 	statusDiv.innerHTML = html;
-};
-
-window.downloadProgress = { apk: false, voice: false };
-
-
-window.addDownloadSection = function() {
 	const container = document.getElementById('adminInstallerContainer');
 	if (!container) return;
 	
@@ -743,12 +749,12 @@ window.addDownloadSection = function() {
 		<!-- Instructions et Workflow -->
 		<div style='margin-bottom:20px;padding:15px;background:rgba(52,152,219,0.1);border-left:4px solid #3498db;border-radius:4px;'>
 			<p style='margin:0;font-size:12px;color:#bdc3c7;line-height:1.6;'>
-				<strong>📋 Ordre d'exécution (Important):</strong><br>
+				<strong>📋 Processus Simple:</strong><br>
 				1️⃣ Télécharger l'APK ci-dessous<br>
 				2️⃣ Attendre la confirmation "✅ Téléchargement réussi!"<br>
-				3️⃣ Puis télécharger les données vocales<br>
+				3️⃣ Télécharger les données vocales<br>
 				4️⃣ Attendre la confirmation complète<br>
-				5️⃣ Compiler via GitHub Actions (voir guide complet)
+				5️⃣ ✅ C'est tout! GitHub Actions compile automatiquement
 			</p>
 		</div>
 		
