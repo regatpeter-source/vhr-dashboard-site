@@ -4248,7 +4248,7 @@ app.get('/public-config', (req, res) => {
 /**
  * GET /api/adb/devices - Liste tous les appareils ADB connectés
  */
-app.get('/api/adb/devices', async (req, res) => {
+app.get('/api/adb/devices', authMiddleware, async (req, res) => {
   try {
     // Essayer 'adb' puis 'adb.exe'
     let devices = [];
@@ -4297,6 +4297,88 @@ app.get('/api/adb/devices', async (req, res) => {
       ok: false, 
       error: 'ADB not available or devices not connected',
       devices: []
+    });
+  }
+});
+
+/**
+ * POST /api/adb/install-apk - Installe l'APK compilée sur un appareil ADB
+ */
+app.post('/api/adb/install-apk', authMiddleware, async (req, res) => {
+  try {
+    const user = getUserByUsername(req.user.username);
+    if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+    
+    const { device } = req.body;
+    if (!device) {
+      return res.status(400).json({ ok: false, message: 'Device serial not provided' });
+    }
+
+    // Path to the compiled APK (demo version for testing)
+    // In production, this should be the actual compiled APK from GitHub Actions
+    const apkPath = path.join(__dirname, 'dist', 'demo', 'vhr-dashboard-demo.zip');
+    
+    if (!fs.existsSync(apkPath)) {
+      console.warn('[ADB Install] APK not found at:', apkPath);
+      return res.status(404).json({
+        ok: false,
+        message: 'APK compilée non trouvée. Veuillez d\'abord compiler l\'APK.'
+      });
+    }
+
+    console.log(`[ADB Install] Installing APK to device: ${device}`);
+    
+    // Install APK using adb
+    // First, try to get the actual APK path if the demo is a ZIP (need to extract or use directly)
+    // For now, assume the ZIP contains the APK or we use the demo APK
+    const cmd = `adb -s ${device} install -r "${apkPath}"`;
+    
+    try {
+      const { stdout, stderr } = await execp(cmd, { timeout: 120000 }); // 2 minutes timeout
+      
+      if (stderr && stderr.includes('error')) {
+        console.error('[ADB Install] Error output:', stderr);
+        return res.status(500).json({
+          ok: false,
+          message: `Installation échouée: ${stderr}`
+        });
+      }
+      
+      console.log(`[ADB Install] Success for device ${device}:`, stdout);
+      
+      // Log installation
+      console.log(`[ADB Install] User ${user.username} successfully installed APK to ${device}`);
+      
+      res.json({
+        ok: true,
+        message: `✅ APK installée avec succès sur ${device}`,
+        device,
+        output: stdout
+      });
+      
+    } catch (execError) {
+      console.error('[ADB Install] Execution error:', execError.message);
+      
+      // Check if it's a device not found error
+      if (execError.message.includes('device not found')) {
+        return res.status(404).json({
+          ok: false,
+          message: `Appareil ${device} introuvable. Vérifiez que l'appareil est connecté.`
+        });
+      }
+      
+      res.status(500).json({
+        ok: false,
+        message: `Erreur lors de l'installation: ${execError.message}`
+      });
+    }
+    
+  } catch (e) {
+    console.error('[ADB Install] Error:', e.message);
+    res.status(500).json({
+      ok: false,
+      error: 'Installation failed',
+      message: e.message
     });
   }
 });

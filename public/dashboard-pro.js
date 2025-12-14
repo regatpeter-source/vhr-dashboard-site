@@ -813,6 +813,96 @@ window.downloadCompiledAPK = async function() {
 	}
 };
 
+// Install APK on connected devices
+window.showInstallOnDevicePanel = async function() {
+	try {
+		// Get list of connected devices
+		const devicesRes = await fetch('/api/adb/devices', {
+			method: 'GET',
+			credentials: 'include',
+			headers: { 'Content-Type': 'application/json' }
+		});
+		
+		const devicesData = await devicesRes.json();
+		let devices = devicesData.devices || [];
+		
+		if (!devices.length) {
+			alert('❌ Aucun appareil détecté.\n\nAssurez-vous que:\n1. Votre casque/téléphone est connecté via USB\n2. ADB est activé sur l\'appareil\n3. L\'appareil a accepté le débogage ADB');
+			return;
+		}
+		
+		// Create panel to select device
+		let panel = document.getElementById('installDevicePanel');
+		if (panel) panel.remove();
+		
+		panel = document.createElement('div');
+		panel.id = 'installDevicePanel';
+		panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:3000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
+		panel.onclick = (e) => { if (e.target === panel) closeInstallDevicePanel(); };
+		
+		let devicesList = devices.map((device, idx) => `
+			<div style='padding:12px;margin:8px 0;background:#2a2d34;border:1px solid #2ecc71;border-radius:6px;cursor:pointer;' onclick='window.installAPKOnDevice("${device}")'>
+				<strong>📱 ${device}</strong>
+				<div style='font-size:11px;color:#95a5a6;margin-top:4px;'>Cliquez pour installer</div>
+			</div>
+		`).join('');
+		
+		panel.innerHTML = `
+			<div style='background:#1a1d24;border:3px solid #9b59b6;border-radius:16px;padding:24px;max-width:500px;width:90%;box-shadow:0 8px 32px #000;color:#fff;'>
+				<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;'>
+					<h3 style='margin:0;color:#2ecc71;'>🚀 Sélectionnez un appareil</h3>
+					<button onclick='closeInstallDevicePanel()' style='background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;'>✕</button>
+				</div>
+				
+				<p style='color:#bdc3c7;margin-bottom:15px;'>Appareils détectés (${devices.length}):</p>
+				${devicesList}
+				
+				<div style='margin-top:20px;padding:12px;background:rgba(52,152,219,0.1);border-left:4px solid #3498db;border-radius:4px;'>
+					<p style='margin:0;font-size:12px;color:#bdc3c7;'>
+						💡 <strong>Conseil:</strong> Assurez-vous que l\'appareil n\'exécute rien de critique
+					</p>
+				</div>
+			</div>
+		`;
+		
+		document.body.appendChild(panel);
+		
+	} catch (e) {
+		console.error('[Install] Error getting devices:', e.message);
+		alert('❌ Erreur lors de la récupération des appareils: ' + e.message);
+	}
+};
+
+// Install APK on specific device
+window.installAPKOnDevice = async function(device) {
+	try {
+		const response = await fetch('/api/adb/install-apk', {
+			method: 'POST',
+			credentials: 'include',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ device })
+		});
+		
+		const result = await response.json();
+		
+		if (!result.ok) {
+			throw new Error(result.message || 'Installation échouée');
+		}
+		
+		alert(`✅ Installation réussie sur ${device}!\n\n${result.message}`);
+		closeInstallDevicePanel();
+		
+	} catch (e) {
+		console.error('[Install APK] Error:', e.message);
+		alert('❌ Erreur lors de l\'installation:\n' + e.message);
+	}
+};
+
+window.closeInstallDevicePanel = function() {
+	const panel = document.getElementById('installDevicePanel');
+	if (panel) panel.remove();
+};
+
 // Add download section to installer panel
 window.addDownloadSection = function() {
 	// Initialize downloadProgress if not exists
@@ -1010,7 +1100,11 @@ window.updateDownloadStatus = function() {
 						📥 Télécharger l'APK Compilée
 					</button>
 					<br>
-					Puis installez sur votre téléphone/casque
+					<button onclick='window.showInstallOnDevicePanel()' style='background:#9b59b6;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;margin:8px 0;margin-left:0;'>
+						🚀 Installer sur Casque/Téléphone
+					</button>
+					<br>
+					<span style='font-size:11px;color:#95a5a6;'>Ou installez manuellement sur votre téléphone/casque</span>
 				</div>
 			`;
 		} else {
