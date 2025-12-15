@@ -1130,8 +1130,9 @@ function saveSubscriptions() {
 // Load all data at startup
 async function initializeApp() {
   if (USE_POSTGRES) {
+    console.log('[DB] Initializing PostgreSQL...');
     await db.initDatabase();
-    console.log('[DB] PostgreSQL initialized');
+    console.log('[DB] PostgreSQL initialized successfully');
   } else {
     messages = loadMessages();
     subscriptions = loadSubscriptions();
@@ -1139,9 +1140,15 @@ async function initializeApp() {
     
     console.log('[STARTUP] Messages count after load:', messages.length);
     console.log('[STARTUP] Messages content:', messages.map(m => ({ id: m.id, subject: m.subject })));
+    
+    // Ensure default users exist (important for Render where filesystem is ephemeral)
+    ensureDefaultUsers();
+    console.log(`[server] ✓ ${users.length} users loaded at startup`);
   }
+}
 
 // Ensure default users exist (important for Render where filesystem is ephemeral)
+// This is only used in JSON mode; PostgreSQL mode uses db.ensureDefaultUsers() in db.initDatabase()
 function ensureDefaultUsers() {
   const hasAdmin = users.some(u => u.username === 'vhr');
   const hasDemo = users.some(u => u.username === 'VhrDashboard');
@@ -1185,9 +1192,6 @@ function ensureDefaultUsers() {
     saveUsers();
   }
 }
-
-  ensureDefaultUsers();
-  console.log(`[server] ✓ ${users.length} users loaded at startup`);
 }
 
 // --- DB wrapper helpers (use SQLite adapter when enabled) ---
