@@ -63,9 +63,6 @@ if (-not $done) { Write-Host "ERROR: Server timeout after 60 seconds"; $p.Kill()
 Write-Host "Server ready! Opening browser..."
 Start-Process $url
 Write-Host "Dashboard opened at $url"
-Write-Host "Press Ctrl+C to stop server"
-$p.WaitForExit()
-if (-not $p.HasExited) { $p.Kill() }
-Write-Host "Server stopped"
-pause
+Write-Host "Server running in background - close this window to stop server"
+Start-Sleep -Seconds 2
 exit 0
