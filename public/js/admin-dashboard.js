@@ -118,7 +118,15 @@ async function loadMessages() {
     const res = await authFetch(`${API_BASE}/admin/messages`);
     console.log('[messages] Response status:', res.status);
     const data = await res.json();
-    console.log('[messages] Response data:', data);
+    console.log('[messages] Raw response data:', data);
+    console.log('[messages] data.ok:', data.ok, 'type:', typeof data.ok);
+    console.log('[messages] data.messages exists:', 'messages' in data);
+    console.log('[messages] data.messages value:', data.messages);
+    console.log('[messages] data.messages type:', typeof data.messages);
+    if (data.messages) {
+      console.log('[messages] Is array:', Array.isArray(data.messages));
+      console.log('[messages] Length:', data.messages.length);
+    }
     
     if (!res.ok) {
       console.error('[messages] API error:', data.error);
