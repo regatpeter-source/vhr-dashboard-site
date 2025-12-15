@@ -22,7 +22,12 @@ const http_module = require('http');
 const unzipper = require('unzipper');
 const fetch = require('node-fetch');
 
-// ========== JAVA & GRADLE MANAGEMENT ==========
+// PostgreSQL database module
+const db = process.env.DATABASE_URL ? require('./db-postgres') : null;
+const USE_POSTGRES = !!process.env.DATABASE_URL;
+console.log(`[DB] Mode: ${USE_POSTGRES ? 'PostgreSQL' : 'JSON Files (Development)'}`);
+
+// ========== JAVA & GRADLE MANAGEMENT ===========
 
 /**
  * Vérifie et installe automatiquement Java/Gradle si nécessaire
@@ -1123,12 +1128,18 @@ function saveSubscriptions() {
 }
 
 // Load all data at startup
-messages = loadMessages();
-subscriptions = loadSubscriptions();
-users = loadUsers();
-
-console.log('[STARTUP] Messages count after load:', messages.length);
-console.log('[STARTUP] Messages content:', messages.map(m => ({ id: m.id, subject: m.subject })));
+async function initializeApp() {
+  if (USE_POSTGRES) {
+    await db.initDatabase();
+    console.log('[DB] PostgreSQL initialized');
+  } else {
+    messages = loadMessages();
+    subscriptions = loadSubscriptions();
+    users = loadUsers();
+    
+    console.log('[STARTUP] Messages count after load:', messages.length);
+    console.log('[STARTUP] Messages content:', messages.map(m => ({ id: m.id, subject: m.subject })));
+  }
 
 // Ensure default users exist (important for Render where filesystem is ephemeral)
 function ensureDefaultUsers() {
@@ -1175,8 +1186,9 @@ function ensureDefaultUsers() {
   }
 }
 
-ensureDefaultUsers();
-console.log(`[server] ✓ ${users.length} users loaded at startup`);
+  ensureDefaultUsers();
+  console.log(`[server] ✓ ${users.length} users loaded at startup`);
+}
 
 // --- DB wrapper helpers (use SQLite adapter when enabled) ---
 let dbEnabled = false;
@@ -2906,7 +2918,7 @@ app.get('/api/test/messages', (req, res) => {
 });
 
 // Get all messages (AUTHENTICATED)
-app.get('/api/admin/messages', authMiddleware, (req, res) => {
+app.get('/api/admin/messages', authMiddleware, async (req, res) => {
   console.log('[api/admin/messages] Called');
   console.log('[api/admin/messages] User role:', req.user?.role);
   if (req.user.role !== 'admin') {
@@ -2914,10 +2926,15 @@ app.get('/api/admin/messages', authMiddleware, (req, res) => {
     return res.status(403).json({ ok: false, error: 'Accès refusé' });
   }
   try {
-    console.log('[api/admin/messages] messages var type:', typeof messages);
-    console.log('[api/admin/messages] messages length:', messages?.length);
-    console.log('[api/admin/messages] First message:', messages?.[0]);
-    res.json({ ok: true, messages });
+    let messageList;
+    
+    if (USE_POSTGRES) {
+      messageList = await db.getMessages();
+    } else {
+      messageList = messages || [];
+    }
+    
+    res.json({ ok: true, messages: messageList });
   } catch (e) {
     console.error('[api] admin/messages:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -4177,18 +4194,25 @@ io.on('connection', socket => {
 })();
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`\nVHR DASHBOARD - Optimisé Anti-Scintillement`);
-  console.log(`­ƒôí Server: http://localhost:${PORT}`);
-  console.log(`\n­ƒôè Profils disponibles (ADB screenrecord - stable):`);
-  console.log(`   · ultra-low: 320p, 600K (WiFi faible)`);
-  console.log(`   · low:       480p, 1.5M`);
-  console.log(`   • wifi:      640p, 2M (WiFi optimisé)`);
-  console.log(`   · default:   720p, 3M`);
-  console.log(`   · high:      1280p, 8M (USB)`);
-  console.log(`   · ultra:     1920p, 12M (USB uniquement)`);
-  console.log(`   Ô£à Pas de scintillement avec ADB natif`);
-  console.log(`\nCrop œil gauche activé par défaut\n`);
+
+// Start server after initializing app
+initializeApp().then(() => {
+  server.listen(PORT, () => {
+    console.log(`\nVHR DASHBOARD - Optimisé Anti-Scintillement`);
+    console.log(`­ƒôí Server: http://localhost:${PORT}`);
+    console.log(`\n­ƒôè Profils disponibles (ADB screenrecord - stable):`);
+    console.log(`   · ultra-low: 320p, 600K (WiFi faible)`);
+    console.log(`   · low:       480p, 1.5M`);
+    console.log(`   • wifi:      640p, 2M (WiFi optimisé)`);
+    console.log(`   · default:   720p, 3M`);
+    console.log(`   · high:      1280p, 8M (USB)`);
+    console.log(`   · ultra:     1920p, 12M (USB uniquement)`);
+    console.log(`   Ô£à Pas de scintillement avec ADB natif`);
+    console.log(`\nCrop œil gauche activé par défaut\n`);
+  });
+}).catch(err => {
+  console.error('[FATAL] Failed to initialize app:', err);
+  process.exit(1);
 });
 
 // Handler de fermeture propre
