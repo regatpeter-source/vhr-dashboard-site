@@ -2975,24 +2975,46 @@ app.get('/api/admin/messages/unread', authMiddleware, (req, res) => {
 });
 
 // Mark message as read and optionally respond
-app.patch('/api/admin/messages/:id', authMiddleware, (req, res) => {
+app.patch('/api/admin/messages/:id', authMiddleware, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
   try {
     const messageId = parseInt(req.params.id);
     const { status, response } = req.body || {};
-    const msg = messages.find(m => m.id === messageId);
-    if (!msg) return res.status(404).json({ ok: false, error: 'Message not found' });
     
-    if (status) msg.status = status;
-    if (response) {
-      msg.response = response;
-      msg.respondedAt = new Date().toISOString();
-      msg.respondedBy = req.user.username;
-    } else if (status === 'read') {
-      msg.readAt = new Date().toISOString();
+    if (USE_POSTGRES) {
+      // PostgreSQL version
+      const msg = await db.getMessages();
+      const m = msg.find(x => x.id === messageId);
+      if (!m) return res.status(404).json({ ok: false, error: 'Message not found' });
+      
+      const updates = {};
+      if (status) updates.status = status;
+      if (response) {
+        updates.response = response;
+        updates.respondedAt = new Date().toISOString();
+        updates.respondedBy = req.user.username;
+      } else if (status === 'read') {
+        updates.readAt = new Date().toISOString();
+      }
+      
+      await db.updateMessage(messageId, updates);
+      res.json({ ok: true, message: 'Message updated' });
+    } else {
+      // JSON fallback version
+      const msg = messages.find(m => m.id === messageId);
+      if (!msg) return res.status(404).json({ ok: false, error: 'Message not found' });
+      
+      if (status) msg.status = status;
+      if (response) {
+        msg.response = response;
+        msg.respondedAt = new Date().toISOString();
+        msg.respondedBy = req.user.username;
+      } else if (status === 'read') {
+        msg.readAt = new Date().toISOString();
+      }
+      saveMessages();
+      res.json({ ok: true, message: 'Message updated' });
     }
-    saveMessages();
-    res.json({ ok: true, message: 'Message updated' });
   } catch (e) {
     console.error('[api] admin/messages/:id:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -3000,15 +3022,27 @@ app.patch('/api/admin/messages/:id', authMiddleware, (req, res) => {
 });
 
 // Delete a message
-app.delete('/api/admin/messages/:id', authMiddleware, (req, res) => {
+app.delete('/api/admin/messages/:id', authMiddleware, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
   try {
     const messageId = parseInt(req.params.id);
-    const idx = messages.findIndex(m => m.id === messageId);
-    if (idx < 0) return res.status(404).json({ ok: false, error: 'Message not found' });
-    messages.splice(idx, 1);
-    saveMessages();
-    res.json({ ok: true, message: 'Message deleted' });
+    
+    if (USE_POSTGRES) {
+      // PostgreSQL version
+      const msg = await db.getMessages();
+      const m = msg.find(x => x.id === messageId);
+      if (!m) return res.status(404).json({ ok: false, error: 'Message not found' });
+      
+      await db.deleteMessage(messageId);
+      res.json({ ok: true, message: 'Message deleted' });
+    } else {
+      // JSON fallback version
+      const idx = messages.findIndex(m => m.id === messageId);
+      if (idx < 0) return res.status(404).json({ ok: false, error: 'Message not found' });
+      messages.splice(idx, 1);
+      saveMessages();
+      res.json({ ok: true, message: 'Message deleted' });
+    }
   } catch (e) {
     console.error('[api] admin/messages/:id (delete):', e);
     res.status(500).json({ ok: false, error: String(e) });
