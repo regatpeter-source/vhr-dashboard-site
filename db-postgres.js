@@ -324,6 +324,121 @@ async function updateUser(id, updates) {
   }
 }
 
+// ===== Subscriptions =====
+async function addSubscription(subscriptionData) {
+  try {
+    if (!subscriptionData || typeof subscriptionData !== 'object') return null;
+    const {
+      id,
+      username,
+      userId,
+      email,
+      stripeSubscriptionId,
+      stripePriceId,
+      status,
+      planName,
+      startDate,
+      endDate,
+      cancelledAt,
+      totalPaid
+    } = subscriptionData;
+
+    const result = await pool.query(
+      `INSERT INTO subscriptions (
+         id,
+         username,
+         userid,
+         email,
+         stripesubscriptionid,
+         stripepriceid,
+         status,
+         planname,
+         startdate,
+         enddate,
+         cancelledat,
+         totalpaid,
+         createdat,
+         updatedat
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       RETURNING *`,
+      [
+        id || null,
+        username || null,
+        userId || null,
+        email || null,
+        stripeSubscriptionId || null,
+        stripePriceId || null,
+        status || 'active',
+        planName || null,
+        startDate ? new Date(startDate) : null,
+        endDate ? new Date(endDate) : null,
+        cancelledAt ? new Date(cancelledAt) : null,
+        totalPaid || 0
+      ]
+    );
+    return result.rows?.[0] || null;
+  } catch (err) {
+    console.error('[DB] Error adding subscription:', err && err.message ? err.message : err);
+    return null;
+  }
+}
+
+async function getAllSubscriptions() {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM subscriptions ORDER BY createdat DESC'
+    );
+    return result.rows || [];
+  } catch (err) {
+    console.error('[DB] Error getting subscriptions:', err && err.message ? err.message : err);
+    return [];
+  }
+}
+
+async function updateSubscription(id, updates) {
+  try {
+    if (!updates || typeof updates !== 'object') return null;
+    const allowed = new Set([
+      'status',
+      'planname',
+      'startdate',
+      'enddate',
+      'cancelledat',
+      'totalpaid'
+    ]);
+
+    const fields = [];
+    const values = [];
+    let i = 1;
+    for (const [k, v] of Object.entries(updates)) {
+      const key = String(k).toLowerCase();
+      if (!allowed.has(key)) continue;
+      fields.push(`${key} = $${i}`);
+      values.push(v);
+      i++;
+    }
+    if (fields.length === 0) return null;
+    values.push(id);
+
+    const query = `UPDATE subscriptions SET ${fields.join(', ')}, updatedat = CURRENT_TIMESTAMP WHERE id = $${i} RETURNING *`;
+    const result = await pool.query(query, values);
+    return result.rows?.[0] || null;
+  } catch (err) {
+    console.error('[DB] Error updating subscription:', err && err.message ? err.message : err);
+    return null;
+  }
+}
+
+async function deleteSubscription(id) {
+  try {
+    await pool.query('DELETE FROM subscriptions WHERE id = $1', [id]);
+    return true;
+  } catch (err) {
+    console.error('[DB] Error deleting subscription:', err && err.message ? err.message : err);
+    return false;
+  }
+}
+
 module.exports = {
   pool,
   initDatabase,
@@ -336,5 +451,10 @@ module.exports = {
   getUsers,
   getUserByUsername,
   createUser,
-  updateUser
+  updateUser,
+  // subscriptions
+  addSubscription,
+  getAllSubscriptions,
+  updateSubscription,
+  deleteSubscription
 };
