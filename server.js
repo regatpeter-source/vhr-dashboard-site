@@ -1297,15 +1297,24 @@ function authMiddleware(req, res, next) {
 // --- Route de login ---
 app.post('/api/login', async (req, res) => {
   console.log('[api/login] request received:', req.body);
-  reloadUsers(); // Reload users from file in case they were modified externally
   const { username, password } = req.body;
   console.log('[api/login] attempting login for:', username);
-  const user = getUserByUsername(username);
+  
+  let user;
+  if (USE_POSTGRES) {
+    user = await db.getUserByUsername(username);
+    console.log('[api/login] user from PostgreSQL:', user ? 'found' : 'not found');
+  } else {
+    reloadUsers(); // Reload users from file in case they were modified externally
+    user = getUserByUsername(username);
+    console.log('[api/login] user from memory:', user ? 'found' : 'not found');
+  }
+  
   if (!user) {
     console.log('[api/login] user not found');
     return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
   }
-  const valid = await bcrypt.compare(password, user.passwordHash);
+  const valid = await bcrypt.compare(password, user.passwordhash || user.passwordHash);
   if (!valid) {
     console.log('[api/login] password mismatch');
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
