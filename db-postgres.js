@@ -1,3 +1,6 @@
+  // Log all messages in the table for debug
+  const allMessages = await client.query('SELECT id, sender, subject FROM messages');
+  console.log('[DB] Messages in table after init:', allMessages.rows);
 const { Pool } = require('pg');
 
 // PostgreSQL connection pool
