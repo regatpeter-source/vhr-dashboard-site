@@ -34,43 +34,50 @@
       }
   // Log all messages in the table for debug
   const allMessages = await client.query('SELECT id, sender, subject FROM messages');
-  console.log('[DB] Messages in table after init:', allMessages.rows);
-const { Pool } = require('pg');
-
-// PostgreSQL connection pool
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
-
-// Initialize database and create tables
-async function initDatabase() {
-  try {
-    const client = await pool.connect();
-    
-    console.log('[DB] Initializing PostgreSQL database...');
-    
-    // Create messages table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS messages (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        email VARCHAR(255) NOT NULL,
-        subject VARCHAR(255) NOT NULL,
-        message TEXT NOT NULL,
-        status VARCHAR(50) DEFAULT 'unread',
-        response TEXT,
-        respondedBy VARCHAR(255),
-        respondedAt TIMESTAMP,
-        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
     console.log('[DB] ✓ Messages table ready');
     
     // Create users table
+                  await importMessagesIfNeeded(client);
+    // Import messages from JSON if table is empty
+    async function importMessagesIfNeeded(client) {
+      const allMessages = await client.query('SELECT id, sender, subject FROM messages');
+      if (allMessages.rows.length === 0) {
+        const fs = require('fs');
+        const path = require('path');
+        const messagesPath = path.join(__dirname, 'data', 'messages.json');
+        if (fs.existsSync(messagesPath)) {
+          const raw = fs.readFileSync(messagesPath, 'utf8');
+          try {
+            const messages = JSON.parse(raw);
+            for (const m of messages) {
+              await client.query(
+                'INSERT INTO messages (id, sender, email, subject, message, status, createdAt, response, respondedAt, respondedBy) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+                [
+                  m.id,
+                  m.name,
+                  m.email,
+                  m.subject,
+                  m.message,
+                  m.status,
+                  m.createdAt,
+                  m.response || null,
+                  m.respondedAt || null,
+                  m.respondedBy || null
+                ]
+              );
+            }
+            console.log(`[DB] Imported ${messages.length} messages from messages.json`);
+          } catch (e) {
+            console.error('[DB] Failed to import messages from JSON:', e);
+          }
+        } else {
+          console.warn('[DB] messages.json not found, no messages imported');
+        }
+      }
+      // Log all messages in the table for debug
+      const afterImport = await client.query('SELECT id, sender, subject FROM messages');
+      console.log('[DB] Messages in table after init:', afterImport.rows);
+    }
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id VARCHAR(255) PRIMARY KEY,
