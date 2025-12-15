@@ -1127,6 +1127,9 @@ messages = loadMessages();
 subscriptions = loadSubscriptions();
 users = loadUsers();
 
+console.log('[STARTUP] Messages count after load:', messages.length);
+console.log('[STARTUP] Messages content:', messages.map(m => ({ id: m.id, subject: m.subject })));
+
 // Ensure default users exist (important for Render where filesystem is ephemeral)
 function ensureDefaultUsers() {
   const hasAdmin = users.some(u => u.username === 'vhr');
@@ -2904,10 +2907,16 @@ app.get('/api/test/messages', (req, res) => {
 
 // Get all messages (AUTHENTICATED)
 app.get('/api/admin/messages', authMiddleware, (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  console.log('[api/admin/messages] Called');
+  console.log('[api/admin/messages] User role:', req.user?.role);
+  if (req.user.role !== 'admin') {
+    console.log('[api/admin/messages] Access denied');
+    return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  }
   try {
-    console.log('[api/admin/messages] User:', req.user.username, 'Messages count:', messages.length);
-    console.log('[api/admin/messages] Messages:', JSON.stringify(messages, null, 2));
+    console.log('[api/admin/messages] messages var type:', typeof messages);
+    console.log('[api/admin/messages] messages length:', messages?.length);
+    console.log('[api/admin/messages] First message:', messages?.[0]);
     res.json({ ok: true, messages });
   } catch (e) {
     console.error('[api] admin/messages:', e);
@@ -3184,9 +3193,10 @@ let streams = new Map();
 
 const wssMpeg1 = new WebSocket.Server({ noServer: true });
 
-// Audio streaming: Map<serial, { sender: ws, receivers: [ws] }>
+// Audio streaming: Map<serial, { sender: ws, receivers: [ws], buffer: [chunks] }>
 const audioStreams = new Map();
 const wssAudio = new WebSocket.Server({ noServer: true });
+const AUDIO_BUFFER_SIZE = 50; // Keep last 50 chunks in buffer
 
 function startAdbTrack() {
   let debounceTimer = null;
@@ -3423,7 +3433,7 @@ function handleAudioWebSocket(serial, ws, req) {
   
   // Get or create audio stream entry for this serial
   if (!audioStreams.has(serial)) {
-    audioStreams.set(serial, { sender: null, receivers: new Set() });
+    audioStreams.set(serial, { sender: null, receivers: new Set(), buffer: [] });
   }
   
   const audioEntry = audioStreams.get(serial);
@@ -3434,6 +3444,12 @@ function handleAudioWebSocket(serial, ws, req) {
     console.log(`[Audio] Sender connected: ${serial}`);
     
     ws.on('message', (data) => {
+      // Add to buffer for late-joining receivers
+      audioEntry.buffer.push(data);
+      if (audioEntry.buffer.length > AUDIO_BUFFER_SIZE) {
+        audioEntry.buffer.shift();
+      }
+      
       // Relay audio chunk to all connected receivers
       const receivers = audioEntry.receivers;
       console.log(`[Audio] Sender relaying chunk (${data.length} bytes) to ${receivers.size} receiver(s)`);
@@ -3472,9 +3488,24 @@ function handleAudioWebSocket(serial, ws, req) {
     // Headset receiving audio
     audioEntry.receivers.add(ws);
     console.log(`[Audio] Receiver connected: ${serial}, total receivers: ${audioEntry.receivers.size}`);
+    console.log(`[Audio] Current sender status: ${audioEntry.sender ? 'CONNECTED' : 'NOT CONNECTED'}`);
+    console.log(`[Audio] Sending buffered chunks to new receiver: ${audioEntry.buffer.length} chunks`);
+    
+    // Send buffered audio chunks first
+    for (const chunk of audioEntry.buffer) {
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(chunk);
+        } catch (e) {
+          console.error(`[Audio] Failed to send buffered chunk to receiver:`, e.message);
+          break;
+        }
+      }
+    }
     
     // If sender already connected, notify receiver
     if (audioEntry.sender && audioEntry.sender.readyState === WebSocket.OPEN) {
+      console.log(`[Audio] Notifying receiver that sender is ready`);
       try {
         ws.send(JSON.stringify({ type: 'sender-connected' }));
       } catch (e) {}
@@ -3504,6 +3535,7 @@ function handleAudioWebSocket(serial, ws, req) {
 
 // ---------- WebSocket ----------
 server.on('upgrade', (req, res, head) => {
+  console.log(`[Upgrade] Request for URL: ${req.url}`);
   // Audio streaming endpoint
   if (req.url.startsWith('/api/audio/stream')) {
     try {

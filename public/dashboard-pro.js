@@ -863,6 +863,15 @@ let games = [];
 let favorites = [];
 let runningApps = {}; // Track running apps: { serial: [pkg1, pkg2, ...] }
 
+// Auto-refresh battery levels every 10 seconds
+setInterval(() => {
+	if (devices && devices.length > 0) {
+		devices.forEach(d => {
+			fetchBatteryLevel(d.serial);
+		});
+	}
+}, 10000);
+
 async function api(path, opts = {}) {
 	try {
 		// Include cookies in request (for httpOnly vhr_token cookie)
@@ -1024,7 +1033,10 @@ function renderDevicesCards() {
 		const runningGameDisplay = runningGamesList.length > 0 ? `<div style='background:#27ae60;color:#fff;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:bold;margin-bottom:10px;'>🎮 ${runningGamesList.join(', ')}</div>` : '';
 		
 		card.innerHTML = `
-			<div style='font-weight:bold;font-size:18px;color:#2ecc71;margin-bottom:8px;'>${d.name}</div>
+			<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'>
+				<div style='font-weight:bold;font-size:18px;color:#2ecc71;'>${d.name}</div>
+				<div id='battery_${d.serial}' style='font-size:14px;font-weight:bold;color:#f39c12;'>🔋 --</div>
+			</div>
 			<div style='font-size:11px;color:#95a5a6;margin-bottom:12px;'>${d.serial}</div>
 			<div style='margin-bottom:12px;'>
 				<span style='background:${statusColor};color:#fff;padding:4px 12px;border-radius:6px;font-size:12px;font-weight:bold;'>
@@ -1063,7 +1075,27 @@ function renderDevicesCards() {
 		`;
 		
 		grid.appendChild(card);
+		
+		// Fetch battery level for this device
+		fetchBatteryLevel(d.serial);
 	});
+}
+
+// Fetch and update battery level for a device
+async function fetchBatteryLevel(serial) {
+	try {
+		const data = await api(`/api/battery/${serial}`);
+		if (data.ok && data.level !== null) {
+			const element = document.getElementById(`battery_${serial}`);
+			if (element) {
+				const batteryColor = data.level > 50 ? '#2ecc71' : data.level > 20 ? '#f39c12' : '#e74c3c';
+				const batteryIcon = data.level > 80 ? '🔋' : data.level > 50 ? '🪫' : data.level > 20 ? '⚠️' : '🔴';
+				element.innerHTML = `<span style='color:${batteryColor};'>${batteryIcon} ${data.level}%</span>`;
+			}
+		}
+	} catch (err) {
+		console.error(`Battery fetch error for ${serial}:`, err);
+	}
 }
 
 function renderDevices() {
