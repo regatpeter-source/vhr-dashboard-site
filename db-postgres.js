@@ -1,37 +1,3 @@
-      // Import messages from JSON if table is empty
-      if (allMessages.rows.length === 0) {
-        const fs = require('fs');
-        const path = require('path');
-        const messagesPath = path.join(__dirname, 'data', 'messages.json');
-        if (fs.existsSync(messagesPath)) {
-          const raw = fs.readFileSync(messagesPath, 'utf8');
-          try {
-            const messages = JSON.parse(raw);
-            for (const m of messages) {
-              await client.query(
-                'INSERT INTO messages (id, sender, email, subject, message, status, createdAt, response, respondedAt, respondedBy) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
-                [
-                  m.id,
-                  m.name,
-                  m.email,
-                  m.subject,
-                  m.message,
-                  m.status,
-                  m.createdAt,
-                  m.response || null,
-                  m.respondedAt || null,
-                  m.respondedBy || null
-                ]
-              );
-            }
-            console.log(`[DB] Imported ${messages.length} messages from messages.json`);
-          } catch (e) {
-            console.error('[DB] Failed to import messages from JSON:', e);
-          }
-        } else {
-          console.warn('[DB] messages.json not found, no messages imported');
-        }
-      }
   // Log all messages in the table for debug
   const allMessages = await client.query('SELECT id, sender, subject FROM messages');
     console.log('[DB] ✓ Messages table ready');
