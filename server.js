@@ -1238,7 +1238,12 @@ function getUserByEmail(email) {
 }
 
 function persistUser(user) {
-  if (dbEnabled) {
+  if (USE_POSTGRES) {
+    // Save async to PostgreSQL (fire and forget to avoid blocking)
+    db.createUser(user.id || `user_${user.username}`, user.username, user.passwordHash, user.email, user.role)
+      .catch(err => console.error('[db] persistUser error:', err && err.message ? err.message : err));
+    return true;
+  } else if (dbEnabled) {
     require('./db').addOrUpdateUser(user);
     // keep in-memory list sync
     users = require('./db').getAllUsers();
@@ -2269,7 +2274,14 @@ app.post('/api/subscriptions/cancel', authMiddleware, async (req, res) => {
     // Mettre à jour l'utilisateur
     user.subscriptionStatus = 'cancelled';
     persistUser(user);
-    saveSubscriptions();
+    
+    if (USE_POSTGRES) {
+      // Save to PostgreSQL
+      db.updateSubscription(sub.id, { status: 'cancelled', cancelledat: sub.cancelledAt })
+        .catch(err => console.error('[db] updateSubscription error:', err && err.message ? err.message : err));
+    } else {
+      saveSubscriptions();
+    }
 
     res.json({ 
       ok: true, 
