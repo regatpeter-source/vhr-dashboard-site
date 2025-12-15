@@ -3028,19 +3028,32 @@ app.post('/api/contact', async (req, res) => {
     
     console.log('[contact] New message from:', email, 'subject:', subject);
     
-    // Add to in-memory messages
-    const msg = {
-      id: messageIdCounter++,
-      name,
-      email,
-      subject,
-      message,
-      status: 'unread',
-      createdAt: new Date().toISOString()
-    };
-    messages.push(msg);
-    saveMessages();
-    console.log('[contact] Message saved to messages.json');
+    let msg;
+    
+    if (USE_POSTGRES) {
+      // Save to PostgreSQL
+      msg = await db.createMessage(name, email, subject, message);
+      if (msg) {
+        console.log('[contact] Message saved to PostgreSQL');
+      } else {
+        console.error('[contact] Failed to save message to PostgreSQL');
+        return res.status(500).json({ ok: false, error: 'Erreur lors de la sauvegarde du message' });
+      }
+    } else {
+      // Add to in-memory messages (fallback for development)
+      msg = {
+        id: messageIdCounter++,
+        name,
+        email,
+        subject,
+        message,
+        status: 'unread',
+        createdAt: new Date().toISOString()
+      };
+      messages.push(msg);
+      saveMessages();
+      console.log('[contact] Message saved to messages.json');
+    }
     
     // Send email notification to admin
     const emailSent = await sendContactMessageToAdmin(msg);
