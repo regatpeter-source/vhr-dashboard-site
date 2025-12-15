@@ -49,7 +49,7 @@ for ($i = 0; $i -lt 120; $i++) {
   }
   
   try {
-    $r = Invoke-WebRequest -Uri "http://localhost:$port/ping" -TimeoutSec 1 -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
+    $r = Invoke-WebRequest -Uri "http://localhost:$port/ping" -TimeoutSec 1 -UseBasicParsing -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
     if ($r.StatusCode -eq 200) { $done = $true; break }
   } catch { }
   
