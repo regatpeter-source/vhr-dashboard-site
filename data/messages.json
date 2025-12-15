@@ -1,0 +1,26 @@
+[
+  {
+    "id": 2,
+    "name": "Marie Martin",
+    "email": "marie.martin@example.com",
+    "subject": "Question about VHR Dashboard features",
+    "message": "I would like to know more about the remote control features and how they work with VR headsets.",
+    "status": "responded",
+    "createdAt": "2025-12-06T10:15:00Z",
+    "response": "Bonjour Marie,\n\nMerci pour votre question intéressante !\n\nNos fonctionnalités de contrôle à distance sont conçues pour offrir une expérience de gestion VR complète et intuitive. Je vous invite à essayer le dashboard gratuitement pendant 7 jours afin de comprendre pleinement ce que nous proposons.\n\nN'hésitez pas à nous contacter si vous avez d'autres questions.\n\n---\n📱 VHR Dashboard Support\nPeter Vhr Dashboard\nYour VR Management Solution\ncontact@vhrdashboard.com",
+    "respondedAt": "2025-12-07T22:13:06.869Z",
+    "respondedBy": "vhr"
+  },
+  {
+    "id": 3,
+    "name": "Luc Bertrand",
+    "email": "luc.bertrand@example.com",
+    "subject": "Integration with our VR studio",
+    "message": "We are interested in integrating VHR Dashboard into our professional VR studio. Could you provide more details about enterprise pricing?",
+    "status": "responded",
+    "createdAt": "2025-12-07T18:45:00Z",
+    "response": "bonjour Luc,\n\nnous proposons actuellement une licence définitive au tarif de 499 ttc.\n\n---\n📱 VHR Dashboard Support\nPeter Vhr Dashboard\nYour VR Management Solution\ncontact@vhrdashboard.com",
+    "respondedAt": "2025-12-07T22:20:01.889Z",
+    "respondedBy": "vhr"
+  }
+]

@@ -14,7 +14,10 @@ coverage/
 *.key
 tests/__snapshots__/
 public/broadway/public/
-data/
+data/*
+!data/messages.json
+!data/subscriptions.json
+!data/users.json
 *.bak
 public/.vscode/
 tmp_*
