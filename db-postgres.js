@@ -91,7 +91,7 @@ async function initDatabase() {
       console.error('[DB] Initialization error:', err && err.message ? err.message : err);
       // Allow retry on next call if init failed.
       initPromise = null;
-      return false;
+      throw err;  // Re-throw to reject the promise so errors are caught upstream
     } finally {
       client.release();
     }
