@@ -63,6 +63,39 @@ async function initDatabase() {
     `);
     console.log('[DB] ✓ Subscriptions table ready');
     
+    // Ensure default users exist
+    const adminCheck = await client.query('SELECT COUNT(*) FROM users WHERE username = $1', ['vhr']);
+    if (adminCheck.rows[0].count === '0') {
+      console.log('[DB] Creating default users...');
+      // Create admin user
+      await client.query(
+        'INSERT INTO users (id, username, passwordHash, email, role) VALUES ($1, $2, $3, $4, $5)',
+        [
+          'admin_vhr',
+          'vhr',
+          '$2b$10$ov9F32cIWWXhvNumETtB1urvsdD5Y4Wl6wXlSHoCy.f4f03kRGcf2', // password: VHR@Render#2025!SecureAdmin789
+          'admin@example.local',
+          'admin'
+        ]
+      );
+      console.log('[DB] ✓ Admin user created');
+      // Create demo user
+      await client.query(
+        'INSERT INTO users (id, username, passwordHash, email, role) VALUES ($1, $2, $3, $4, $5)',
+        [
+          'user_demo',
+          'VhrDashboard',
+          '$2b$10$XtU3hKSETcFgyx9w.KfL5unRFQ7H2Q26vBKXXjQ05Kz47mZbvrdQS', // password: VhrDashboard@2025
+          'regatpeter@hotmail.fr',
+          'user'
+        ]
+      );
+      console.log('[DB] ✓ Demo user created');
+    }
+    // Log all users in the table for debug
+    const allUsers = await client.query('SELECT id, username, email, role FROM users');
+    console.log('[DB] Users in table after init:', allUsers.rows);
+    
     client.release();
     console.log('[DB] PostgreSQL initialized successfully');
     return true;
