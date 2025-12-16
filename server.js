@@ -652,20 +652,34 @@ async function sendContactMessageToAdmin(msg) {
 // Send reply email to contact sender
 async function sendReplyToContact(originalMessage, replyText, repliedBy) {
   const recipientEmail = originalMessage.email;
+  
+  console.log('[email] sendReplyToContact() called');
+  console.log('[email] Recipient email:', recipientEmail);
+  console.log('[email] Reply text length:', replyText ? replyText.length : 0);
+  console.log('[email] Replied by:', repliedBy);
+  console.log('[email] EMAIL_USER configured:', !!process.env.EMAIL_USER);
+  console.log('[email] EMAIL_PASS configured:', !!process.env.EMAIL_PASS);
+  console.log('[email] EMAIL_FROM:', process.env.EMAIL_FROM || 'not set');
+  
   if (!recipientEmail) {
-    console.error('[email] Recipient email not available');
+    console.error('[email] ✗ Recipient email not available');
     return false;
   }
 
   if (!process.env.EMAIL_PASS) {
-    console.error('[email] EMAIL_PASS not configured, cannot send reply');
+    console.error('[email] ✗ EMAIL_PASS not configured, cannot send reply');
     return false;
   }
 
-  console.log('[email] Preparing reply to:', recipientEmail);
+  if (!emailTransporter) {
+    console.error('[email] ✗ emailTransporter not initialized');
+    return false;
+  }
+
+  console.log('[email] → Preparing reply to:', recipientEmail);
 
   const mailOptions = {
-    from: process.env.EMAIL_USER,
+    from: process.env.EMAIL_USER || process.env.EMAIL_FROM || 'noreply@vhr-dashboard.local',
     to: recipientEmail,
     subject: `Réponse: ${originalMessage.subject}`,
     html: `
@@ -698,14 +712,18 @@ async function sendReplyToContact(originalMessage, replyText, repliedBy) {
   };
 
   try {
-    console.log('[email] Sending reply via SMTP...');
+    console.log('[email] → Sending reply via SMTP from:', mailOptions.from);
     const info = await emailTransporter.sendMail(mailOptions);
     console.log('[email] ✓ Reply sent successfully');
     console.log('[email] Response ID:', info.response);
+    console.log('[email] Message ID:', info.messageId);
     return true;
   } catch (e) {
     console.error('[email] ✗ Failed to send reply');
-    console.error('[email] Error:', e.message);
+    console.error('[email] Error name:', e.name);
+    console.error('[email] Error message:', e.message);
+    console.error('[email] Error code:', e.code);
+    if (e.response) console.error('[email] SMTP response:', e.response);
     return false;
   }
 }
@@ -3212,6 +3230,10 @@ app.get('/api/admin/messages/unread', authMiddleware, (req, res) => {
 app.patch('/api/admin/messages/:id', authMiddleware, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
   try {
+    console.log('[api] PATCH /api/admin/messages/:id - messageId:', req.params.id);
+    console.log('[api] Request body:', JSON.stringify(req.body, null, 2));
+    console.log('[api] User:', req.user.username, 'Role:', req.user.role);
+    
     const messageId = parseInt(req.params.id);
     const { status, response } = req.body || {};
     
@@ -3224,6 +3246,7 @@ app.patch('/api/admin/messages/:id', authMiddleware, async (req, res) => {
       const updates = {};
       if (status) updates.status = status;
       if (response) {
+        console.log('[api] Sending response to message', messageId, 'with text length:', response.length);
         updates.response = response;
         updates.respondedAt = new Date().toISOString();
         updates.respondedBy = req.user.username;
@@ -3231,9 +3254,9 @@ app.patch('/api/admin/messages/:id', authMiddleware, async (req, res) => {
         // Send reply email to the contact sender
         const emailSent = await sendReplyToContact(m, response, req.user.username);
         if (emailSent) {
-          console.log('[api] Reply email sent to:', m.email);
+          console.log('[api] ✓ Reply email sent to:', m.email);
         } else {
-          console.warn('[api] Failed to send reply email to:', m.email);
+          console.warn('[api] ✗ Failed to send reply email to:', m.email);
         }
       } else if (status === 'read') {
         updates.readAt = new Date().toISOString();
@@ -3249,6 +3272,7 @@ app.patch('/api/admin/messages/:id', authMiddleware, async (req, res) => {
       let emailSent = false;
       if (status) msg.status = status;
       if (response) {
+        console.log('[api] Sending response to message', messageId, 'with text length:', response.length);
         msg.response = response;
         msg.respondedAt = new Date().toISOString();
         msg.respondedBy = req.user.username;
@@ -3256,19 +3280,21 @@ app.patch('/api/admin/messages/:id', authMiddleware, async (req, res) => {
         // Send reply email to the contact sender
         emailSent = await sendReplyToContact(msg, response, req.user.username);
         if (emailSent) {
-          console.log('[api] Reply email sent to:', msg.email);
+          console.log('[api] ✓ Reply email sent to:', msg.email);
         } else {
-          console.warn('[api] Failed to send reply email to:', msg.email);
+          console.warn('[api] ✗ Failed to send reply email to:', msg.email);
         }
       } else if (status === 'read') {
         msg.readAt = new Date().toISOString();
       }
       saveMessages();
+      console.log('[api] Message saved to JSON. Total messages:', messages.length);
       res.json({ ok: true, message: 'Message updated', emailSent });
     }
   } catch (e) {
-    console.error('[api] admin/messages/:id:', e);
-    res.status(500).json({ ok: false, error: String(e) });
+    console.error('[api] PATCH /api/admin/messages/:id ERROR:', e.message);
+    console.error('[api] Stack:', e.stack);
+    res.status(500).json({ ok: false, error: String(e.message) });
   }
 });
 
