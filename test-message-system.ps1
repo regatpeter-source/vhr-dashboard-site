@@ -47,7 +47,7 @@ try {
         -ContentType "application/json" `
         -Body (ConvertTo-Json @{ 
             username = "vhr"
-            password = "VHR@Render#2025!SecureAdmin789"
+            password = "04091110RppvlTa2025"
         }) `
         -UseBasicParsing `
         -TimeoutSec 10 `
