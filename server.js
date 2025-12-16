@@ -503,30 +503,39 @@ function getDemoRemainingDays(user) {
 const LICENSES_FILE = path.join(__dirname, 'data', 'licenses.json');
 
 // ========== EMAIL CONFIGURATION ==========
+// Support both Brevo and Gmail configurations
+const emailUser = process.env.BREVO_SMTP_USER || process.env.EMAIL_USER;
+const emailPass = process.env.BREVO_SMTP_PASS || process.env.EMAIL_PASS;
+const emailHost = process.env.BREVO_SMTP_HOST || process.env.EMAIL_HOST || 'smtp-relay.brevo.com';
+const emailPort = parseInt(process.env.BREVO_SMTP_PORT || process.env.EMAIL_PORT || '587');
+
 const emailTransporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.EMAIL_PORT) || 587,
-  secure: process.env.EMAIL_SECURE === 'true' ? true : false,
+  host: emailHost,
+  port: emailPort,
+  secure: emailPort === 465 ? true : false,  // SSL for port 465, TLS for 587
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
+    user: emailUser,
+    pass: emailPass
   },
   logger: true,  // Enable logging
   debug: true    // Show debug info
 });
 
 // Verify email configuration at startup
-if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+if (emailUser && emailPass) {
   emailTransporter.verify((err, success) => {
     if (err) {
       console.error('[email] Configuration error - SMTP verification failed:', err.message);
-      console.error('[email] Check EMAIL_USER, EMAIL_PASS, EMAIL_HOST, EMAIL_PORT in .env');
+      console.error('[email] Check BREVO_SMTP_USER/EMAIL_USER and BREVO_SMTP_PASS/EMAIL_PASS in .env');
+      console.error('[email] Host:', emailHost, '| Port:', emailPort);
     } else if (success) {
       console.log('[email] ✓ SMTP configuration verified - emails can be sent');
+      console.log('[email] Using:', emailHost, '| User:', emailUser);
     }
   });
 } else {
-  console.warn('[email] EMAIL_USER or EMAIL_PASS not configured - contact notifications disabled');
+  console.warn('[email] SMTP credentials not configured - contact notifications disabled');
+  console.warn('[email] Configure: BREVO_SMTP_USER/EMAIL_USER and BREVO_SMTP_PASS/EMAIL_PASS');
 }
 
 // ========== LICENSE SYSTEM ==========
