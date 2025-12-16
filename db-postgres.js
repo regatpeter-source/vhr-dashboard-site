@@ -254,20 +254,47 @@ async function getUserByUsername(username) {
       `SELECT
          id,
          username,
-         passwordhash AS "passwordHash",
+         passwordhash,
          email,
          role,
-         stripecustomerid AS "stripeCustomerId",
-         latestinvoiceid AS "latestInvoiceId",
-         lastinvoicepaidat AS "lastInvoicePaidAt",
-         subscriptionstatus AS "subscriptionStatus",
-         subscriptionid AS "subscriptionId"
+         stripecustomerid,
+         latestinvoiceid,
+         lastinvoicepaidat,
+         subscriptionstatus,
+         subscriptionid,
+         createdat,
+         updatedat
        FROM users
        WHERE username = $1
        LIMIT 1`,
       [username]
     );
-    return result.rows?.[0] || null;
+    const row = result.rows?.[0];
+    if (!row) return null;
+    
+    // Map database columns to camelCase for compatibility
+    return {
+      id: row.id,
+      username: row.username,
+      passwordhash: row.passwordhash,
+      passwordHash: row.passwordhash,
+      email: row.email,
+      role: row.role,
+      stripecustomerid: row.stripecustomerid,
+      stripeCustomerId: row.stripecustomerid,
+      latestinvoiceid: row.latestinvoiceid,
+      latestInvoiceId: row.latestinvoiceid,
+      lastinvoicepaidat: row.lastinvoicepaidat,
+      lastInvoicePaidAt: row.lastinvoicepaidat,
+      subscriptionstatus: row.subscriptionstatus,
+      subscriptionStatus: row.subscriptionstatus,
+      subscriptionid: row.subscriptionid,
+      subscriptionId: row.subscriptionid,
+      createdat: row.createdat,
+      createdAt: row.createdat,
+      updatedat: row.updatedat,
+      updatedAt: row.updatedat
+    };
   } catch (err) {
     console.error('[DB] Error getting user:', err && err.message ? err.message : err);
     return null;
