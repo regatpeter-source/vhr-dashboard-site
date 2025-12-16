@@ -1836,7 +1836,13 @@ function showTrialBanner(daysRemaining) {
 		</button>` : ''}
 	`;
 	document.body.appendChild(banner);
-	document.body.style.paddingTop = '106px'; // 56 + 50
+	document.body.style.paddingTop = '106px'; // 56 navbar + 50 banner
+	
+	// Add margin-top to deviceGrid to prevent overlap with headers
+	const deviceGrid = document.getElementById('deviceGrid');
+	if (deviceGrid) {
+		deviceGrid.style.marginTop = '20px';
+	}
 }
 
 window.showUnlockModal = function(status = licenseStatus) {
