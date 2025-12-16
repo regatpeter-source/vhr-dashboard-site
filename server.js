@@ -1958,6 +1958,25 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
     const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
     
+    // ADMINS: Skip license/demo checks and grant full access
+    if (user.role === 'admin') {
+      console.log(`[demo/status] Admin user ${user.username} - unrestricted access`);
+      return res.json({
+        ok: true,
+        demo: {
+          demoStartDate: null,
+          demoExpired: false,
+          remainingDays: -1, // Unlimited
+          totalDays: demoConfig.DEMO_DAYS,
+          expirationDate: null,
+          hasValidSubscription: true,
+          subscriptionStatus: 'admin',
+          accessBlocked: false, // Never block admins
+          message: '✅ Accès administrateur illimité'
+        }
+      });
+    }
+    
     const demoExpired = isDemoExpired(user);
     const remainingDays = getDemoRemainingDays(user);
     const expirationDate = user.demoStartDate ? 
