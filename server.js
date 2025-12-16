@@ -1139,36 +1139,9 @@ async function initializeApp() {
     await db.initDatabase();
     console.log('[DB] PostgreSQL initialized successfully');
     
-    // IMPORTANT: Also load users from JSON file and migrate to PostgreSQL
-    // This ensures existing users are available
-    console.log('[STARTUP] Loading users from JSON file for migration...');
-    users = loadUsers();
-    console.log('[STARTUP] Loaded ' + users.length + ' users from JSON file');
-    
-    // Migrate users to PostgreSQL if they don't exist
-    if (users.length > 0) {
-      console.log('[STARTUP] Migrating users to PostgreSQL...');
-      for (const user of users) {
-        try {
-          const existing = await db.getUserByUsername(user.username);
-          if (!existing) {
-            console.log('[STARTUP] Migrating user:', user.username);
-            await db.createUser(
-              user.id || `user_${user.username}`,
-              user.username,
-              user.passwordHash || user.passwordhash,
-              user.email,
-              user.role || 'user'
-            );
-          } else {
-            console.log('[STARTUP] User already exists:', user.username);
-          }
-        } catch (err) {
-          console.error('[STARTUP] Error migrating user ' + user.username + ':', err && err.message);
-        }
-      }
-      console.log('[STARTUP] User migration complete');
-    }
+    // Skip user migration - users should already be in DB from ensureDefaultUsers()
+    // Or they will be added via /api/admin/init-users endpoint if needed
+    console.log('[STARTUP] PostgreSQL mode - users managed via database');
   } else {
     messages = loadMessages();
     subscriptions = loadSubscriptions();
@@ -1179,7 +1152,7 @@ async function initializeApp() {
     
     // Ensure default users exist (important for Render where filesystem is ephemeral)
     ensureDefaultUsers();
-    console.log(`[server] ✓ ${users.length} users loaded at startup`);
+    console.log('[server] Users loaded at startup: ' + users.length);
   }
 }
 
