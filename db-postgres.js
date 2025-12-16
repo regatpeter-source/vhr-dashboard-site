@@ -396,6 +396,16 @@ async function updateUser(id, updates) {
   }
 }
 
+async function deleteUser(id) {
+  try {
+    const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING id', [id]);
+    return result.rows?.[0]?.id || null;
+  } catch (err) {
+    console.error('[DB] Error deleting user:', err && err.message ? err.message : err);
+    return null;
+  }
+}
+
 // ===== Subscriptions =====
 async function addSubscription(subscriptionData) {
   try {
@@ -524,6 +534,7 @@ module.exports = {
   getUserByUsername,
   createUser,
   updateUser,
+  deleteUser,
   // subscriptions
   addSubscription,
   getAllSubscriptions,
