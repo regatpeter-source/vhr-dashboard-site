@@ -67,7 +67,30 @@ async function initDatabase() {
         )
       `);
       console.log('[DB] [32m[1m✓[0m Users table ready');
+      // Ensure all required columns exist (migration for older tables)
+      const columnChecks = [
+        { name: 'stripecustomerid', type: 'VARCHAR(255)' },
+        { name: 'latestinvoiceid', type: 'VARCHAR(255)' },
+        { name: 'lastinvoicepaidat', type: 'TIMESTAMPTZ' },
+        { name: 'subscriptionstatus', type: 'VARCHAR(50)' },
+        { name: 'subscriptionid', type: 'VARCHAR(255)' }
+      ];
 
+      for (const col of columnChecks) {
+        try {
+          await client.query(`
+            ALTER TABLE users 
+            ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}
+          `);
+          console.log(`[DB] Column ${col.name} ensured`);
+        } catch (colErr) {
+          if (colErr.message && colErr.message.includes('already exists')) {
+            // Column already exists, that's fine
+          } else {
+            console.log(`[DB] Note: Could not add column ${col.name}:`, colErr && colErr.message);
+          }
+        }
+      }
       // Subscriptions (currently not heavily used from Postgres in server.js, but keep schema for completeness)
       await client.query(`
         CREATE TABLE IF NOT EXISTS subscriptions (
