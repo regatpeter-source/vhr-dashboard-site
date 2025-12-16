@@ -1359,13 +1359,36 @@ app.post('/api/logout', (req, res) => {
 app.post('/api/admin/init-users', async (req, res) => {
   console.log('[api/admin/init-users] Initializing default users...');
   try {
-    if (USE_POSTGRES) {
+    if (USE_POSTGRES && db && db.pool) {
       // Get a direct connection from pool to run initialization
-      const client = await db.pool?.connect();
-      if (!client) {
-        return res.status(500).json({ ok: false, error: 'Database connection unavailable' });
-      }
+      let client;
       try {
+        client = await db.pool.connect();
+      } catch (connErr) {
+        console.error('[api/admin/init-users] Connection error:', connErr && connErr.message);
+        return res.status(500).json({ ok: false, error: 'Database connection failed: ' + (connErr?.message || 'unknown') });
+      }
+      
+      try {
+        // Create users table if not exists
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS users (
+            id VARCHAR(255) PRIMARY KEY,
+            username VARCHAR(255) NOT NULL UNIQUE,
+            passwordhash VARCHAR(255) NOT NULL,
+            email VARCHAR(255),
+            role VARCHAR(50) DEFAULT 'user',
+            stripecustomerid VARCHAR(255),
+            latestinvoiceid VARCHAR(255),
+            lastinvoicepaidat TIMESTAMPTZ,
+            subscriptionstatus VARCHAR(50),
+            subscriptionid VARCHAR(255),
+            createdat TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            updatedat TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+        console.log('[api/admin/init-users] Users table ensured');
+
         // Create default admin user
         const adminCheck = await client.query('SELECT 1 FROM users WHERE username = $1 LIMIT 1', ['vhr']);
         if (adminCheck.rowCount === 0) {
@@ -1379,7 +1402,7 @@ app.post('/api/admin/init-users', async (req, res) => {
               'admin'
             ]
           );
-          console.log('[api/admin/init-users] ✓ Admin user created');
+          console.log('[api/admin/init-users] SUCCESS: Admin user created');
         } else {
           console.log('[api/admin/init-users] Admin user already exists');
         }
@@ -1397,21 +1420,29 @@ app.post('/api/admin/init-users', async (req, res) => {
               'user'
             ]
           );
-          console.log('[api/admin/init-users] ✓ Demo user created');
+          console.log('[api/admin/init-users] SUCCESS: Demo user created');
         } else {
           console.log('[api/admin/init-users] Demo user already exists');
         }
 
-        res.json({ ok: true, message: 'Default users initialized' });
+        // Verify users were created
+        const allUsers = await client.query('SELECT username, email, role FROM users');
+        console.log('[api/admin/init-users] Users in database:', allUsers.rows);
+
+        res.json({ ok: true, message: 'Default users initialized', users: allUsers.rows });
+      } catch (dbErr) {
+        console.error('[api/admin/init-users] Database error:', dbErr && dbErr.message);
+        res.status(500).json({ ok: false, error: 'Database error: ' + (dbErr?.message || 'unknown') });
       } finally {
-        client.release();
+        if (client) client.release();
       }
     } else {
+      console.log('[api/admin/init-users] JSON mode - creating users in memory');
       ensureDefaultUsers();
-      res.json({ ok: true, message: 'Default users initialized' });
+      res.json({ ok: true, message: 'Default users initialized (JSON mode)' });
     }
   } catch (error) {
-    console.error('[api/admin/init-users] Error:', error && error.message ? error.message : error);
+    console.error('[api/admin/init-users] Unexpected error:', error && error.message ? error.message : error);
     res.status(500).json({ ok: false, error: error && error.message ? error.message : 'Initialization failed' });
   }
 });
