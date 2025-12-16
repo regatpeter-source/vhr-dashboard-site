@@ -1,5 +1,26 @@
 // Account page client script (moved from inline to comply with CSP)
 (function(){
+  // Toggle password visibility
+  document.addEventListener('DOMContentLoaded', () => {
+    const toggleButtons = document.querySelectorAll('.togglePassword');
+    toggleButtons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const targetId = btn.getAttribute('data-target');
+        const input = document.getElementById(targetId);
+        if (input.type === 'password') {
+          input.type = 'text';
+          btn.textContent = '👁️‍🗨️';
+          btn.style.opacity = '0.6';
+        } else {
+          input.type = 'password';
+          btn.textContent = '👁️';
+          btn.style.opacity = '1';
+        }
+      });
+    });
+  });
+
   async function api(path, opts = {}) {
     opts = Object.assign({ credentials: 'include' }, opts);
     try { 
