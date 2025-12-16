@@ -32,6 +32,7 @@
       const res = await api('/api/me');
       if (!res || !res.ok) { showLoggedOut(); return; }
       showLoggedIn(res.user);
+      loadSubscription();
       loadBilling();
     } catch (e) { showLoggedOut(); }
   }
@@ -165,6 +166,84 @@
       console.error('[Billing] Error loading invoices:', e);
       const box = document.getElementById('billingBox');
       box.innerHTML = '<h3>💳 Factures</h3><p>Erreur lors du chargement des factures</p>';
+    }
+  }
+
+  // Load subscription info
+  async function loadSubscription() {
+    try {
+      const res = await api('/api/subscriptions/my-subscription');
+      if (!res || !res.ok) {
+        document.getElementById('subscriptionContent').innerHTML = '<p>Pas d\'abonnement actif actuellement.</p>';
+        return;
+      }
+      
+      const sub = res.subscription;
+      if (!sub.isActive) {
+        document.getElementById('subscriptionContent').innerHTML = '<p>Pas d\'abonnement actif actuellement.</p>';
+        return;
+      }
+      
+      const planName = sub.currentPlan ? sub.currentPlan.name : 'Plan inconnu';
+      const startDate = sub.startDate ? new Date(sub.startDate).toLocaleDateString('fr-FR') : 'N/A';
+      const endDate = sub.endDate ? new Date(sub.endDate).toLocaleDateString('fr-FR') : 'N/A';
+      const daysLeft = sub.daysUntilRenewal || 0;
+      const statusColor = daysLeft > 14 ? '#4CAF50' : daysLeft > 0 ? '#ff9800' : '#d32f2f';
+      
+      let html = `
+        <div style="background: white; padding: 12px; border-radius: 4px; margin-bottom: 12px;">
+          <p><strong>Plan actuel:</strong> ${planName}</p>
+          <p><strong>Début:</strong> ${startDate}</p>
+          <p><strong>Renouvellement:</strong> ${endDate}</p>
+          <p><strong>Jours restants:</strong> <span style="color: ${statusColor}; font-weight: bold;">${daysLeft} jours</span></p>
+        </div>
+        <div id="cancelSubscriptionBox" style="margin-top: 12px;">
+          <button id="cancelSubscriptionBtn" class="cta-secondary" style="background-color: #ff9800; color: white; padding: 10px 16px; border: none; border-radius: 4px; cursor: pointer;">Annuler mon abonnement</button>
+          <div id="cancelSubscriptionMessage" style="margin-top: 12px;"></div>
+        </div>
+      `;
+      document.getElementById('subscriptionContent').innerHTML = html;
+      
+      // Attach cancel button handler
+      const cancelBtn = document.getElementById('cancelSubscriptionBtn');
+      if (cancelBtn) {
+        cancelBtn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          
+          if (!confirm('Êtes-vous sûr de vouloir annuler votre abonnement?\n\nVous conserverez l\'accès jusqu\'à la date de renouvellement.')) {
+            return;
+          }
+          
+          const msgDiv = document.getElementById('cancelSubscriptionMessage');
+          msgDiv.textContent = 'Annulation en cours...';
+          msgDiv.style.color = '#ff9800';
+          
+          try {
+            const cancelRes = await api('/api/subscriptions/cancel', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({})
+            });
+            
+            if (cancelRes && cancelRes.ok) {
+              msgDiv.textContent = '✓ Abonnement annulé avec succès.';
+              msgDiv.style.color = '#4CAF50';
+              document.getElementById('cancelSubscriptionBtn').disabled = true;
+              document.getElementById('cancelSubscriptionBtn').style.opacity = '0.5';
+              setTimeout(() => { loadSubscription(); }, 2000);
+            } else {
+              msgDiv.textContent = '❌ Erreur: ' + (cancelRes && cancelRes.error ? cancelRes.error : 'Impossible d\'annuler l\'abonnement');
+              msgDiv.style.color = '#d32f2f';
+            }
+          } catch (err) {
+            msgDiv.textContent = '❌ Erreur: ' + err.message;
+            msgDiv.style.color = '#d32f2f';
+          }
+        });
+      }
+    } catch (e) {
+      console.error('[loadSubscription] error:', e);
+      document.getElementById('subscriptionContent').innerHTML = '<p>Erreur lors du chargement de l\'abonnement.</p>';
     }
   }
 
