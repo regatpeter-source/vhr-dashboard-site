@@ -98,7 +98,14 @@
     if (p1 !== p2) return alert('Les mots de passe ne correspondent pas');
     loginMessage.textContent = 'Création du compte...';
     const res = await api('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: p1, email }) });
-    if (res && res.ok) { loginMessage.textContent = 'Compte créé, connexion...'; await loadMe(); }
+    if (res && res.ok) { 
+      loginMessage.textContent = 'Compte créé ✓ Redirection vers le dashboard...'; 
+      await loadMe(); 
+      // Redirect to dashboard after 1.5 seconds
+      setTimeout(() => {
+        window.location.href = '/admin-dashboard.html';
+      }, 1500);
+    }
     else { loginMessage.textContent = 'Erreur: ' + (res && res.error ? res.error : 'Erreur inconnue'); }
   });
 
