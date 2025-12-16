@@ -713,7 +713,7 @@ async function sendReplyToContact(originalMessage, replyText, repliedBy) {
 // Send license email
 async function sendLicenseEmail(email, licenseKey, username) {
   const mailOptions = {
-    from: process.env.EMAIL_USER || 'noreply@vhr-dashboard.com',
+    from: process.env.EMAIL_FROM || 'noreply@vhr-dashboard.com',
     to: email,
     subject: '🎉 Votre licence VHR Dashboard',
     html: `
@@ -2670,50 +2670,6 @@ app.post('/api/license/activate', async (req, res) => {
   }
 });
 
-// Send license email
-async function sendLicenseEmail(email, licenseKey, username) {
-  const mailOptions = {
-    from: process.env.EMAIL_USER || 'noreply@vhr-dashboard.com',
-    to: email,
-    subject: '🎉 Votre licence VHR Dashboard',
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #0d0f14; color: #ecf0f1; border-radius: 10px;">
-        <h1 style="color: #2ecc71; text-align: center;">🥽 VHR Dashboard</h1>
-        <h2 style="color: #3498db;">Merci pour votre achat !</h2>
-        <p>Bonjour <strong>${username}</strong>,</p>
-        <p>Votre licence VHR Dashboard a été activée avec succès. Voici votre clé de licence :</p>
-        <div style="background: #1a1d24; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
-          <h2 style="color: #2ecc71; font-size: 24px; letter-spacing: 2px;">${licenseKey}</h2>
-        </div>
-        <h3 style="color: #e67e22;">Comment activer votre licence :</h3>
-        <ol style="line-height: 1.8;">
-          <li>Ouvrez le VHR Dashboard</li>
-          <li>Cliquez sur le bouton <strong>"Activer une licence"</strong></li>
-          <li>Copiez-collez votre clé de licence</li>
-          <li>Profitez de toutes les fonctionnalités sans limitation !</li>
-        </ol>
-        <p style="color: #95a5a6; font-size: 12px; margin-top: 30px; text-align: center;">
-          Cette licence est valide à vie et ne nécessite aucun paiement récurrent.<br>
-          Conservez cette clé en lieu sûr.
-        </p>
-        <p style="text-align: center; margin-top: 20px;">
-          <strong style="color: #2ecc71;">Besoin d'aide ?</strong><br>
-          <a href="mailto:support@vhr-dashboard.com" style="color: #3498db;">support@vhr-dashboard.com</a>
-        </p>
-      </div>
-    `
-  };
-  
-  try {
-    await emailTransporter.sendMail(mailOptions);
-    console.log('[email] License sent to:', email);
-    return true;
-  } catch (e) {
-    console.error('[email] Failed to send license:', e);
-    return false;
-  }
-}
-
 // ========== LICENSE VERIFICATION API ==========
 
 // TEST ROUTE: Generate a test license (only in development)
@@ -2730,7 +2686,7 @@ app.get('/api/test/generate-license', async (req, res) => {
     
     // Try to send email if configured
     let emailSent = false;
-    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+    if ((process.env.BREVO_SMTP_USER || process.env.EMAIL_USER) && (process.env.BREVO_SMTP_PASS || process.env.EMAIL_PASS)) {
       emailSent = await sendLicenseEmail(testUser.email, license.key, testUser.username);
     }
     
