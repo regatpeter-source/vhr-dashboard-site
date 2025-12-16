@@ -408,7 +408,7 @@ function getSettingsContent() {
 				</div>
 				<div style='display:flex;gap:10px;flex-wrap:wrap;'>
 					<button onclick='showModal("<h3>Voir les factures</h3><p>Facture du 15 Décembre 2024 - 29€</p><p>Facture du 15 Novembre 2024 - 29€</p>")' style='flex:1;min-width:150px;background:#3498db;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>📄 Factures</button>
-					<button onclick='showModal("<h3>Gérer le paiement</h3><p>Vous serez redirigé vers le portail Stripe pour gérer votre méthode de paiement.</p><button onclick=\"window.location.href=\\\"/api/billing/portal\\\" style=\\\"width:100%;background:#2ecc71;color:#000;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;\\\">Accéder au portail Stripe</button>")' style='flex:1;min-width:150px;background:#f39c12;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>💳 Méthode de paiement</button>
+					<button onclick='openBillingPortal()' style='flex:1;min-width:150px;background:#f39c12;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>💳 Méthode de paiement</button>
 					<button onclick='confirmCancelSubscription()' style='flex:1;min-width:150px;background:#e74c3c;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>❌ Annuler l\'abonnement</button>
 				</div>
 			</div>
@@ -748,6 +748,25 @@ window.saveSettings = function() {
 	}
 	
 	showToast('✅ Paramètres sauvegardés !', 'success');
+};
+
+window.openBillingPortal = async function() {
+	showToast('⏳ Ouverture du portail Stripe...', 'info');
+	try {
+		const res = await api('/api/billing/portal', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' }
+		});
+		if (res.ok && res.url) {
+			closeModal();
+			window.location.href = res.url;
+		} else {
+			showToast('❌ Erreur: ' + (res.error || 'Impossible d\'ouvrir le portail Stripe'), 'error');
+		}
+	} catch (e) {
+		console.error('[billing/portal error]', e);
+		showToast('❌ Erreur lors de la connexion à Stripe: ' + e.message, 'error');
+	}
 };
 
 window.confirmCancelSubscription = function() {
