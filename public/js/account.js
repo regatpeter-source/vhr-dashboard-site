@@ -137,8 +137,80 @@
       const r = await api('/api/billing/invoices');
       const invoices = (r && r.invoices) || [];
       const box = document.getElementById('billingBox');
-      box.innerHTML = '<h3>Factures</h3>' + (invoices.length ? '<ul>' + invoices.map(i=>`<li>Invoice ${i.id} - ${i.amount_due/100} ${i.currency}</li>`).join('') + '</ul>' : '<p>Aucune facture</p>');
-    } catch(e) {}
+      
+      let html = '<h3>💳 Factures</h3>';
+      
+      if (invoices.length === 0) {
+        html += '<p>Aucune facture pour le moment.</p>';
+      } else {
+        html += '<ul style="list-style: none; padding: 0;">';
+        invoices.forEach(inv => {
+          const date = new Date(inv.created * 1000).toLocaleDateString('fr-FR');
+          const amount = inv.amount_paid ? (inv.amount_paid / 100) : (inv.amount_due / 100);
+          const currency = inv.currency ? inv.currency.toUpperCase() : 'EUR';
+          const status = inv.status || 'unknown';
+          const statusColor = status === 'paid' ? '#4CAF50' : '#ff9800';
+          
+          html += `<li style="padding: 12px; margin: 8px 0; background: white; border-left: 4px solid ${statusColor}; border-radius: 4px;">
+            <strong>Facture #${inv.number || inv.id}</strong> - ${date}<br>
+            Montant: ${amount} ${currency} <span style="color: ${statusColor}; font-weight: bold;">(${status})</span>
+            ${inv.hosted_invoice_url ? `<br><a href="${inv.hosted_invoice_url}" target="_blank" style="color: #2196F3; text-decoration: none;">Voir la facture →</a>` : ''}
+          </li>`;
+        });
+        html += '</ul>';
+      }
+      
+      box.innerHTML = html;
+    } catch(e) {
+      console.error('[Billing] Error loading invoices:', e);
+      const box = document.getElementById('billingBox');
+      box.innerHTML = '<h3>💳 Factures</h3><p>Erreur lors du chargement des factures</p>';
+    }
+  }
+
+  // Delete account handler
+  const deleteAccountBtn = document.getElementById('deleteAccountBtn');
+  if (deleteAccountBtn) {
+    deleteAccountBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      
+      // Confirmation dialog
+      if (!confirm('⚠️ ATTENTION: Êtes-vous sûr de vouloir supprimer votre compte?\n\nCette action est IRRÉVERSIBLE et toutes vos données seront perdues.')) {
+        return;
+      }
+      
+      // Second confirmation with typing
+      const confirmPassword = prompt('Pour confirmer, veuillez entrer votre mot de passe:');
+      if (!confirmPassword) {
+        return;
+      }
+      
+      const msg = document.getElementById('deleteAccountMessage');
+      msg.textContent = 'Suppression en cours...';
+      msg.style.color = '#ff6b6b';
+      
+      try {
+        const res = await api('/api/users/self', { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: confirmPassword })
+        });
+        
+        if (res && res.ok) {
+          msg.textContent = '✓ Compte supprimé. Redirection...';
+          msg.style.color = '#4CAF50';
+          setTimeout(() => {
+            window.location.href = '/account.html';
+          }, 2000);
+        } else {
+          msg.textContent = '❌ Erreur: ' + (res && res.error ? res.error : 'Impossible de supprimer le compte');
+          msg.style.color = '#d32f2f';
+        }
+      } catch (err) {
+        msg.textContent = '❌ Erreur: ' + err.message;
+        msg.style.color = '#d32f2f';
+      }
+    });
   }
 
   // Check URL parameters for specific actions

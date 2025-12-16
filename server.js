@@ -3104,14 +3104,29 @@ app.patch('/api/me', authMiddleware, async (req, res) => {
   }
 });
 
-// Delete self account (development/demo only)
-app.delete('/api/users/self', authMiddleware, (req, res) => {
+// Delete self account
+app.delete('/api/users/self', authMiddleware, async (req, res) => {
   try {
     const u = getUserByUsername(req.user.username);
     if (!u) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
-    removeUserByUsername(req.user.username);
+    
+    // Verify password before deletion
+    const { password } = req.body || {};
+    if (!password) return res.status(400).json({ ok: false, error: 'Mot de passe requis' });
+    
+    const passwordMatch = await bcrypt.compare(password, u.passwordHash);
+    if (!passwordMatch) return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
+    
+    // Delete from PostgreSQL if enabled
+    if (USE_POSTGRES && db && db.deleteUser) {
+      await db.deleteUser(u.id);
+    } else {
+      // Delete from JSON storage
+      removeUserByUsername(req.user.username);
+    }
+    
     res.clearCookie('vhr_token');
-    res.json({ ok: true });
+    res.json({ ok: true, message: 'Compte supprimé avec succès' });
   } catch (e) {
     console.error('[api] delete self:', e);
     res.status(500).json({ ok: false, error: String(e) });
