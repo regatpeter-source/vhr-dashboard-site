@@ -4843,8 +4843,12 @@ app.post('/api/register', async (req, res) => {
       stripeCustomerId: null,
       demoStartDate: new Date().toISOString() // Initialize demo start date
     };
-    // persist
-    persistUser(newUser);
+    // persist to database
+    if (USE_POSTGRES) {
+      await db.createUser(newUser.id, newUser.username, newUser.passwordHash, newUser.email, newUser.role);
+    } else {
+      persistUser(newUser);
+    }
     // create token and set cookie
     const token = jwt.sign({ username: newUser.username, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
     const cookieOptions = { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 2 * 60 * 60 * 1000 };
