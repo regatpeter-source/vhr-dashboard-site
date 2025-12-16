@@ -409,14 +409,19 @@ console.log('[Server] Initialisation des chemins Java/Gradle...');
 configureEnvironmentVariables();
 ensureLocalProperties();
 
-// Démarrer l'installation de Java/Gradle/SDK en arrière-plan (ne bloque pas le serveur)
-(async () => {
-  try {
-    await ensureJavaAndGradle();
-  } catch (e) {
-    console.error('[Setup] Erreur lors de l\'initialisation:', e.message);
-  }
-})();
+// Démarrer l'installation de Java/Gradle/SDK en arrière-plan SEULEMENT en développement local
+// Sur Render/production, ce n'est pas nécessaire et ralentit le déploiement
+if (process.env.NODE_ENV !== 'production' && process.env.RENDER !== 'true') {
+  (async () => {
+    try {
+      await ensureJavaAndGradle();
+    } catch (e) {
+      console.error('[Setup] Erreur lors de l\'initialisation:', e.message);
+    }
+  })();
+} else {
+  console.log('[Setup] Mode production détecté - Java/Gradle/SDK non nécessaires');
+}
 
 const app = express();
 // Helmet with custom CSP: allow own scripts and the botpress CDN. Do not enable 'unsafe-inline'.
