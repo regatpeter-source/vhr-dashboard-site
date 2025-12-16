@@ -937,6 +937,7 @@ function renderDevicesTable() {
 		<thead>
 			<tr style='background:#23272f;'>
 				<th style='padding:14px;text-align:left;border-bottom:2px solid #2ecc71;font-size:15px;'>Casque</th>
+				<th style='padding:14px;text-align:center;border-bottom:2px solid #2ecc71;font-size:15px;'>Batterie</th>
 				<th style='padding:14px;text-align:left;border-bottom:2px solid #2ecc71;font-size:15px;'>Statut</th>
 				<th style='padding:14px;text-align:center;border-bottom:2px solid #2ecc71;font-size:15px;'>Jeu en cours</th>
 				<th style='padding:14px;text-align:center;border-bottom:2px solid #2ecc71;font-size:15px;'>Streaming</th>
@@ -959,6 +960,9 @@ function renderDevicesTable() {
 			<td style='padding:12px;'>
 				<div style='font-weight:bold;font-size:16px;color:#2ecc71;'>${d.name}</div>
 				<div style='font-size:11px;color:#95a5a6;margin-top:2px;'>${d.serial}</div>
+			</td>
+			<td style='padding:12px;text-align:center;'>
+				<div id='battery_${d.serial}' style='font-size:14px;font-weight:bold;color:#f39c12;'>🔋 --</div>
 			</td>
 			<td style='padding:12px;'>
 				<span style='background:${statusColor};color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:bold;'>
@@ -1001,6 +1005,9 @@ function renderDevicesTable() {
 				<button onclick='showStorageDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>💾</button>
 			</td>
 		</tr>`;
+		
+		// Fetch battery level for this device
+		fetchBatteryLevel(d.serial);
 	});
 	
 	table += `</tbody></table>`;
