@@ -250,29 +250,51 @@ async function getUsers() {
 
 async function getUserByUsername(username) {
   try {
-    const result = await pool.query(
+    // Try simple query with only essential columns first
+    let result = await pool.query(
       `SELECT
          id,
          username,
          passwordhash,
          email,
-         role,
-         stripecustomerid,
-         latestinvoiceid,
-         lastinvoicepaidat,
-         subscriptionstatus,
-         subscriptionid,
-         createdat,
-         updatedat
+         role
        FROM users
        WHERE username = $1
        LIMIT 1`,
       [username]
     );
-    const row = result.rows?.[0];
-    if (!row) return null;
     
-    // Map database columns to camelCase for compatibility
+    if (!result.rows || !result.rows[0]) {
+      return null;
+    }
+    
+    const row = result.rows[0];
+    
+    // Try to get optional columns if they exist
+    let optionalFields = {};
+    try {
+      const optResult = await pool.query(
+        `SELECT
+           stripecustomerid,
+           latestinvoiceid,
+           lastinvoicepaidat,
+           subscriptionstatus,
+           subscriptionid,
+           createdat,
+           updatedat
+         FROM users
+         WHERE username = $1
+         LIMIT 1`,
+        [username]
+      );
+      if (optResult.rows && optResult.rows[0]) {
+        optionalFields = optResult.rows[0];
+      }
+    } catch (optErr) {
+      console.log('[DB] Optional columns not available (this is ok):', optErr && optErr.message);
+    }
+    
+    // Return combined result
     return {
       id: row.id,
       username: row.username,
@@ -280,20 +302,20 @@ async function getUserByUsername(username) {
       passwordHash: row.passwordhash,
       email: row.email,
       role: row.role,
-      stripecustomerid: row.stripecustomerid,
-      stripeCustomerId: row.stripecustomerid,
-      latestinvoiceid: row.latestinvoiceid,
-      latestInvoiceId: row.latestinvoiceid,
-      lastinvoicepaidat: row.lastinvoicepaidat,
-      lastInvoicePaidAt: row.lastinvoicepaidat,
-      subscriptionstatus: row.subscriptionstatus,
-      subscriptionStatus: row.subscriptionstatus,
-      subscriptionid: row.subscriptionid,
-      subscriptionId: row.subscriptionid,
-      createdat: row.createdat,
-      createdAt: row.createdat,
-      updatedat: row.updatedat,
-      updatedAt: row.updatedat
+      stripecustomerid: optionalFields.stripecustomerid || null,
+      stripeCustomerId: optionalFields.stripecustomerid || null,
+      latestinvoiceid: optionalFields.latestinvoiceid || null,
+      latestInvoiceId: optionalFields.latestinvoiceid || null,
+      lastinvoicepaidat: optionalFields.lastinvoicepaidat || null,
+      lastInvoicePaidAt: optionalFields.lastinvoicepaidat || null,
+      subscriptionstatus: optionalFields.subscriptionstatus || null,
+      subscriptionStatus: optionalFields.subscriptionstatus || null,
+      subscriptionid: optionalFields.subscriptionid || null,
+      subscriptionId: optionalFields.subscriptionid || null,
+      createdat: optionalFields.createdat || null,
+      createdAt: optionalFields.createdat || null,
+      updatedat: optionalFields.updatedat || null,
+      updatedAt: optionalFields.updatedat || null
     };
   } catch (err) {
     console.error('[DB] Error getting user:', err && err.message ? err.message : err);
