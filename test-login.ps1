@@ -1,8 +1,11 @@
 param(
     [string]$Domain = "https://vhr-dashboard-site.onrender.com",
     [string]$Username = "vhr",
-    [string]$Password = "VHR@Render#2025!SecureAdmin789"
+    [SecureString]$Password = (ConvertTo-SecureString -String "VHR@Render#2025!SecureAdmin789" -AsPlainText -Force)
 )
+
+# Convert SecureString to plain text for API call
+$plainPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToCoTaskMemUnicode($Password))
 
 Write-Host "Testing login..." -ForegroundColor Cyan
 Write-Host "Domain: $Domain" -ForegroundColor Yellow
@@ -13,7 +16,7 @@ try {
     $response = Invoke-WebRequest -Uri "$Domain/api/login" `
         -Method POST `
         -ContentType "application/json" `
-        -Body (ConvertTo-Json @{ username = $Username; password = $Password }) `
+        -Body (ConvertTo-Json @{ username = $Username; password = $plainPassword }) `
         -UseBasicParsing `
         -TimeoutSec 10 `
         -ErrorAction Stop
