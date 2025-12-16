@@ -640,6 +640,67 @@ async function sendContactMessageToAdmin(msg) {
   }
 }
 
+// Send reply email to contact sender
+async function sendReplyToContact(originalMessage, replyText, repliedBy) {
+  const recipientEmail = originalMessage.email;
+  if (!recipientEmail) {
+    console.error('[email] Recipient email not available');
+    return false;
+  }
+
+  if (!process.env.EMAIL_PASS) {
+    console.error('[email] EMAIL_PASS not configured, cannot send reply');
+    return false;
+  }
+
+  console.log('[email] Preparing reply to:', recipientEmail);
+
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: recipientEmail,
+    subject: `Réponse: ${originalMessage.subject}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #0d0f14; color: #ecf0f1; border-radius: 10px;">
+        <h1 style="color: #3498db; text-align: center;">📨 Réponse à votre message</h1>
+        
+        <div style="background: #1a1d24; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <p style="margin: 8px 0;"><strong style="color: #2ecc71;">👤 Répondu par:</strong> ${repliedBy}</p>
+          <p style="margin: 8px 0;"><strong style="color: #2ecc71;">📅 Date de réponse:</strong> ${new Date().toLocaleString('fr-FR')}</p>
+          <p style="margin: 8px 0;"><strong style="color: #2ecc71;">📅 Votre message envoyé le:</strong> ${new Date(originalMessage.createdAt).toLocaleString('fr-FR')}</p>
+        </div>
+        
+        <div style="background: #2c3e50; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <h3 style="color: #e67e22; margin-top: 0;">💬 Réponse:</h3>
+          <p style="line-height: 1.8; white-space: pre-wrap;">${replyText}</p>
+        </div>
+        
+        <div style="background: #34495e; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3498db;">
+          <h4 style="color: #3498db; margin-top: 0;">📝 Votre message original:</h4>
+          <p style="margin: 8px 0;"><strong>Sujet:</strong> ${originalMessage.subject}</p>
+          <p style="line-height: 1.6; white-space: pre-wrap; color: #bdc3c7;">${originalMessage.message}</p>
+        </div>
+        
+        <p style="text-align: center; color: #95a5a6; font-size: 12px; margin-top: 30px;">
+          Cet email a été envoyé en réponse à votre demande de contact VHR Dashboard.<br>
+          Ne répondez pas à cet email, veuillez utiliser le formulaire de contact du site.
+        </p>
+      </div>
+    `
+  };
+
+  try {
+    console.log('[email] Sending reply via SMTP...');
+    const info = await emailTransporter.sendMail(mailOptions);
+    console.log('[email] ✓ Reply sent successfully');
+    console.log('[email] Response ID:', info.response);
+    return true;
+  } catch (e) {
+    console.error('[email] ✗ Failed to send reply');
+    console.error('[email] Error:', e.message);
+    return false;
+  }
+}
+
 // Send license email
 async function sendLicenseEmail(email, licenseKey, username) {
   const mailOptions = {
@@ -3157,8 +3218,8 @@ app.patch('/api/admin/messages/:id', authMiddleware, async (req, res) => {
     
     if (USE_POSTGRES) {
       // PostgreSQL version
-      const msg = await db.getMessages();
-      const m = msg.find(x => x.id === messageId);
+      const allMessages = await db.getMessages();
+      const m = allMessages.find(x => x.id === messageId);
       if (!m) return res.status(404).json({ ok: false, error: 'Message not found' });
       
       const updates = {};
@@ -3167,27 +3228,44 @@ app.patch('/api/admin/messages/:id', authMiddleware, async (req, res) => {
         updates.response = response;
         updates.respondedAt = new Date().toISOString();
         updates.respondedBy = req.user.username;
+        
+        // Send reply email to the contact sender
+        const emailSent = await sendReplyToContact(m, response, req.user.username);
+        if (emailSent) {
+          console.log('[api] Reply email sent to:', m.email);
+        } else {
+          console.warn('[api] Failed to send reply email to:', m.email);
+        }
       } else if (status === 'read') {
         updates.readAt = new Date().toISOString();
       }
       
       await db.updateMessage(messageId, updates);
-      res.json({ ok: true, message: 'Message updated' });
+      res.json({ ok: true, message: 'Message updated', emailSent: !!response });
     } else {
       // JSON fallback version
       const msg = messages.find(m => m.id === messageId);
       if (!msg) return res.status(404).json({ ok: false, error: 'Message not found' });
       
+      let emailSent = false;
       if (status) msg.status = status;
       if (response) {
         msg.response = response;
         msg.respondedAt = new Date().toISOString();
         msg.respondedBy = req.user.username;
+        
+        // Send reply email to the contact sender
+        emailSent = await sendReplyToContact(msg, response, req.user.username);
+        if (emailSent) {
+          console.log('[api] Reply email sent to:', msg.email);
+        } else {
+          console.warn('[api] Failed to send reply email to:', msg.email);
+        }
       } else if (status === 'read') {
         msg.readAt = new Date().toISOString();
       }
       saveMessages();
-      res.json({ ok: true, message: 'Message updated' });
+      res.json({ ok: true, message: 'Message updated', emailSent });
     }
   } catch (e) {
     console.error('[api] admin/messages/:id:', e);
