@@ -1192,7 +1192,6 @@ function ensureDefaultUsers() {
     saveUsers();
   }
 }
-}
 
 // --- DB wrapper helpers (use SQLite adapter when enabled) ---
 let dbEnabled = false;
@@ -4352,10 +4351,6 @@ initializeApp().then(() => {
     console.log(`\n[WARNING] Server running on port ${PORT} but initialization failed`);
     console.log(`[INSTRUCTION] Run: curl -X POST http://localhost:${PORT}/api/admin/init-users\n`);
   });
-});
-}).catch(err => {
-  console.error('[FATAL] Failed to initialize app:', err);
-  process.exit(1);
 });
 
 // Handler de fermeture propre
