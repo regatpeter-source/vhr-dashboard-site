@@ -1,0 +1,65 @@
+═══════════════════════════════════════════════════════════════════════════════
+                    QUICK REFERENCE - CONTACT MESSAGING FIX
+═══════════════════════════════════════════════════════════════════════════════
+
+🔴 PROBLÈME
+  └─ Répondre aux messages depuis admin-dashboard.html bloquait
+     (messages reçus OK, mais réponses échouaient)
+
+🟢 CAUSE
+  └─ server.js utilisait EMAIL_USER/PASS (Gmail par défaut)
+     au lieu de BREVO_SMTP_USER/PASS qui était dans .env
+
+⚡ FIX
+  └─ Modified server.js (line 505-540)
+     ├─ Lecture BREVO_SMTP_USER/PASS en priorité
+     ├─ Fallback sur EMAIL_USER/PASS si absent
+     └─ Corriger logique de port (587=TLS, 465=SSL)
+
+✅ TESTED
+  └─ Exécuté: node test-messaging-system.js
+     ├─ Connexion SMTP: ✓
+     ├─ Email admin: ✓
+     └─ Email réponse: ✓
+
+📦 DÉPLOYÉ
+  └─ Commit 827d9a8 + 76cdc57
+     ├─ server.js (modifié)
+     ├─ test-messaging-system.js (nouveau)
+     ├─ CONTACT_MESSAGING_FIX.md (documentation)
+     └─ MESSAGING_FIX_SUMMARY.txt (résumé)
+
+⏳ EN ATTENTE
+  └─ Render.com auto-deploy (2-3 minutes)
+
+🧪 À TESTER
+  1. Envoyer message: https://vhr-dashboard-site.onrender.com/contact.html
+  2. Admin répond: https://vhr-dashboard-site.onrender.com/admin-dashboard.html
+  3. Vérifier email de réponse reçu
+
+
+═══════════════════════════════════════════════════════════════════════════════
+FICHIERS CLÉS
+═══════════════════════════════════════════════════════════════════════════════
+
+server.js (line 505-540)
+  ├─ Configuration email Brevo
+  ├─ Support BREVO_SMTP_* + fallback EMAIL_*
+  └─ Utilisé par sendContactMessageToAdmin() et sendReplyToContact()
+
+test-messaging-system.js
+  ├─ Tester connexion Brevo
+  ├─ Simuler message et réponse
+  └─ Usage: node test-messaging-system.js
+
+.env (production = Render)
+  ├─ BREVO_SMTP_USER
+  ├─ BREVO_SMTP_PASS
+  ├─ EMAIL_FROM
+  └─ EMAIL_ENABLED=true
+
+.env.example (template)
+  └─ Documentation pour configuration
+
+
+═══════════════════════════════════════════════════════════════════════════════
