@@ -196,11 +196,11 @@ Write-Host "MESSAGE SYSTEM TEST COMPLETE" -ForegroundColor Cyan
 Write-Host "═════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Summary:" -ForegroundColor Yellow
-Write-Host "  ✓ Contact messages can be sent" -ForegroundColor Green
-Write-Host "  ✓ Messages are stored with creation date" -ForegroundColor Green
-Write-Host "  ✓ Admin can reply to messages" -ForegroundColor Green
-Write-Host "  ✓ Reply email is sent to sender" -ForegroundColor Green
-Write-Host "  ✓ Timestamps track reception and reply dates" -ForegroundColor Green
+Write-Host "  [OK] Contact messages can be sent" -ForegroundColor Green
+Write-Host "  [OK] Messages are stored with creation date" -ForegroundColor Green
+Write-Host "  [OK] Admin can reply to messages" -ForegroundColor Green
+Write-Host "  [OK] Reply email is sent to sender" -ForegroundColor Green
+Write-Host "  [OK] Timestamps track reception and reply dates" -ForegroundColor Green
 Write-Host ""
-Write-Host "Check your email ($testEmail) for the reply!" -ForegroundColor Cyan
+Write-Host "Test email: $testEmail" -ForegroundColor Cyan
 Write-Host ""
