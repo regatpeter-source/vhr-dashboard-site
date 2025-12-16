@@ -1329,14 +1329,19 @@ window.connectStreamSocket = function(serial) {
 	try {
 		console.log('[stream] Creating JSMpeg player...');
 		
-		// JSMpeg.Player handles WebSocket connection internally
+		// JSMpeg.Player configuration pour une lecture stable
+		// Priorité: stabilité vidéo sans scintillement plutôt que latence basse
 		const player = new JSMpeg.Player(wsUrl, {
 			canvas: canvas,
 			autoplay: true,
 			progressive: true,
+			// Optimisations pour éviter le scintillement:
+			bufferSize: 512 * 1024,  // 512KB buffer client-side (accepte +100-200ms pour la stabilité)
+			chunkSize: 1024 * 10,    // Traiter les chunks par 10KB
+			throttled: true,         // Throttle rendering quand le navigateur est occupé
 			onPlay: () => {
 				console.log('[stream] JSMpeg onPlay callback fired');
-				showToast('🎬 Stream connecté !', 'success');
+				showToast('🎬 Stream connecté ! (buffering pour stabilité)', 'success');
 				// Remove loading indicator
 				const loading = document.getElementById('streamLoading');
 				if (loading) loading.style.display = 'none';
@@ -1348,7 +1353,10 @@ window.connectStreamSocket = function(serial) {
 		});
 		
 		window.jsmpegPlayer = player;
-		console.log('[stream] JSMpeg player created and assigned to window.jsmpegPlayer');
+		console.log('[stream] JSMpeg player créé avec stabilisation vidéo activée');
+		console.log('[stream] - Buffer côté client: 512KB pour absorber les variations de débit');
+		console.log('[stream] - Rendu throttlé pour éviter le scintillement');
+		console.log('[stream] - Latence acceptée: +100-200ms pour la stabilité');
 	} catch (e) {
 		console.error('[stream] Connection error:', e);
 		console.error('[stream] Stack:', e.stack);

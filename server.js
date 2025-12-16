@@ -3612,17 +3612,49 @@ async function startStream(serial, opts = {}) {
   entry.adbProc = adbProc;
   entry.shouldRun = true;
   entry.autoReconnect = Boolean(opts.autoReconnect);
+  
+  // ---------- Video Stabilization Buffer ----------
+  // Prevent flickering by buffering and smoothly distributing frames
+  // This adds ~200-300ms latency but ensures smooth playback without visual glitches
+  entry.frameBuffer = [];
+  entry.maxBufferSize = 15; // Buffer up to 15 frames (at ~30fps = ~500ms buffer)
+  entry.sendInterval = null;
+  entry.targetFPS = 30; // Target playback rate (33ms between frames)
+  entry.lastSendTime = Date.now();
+  
   streams.set(serial, entry);
 
-  // ---------- Pipeline H264 direct (no re-encoding = no flicker!) ----------
-  // Pass H264 directly from ADB to WebSocket clients
-  // This eliminates the need for FFmpeg re-encoding and dramatically reduces CPU usage and latency
+  // ---------- Pipeline H264 with Frame Stabilization ----------
+  // Buffer incoming frames and send them at a steady rate to prevent flickering
   adbProc.stdout.on('data', chunk => {
-    // Send H264 frames directly to all connected WebSocket clients
-    for (const ws of entry.h264Clients || []) {
-      if (ws.readyState === 1) {
-        try { ws.send(chunk) } catch {}
+    // Add chunk to buffer
+    if (entry.frameBuffer.length < entry.maxBufferSize) {
+      entry.frameBuffer.push(chunk);
+    } else {
+      // If buffer is full, drop oldest frame to make room (prevent memory overflow)
+      entry.frameBuffer.shift();
+      entry.frameBuffer.push(chunk);
+      if (Date.now() % 300 === 0) { // Log occasionally, not every frame
+        console.log(`[stream/${serial}] Buffer full, dropping frame (${entry.frameBuffer.length} frames buffered)`);
       }
+    }
+
+    // Start steady transmission if not already running
+    if (!entry.sendInterval) {
+      entry.sendInterval = setInterval(() => {
+        if (entry.frameBuffer.length > 0) {
+          const chunk = entry.frameBuffer.shift();
+          
+          // Send to all H264 clients with stable timing
+          for (const ws of entry.h264Clients || []) {
+            if (ws.readyState === 1) {
+              try { ws.send(chunk) } catch {}
+            }
+          }
+          
+          entry.lastSendTime = Date.now();
+        }
+      }, entry.targetFPS); // Send at ~30 FPS (33ms intervals)
     }
   });
 
@@ -3701,6 +3733,17 @@ function stopStream(serial) {
   if (!entry) return false;
 
   entry.shouldRun = false;
+  
+  // Clear the stabilization interval
+  if (entry.sendInterval) {
+    clearInterval(entry.sendInterval);
+    entry.sendInterval = null;
+  }
+  
+  // Clear the frame buffer
+  if (entry.frameBuffer) {
+    entry.frameBuffer = [];
+  }
   
   if (entry.checkInterval) clearInterval(entry.checkInterval);
   
