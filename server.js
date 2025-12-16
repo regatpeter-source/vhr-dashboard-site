@@ -1351,6 +1351,67 @@ app.post('/api/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+// Initialize default admin users (maintenance endpoint - for production fix)
+app.post('/api/admin/init-users', async (req, res) => {
+  console.log('[api/admin/init-users] Initializing default users...');
+  try {
+    if (USE_POSTGRES) {
+      // Get a direct connection from pool to run initialization
+      const client = await db.pool?.connect();
+      if (!client) {
+        return res.status(500).json({ ok: false, error: 'Database connection unavailable' });
+      }
+      try {
+        // Create default admin user
+        const adminCheck = await client.query('SELECT 1 FROM users WHERE username = $1 LIMIT 1', ['vhr']);
+        if (adminCheck.rowCount === 0) {
+          await client.query(
+            'INSERT INTO users (id, username, passwordhash, email, role) VALUES ($1, $2, $3, $4, $5)',
+            [
+              'admin_vhr',
+              'vhr',
+              '$2b$10$ov9F32cIWWXhvNumETtB1urvsdD5Y4Wl6wXlSHoCy.f4f03kRGcf2',
+              'admin@example.local',
+              'admin'
+            ]
+          );
+          console.log('[api/admin/init-users] ✓ Admin user created');
+        } else {
+          console.log('[api/admin/init-users] Admin user already exists');
+        }
+
+        // Create default demo user
+        const demoCheck = await client.query('SELECT 1 FROM users WHERE username = $1 LIMIT 1', ['VhrDashboard']);
+        if (demoCheck.rowCount === 0) {
+          await client.query(
+            'INSERT INTO users (id, username, passwordhash, email, role) VALUES ($1, $2, $3, $4, $5)',
+            [
+              'user_demo',
+              'VhrDashboard',
+              '$2b$10$XtU3hKSETcFgyx9w.KfL5unRFQ7H2Q26vBKXXjQ05Kz47mZbvrdQS',
+              'regatpeter@hotmail.fr',
+              'user'
+            ]
+          );
+          console.log('[api/admin/init-users] ✓ Demo user created');
+        } else {
+          console.log('[api/admin/init-users] Demo user already exists');
+        }
+
+        res.json({ ok: true, message: 'Default users initialized' });
+      } finally {
+        client.release();
+      }
+    } else {
+      ensureDefaultUsers();
+      res.json({ ok: true, message: 'Default users initialized' });
+    }
+  } catch (error) {
+    console.error('[api/admin/init-users] Error:', error && error.message ? error.message : error);
+    res.status(500).json({ ok: false, error: error && error.message ? error.message : 'Initialization failed' });
+  }
+});
+
 // Return authenticated user info (uses auth middleware)
 app.get('/api/me', authMiddleware, (req, res) => {
   const user = { username: req.user.username, role: req.user.role };
@@ -4282,6 +4343,16 @@ initializeApp().then(() => {
     console.log(`   Ô£à Pas de scintillement avec ADB natif`);
     console.log(`\nCrop œil gauche activé par défaut\n`);
   });
+}).catch(err => {
+  console.error('[FATAL] Initialization failed:', err && err.message ? err.message : err);
+  console.error('[FATAL] Stack:', err && err.stack);
+  console.log('[INFO] Server will start anyway, but users table may not be initialized.');
+  console.log('[INFO] To fix: POST to /api/admin/init-users once server is running');
+  server.listen(PORT, () => {
+    console.log(`\n[WARNING] Server running on port ${PORT} but initialization failed`);
+    console.log(`[INSTRUCTION] Run: curl -X POST http://localhost:${PORT}/api/admin/init-users\n`);
+  });
+});
 }).catch(err => {
   console.error('[FATAL] Failed to initialize app:', err);
   process.exit(1);
