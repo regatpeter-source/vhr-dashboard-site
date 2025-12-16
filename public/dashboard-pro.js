@@ -1,6 +1,18 @@
 // VHR DASHBOARD PRO - Version complète avec fond noir et vue tableau
 // Date: 2025-12-03
 
+// ========== HELPER FUNCTIONS ========== 
+// Toggle password visibility in forms
+window.toggleDashboardPassword = function(inputId) {
+	const input = document.getElementById(inputId);
+	if (!input) return;
+	if (input.type === 'password') {
+		input.type = 'text';
+	} else {
+		input.type = 'password';
+	}
+};
+
 // ========== CONFIGURATION ========== 
 let viewMode = localStorage.getItem('vhr_view_mode') || 'table'; // 'table' ou 'cards'
 let currentUser = localStorage.getItem('vhr_user') || '';
@@ -2082,7 +2094,10 @@ window.showAuthModal = function(mode = 'login') {
 				</div>
 				<div style="margin-bottom:20px;">
 					<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Mot de passe</label>
-					<input type="password" id="loginPassword" placeholder="••••••••" style="width:100%;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+					<div style="display:flex;gap:8px;align-items:center;">
+						<input type="password" id="loginPassword" placeholder="••••••••" style="flex:1;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+						<button type="button" onclick="toggleDashboardPassword('loginPassword')" style="background:none;border:none;cursor:pointer;font-size:18px;padding:8px;color:#fff;" title="Afficher/masquer">👁️</button>
+					</div>
 				</div>
 				<button onclick="loginUser()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
 					🔐 Se connecter
@@ -2104,7 +2119,10 @@ window.showAuthModal = function(mode = 'login') {
 				</div>
 				<div style="margin-bottom:20px;">
 					<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Mot de passe</label>
-					<input type="password" id="registerPassword" placeholder="••••••••" style="width:100%;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+					<div style="display:flex;gap:8px;align-items:center;">
+						<input type="password" id="registerPassword" placeholder="••••••••" style="flex:1;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+						<button type="button" onclick="toggleDashboardPassword('registerPassword')" style="background:none;border:none;cursor:pointer;font-size:18px;padding:8px;color:#fff;" title="Afficher/masquer">👁️</button>
+					</div>
 				</div>
 				<button onclick="registerUser()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
 					📝 S'inscrire
