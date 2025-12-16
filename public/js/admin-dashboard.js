@@ -239,69 +239,91 @@ async function viewUser(username) {
 // View message detail
 async function viewMessage(messageId) {
   try {
+    console.log('[viewMessage] Loading message', messageId);
     const res = await authFetch(`${API_BASE}/admin/messages`);
     const data = await res.json();
-    const msg = data.messages.find(m => m.id == messageId);
-    if (msg) {
-      const modalBody = document.getElementById('messageModalBody');
-      const responseForm = `
-        <div class="form-group">
-          <label>Response:</label>
-          <textarea id="responseText" placeholder="Type your response here..." style="height: 150px; resize: vertical;"></textarea>
-          <small style="color: #666; margin-top: 8px; display: block;">💬 A signature will be automatically added to your response</small>
-        </div>
-        <button class="btn-submit" onclick="respondToMessage('${msg.id}')">Send Response</button>
-      `;
-      
-      const statusBadgeClass = msg.status === 'unread' ? 'badge-unread' : (msg.status === 'responded' ? 'badge-active' : 'badge-inactive');
-      const statusLabel = msg.status === 'unread' ? '📧 Unread' : (msg.status === 'responded' ? '✓ Responded' : 'Read');
-      
-      const userAvatar = msg.name.charAt(0).toUpperCase();
-      const respondedAt = msg.respondedAt ? new Date(msg.respondedAt).toLocaleString() : null;
-      
-      modalBody.innerHTML = `
-        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-          <div style="display: flex; gap: 12px; align-items: flex-start;">
-            <div style="width: 40px; height: 40px; border-radius: 50%; background: #667eea; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 16px;">${userAvatar}</div>
-            <div style="flex: 1;">
-              <p style="margin: 0; font-weight: 600; color: #333;">${msg.name}</p>
-              <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">${msg.email}</p>
-              <p style="margin: 8px 0 0 0; color: #999; font-size: 12px;">${new Date(msg.createdAt).toLocaleString()}</p>
-            </div>
-            <span class="badge ${statusBadgeClass}" style="white-space: nowrap;">${statusLabel}</span>
-          </div>
-        </div>
-        
-        <h4 style="margin: 20px 0 10px 0; color: #333;">${msg.subject}</h4>
-        
-        <div style="background: white; padding: 15px; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 20px; line-height: 1.6; color: #555;">
-          ${msg.message.replace(/\n/g, '<br>')}
-        </div>
-        
-        ${msg.response ? `
-          <div style="background: #f0f7ff; padding: 15px; border-left: 4px solid #667eea; border-radius: 6px; margin-bottom: 20px;">
-            <p style="margin: 0 0 10px 0; font-weight: 600; color: #667eea;">📨 Your Response (${respondedAt})</p>
-            <div style="color: #555; line-height: 1.6; margin-bottom: 10px; white-space: pre-wrap; font-family: inherit;">
-              ${msg.response.replace(/\n/g, '<br>')}
-            </div>
-            <p style="margin: 10px 0 0 0; font-size: 12px; color: #999; border-top: 1px solid rgba(102, 126, 234, 0.2); padding-top: 10px;">
-              Responded by: <strong>${msg.respondedBy || 'Admin'}</strong>
-            </p>
-          </div>
-        ` : responseForm}
-      `;
-      document.getElementById('messageModal').classList.add('active');
+    
+    if (!data.ok || !data.messages) {
+      console.error('[viewMessage] Error loading messages:', data.error);
+      alert('❌ Error loading messages: ' + (data.error || 'Unknown error'));
+      return;
     }
+    
+    const msg = data.messages.find(m => m.id == messageId);
+    if (!msg) {
+      console.error('[viewMessage] Message not found with id:', messageId);
+      alert('❌ Message not found');
+      return;
+    }
+    
+    console.log('[viewMessage] Found message:', msg.subject);
+    
+    const modalBody = document.getElementById('messageModalBody');
+    const responseForm = `
+      <div class="form-group">
+        <label>Response:</label>
+        <textarea id="responseText" placeholder="Type your response here..." style="height: 150px; resize: vertical; width: 100%;"></textarea>
+        <small style="color: #666; margin-top: 8px; display: block;">💬 A signature will be automatically added to your response</small>
+      </div>
+      <button class="btn-submit" onclick="respondToMessage('${msg.id}')">Send Response</button>
+    `;
+    
+    const statusBadgeClass = msg.status === 'unread' ? 'badge-unread' : (msg.status === 'responded' ? 'badge-active' : 'badge-inactive');
+    const statusLabel = msg.status === 'unread' ? '📧 Unread' : (msg.status === 'responded' ? '✓ Responded' : 'Read');
+    
+    const userAvatar = msg.name.charAt(0).toUpperCase();
+    const respondedAt = msg.respondedAt ? new Date(msg.respondedAt).toLocaleString() : null;
+    
+    modalBody.innerHTML = `
+      <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+        <div style="display: flex; gap: 12px; align-items: flex-start;">
+          <div style="width: 40px; height: 40px; border-radius: 50%; background: #667eea; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 16px;">${userAvatar}</div>
+          <div style="flex: 1;">
+            <p style="margin: 0; font-weight: 600; color: #333;">${msg.name}</p>
+            <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">${msg.email}</p>
+            <p style="margin: 8px 0 0 0; color: #999; font-size: 12px;">${new Date(msg.createdAt).toLocaleString()}</p>
+          </div>
+          <span class="badge ${statusBadgeClass}" style="white-space: nowrap;">${statusLabel}</span>
+        </div>
+      </div>
+      
+      <h4 style="margin: 20px 0 10px 0; color: #333;">${msg.subject}</h4>
+      
+      <div style="background: white; padding: 15px; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 20px; line-height: 1.6; color: #555;">
+        ${msg.message.replace(/\n/g, '<br>')}
+      </div>
+      
+      ${msg.response ? `
+        <div style="background: #f0f7ff; padding: 15px; border-left: 4px solid #667eea; border-radius: 6px; margin-bottom: 20px;">
+          <p style="margin: 0 0 10px 0; font-weight: 600; color: #667eea;">📨 Your Response (${respondedAt})</p>
+          <div style="color: #555; line-height: 1.6; margin-bottom: 10px; white-space: pre-wrap; font-family: inherit;">
+            ${msg.response.replace(/\n/g, '<br>')}
+          </div>
+          <p style="margin: 10px 0 0 0; font-size: 12px; color: #999; border-top: 1px solid rgba(102, 126, 234, 0.2); padding-top: 10px;">
+            Responded by: <strong>${msg.respondedBy || 'Admin'}</strong>
+          </p>
+        </div>
+      ` : responseForm}
+    `;
+    document.getElementById('messageModal').classList.add('active');
   } catch (e) {
-    console.error('Error viewing message:', e);
+    console.error('[viewMessage] Exception:', e);
+    alert('❌ Error viewing message:\n' + e.message);
   }
 }
 
 // Respond to message with automatic signature
 async function respondToMessage(messageId) {
-  const response = document.getElementById('responseText').value;
-  if (!response) {
-    alert('Please write a response');
+  const responseText = document.getElementById('responseText');
+  if (!responseText) {
+    console.error('[respond] responseText textarea not found');
+    alert('❌ Error: Response field not found. Try refreshing the page.');
+    return;
+  }
+  
+  const response = responseText.value;
+  if (!response || response.trim() === '') {
+    alert('❌ Please write a response');
     return;
   }
   
@@ -309,23 +331,40 @@ async function respondToMessage(messageId) {
   const signature = `\n\n---\n📱 VHR Dashboard Support\nPeter Vhr Dashboard\nYour VR Management Solution\ncontact@vhrdashboard.com`;
   const responseWithSignature = response + signature;
   
+  console.log('[respond] Sending response for message', messageId);
+  console.log('[respond] Response length:', responseWithSignature.length);
+  
   try {
-    const res = await authFetch(`${API_BASE}/admin/messages/${messageId}`, {
+    const url = `${API_BASE}/admin/messages/${messageId}`;
+    const body = JSON.stringify({ status: 'responded', response: responseWithSignature });
+    
+    console.log('[respond] URL:', url);
+    console.log('[respond] Request body:', body);
+    
+    const res = await authFetch(url, {
       method: 'PATCH',
-      body: JSON.stringify({ status: 'responded', response: responseWithSignature })
+      body: body
     });
+    
+    console.log('[respond] Response status:', res.status);
+    console.log('[respond] Response ok:', res.ok);
+    
     const data = await res.json();
+    console.log('[respond] Response data:', data);
+    
     if (data.ok) {
-      alert('✓ Response sent successfully with signature!');
+      alert('✅ Response sent successfully!\n\n📧 Reply email sent to: ' + (data.emailSent ? 'Yes' : 'No (check email config)'));
       document.getElementById('messageModal').classList.remove('active');
-      loadMessages();
-      loadStats();
+      await loadMessages();
+      await loadStats();
     } else {
-      alert('Error: ' + data.error);
+      console.error('[respond] Error:', data.error);
+      alert('❌ Error: ' + (data.error || 'Unknown error'));
     }
   } catch (e) {
-    console.error('Error responding:', e);
-    alert('Error sending response');
+    console.error('[respond] Exception:', e);
+    console.error('[respond] Stack:', e.stack);
+    alert('❌ Error sending response:\n' + e.message);
   }
 }
 

@@ -4,7 +4,7 @@
     "passwordHash": "$2b$10$SUXGbqHTbVmphiRiqGJYuO01oTslpJpL2.x0i1fZc2uQL9V3wCEVy",
     "role": "admin",
     "email": "admin@example.local",
-    "stripeCustomerId": null,
+    "stripeCustomerId": "cus_TcKYOM74wACDDH",
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
     "subscriptionStatus": "active",
