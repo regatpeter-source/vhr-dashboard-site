@@ -1447,6 +1447,76 @@ app.post('/api/admin/init-users', async (req, res) => {
   }
 });
 
+// Diagnostic endpoint to check database and user status
+app.get('/api/admin/diagnose', async (req, res) => {
+  console.log('[api/admin/diagnose] Running diagnosis...');
+  const diagnosis = {
+    timestamp: new Date().toISOString(),
+    mode: USE_POSTGRES ? 'PostgreSQL' : 'JSON',
+    checks: {}
+  };
+
+  try {
+    // Check database connection
+    if (USE_POSTGRES && db && db.pool) {
+      try {
+        const client = await db.pool.connect();
+        try {
+          const result = await client.query('SELECT NOW()');
+          diagnosis.checks.database = { ok: true, message: 'Connected to PostgreSQL' };
+          
+          // Check users table exists
+          const tableCheck = await client.query(`
+            SELECT EXISTS (
+              SELECT FROM information_schema.tables 
+              WHERE table_schema = 'public' 
+              AND table_name = 'users'
+            )
+          `);
+          diagnosis.checks.usersTable = { ok: tableCheck.rows[0].exists, message: tableCheck.rows[0].exists ? 'Users table exists' : 'Users table NOT found' };
+          
+          // Check users in database
+          if (tableCheck.rows[0].exists) {
+            const usersResult = await client.query('SELECT id, username, email, role FROM users ORDER BY username');
+            diagnosis.checks.users = { 
+              ok: usersResult.rows.length > 0, 
+              count: usersResult.rows.length,
+              users: usersResult.rows
+            };
+            
+            // Check for admin user specifically
+            const adminCheck = await client.query('SELECT * FROM users WHERE username = $1', ['vhr']);
+            diagnosis.checks.adminUser = { 
+              ok: adminCheck.rows.length > 0, 
+              message: adminCheck.rows.length > 0 ? 'Admin user "vhr" found' : 'Admin user "vhr" NOT found'
+            };
+          }
+        } finally {
+          client.release();
+        }
+      } catch (dbErr) {
+        diagnosis.checks.database = { ok: false, error: dbErr?.message || 'Connection failed' };
+      }
+    } else {
+      diagnosis.checks.database = { ok: false, message: 'Database not in PostgreSQL mode' };
+    }
+
+    // Check file mode users
+    if (!USE_POSTGRES) {
+      diagnosis.checks.users = { 
+        ok: users.length > 0, 
+        count: users.length,
+        users: users.map(u => ({ username: u.username, role: u.role, email: u.email }))
+      };
+    }
+
+  } catch (err) {
+    diagnosis.error = err?.message || 'Unknown error';
+  }
+
+  res.json(diagnosis);
+});
+
 // Return authenticated user info (uses auth middleware)
 app.get('/api/me', authMiddleware, (req, res) => {
   const user = { username: req.user.username, role: req.user.role };
