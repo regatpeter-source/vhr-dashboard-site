@@ -27,6 +27,19 @@ const db = process.env.DATABASE_URL ? require('./db-postgres') : null;
 const USE_POSTGRES = !!process.env.DATABASE_URL;
 console.log(`[DB] Mode: ${USE_POSTGRES ? 'PostgreSQL' : 'JSON Files (Development)'}`);
 
+// ========== GLOBAL ERROR HANDLERS =========
+// Capture unhandled exceptions to prevent server crashes
+process.on('uncaughtException', (err) => {
+  console.error('[CRITICAL] Uncaught Exception:', err.message);
+  console.error('[CRITICAL] Stack:', err.stack);
+  // Don't exit, try to continue
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[CRITICAL] Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit, try to continue
+});
+
 // ========== JAVA & GRADLE MANAGEMENT ===========
 
 /**
