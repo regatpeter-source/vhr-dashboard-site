@@ -1,10 +1,12 @@
 @echo off
 setlocal enabledelayedexpansion
+chcp 65001 > nul
 
+cls
 echo.
-echo ========================================
-echo VHR Dashboard Launcher
-echo ========================================
+echo  ╔════════════════════════════════════════╗
+echo  ║  VHR DASHBOARD - Lancement automatique ║
+echo  ╚════════════════════════════════════════╝
 echo.
 
 REM Search for the project by looking for package.json
@@ -22,30 +24,43 @@ if exist "C:\Users\peter\VR-Manager\package.json" (
 )
 
 if "!PROJECT_DIR!"=="" (
-  echo ERROR: Could not find VR-Manager project
+  color 0C
+  echo [ERREUR] Impossible de trouver le répertoire VR-Manager
+  echo.
+  echo Vérifiez que VR-Manager est installé dans:
+  echo   - C:\Users\%USERNAME%\VR-Manager
+  echo   - C:\Users\%USERNAME%\Documents\VR-Manager
+  echo   - C:\VR-Manager
+  echo.
   pause
   exit /b 1
 )
 
-echo Project: !PROJECT_DIR!
+echo [OK] Répertoire trouvé: !PROJECT_DIR!
 echo.
-echo Downloading and executing launcher...
+echo  Préparation du lancement...
 echo.
 
-REM Download script to temp and execute
-set "TEMP_PS1=%TEMP%\vhr-launcher-%RANDOM%.ps1"
-
+REM Execute PowerShell launcher with admin rights handling
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$url = 'https://vhr-dashboard-site.onrender.com/scripts/launch-dashboard.ps1'; " ^
-  "$tempFile = '%TEMP_PS1%'; " ^
   "$projectDir = '!PROJECT_DIR!'; " ^
-  "try { " ^
-  "  (New-Object System.Net.WebClient).DownloadFile($url, $tempFile); " ^
-  "  if (Test-Path $tempFile) { " ^
-  "    & $tempFile; " ^
-  "  } " ^
-  "} finally { " ^
-  "  Remove-Item $tempFile -Force -ErrorAction SilentlyContinue; " ^
-  "}"
+  "Write-Host ''; " ^
+  "$scriptPath = Join-Path $projectDir 'scripts\launch-dashboard.ps1'; " ^
+  "if (-not (Test-Path $scriptPath)) { " ^
+  "  Write-Host '[ERREUR] Script de lancement non trouvé!' -ForegroundColor Red; " ^
+  "  Write-Host \"Expected: $scriptPath\" -ForegroundColor Yellow; " ^
+  "  Read-Host 'Appuyez sur Entrée pour quitter'; " ^
+  "  exit 1; " ^
+  "} " ^
+  "& $scriptPath"
 
-pause
+if errorlevel 1 (
+  color 0C
+  echo.
+  echo [ERREUR] Le lancement a échoué
+  echo.
+  pause
+  exit /b 1
+)
+
+exit /b 0

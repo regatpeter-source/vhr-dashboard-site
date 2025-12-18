@@ -5,10 +5,10 @@
     "email": "marie.martin@example.com",
     "subject": "Question about VHR Dashboard features",
     "message": "I would like to know more about the remote control features and how they work with VR headsets.",
-    "status": "responded",
+    "status": "read",
     "createdAt": "2025-12-06T10:15:00Z",
-    "response": "Bonjour Marie,\n\nMerci pour votre question intéressante !\n\nNos fonctionnalités de contrôle à distance sont conçues pour offrir une expérience de gestion VR complète et intuitive. Je vous invite à essayer le dashboard gratuitement pendant 7 jours afin de comprendre pleinement ce que nous proposons.\n\nN'hésitez pas à nous contacter si vous avez d'autres questions.\n\n---\n📱 VHR Dashboard Support\nPeter Vhr Dashboard\nYour VR Management Solution\ncontact@vhrdashboard.com",
-    "respondedAt": "2025-12-07T22:13:06.869Z",
+    "response": "Thank you for your message. This is a test reply sent on 2025-12-16 22:48:33. The message reception date and reply date should both be recorded in the system.",
+    "respondedAt": "2025-12-16T21:48:33.569Z",
     "respondedBy": "vhr"
   },
   {
@@ -22,5 +22,14 @@
     "response": "bonjour Luc,\n\nnous proposons actuellement une licence définitive au tarif de 499 ttc.\n\n---\n📱 VHR Dashboard Support\nPeter Vhr Dashboard\nYour VR Management Solution\ncontact@vhrdashboard.com",
     "respondedAt": "2025-12-07T22:20:01.889Z",
     "respondedBy": "vhr"
+  },
+  {
+    "id": 4,
+    "name": "Test User",
+    "email": "test_1950576574@example.local",
+    "subject": "Test Message - 2025-12-16 22:48:33",
+    "message": "This is a test message to verify the message system is working correctly. Reply date should be recorded.",
+    "status": "unread",
+    "createdAt": "2025-12-16T21:48:33.457Z"
   }
 ]

@@ -8,7 +8,7 @@ async function launchDashboard() {
     // Disable button
     btn.disabled = true;
     btn.classList.add('loading');
-    btn.textContent = '⏳ Téléchargement...';
+    btn.textContent = '⏳ Téléchargement en cours...';
     successMsg.classList.remove('show');
     
     try {
@@ -16,7 +16,7 @@ async function launchDashboard() {
         const response = await fetch('/download/launch-script');
         
         if (!response.ok) {
-            throw new Error('Erreur lors du téléchargement');
+            throw new Error(`Erreur HTTP ${response.status}`);
         }
         
         const blob = await response.blob();
@@ -29,11 +29,17 @@ async function launchDashboard() {
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
         
-        // Show success message
+        // Show success message with instructions
         successMsg.classList.add('show');
         btn.textContent = '✓ Fichier téléchargé !';
         
-        // Reset after 5 seconds
+        // Automatically open the launch status page
+        // This shows the user the server is starting and redirects when ready
+        setTimeout(() => {
+            window.open('/launch-status.html', '_blank', 'width=600,height=700');
+        }, 1000);
+        
+        // Reset button after 5 seconds
         setTimeout(() => {
             btn.disabled = false;
             btn.classList.remove('loading');
@@ -41,10 +47,20 @@ async function launchDashboard() {
         }, 5000);
         
     } catch (error) {
-        console.error('Erreur:', error);
+        console.error('Erreur de téléchargement:', error);
         btn.textContent = '✗ Erreur - Réessayez';
         btn.disabled = false;
         btn.classList.remove('loading');
+        
+        // Show error message
+        const errorDiv = document.createElement('div');
+        errorDiv.style.cssText = 'background: #ffebee; color: #c62828; padding: 15px; border-radius: 5px; margin-top: 20px; text-align: left;';
+        errorDiv.innerHTML = `
+            <strong>Erreur de téléchargement:</strong><br>
+            ${error.message}<br><br>
+            Vérifiez votre connexion Internet et réessayez.
+        `;
+        successMsg.parentNode.insertBefore(errorDiv, successMsg.nextSibling);
         
         setTimeout(() => {
             btn.textContent = '🚀 Lancer le Dashboard';
