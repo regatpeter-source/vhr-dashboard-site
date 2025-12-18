@@ -37,6 +37,12 @@
   
   <!-- Content Pages -->
   <url>
+    <loc>https://vhr-dashboard-site.onrender.com/guide-gestion-casques-vr.html</loc>
+    <lastmod>2025-12-16</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
     <loc>https://vhr-dashboard-site.onrender.com/case-studies.html</loc>
     <lastmod>2025-12-15</lastmod>
     <changefreq>monthly</changefreq>
