@@ -1020,7 +1020,7 @@ function renderDevicesTable() {
 				`}
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				${!d.serial.includes(':') && !d.serial.includes('.') ? `
+				${!d.serial.includes(':') ? `
 					<button onclick='connectWifiAuto("${d.serial}")' style='background:#9b59b6;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📶 WiFi Auto</button>
 				` : `<span style='color:#95a5a6;'>-</span>`}
 			</td>
@@ -1103,7 +1103,7 @@ function renderDevicesCards() {
 				<button onclick='showFavoritesDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#e67e22;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>⭐ Favoris</button>
 			</div>
 			<button onclick='sendVoiceToHeadset("${d.serial}")' style='width:100%;background:#1abc9c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>🎤 Voix PC→Casque</button>
-			${!d.serial.includes(':') && !d.serial.includes('.') ? `
+			${!d.serial.includes(':') ? `
 				<button onclick='connectWifiAuto("${d.serial}")' style='width:100%;background:#9b59b6;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>📶 WiFi Auto</button>
 			` : ''}
 			<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;'>
