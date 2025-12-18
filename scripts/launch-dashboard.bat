@@ -1,12 +1,11 @@
 @echo off
 setlocal enabledelayedexpansion
-chcp 65001 > nul
 
 cls
 echo.
-echo  ╔════════════════════════════════════════╗
-echo  ║  VHR DASHBOARD - Lancement automatique ║
-echo  ╚════════════════════════════════════════╝
+echo ============================================
+echo VHR Dashboard Launcher
+echo ============================================
 echo.
 
 REM Search for the project by looking for package.json
@@ -25,9 +24,9 @@ if exist "C:\Users\peter\VR-Manager\package.json" (
 
 if "!PROJECT_DIR!"=="" (
   color 0C
-  echo [ERREUR] Impossible de trouver le répertoire VR-Manager
+  echo [ERREUR] Impossible de trouver le repertoire VR-Manager
   echo.
-  echo Vérifiez que VR-Manager est installé dans:
+  echo Verifiez que VR-Manager est installe dans:
   echo   - C:\Users\%USERNAME%\VR-Manager
   echo   - C:\Users\%USERNAME%\Documents\VR-Manager
   echo   - C:\VR-Manager
@@ -36,9 +35,7 @@ if "!PROJECT_DIR!"=="" (
   exit /b 1
 )
 
-echo [OK] Répertoire trouvé: !PROJECT_DIR!
-echo.
-echo  Préparation du lancement...
+echo [OK] Repertoire trouve: !PROJECT_DIR!
 echo.
 
 REM Launch PowerShell script directly with project directory
@@ -47,7 +44,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "!PROJECT_DIR!\scripts\launc
 if errorlevel 1 (
   color 0C
   echo.
-  echo [ERREUR] Le lancement a échoué
+  echo [ERREUR] Le lancement a echoue
   echo.
   pause
   exit /b 1
