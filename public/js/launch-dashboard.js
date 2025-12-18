@@ -8,7 +8,7 @@ async function launchDashboard() {
     // Disable button
     btn.disabled = true;
     btn.classList.add('loading');
-    btn.textContent = '⏳ Téléchargement en cours...';
+    btn.textContent = '⏳ Téléchargement et lancement...';
     successMsg.classList.remove('show');
     
     try {
@@ -29,15 +29,28 @@ async function launchDashboard() {
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
         
-        // Show success message with instructions
+        // Automatic launch via Explorer (Windows)
+        // Try to execute the script automatically on Windows
+        if (navigator.platform && navigator.platform.includes('Win')) {
+            // Create a simple exec that opens the file with default handler
+            // This will auto-execute .bat files
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/api/launch-dashboard';
+            form.style.display = 'none';
+            document.body.appendChild(form);
+            form.submit();
+            document.body.removeChild(form);
+        }
+        
+        // Show page de statut
         successMsg.classList.add('show');
-        btn.textContent = '✓ Fichier téléchargé !';
+        btn.textContent = '✓ Lancement en cours...';
         
         // Automatically open the launch status page
-        // This shows the user the server is starting and redirects when ready
         setTimeout(() => {
             window.open('/launch-status.html', '_blank', 'width=600,height=700');
-        }, 1000);
+        }, 500);
         
         // Reset button after 5 seconds
         setTimeout(() => {
