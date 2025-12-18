@@ -8,11 +8,11 @@ async function launchDashboard() {
     // Disable button
     btn.disabled = true;
     btn.classList.add('loading');
-    btn.textContent = '⏳ Téléchargement et lancement...';
+    btn.textContent = '⏳ Téléchargement...';
     successMsg.classList.remove('show');
     
     try {
-        // Download the PowerShell script
+        // Download the launcher script
         const response = await fetch('/download/launch-script');
         
         if (!response.ok) {
@@ -29,35 +29,16 @@ async function launchDashboard() {
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
         
-        // Automatic launch via Explorer (Windows)
-        // Try to execute the script automatically on Windows
-        if (navigator.platform && navigator.platform.includes('Win')) {
-            // Create a simple exec that opens the file with default handler
-            // This will auto-execute .bat files
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.action = '/api/launch-dashboard';
-            form.style.display = 'none';
-            document.body.appendChild(form);
-            form.submit();
-            document.body.removeChild(form);
-        }
-        
-        // Show page de statut
+        // Show success message
         successMsg.classList.add('show');
-        btn.textContent = '✓ Lancement en cours...';
+        btn.textContent = '✓ Fichier téléchargé!';
         
-        // Automatically open the launch status page
-        setTimeout(() => {
-            window.open('/launch-status.html', '_blank', 'width=600,height=700');
-        }, 500);
-        
-        // Reset button after 5 seconds
+        // Reset button after 3 seconds
         setTimeout(() => {
             btn.disabled = false;
             btn.classList.remove('loading');
             btn.textContent = '🚀 Lancer le Dashboard';
-        }, 5000);
+        }, 3000);
         
     } catch (error) {
         console.error('Erreur de téléchargement:', error);

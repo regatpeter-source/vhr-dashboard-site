@@ -1,3 +1,5 @@
+param([string]$projectDir)
+
 $port = 3000
 $url = "http://localhost:$port/vhr-dashboard-pro.html"
 
@@ -5,9 +7,10 @@ $url = "http://localhost:$port/vhr-dashboard-pro.html"
 if (-not $projectDir) { $projectDir = Get-Location }
 $dir = $projectDir.ToString()
 
+Write-Host ""
 Write-Host "VHR Dashboard Launcher"
-Write-Host "======================================"
-Write-Host "Checking Node.js..."
+Write-Host "========================================"`
+Write-Host ""
 node --version
 if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: Node.js not found"; pause; exit 1 }
 Write-Host "Project: $dir"

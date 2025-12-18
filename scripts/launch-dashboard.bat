@@ -41,18 +41,8 @@ echo.
 echo  Préparation du lancement...
 echo.
 
-REM Execute PowerShell launcher with admin rights handling
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$projectDir = '!PROJECT_DIR!'; " ^
-  "Write-Host ''; " ^
-  "$scriptPath = Join-Path $projectDir 'scripts\launch-dashboard.ps1'; " ^
-  "if (-not (Test-Path $scriptPath)) { " ^
-  "  Write-Host '[ERREUR] Script de lancement non trouvé!' -ForegroundColor Red; " ^
-  "  Write-Host \"Expected: $scriptPath\" -ForegroundColor Yellow; " ^
-  "  Read-Host 'Appuyez sur Entrée pour quitter'; " ^
-  "  exit 1; " ^
-  "} " ^
-  "& $scriptPath"
+REM Launch PowerShell script directly with project directory
+powershell -NoProfile -ExecutionPolicy Bypass -File "!PROJECT_DIR!\scripts\launch-dashboard.ps1" -projectDir "!PROJECT_DIR!"
 
 if errorlevel 1 (
   color 0C
