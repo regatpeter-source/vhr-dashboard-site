@@ -3575,7 +3575,7 @@ function startAdbTrack() {
       if (buffer.includes('\n')) {
         buffer = '';
         if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(refreshDevices, 500);
+        debounceTimer = setTimeout(refreshDevices, 200);
       }
     });
     track.on('error', () => setInterval(refreshDevices, 2000));
