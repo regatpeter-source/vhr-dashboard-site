@@ -887,7 +887,9 @@ app.get('/download/launch-script', (req, res) => {
     
     res.setHeader('Content-Type', 'application/x-bat');
     res.setHeader('Content-Disposition', 'attachment; filename="launch-dashboard.bat"');
-    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     return res.sendFile(scriptPath);
   } catch (e) {
     console.error('[launch-script] error:', e);
