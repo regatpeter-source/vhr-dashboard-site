@@ -3462,7 +3462,8 @@ app.post('/api/package-dashboard', async (req, res) => {
 // Run an adb command for a given serial, return { stdout, stderr }
 const runAdbCommand = (serial, args) => {
   return new Promise((resolve, reject) => {
-    const proc = spawn('adb', ['-s', serial, ...args])
+    const adbArgs = serial ? ['-s', serial, ...args] : args;
+    const proc = spawn('adb', adbArgs)
     let stdout = '', stderr = ''
     proc.stdout.on('data', d => { stdout += d })
     proc.stderr.on('data', d => { stderr += d })
