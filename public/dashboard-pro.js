@@ -40,6 +40,9 @@ function createNavbar() {
 		<button id="toggleViewBtn" style="margin-right:15px;background:#2ecc71;color:#000;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			📊 Vue: Tableau
 		</button>
+		<button id="refreshBtn" style="margin-right:15px;background:#9b59b6;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
+			🔄 Rafraîchir
+		</button>
 		<button id="favoritesBtn" style="margin-right:15px;background:#f39c12;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			⭐ Ajouter aux favoris
 		</button>
@@ -50,6 +53,7 @@ function createNavbar() {
 	`;
 	
 	document.getElementById('toggleViewBtn').onclick = toggleView;
+	document.getElementById('refreshBtn').onclick = refreshDevicesList;
 	document.getElementById('favoritesBtn').onclick = addDashboardToFavorites;
 	document.getElementById('accountBtn').onclick = showAccountPanel;
 	updateUserUI();
@@ -925,6 +929,40 @@ async function api(path, opts = {}) {
 	} catch (e) {
 		console.error('[api]', path, e);
 		return { ok: false, error: e.message };
+	}
+}
+
+async function refreshDevicesList() {
+	const btn = document.getElementById('refreshBtn');
+	if (!btn) return;
+	
+	// Montrer un état de loading
+	btn.style.opacity = '0.6';
+	btn.style.pointerEvents = 'none';
+	const originalText = btn.innerHTML;
+	btn.innerHTML = '⏳ Rafraîchissement...';
+	
+	try {
+		// Recharger les devices
+		await loadDevices();
+		
+		// Feedback visuel de succès
+		btn.innerHTML = '✓ Rafraîchi!';
+		setTimeout(() => {
+			btn.innerHTML = originalText;
+			btn.style.opacity = '1';
+			btn.style.pointerEvents = 'auto';
+		}, 1500);
+	} catch (error) {
+		console.error('Erreur rafraîchissement:', error);
+		btn.innerHTML = '❌ Erreur';
+		btn.style.background = '#e74c3c';
+		setTimeout(() => {
+			btn.innerHTML = originalText;
+			btn.style.background = '#9b59b6';
+			btn.style.opacity = '1';
+			btn.style.pointerEvents = 'auto';
+		}, 2000);
 	}
 }
 
