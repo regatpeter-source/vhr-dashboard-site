@@ -944,17 +944,23 @@ async function refreshDevicesList() {
 	
 	try {
 		// Recharger les devices
-		await loadDevices();
-		
-		// Feedback visuel de succès
-		btn.innerHTML = '✓ Rafraîchi!';
-		setTimeout(() => {
-			btn.innerHTML = originalText;
-			btn.style.opacity = '1';
-			btn.style.pointerEvents = 'auto';
-		}, 1500);
+		const data = await api('/api/devices');
+		if (data.ok && Array.isArray(data.devices)) {
+			devices = data.devices;
+			renderDevices();
+			
+			// Feedback visuel de succès
+			btn.innerHTML = '✓ Rafraîchi!';
+			setTimeout(() => {
+				btn.innerHTML = originalText;
+				btn.style.opacity = '1';
+				btn.style.pointerEvents = 'auto';
+			}, 1500);
+		} else {
+			throw new Error(data.error || 'Échec du chargement des devices');
+		}
 	} catch (error) {
-		console.error('Erreur rafraîchissement:', error);
+		console.error('[refresh]', error);
 		btn.innerHTML = '❌ Erreur';
 		btn.style.background = '#e74c3c';
 		setTimeout(() => {
