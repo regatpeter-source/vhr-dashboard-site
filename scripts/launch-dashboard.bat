@@ -38,7 +38,7 @@ if "!PROJECT_DIR!"=="" (
 echo [OK] Repertoire trouve: !PROJECT_DIR!
 echo.
 
-REM Launch PowerShell script directly with project directory
+REM Launch PowerShell script directly
 powershell -NoProfile -ExecutionPolicy Bypass -File "!PROJECT_DIR!\scripts\launch-dashboard.ps1" -projectDir "!PROJECT_DIR!"
 
 if errorlevel 1 (
