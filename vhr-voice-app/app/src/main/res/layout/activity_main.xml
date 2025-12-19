@@ -35,6 +35,17 @@
         android:padding="16dp"
         android:textSize="16sp"
         android:inputType="textUri"
+        android:layout_marginBottom="8dp" />
+    
+    <Button
+        android:id="@+id/detectBtn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🔍 Détecter serveur automatiquement"
+        android:textSize="14sp"
+        android:padding="12dp"
+        android:backgroundTint="#3498db"
+        android:textColor="#ffffff"
         android:layout_marginBottom="16dp" />
     
     <TextView

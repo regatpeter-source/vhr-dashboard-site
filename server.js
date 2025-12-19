@@ -1733,6 +1733,16 @@ app.post('/api/dashboard/login', async (req, res) => {
   });
 });
 
+// --- Ping endpoint for VHR Voice app auto-discovery ---
+app.get('/api/ping', (req, res) => {
+  res.json({ 
+    ok: true, 
+    service: 'VHR Dashboard',
+    version: '1.0',
+    timestamp: Date.now()
+  });
+});
+
 // --- Liste des sessions collaboratives actives (pour admin) ---
 app.get('/api/sessions/active', authMiddleware, (req, res) => {
   const sessions = [];
