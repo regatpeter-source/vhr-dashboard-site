@@ -545,6 +545,22 @@ window.sendVoiceToHeadset = async function(serial) {
 				${Array(32).fill(0).map((_, i) => `<div style='width:8px;background:linear-gradient(to top, #2ecc71, #27ae60);border-radius:2px;flex:1;min-height:4px;'></div>`).join('')}
 			</div>
 			
+			<!-- Audio Output Controls -->
+			<div style='padding:15px 20px;background:#1e2128;border-top:1px solid #333;'>
+				<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;'>
+					<label style='color:#fff;font-size:13px;display:flex;align-items:center;gap:8px;'>
+						🔊 Sortie audio:
+						<select id='voiceAudioOutputSelect' style='background:#1a1d24;color:#fff;border:1px solid #2ecc71;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:12px;'>
+							<option value='headset'>📱 Casque uniquement</option>
+							<option value='pc'>💻 PC uniquement</option>
+							<option value='both' selected>🔊 Casque + PC</option>
+						</select>
+					</label>
+					<button id='localMonitorBtn' onclick='window.toggleLocalVoiceMonitor()' style='background:linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>
+						🎧 Écouter localement: ON
+					</button>
+				</div>
+			</div>
 			<!-- Controls -->
 			<div style='padding:20px;background:#2a2d34;border-top:1px solid #444;'>
 				<div style='display:grid;grid-template-columns:1fr 1fr;gap:12px;'>
@@ -556,7 +572,7 @@ window.sendVoiceToHeadset = async function(serial) {
 					</button>
 				</div>
 				<div style='margin-top:15px;padding:12px;background:rgba(46,204,113,0.1);border-left:4px solid #2ecc71;border-radius:4px;font-size:12px;color:#bdc3c7;'>
-					<strong>📊 Status:</strong> Streaming en direct depuis votre micro vers ${deviceName}
+					<strong>📊 Status:</strong> Streaming en direct depuis votre micro vers ${deviceName} (+ PC si activé)
 				</div>
 			</div>
 		</div>
@@ -572,6 +588,9 @@ window.sendVoiceToHeadset = async function(serial) {
 		});
 		await activeAudioStream.start(serial);
 		
+		// Local monitoring is ON by default (hear yourself on PC)
+		activeAudioStream.isLocalMonitoring = true;
+		
 		// Also start audio relay to headset via WebSocket for simple receivers
 		try {
 			await activeAudioStream.startAudioRelay(serial);
@@ -580,8 +599,44 @@ window.sendVoiceToHeadset = async function(serial) {
 			console.warn('[sendVoiceToHeadset] Audio relay failed (WebRTC will still work):', relayError);
 		}
 		
+		// Setup voice audio output select handler
+		setTimeout(() => {
+			const voiceAudioSelect = document.getElementById('voiceAudioOutputSelect');
+			if (voiceAudioSelect) {
+				voiceAudioSelect.addEventListener('change', (e) => {
+					const mode = e.target.value;
+					console.log('[voice] Audio output changed to:', mode);
+					
+					// Adjust local monitoring based on selection
+					if (mode === 'headset') {
+						// Casque only - disable PC playback
+						if (activeAudioStream) activeAudioStream.setLocalMonitoring(false);
+						showToast('🔊 Son: Casque uniquement', 'info');
+					} else if (mode === 'pc') {
+						// PC only - enable PC playback, disable relay to headset
+						if (activeAudioStream) activeAudioStream.setLocalMonitoring(true);
+						showToast('🔊 Son: PC uniquement', 'info');
+					} else if (mode === 'both') {
+						// Both - enable PC playback + keep headset relay
+						if (activeAudioStream) activeAudioStream.setLocalMonitoring(true);
+						showToast('🔊 Son: Casque + PC', 'info');
+					}
+					
+					// Update UI
+					const monitorBtn = document.getElementById('localMonitorBtn');
+					if (monitorBtn && mode !== 'headset') {
+						monitorBtn.innerHTML = '🎧 Écouter localement: ON';
+						monitorBtn.style.background = 'linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%)';
+					} else if (monitorBtn) {
+						monitorBtn.innerHTML = '🔇 Écouter localement: OFF';
+						monitorBtn.style.background = 'linear-gradient(135deg, #7f8c8d 0%, #95a5a6 100%)';
+					}
+				});
+			}
+		}, 100);
+		
 		window.animateAudioVisualizer();
-		showToast(`🎤 Streaming vers ${deviceName}`, 'success');
+		showToast(`🎤 Streaming vers ${deviceName} (+ PC)`, 'success');
 	} catch (e) {
 		console.error('[sendVoiceToHeadset] Error:', e);
 		closeAudioStream();
@@ -599,6 +654,24 @@ window.toggleAudioStreamPause = function() {
 	const pauseBtn = document.getElementById('pauseAudioBtn');
 	if (pauseBtn) pauseBtn.innerHTML = isPaused ? '⏸️ Pause' : '▶️ Reprendre';
 	showToast(isPaused ? '▶️ Streaming repris' : '⏸️ Streaming en pause', 'info');
+};
+
+// Toggle local voice monitoring (hear your own voice on PC speakers)
+window.toggleLocalVoiceMonitor = function() {
+	if (!activeAudioStream) return;
+	
+	const isMonitoring = activeAudioStream.isLocalMonitoring || false;
+	activeAudioStream.setLocalMonitoring(!isMonitoring);
+	activeAudioStream.isLocalMonitoring = !isMonitoring;
+	
+	const monitorBtn = document.getElementById('localMonitorBtn');
+	if (monitorBtn) {
+		monitorBtn.innerHTML = !isMonitoring ? '🎧 Écouter localement: ON' : '🔇 Écouter localement: OFF';
+		monitorBtn.style.background = !isMonitoring 
+			? 'linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%)' 
+			: 'linear-gradient(135deg, #7f8c8d 0%, #95a5a6 100%)';
+	}
+	showToast(!isMonitoring ? '🎧 Écoute locale activée' : '🔇 Écoute locale désactivée', 'info');
 };
 
 window.animateAudioVisualizer = function() {
@@ -1206,21 +1279,54 @@ function renderDevices() {
 }
 
 // ========== STREAMING FUNCTIONS ========== 
-window.startStreamFromTable = async function(serial) {
-	// Use safe ID for HTML element lookup
-	const safeId = serial.replace(/[^a-zA-Z0-9]/g, '_');
-	const profileSelect = document.getElementById(`profile_${safeId}`);
-	const profile = profileSelect ? profileSelect.value : 'default';
+
+// Show audio output selection dialog for stream
+window.showStreamAudioDialog = function(serial, callback) {
+	let dialog = document.getElementById('streamAudioDialog');
+	if (dialog) dialog.remove();
 	
-	// Launch Scrcpy directly (simple and works great)
+	dialog = document.createElement('div');
+	dialog.id = 'streamAudioDialog';
+	dialog.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:4000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(5px);';
+	dialog.onclick = (e) => { if (e.target === dialog) dialog.remove(); };
+	
+	dialog.innerHTML = `
+		<div style='background:#1a1d24;border:2px solid #2ecc71;border-radius:12px;padding:24px;max-width:400px;width:90%;text-align:center;'>
+			<h3 style='color:#2ecc71;margin:0 0 20px 0;'>🔊 Sortie Audio du Stream</h3>
+			<p style='color:#bdc3c7;margin-bottom:20px;font-size:14px;'>Où voulez-vous entendre le son du casque ?</p>
+			<div style='display:flex;flex-direction:column;gap:10px;'>
+				<button onclick='window.launchStreamWithAudio("${serial}", "headset")' style='background:linear-gradient(135deg, #3498db 0%, #2980b9 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
+					📱 Casque uniquement
+				</button>
+				<button onclick='window.launchStreamWithAudio("${serial}", "pc")' style='background:linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
+					💻 PC uniquement
+				</button>
+				<button onclick='window.launchStreamWithAudio("${serial}", "both")' style='background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
+					🔊 Casque + PC (recommandé)
+				</button>
+			</div>
+			<button onclick='document.getElementById("streamAudioDialog").remove()' style='margin-top:16px;background:#7f8c8d;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:12px;'>Annuler</button>
+		</div>
+	`;
+	document.body.appendChild(dialog);
+};
+
+window.launchStreamWithAudio = async function(serial, audioOutput) {
+	// Close dialog
+	const dialog = document.getElementById('streamAudioDialog');
+	if (dialog) dialog.remove();
+	
+	showToast('🎮 Lancement Scrcpy...', 'info');
+	
 	const res = await api('/api/scrcpy-gui', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ serial })
+		body: JSON.stringify({ serial, audioOutput })
 	});
 	
 	if (res.ok) {
-		showToast('🎮 Scrcpy lancé ! Vérifiez votre écran...', 'success');
+		const audioMsg = audioOutput === 'headset' ? '(son sur casque)' : audioOutput === 'pc' ? '(son sur PC)' : '(son sur casque + PC)';
+		showToast(`🎮 Scrcpy lancé ! ${audioMsg}`, 'success');
 		incrementStat('totalSessions');
 	} else {
 		showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
@@ -1228,25 +1334,14 @@ window.startStreamFromTable = async function(serial) {
 	setTimeout(loadDevices, 500);
 };
 
+window.startStreamFromTable = async function(serial) {
+	// Show audio output selection dialog
+	window.showStreamAudioDialog(serial);
+};
+
 window.startStreamFromCard = async function(serial) {
-	// Use safe ID for HTML element lookup
-	const safeId = serial.replace(/[^a-zA-Z0-9]/g, '_');
-	const profileSelect = document.getElementById(`profile_card_${safeId}`);
-	const profile = profileSelect ? profileSelect.value : 'default';
-	
-	// Launch Scrcpy directly (simple and works great)
-	const res = await api('/api/scrcpy-gui', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ serial })
-	});
-	
-	if (res.ok) {
-		showToast('🎮 Scrcpy lancé ! Vérifiez votre écran...', 'success');
-	} else {
-		showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
-	}
-	setTimeout(loadDevices, 500);
+	// Show audio output selection dialog  
+	window.showStreamAudioDialog(serial);
 };
 
 window.startStreamJSMpeg = async function(serial) {

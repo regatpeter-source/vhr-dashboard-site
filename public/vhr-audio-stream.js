@@ -42,6 +42,9 @@ class VHRAudioStream {
     this.analyser = null;
     this.micGain = null;
     this.compressor = null;
+    this.localMonitorGain = null;  // For controlling local playback volume
+    this.isLocalMonitoring = true;  // Local monitoring ON by default
+    this.micSource = null;  // Store reference to mic source
   }
 
   /**
@@ -56,6 +59,10 @@ class VHRAudioStream {
     // Mic input gain (control volume)
     this.micGain = this.audioContext.createGain();
     this.micGain.gain.value = 1.0;
+    
+    // Local monitor gain (control local playback - hear yourself on PC speakers)
+    this.localMonitorGain = this.audioContext.createGain();
+    this.localMonitorGain.gain.value = this.isLocalMonitoring ? 1.0 : 0.0;
     
     // Compressor for better audio quality
     this.compressor = this.audioContext.createDynamicsCompressor();
@@ -86,12 +93,17 @@ class VHRAudioStream {
       console.log('[VHRAudio] Requesting microphone access...');
       this.localStream = await navigator.mediaDevices.getUserMedia(this.config.audioConstraints);
       
-      // Connect local mic to audio graph for visualization
-      const micSource = this.audioContext.createMediaStreamSource(this.localStream);
-      micSource.connect(this.micGain);
+      // Connect local mic to audio graph for visualization AND local monitoring
+      // Chain: micSource → micGain → compressor → analyser → localMonitorGain → destination
+      this.micSource = this.audioContext.createMediaStreamSource(this.localStream);
+      this.micSource.connect(this.micGain);
       this.micGain.connect(this.compressor);
       this.compressor.connect(this.analyser);
-      this.analyser.connect(this.audioContext.destination);
+      // Local monitor: allows hearing yourself on PC speakers (controllable via setLocalMonitoring)
+      this.analyser.connect(this.localMonitorGain);
+      this.localMonitorGain.connect(this.audioContext.destination);
+      
+      console.log('[VHRAudio] Local monitoring:', this.isLocalMonitoring ? 'ON' : 'OFF');
       
       // Setup peer connection
       await this._setupPeerConnection();
@@ -179,11 +191,37 @@ class VHRAudioStream {
   }
 
   /**
+   * Set local monitoring on/off (hear yourself on PC speakers)
+   * Useful for: voice streaming to headset while also hearing on PC
+   */
+  setLocalMonitoring(enabled) {
+    this.isLocalMonitoring = enabled;
+    if (this.localMonitorGain && this.audioContext) {
+      // Smooth transition to avoid clicks
+      this.localMonitorGain.gain.setTargetAtTime(
+        enabled ? 1.0 : 0.0, 
+        this.audioContext.currentTime, 
+        0.05 // 50ms ramp time
+      );
+      this._log('Local monitoring: ' + (enabled ? 'ON' : 'OFF'));
+    }
+  }
+
+  /**
    * Set microphone volume (0.0 to 2.0)
    */
   setMicVolume(volume) {
     if (this.micGain) {
       this.micGain.gain.setValueAtTime(volume, this.audioContext.currentTime);
+    }
+  }
+
+  /**
+   * Set local monitor volume (0.0 to 1.0)
+   */
+  setLocalMonitorVolume(volume) {
+    if (this.localMonitorGain && this.audioContext) {
+      this.localMonitorGain.gain.setTargetAtTime(volume, this.audioContext.currentTime, 0.05);
     }
   }
 
