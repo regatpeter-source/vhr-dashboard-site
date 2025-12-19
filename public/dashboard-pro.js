@@ -892,6 +892,14 @@ function getSettingsContent() {
 				</div>
 			</div>
 			
+			<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>🖥️ Raccourcis Bureau</h3>
+			<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;'>
+				<p style='color:#95a5a6;font-size:13px;margin-bottom:16px;'>Créez un raccourci sur votre bureau pour lancer rapidement le dashboard. Le serveur démarrera automatiquement en arrière-plan.</p>
+				<button onclick='window.createDesktopShortcut()' style='width:100%;background:linear-gradient(135deg, #3498db 0%, #2980b9 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;display:flex;align-items:center;justify-content:center;gap:10px;'>
+					<span style='font-size:20px;'>🖥️</span> Créer un raccourci sur le bureau
+				</button>
+			</div>
+			
 			<button onclick='saveSettings()' style='width:100%;background:#2ecc71;color:#000;border:none;padding:16px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>
 				💾 Sauvegarder les paramètres
 			</button>
@@ -1268,6 +1276,25 @@ window.saveSettings = function() {
 	}
 	
 	showToast('✅ Paramètres sauvegardés !', 'success');
+};
+
+// Créer un raccourci sur le bureau
+window.createDesktopShortcut = async function() {
+	showToast('⏳ Création du raccourci...', 'info');
+	try {
+		const res = await api('/api/create-desktop-shortcut', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' }
+		});
+		if (res.ok) {
+			showToast('✅ Raccourci créé sur le bureau !', 'success');
+		} else {
+			showToast('❌ Erreur: ' + (res.error || 'Impossible de créer le raccourci'), 'error');
+		}
+	} catch (e) {
+		console.error('[shortcut]', e);
+		showToast('❌ Erreur lors de la création du raccourci', 'error');
+	}
 };
 
 window.openBillingPortal = async function() {

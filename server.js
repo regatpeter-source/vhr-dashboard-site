@@ -1760,6 +1760,74 @@ app.get('/api/ping', (req, res) => {
   });
 });
 
+// --- Create desktop shortcut ---
+app.post('/api/create-desktop-shortcut', authMiddleware, async (req, res) => {
+  try {
+    const os = require('os');
+    const path = require('path');
+    const fs = require('fs');
+    const { exec } = require('child_process');
+    
+    const homeDir = os.homedir();
+    const desktopPath = path.join(homeDir, 'Desktop');
+    const projectDir = __dirname;
+    
+    // Créer le fichier VBS pour un lancement invisible
+    const vbsContent = `' VHR Dashboard Pro - Invisible Launcher
+Set WshShell = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+
+projectDir = "${projectDir.replace(/\\/g, '\\\\')}"
+dashboardUrl = "http://localhost:3000/vhr-dashboard-pro.html"
+
+' Vérifier si le serveur est déjà en cours
+Set objExec = WshShell.Exec("cmd /c netstat -ano | find "":3000""")
+output = objExec.StdOut.ReadAll()
+
+If Len(Trim(output)) = 0 Then
+    ' Le serveur n''est pas en cours, le lancer en mode invisible
+    WshShell.CurrentDirectory = projectDir
+    WshShell.Run "cmd /c node server.js", 0, False
+    
+    ' Attendre 2 secondes que le serveur démarre
+    WScript.Sleep 2000
+End If
+
+' Ouvrir le dashboard dans le navigateur
+WshShell.Run dashboardUrl, 1, False
+`;
+    
+    const vbsPath = path.join(projectDir, 'VHR-Dashboard-Launcher.vbs');
+    fs.writeFileSync(vbsPath, vbsContent, 'utf8');
+    
+    // Créer le raccourci avec PowerShell
+    const shortcutPath = path.join(desktopPath, 'VHR Dashboard Pro.lnk');
+    const psCommand = `
+      $WshShell = New-Object -ComObject WScript.Shell
+      $Shortcut = $WshShell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
+      $Shortcut.TargetPath = 'wscript.exe'
+      $Shortcut.Arguments = '"${vbsPath.replace(/'/g, "''")}"'
+      $Shortcut.WorkingDirectory = '${projectDir.replace(/'/g, "''")}'
+      $Shortcut.IconLocation = 'C:\\Windows\\System32\\shell32.dll,13'
+      $Shortcut.Description = 'Lance VHR Dashboard Pro'
+      $Shortcut.Save()
+    `;
+    
+    exec(`powershell -Command "${psCommand.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, (err, stdout, stderr) => {
+      if (err) {
+        console.error('[shortcut] Error:', err);
+        return res.status(500).json({ ok: false, error: 'Erreur lors de la création du raccourci' });
+      }
+      console.log('[shortcut] Desktop shortcut created at:', shortcutPath);
+      res.json({ ok: true, path: shortcutPath });
+    });
+    
+  } catch (e) {
+    console.error('[api] create-desktop-shortcut:', e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // --- Liste des sessions collaboratives actives (pour admin) ---
 app.get('/api/sessions/active', authMiddleware, (req, res) => {
   const sessions = [];
