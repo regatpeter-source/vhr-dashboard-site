@@ -5,12 +5,14 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
-import java.lang.reflect.Method;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 
 /**
  * Main activity for manual configuration (optional)
@@ -39,9 +41,14 @@ public class MainActivity extends Activity {
         
         // Auto-detect device serial
         String deviceSerial = getDeviceSerial();
-        if (deviceSerial != null && !deviceSerial.isEmpty()) {
+        if (deviceSerial != null && !deviceSerial.isEmpty() && !deviceSerial.equals("unknown")) {
             serialInput.setText(deviceSerial);
-            serialInput.setEnabled(false); // Disable editing since it's auto-detected
+        } else {
+            // Load saved serial if available
+            String savedSerial = prefs.getString("serial", "");
+            if (!savedSerial.isEmpty()) {
+                serialInput.setText(savedSerial);
+            }
         }
         
         // Load saved server URL or use default
@@ -54,7 +61,7 @@ public class MainActivity extends Activity {
             serverUrlInput.setSelection(serverUrlInput.getText().length());
         }
         
-        // Check if started with intent parameters
+        // Check if started with intent parameters (from ADB)
         Intent intent = getIntent();
         if (intent != null) {
             String serverUrl = intent.getStringExtra("serverUrl");
@@ -63,16 +70,20 @@ public class MainActivity extends Activity {
             
             if (serverUrl != null && !serverUrl.isEmpty()) {
                 serverUrlInput.setText(serverUrl);
-                // Save for next time
                 prefs.edit().putString("serverUrl", serverUrl).apply();
             }
             if (serial != null && !serial.isEmpty()) {
                 serialInput.setText(serial);
+                prefs.edit().putString("serial", serial).apply();
             }
-            if (autoStart && serverUrl != null && serial != null) {
-                startVoiceService();
-                // Minimize to background
-                moveTaskToBack(true);
+            if (autoStart) {
+                // Auto-start with provided or saved values
+                String url = serverUrlInput.getText().toString().trim();
+                String ser = serialInput.getText().toString().trim();
+                if (!url.isEmpty() && !ser.isEmpty() && !url.contains("XXX")) {
+                    startVoiceService();
+                    moveTaskToBack(true);
+                }
             }
         }
         
@@ -86,72 +97,85 @@ public class MainActivity extends Activity {
     }
     
     /**
-     * Get the device serial number
+     * Get the device serial number - multiple methods for Quest compatibility
      */
     private String getDeviceSerial() {
         String serial = null;
+        
+        // Method 1: Try getprop via shell command (most reliable on Quest)
         try {
-            // Try Build.getSerial() for Android 8+
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                // This requires READ_PHONE_STATE permission which we may not have
-                // So we use reflection to get SERIAL from Build
-                try {
-                    serial = Build.getSerial();
-                } catch (SecurityException e) {
-                    // Fall through to other methods
-                }
+            Process process = Runtime.getRuntime().exec("getprop ro.serialno");
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            serial = reader.readLine();
+            reader.close();
+            if (serial != null && !serial.isEmpty() && !serial.equals("unknown")) {
+                return serial;
             }
-            
-            // Fallback: Try Build.SERIAL (deprecated but works on many devices)
-            if (serial == null || serial.equals("unknown") || serial.isEmpty()) {
-                serial = Build.SERIAL;
-            }
-            
-            // Fallback: Try system property
-            if (serial == null || serial.equals("unknown") || serial.isEmpty()) {
-                try {
-                    Class<?> c = Class.forName("android.os.SystemProperties");
-                    Method get = c.getMethod("get", String.class);
-                    serial = (String) get.invoke(c, "ro.serialno");
-                } catch (Exception e) {
-                    // Ignore
-                }
-            }
-            
-            // Fallback: Try another property
-            if (serial == null || serial.equals("unknown") || serial.isEmpty()) {
-                try {
-                    Class<?> c = Class.forName("android.os.SystemProperties");
-                    Method get = c.getMethod("get", String.class);
-                    serial = (String) get.invoke(c, "ril.serialnumber");
-                } catch (Exception e) {
-                    // Ignore
-                }
-            }
-            
         } catch (Exception e) {
-            e.printStackTrace();
+            // Ignore
         }
         
-        return (serial != null && !serial.equals("unknown")) ? serial : null;
+        // Method 2: Try ro.boot.serialno
+        try {
+            Process process = Runtime.getRuntime().exec("getprop ro.boot.serialno");
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            serial = reader.readLine();
+            reader.close();
+            if (serial != null && !serial.isEmpty() && !serial.equals("unknown")) {
+                return serial;
+            }
+        } catch (Exception e) {
+            // Ignore
+        }
+        
+        // Method 3: Build.SERIAL (deprecated but may work)
+        try {
+            serial = Build.SERIAL;
+            if (serial != null && !serial.equals("unknown") && !serial.isEmpty()) {
+                return serial;
+            }
+        } catch (Exception e) {
+            // Ignore
+        }
+        
+        // Method 4: Use Android ID as fallback (unique per device)
+        try {
+            serial = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
+            if (serial != null && !serial.isEmpty()) {
+                // Prefix to indicate it's an Android ID, not serial
+                return "QUEST_" + serial.substring(0, Math.min(serial.length(), 12)).toUpperCase();
+            }
+        } catch (Exception e) {
+            // Ignore
+        }
+        
+        return null;
     }
     
     private void startVoiceService() {
         String serverUrl = serverUrlInput.getText().toString().trim();
         String serial = serialInput.getText().toString().trim();
         
-        if (serverUrl.isEmpty() || serial.isEmpty()) {
-            Toast.makeText(this, "Veuillez remplir tous les champs", Toast.LENGTH_SHORT).show();
+        if (serverUrl.isEmpty()) {
+            Toast.makeText(this, "Entrez l'URL du serveur", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        if (serial.isEmpty()) {
+            Toast.makeText(this, "Entrez le numéro de série", Toast.LENGTH_SHORT).show();
             return;
         }
         
         if (serverUrl.contains("XXX")) {
-            Toast.makeText(this, "Modifiez l'adresse IP du serveur", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Modifiez l'adresse IP du serveur (remplacez XXX)", Toast.LENGTH_LONG).show();
             return;
         }
         
-        // Save server URL for next time
-        prefs.edit().putString("serverUrl", serverUrl).apply();
+        // Save for next time
+        prefs.edit()
+            .putString("serverUrl", serverUrl)
+            .putString("serial", serial)
+            .apply();
         
         Intent serviceIntent = new Intent(this, VoiceReceiverService.class);
         serviceIntent.setAction("START");
