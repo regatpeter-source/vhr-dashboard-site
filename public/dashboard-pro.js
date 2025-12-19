@@ -948,7 +948,7 @@ window.sendVoiceToHeadset = async function(serial) {
 				<h2 style='margin:0;font-size:24px;color:#fff;display:flex;align-items:center;gap:12px;'>
 					🎤 Streaming Audio WebRTC vers ${deviceName}
 				</h2>
-				<button onclick='closeAudioStream()' style='background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;font-weight:bold;'>✕</button>
+				<button onclick='window.closeAudioStream()' style='background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;font-weight:bold;'>✕</button>
 			</div>
 			
 			<!-- Visualizer -->
