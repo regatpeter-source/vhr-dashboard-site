@@ -14,7 +14,7 @@ const server = spawn('node', [serverPath], {
   stdio: 'inherit'
 });
 
-// Attendre 3 secondes puis ouvrir le navigateur
+// Attendre 8 secondes puis ouvrir le navigateur (temps pour que le serveur démarre)
 setTimeout(() => {
   console.log('\nOuverture du dashboard dans le navigateur...\n');
   open('http://localhost:3000/vhr-dashboard-app.html');
@@ -22,7 +22,7 @@ setTimeout(() => {
   console.log('Dashboard ouvert!');
   console.log('Pour arrêter: fermez cette fenêtre');
   console.log('========================================\n');
-}, 3000);
+}, 8000);
 
 // Gérer l'arrêt propre
 process.on('SIGINT', () => {
