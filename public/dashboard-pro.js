@@ -1588,33 +1588,16 @@ let devices = [];
 let games = [];
 let favorites = [];
 let runningApps = {}; // Track running apps: { serial: [pkg1, pkg2, ...] }
-let batteryPollInterval = null;  // Single interval reference
-const batteryBackoff = {}; // { serial: { failures, backoffUntil } }
+let batteryPollInterval = null;  // Single interval reference (disabled)
+const batteryBackoff = {}; // (disabled with battery gauge)
 
 // Initialize collaborative session socket handlers
 initSessionSocket();
 
-// Auto-refresh battery levels every 30 seconds (reduced from 10s for performance)
+// Auto-refresh battery levels DISABLED to prevent errors on unreachable WiFi devices
 function startBatteryPolling() {
-	if (batteryPollInterval) clearInterval(batteryPollInterval);
-	batteryPollInterval = setInterval(() => {
-		if (devices && devices.length > 0) {
-			// Fetch battery for devices sequentially to reduce ADB load
-			let index = 0;
-			const fetchNext = () => {
-				if (index < devices.length) {
-					fetchBatteryLevel(devices[index].serial);
-					index++;
-					setTimeout(fetchNext, 1000); // 1s between each device
-				}
-			};
-			fetchNext();
-		}
-	}, 30000);  // Every 30 seconds instead of 10
+	// no-op
 }
-
-// Start polling when page loads
-startBatteryPolling();
 
 async function api(path, opts = {}) {
 	try {
@@ -1760,7 +1743,7 @@ function renderDevicesTable() {
 				<div style='font-size:11px;color:#95a5a6;margin-top:2px;'>${d.serial}</div>
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#f39c12;'>🔋 --</div>
+				<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#95a5a6;'>🔋 Batterie désactivée</div>
 			</td>
 			<td style='padding:12px;'>
 				<span style='background:${statusColor};color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:bold;'>
@@ -1804,8 +1787,7 @@ function renderDevicesTable() {
 			</td>
 		</tr>`;
 		
-		// Fetch battery level for this device
-		fetchBatteryLevel(d.serial);
+		// Battery gauge disabled
 	});
 	
 	table += `</tbody></table>`;
@@ -1848,7 +1830,7 @@ function renderDevicesCards() {
 		card.innerHTML = `
 			<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'>
 				<div style='font-weight:bold;font-size:18px;color:#2ecc71;'>${d.name}</div>
-				<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#f39c12;'>🔋 --</div>
+				<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#95a5a6;'>🔋 Batterie désactivée</div>
 			</div>
 			<div style='font-size:11px;color:#95a5a6;margin-bottom:12px;'>${d.serial}</div>
 			<div style='margin-bottom:12px;'>
@@ -1891,47 +1873,14 @@ function renderDevicesCards() {
 		
 		grid.appendChild(card);
 		
-		// Fetch battery level for this device
-		fetchBatteryLevel(d.serial);
+		// Battery gauge disabled
 	});
 }
 
 // Fetch and update battery level for a device
 async function fetchBatteryLevel(serial) {
-	// Backoff if previous failures occurred
-	const backoff = batteryBackoff[serial];
-	if (backoff && backoff.backoffUntil && Date.now() < backoff.backoffUntil) {
-		return; // Skip until cooldown ends
-	}
-
-	try {
-		const data = await api(`/api/battery/${encodeURIComponent(serial)}`);
-		if (data.ok && data.level !== null) {
-			// Use safe ID for HTML element lookup
-			const safeId = serial.replace(/[^a-zA-Z0-9]/g, '_');
-			const element = document.getElementById(`battery_${safeId}`);
-			if (element) {
-				const batteryColor = data.level > 50 ? '#2ecc71' : data.level > 20 ? '#f39c12' : '#e74c3c';
-				const batteryIcon = data.level > 80 ? '🔋' : data.level > 50 ? '🪫' : data.level > 20 ? '⚠️' : '🔴';
-				element.innerHTML = `<span style='color:${batteryColor};'>${batteryIcon} ${data.level}%</span>`;
-			}
-			// Reset backoff on success
-			if (batteryBackoff[serial]) delete batteryBackoff[serial];
-		}
-	} catch (err) {
-		console.error(`Battery fetch error for ${serial}:`, err);
-		const entry = batteryBackoff[serial] || { failures: 0, backoffUntil: 0 };
-		entry.failures += 1;
-		// Simple backoff: 1st fail no delay, then 2 min cooldown
-		if (entry.failures >= 2) {
-			entry.backoffUntil = Date.now() + 2 * 60 * 1000; // 2 minutes
-			if (!entry.notified) {
-				showToast(`🔌 Impossible de joindre ${serial} (batterie). Pause 2 min.`, 'warning', 3500);
-				entry.notified = true;
-			}
-		}
-		batteryBackoff[serial] = entry;
-	}
+	// Battery gauge disabled
+	return;
 }
 
 function renderDevices() {
