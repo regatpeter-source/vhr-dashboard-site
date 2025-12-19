@@ -5,6 +5,8 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.view.View;
 import android.widget.Button;
@@ -13,6 +15,14 @@ import android.widget.TextView;
 import android.widget.Toast;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.URL;
+import java.util.Collections;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Main activity for manual configuration (optional)
@@ -24,7 +34,11 @@ public class MainActivity extends Activity {
     private TextView statusText;
     private Button startButton;
     private Button stopButton;
+    private Button detectButton;
     private SharedPreferences prefs;
+    private Handler mainHandler;
+    private ExecutorService executor;
+    private AtomicBoolean isScanning = new AtomicBoolean(false);
     
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -32,12 +46,15 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
         
         prefs = getSharedPreferences("vhr_voice", MODE_PRIVATE);
+        mainHandler = new Handler(Looper.getMainLooper());
+        executor = Executors.newSingleThreadExecutor();
         
         serverUrlInput = findViewById(R.id.serverUrl);
         serialInput = findViewById(R.id.serial);
         statusText = findViewById(R.id.status);
         startButton = findViewById(R.id.startBtn);
         stopButton = findViewById(R.id.stopBtn);
+        detectButton = findViewById(R.id.detectBtn);
         
         // Auto-detect device serial
         String deviceSerial = getDeviceSerial();
@@ -89,11 +106,114 @@ public class MainActivity extends Activity {
         
         startButton.setOnClickListener(v -> startVoiceService());
         stopButton.setOnClickListener(v -> stopVoiceService());
+        detectButton.setOnClickListener(v -> detectServer());
         
         // Update status if service is running
         if (VoiceReceiverService.isRunning) {
             statusText.setText("🟢 Service actif");
         }
+        
+        // Auto-detect server on startup if URL contains XXX
+        String currentUrl = serverUrlInput.getText().toString();
+        if (currentUrl.contains("XXX")) {
+            detectServer();
+        }
+    }
+    
+    /**
+     * Detect VHR server on local network
+     */
+    private void detectServer() {
+        if (isScanning.get()) {
+            Toast.makeText(this, "Recherche déjà en cours...", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        isScanning.set(true);
+        detectButton.setEnabled(false);
+        detectButton.setText("🔍 Recherche en cours...");
+        statusText.setText("🔍 Recherche du serveur VHR...");
+        
+        executor.execute(() -> {
+            String foundServer = null;
+            
+            try {
+                // Get local IP to determine network prefix
+                String localIp = getLocalIpAddress();
+                if (localIp != null) {
+                    String prefix = localIp.substring(0, localIp.lastIndexOf('.') + 1);
+                    
+                    // Scan common IP addresses on the network
+                    for (int i = 1; i <= 254 && foundServer == null; i++) {
+                        String ip = prefix + i;
+                        foundServer = checkVHRServer(ip, 3000);
+                    }
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            
+            final String result = foundServer;
+            mainHandler.post(() -> {
+                isScanning.set(false);
+                detectButton.setEnabled(true);
+                detectButton.setText("🔍 Détecter serveur automatiquement");
+                
+                if (result != null) {
+                    serverUrlInput.setText(result);
+                    prefs.edit().putString("serverUrl", result).apply();
+                    statusText.setText("✅ Serveur trouvé !");
+                    Toast.makeText(MainActivity.this, "Serveur VHR trouvé: " + result, Toast.LENGTH_LONG).show();
+                } else {
+                    statusText.setText("❌ Serveur non trouvé");
+                    Toast.makeText(MainActivity.this, "Serveur VHR non trouvé. Vérifiez que le PC est allumé et sur le même réseau.", Toast.LENGTH_LONG).show();
+                }
+            });
+        });
+    }
+    
+    /**
+     * Get local IP address
+     */
+    private String getLocalIpAddress() {
+        try {
+            for (NetworkInterface intf : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                for (InetAddress addr : Collections.list(intf.getInetAddresses())) {
+                    if (!addr.isLoopbackAddress() && addr.getHostAddress().indexOf(':') < 0) {
+                        String ip = addr.getHostAddress();
+                        if (ip.startsWith("192.168.") || ip.startsWith("10.") || ip.startsWith("172.")) {
+                            return ip;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+    
+    /**
+     * Check if a VHR server is running at the given IP and port
+     */
+    private String checkVHRServer(String ip, int port) {
+        try {
+            URL url = new URL("http://" + ip + ":" + port + "/api/ping");
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(200);
+            conn.setReadTimeout(200);
+            conn.setRequestMethod("GET");
+            
+            int responseCode = conn.getResponseCode();
+            conn.disconnect();
+            
+            if (responseCode == 200) {
+                return "http://" + ip + ":" + port;
+            }
+        } catch (Exception e) {
+            // Server not found at this IP, continue
+        }
+        return null;
     }
     
     /**
