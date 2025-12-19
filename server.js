@@ -4698,21 +4698,68 @@ app.post('/api/adb/command', async (req, res) => {
   }
 });
 
-// Open audio receiver in Quest browser for voice streaming
+// Open audio receiver in Quest - supports both browser and background app
 app.post('/api/device/open-audio-receiver', async (req, res) => {
-  const { serial, serverUrl } = req.body || {};
+  const { serial, serverUrl, useBackgroundApp } = req.body || {};
   if (!serial) {
     return res.status(400).json({ ok: false, error: 'serial required' });
   }
 
   try {
-    // Build the audio receiver URL with the serial pre-filled
-    const receiverUrl = `${serverUrl || 'http://localhost:3000'}/audio-receiver.html?serial=${encodeURIComponent(serial)}&autoconnect=true`;
+    const server = serverUrl || 'http://localhost:3000';
+    
+    if (useBackgroundApp) {
+      // Use VHR Voice app (background service) - doesn't interrupt games
+      console.log(`[open-audio-receiver] Starting background voice app on ${serial}`);
+      
+      // First try to start via broadcast (if app is installed)
+      const broadcastResult = await runAdbCommand(serial, [
+        'shell', 'am', 'broadcast',
+        '-a', 'com.vhr.voice.START',
+        '--es', 'serverUrl', server,
+        '--es', 'serial', serial
+      ]);
+      
+      if (broadcastResult.code === 0 && !broadcastResult.stderr.includes('No broadcast receiver')) {
+        console.log(`[open-audio-receiver] Background app started via broadcast`);
+        res.json({ 
+          ok: true, 
+          method: 'background-app',
+          stdout: broadcastResult.stdout, 
+          stderr: broadcastResult.stderr 
+        });
+        return;
+      }
+      
+      // Fallback: try to launch the app directly
+      const appResult = await runAdbCommand(serial, [
+        'shell', 'am', 'start',
+        '-n', 'com.vhr.voice/.MainActivity',
+        '--es', 'serverUrl', server,
+        '--es', 'serial', serial,
+        '--ez', 'autostart', 'true'
+      ]);
+      
+      if (appResult.code === 0) {
+        console.log(`[open-audio-receiver] Background app launched`);
+        res.json({ 
+          ok: true, 
+          method: 'background-app-activity',
+          stdout: appResult.stdout, 
+          stderr: appResult.stderr 
+        });
+        return;
+      }
+      
+      // App not installed, fall through to browser method
+      console.log(`[open-audio-receiver] Background app not available, using browser`);
+    }
+    
+    // Browser method (may pause games)
+    const receiverUrl = `${server}/audio-receiver.html?serial=${encodeURIComponent(serial)}&autoconnect=true`;
     
     console.log(`[open-audio-receiver] Opening ${receiverUrl} on ${serial}`);
     
-    // Use ADB to open URL in Quest browser
-    // am start -a android.intent.action.VIEW -d "URL"
     const result = await runAdbCommand(serial, [
       'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', 
       '-d', receiverUrl
@@ -4721,12 +4768,39 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
     console.log(`[open-audio-receiver] Result:`, result);
     res.json({ 
       ok: result.code === 0, 
+      method: 'browser',
       url: receiverUrl,
       stdout: result.stdout, 
       stderr: result.stderr 
     });
   } catch (e) {
     console.error('[api] device/open-audio-receiver:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Stop background voice app
+app.post('/api/device/stop-audio-receiver', async (req, res) => {
+  const { serial } = req.body || {};
+  if (!serial) {
+    return res.status(400).json({ ok: false, error: 'serial required' });
+  }
+
+  try {
+    console.log(`[stop-audio-receiver] Stopping voice app on ${serial}`);
+    
+    const result = await runAdbCommand(serial, [
+      'shell', 'am', 'broadcast',
+      '-a', 'com.vhr.voice.STOP'
+    ]);
+    
+    res.json({ 
+      ok: result.code === 0, 
+      stdout: result.stdout, 
+      stderr: result.stderr 
+    });
+  } catch (e) {
+    console.error('[api] device/stop-audio-receiver:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
