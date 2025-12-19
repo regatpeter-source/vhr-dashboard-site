@@ -588,28 +588,39 @@ window.sendVoiceToHeadset = async function(serial) {
 		});
 		await activeAudioStream.start(serial);
 		
+		// Save serial for cleanup later
+		activeAudioSerial = serial;
+		
 		// Local monitoring is OFF by default (sound goes to headset only)
 		activeAudioStream.isLocalMonitoring = false;
 		activeAudioStream.setLocalMonitoring(false);
 		
-		// Open audio receiver on headset browser automatically
+		// Start audio receiver on headset - try background app first, then browser
 		try {
 			const serverUrl = window.location.origin;
-			showToast('📱 Ouverture du récepteur audio sur le casque...', 'info');
+			showToast('📱 Activation du récepteur audio sur le casque...', 'info');
+			
+			// First try background app (doesn't pause games)
 			const openRes = await api('/api/device/open-audio-receiver', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ serial, serverUrl })
+				body: JSON.stringify({ serial, serverUrl, useBackgroundApp: true })
 			});
+			
 			if (openRes && openRes.ok) {
-				console.log('[sendVoiceToHeadset] Audio receiver opened on headset:', openRes.url);
-				showToast('✅ Récepteur audio ouvert sur le casque!', 'success');
+				if (openRes.method === 'background-app' || openRes.method === 'background-app-activity') {
+					console.log('[sendVoiceToHeadset] Background voice app started');
+					showToast('✅ Audio en arrière-plan activé (jeu non interrompu)', 'success');
+				} else {
+					console.log('[sendVoiceToHeadset] Audio receiver opened in browser:', openRes.url);
+					showToast('✅ Récepteur audio ouvert (navigateur)', 'success');
+				}
 			} else {
-				console.warn('[sendVoiceToHeadset] Failed to open audio receiver on headset:', openRes);
-				showToast('⚠️ Ouvrez audio-receiver.html sur le casque manuellement', 'warning');
+				console.warn('[sendVoiceToHeadset] Failed to open audio receiver:', openRes);
+				showToast('⚠️ Installez VHR Voice app pour le mode arrière-plan', 'warning');
 			}
 		} catch (openError) {
-			console.warn('[sendVoiceToHeadset] Could not open audio receiver on headset:', openError);
+			console.warn('[sendVoiceToHeadset] Could not open audio receiver:', openError);
 		}
 		
 		// Also start audio relay to headset via WebSocket for simple receivers
@@ -1629,9 +1640,25 @@ window.connectWifiAuto = async function(serial) {
 // ========== VOICE TO HEADSET (TTS) ========== 
 // ========== AUDIO STREAMING (WebRTC) ==========
 let activeAudioStream = null;  // Global audio stream instance
+let activeAudioSerial = null;  // Serial of device receiving audio
 
 window.closeAudioStream = async function() {
 	try {
+		// Stop background voice app on headset if running
+		if (activeAudioSerial) {
+			try {
+				await api('/api/device/stop-audio-receiver', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ serial: activeAudioSerial })
+				});
+				console.log('[closeAudioStream] Stopped background voice app');
+			} catch (e) {
+				console.warn('[closeAudioStream] Error stopping background app:', e);
+			}
+			activeAudioSerial = null;
+		}
+		
 		if (activeAudioStream) {
 			// Stop audio relay first
 			try {
