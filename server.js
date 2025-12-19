@@ -160,14 +160,31 @@ startProcessCleanup();
 
 // ========== GLOBAL ERROR HANDLERS =========
 // Capture unhandled exceptions to prevent server crashes
+let errorCount = 0;
+const MAX_ERRORS_BEFORE_LOG = 100;
+
 process.on('uncaughtException', (err) => {
-  console.error('[CRITICAL] Uncaught Exception:', err.message);
+  errorCount++;
+  console.error(`[CRITICAL #${errorCount}] Uncaught Exception:`, err.message);
   console.error('[CRITICAL] Stack:', err.stack);
+  
+  // Log to file for debugging
+  const fs = require('fs');
+  const logEntry = `[${new Date().toISOString()}] UNCAUGHT: ${err.message}\n${err.stack}\n\n`;
+  fs.appendFileSync('server-errors.log', logEntry, { flag: 'a' });
+  
   // Don't exit, try to continue
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('[CRITICAL] Unhandled Rejection at:', promise, 'reason:', reason);
+  errorCount++;
+  console.error(`[CRITICAL #${errorCount}] Unhandled Rejection:`, reason);
+  
+  // Log to file for debugging
+  const fs = require('fs');
+  const logEntry = `[${new Date().toISOString()}] REJECTION: ${reason}\n\n`;
+  fs.appendFileSync('server-errors.log', logEntry, { flag: 'a' });
+  
   // Don't exit, try to continue
 });
 
@@ -3793,20 +3810,48 @@ app.post('/api/package-dashboard', async (req, res) => {
 });
 
 // Run an adb command for a given serial, return { stdout, stderr }
-const runAdbCommand = (serial, args) => {
+const runAdbCommand = (serial, args, timeout = 30000) => {
   return new Promise((resolve, reject) => {
     const adbArgs = serial ? ['-s', serial, ...args] : args;
-    const proc = spawn('adb', adbArgs)
-    let stdout = '', stderr = ''
-    proc.stdout.on('data', d => { stdout += d })
-    proc.stderr.on('data', d => { stderr += d })
+    let proc;
+    try {
+      proc = spawn('adb', adbArgs);
+    } catch (spawnError) {
+      console.error('[ADB] Spawn error:', spawnError.message);
+      return reject(new Error('Failed to spawn adb: ' + spawnError.message));
+    }
+    
+    let stdout = '', stderr = '';
+    let killed = false;
+    
+    // Timeout pour éviter les processus bloqués
+    const timer = setTimeout(() => {
+      if (!killed) {
+        killed = true;
+        try { proc.kill('SIGKILL'); } catch (e) {}
+        reject(new Error(`adb command timed out after ${timeout}ms`));
+      }
+    }, timeout);
+    
+    proc.stdout.on('data', d => { stdout += d; });
+    proc.stderr.on('data', d => { stderr += d; });
+    
     proc.on('close', code => {
-      if (code === 0) resolve({ stdout, stderr })
-      else reject(new Error(stderr || `adb exited with code ${code}`))
-    })
-    proc.on('error', reject)
-  })
-}
+      clearTimeout(timer);
+      if (killed) return;
+      if (code === 0) resolve({ stdout, stderr });
+      else reject(new Error(stderr || `adb exited with code ${code}`));
+    });
+    
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      if (!killed) {
+        killed = true;
+        reject(err);
+      }
+    });
+  });
+};
 // ---------- Helpers ----------
 // Parse 'adb devices -l' output into [{ serial, model, status }]
 const parseAdbDevices = stdout => {
