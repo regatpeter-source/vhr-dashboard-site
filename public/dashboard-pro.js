@@ -2104,8 +2104,44 @@ window.closeAudioStream = async function() {
 
 // ========== VHR VOICE APP INSTALLATION ==========
 window.installVoiceApp = async function(serial) {
+	// Show installation progress dialog
+	const progressHtml = `
+		<div id="installProgressContent" style="text-align:center; padding: 20px;">
+			<h2 style="color:#1abc9c; margin-bottom: 20px;">📲 Installation en cours...</h2>
+			
+			<div style="margin: 30px 0;">
+				<div style="width: 100%; height: 8px; background: #23272f; border-radius: 4px; overflow: hidden;">
+					<div id="installProgressBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #2ecc71, #1abc9c); border-radius: 4px; transition: width 0.3s ease;"></div>
+				</div>
+				<p id="installProgressText" style="color: #95a5a6; margin-top: 12px; font-size: 14px;">Préparation de l'installation...</p>
+			</div>
+			
+			<div style="font-size: 48px; margin: 20px 0;">
+				<span id="installSpinner" style="display: inline-block; animation: spin 1s linear infinite;">⏳</span>
+			</div>
+			
+			<p style="color: #7f8c8d; font-size: 12px;">Assurez-vous que le casque est connecté en USB</p>
+		</div>
+		<style>
+			@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+		</style>
+	`;
+	
+	showModal(progressHtml);
+	
+	// Simulate progress stages
+	const updateProgress = (percent, text) => {
+		const bar = document.getElementById('installProgressBar');
+		const textEl = document.getElementById('installProgressText');
+		if (bar) bar.style.width = percent + '%';
+		if (textEl) textEl.textContent = text;
+	};
+	
 	try {
-		showToast('📲 Installation de VHR Voice en cours...', 'info');
+		updateProgress(10, 'Connexion au casque...');
+		await new Promise(r => setTimeout(r, 500));
+		
+		updateProgress(30, 'Transfert de VHR Voice vers le casque...');
 		
 		const res = await api('/api/device/install-voice-app', {
 			method: 'POST',
@@ -2113,15 +2149,122 @@ window.installVoiceApp = async function(serial) {
 			body: JSON.stringify({ serial })
 		});
 		
+		updateProgress(80, 'Finalisation de l\'installation...');
+		await new Promise(r => setTimeout(r, 500));
+		
 		if (res && res.ok) {
+			updateProgress(100, 'Installation terminée !');
+			
+			// Show success message
+			const successHtml = `
+				<div style="text-align:center; padding: 20px;">
+					<div style="font-size: 80px; margin-bottom: 20px;">✅</div>
+					<h2 style="color:#2ecc71; margin-bottom: 16px;">VHR Voice installé !</h2>
+					<p style="color:#bdc3c7; margin-bottom: 24px; line-height: 1.6;">
+						L'application a été installée avec succès sur votre casque Quest.
+					</p>
+					
+					<div style="background:#27ae60; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+						<h4 style="color:#fff; margin-bottom: 8px;">🎮 Prochaine étape</h4>
+						<p style="color:#d5f4e6; font-size: 14px; margin: 0;">
+							Dans le casque, allez dans <strong>Applications</strong> → <strong>Sources inconnues</strong><br>
+							et lancez <strong>VHR Voice</strong>
+						</p>
+					</div>
+					
+					<button onclick="closeModal()" style="
+						background: linear-gradient(135deg, #2ecc71, #27ae60);
+						color: #fff;
+						border: none;
+						padding: 14px 32px;
+						border-radius: 8px;
+						font-size: 16px;
+						font-weight: bold;
+						cursor: pointer;
+					">👍 Compris !</button>
+				</div>
+			`;
+			
+			setTimeout(() => {
+				const modal = document.getElementById('modal');
+				if (modal) {
+					modal.querySelector('div').innerHTML = successHtml + '<br><button onclick="closeModal()" style="background:#e74c3c;color:#fff;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;font-weight:bold;margin-top:12px;">❌ Fermer</button>';
+				}
+			}, 500);
+			
 			showToast('✅ VHR Voice installé avec succès!', 'success');
 			return true;
 		} else {
-			showToast('❌ Erreur installation: ' + (res.error || 'inconnue'), 'error');
+			// Show error
+			const errorHtml = `
+				<div style="text-align:center; padding: 20px;">
+					<div style="font-size: 80px; margin-bottom: 20px;">❌</div>
+					<h2 style="color:#e74c3c; margin-bottom: 16px;">Échec de l'installation</h2>
+					<p style="color:#bdc3c7; margin-bottom: 16px;">
+						${res?.error || 'Une erreur est survenue lors de l\'installation.'}
+					</p>
+					
+					<div style="background:#34495e; padding: 16px; border-radius: 8px; margin-bottom: 20px; text-align: left;">
+						<h4 style="color:#f39c12; margin-bottom: 8px;">💡 Solutions possibles</h4>
+						<ul style="color:#95a5a6; font-size: 13px; padding-left: 20px; margin: 0;">
+							<li>Vérifiez que le casque est connecté en USB</li>
+							<li>Acceptez la demande de débogage USB sur le casque</li>
+							<li>Essayez de télécharger l'APK et de l'installer manuellement</li>
+						</ul>
+					</div>
+					
+					<button onclick="downloadVoiceApk()" style="
+						background: linear-gradient(135deg, #3498db, #2980b9);
+						color: #fff;
+						border: none;
+						padding: 12px 24px;
+						border-radius: 8px;
+						font-size: 14px;
+						font-weight: bold;
+						cursor: pointer;
+						margin-right: 10px;
+					">💾 Télécharger APK</button>
+				</div>
+			`;
+			
+			const modal = document.getElementById('modal');
+			if (modal) {
+				modal.querySelector('div').innerHTML = errorHtml + '<br><button onclick="closeModal()" style="background:#e74c3c;color:#fff;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;font-weight:bold;margin-top:12px;">❌ Fermer</button>';
+			}
+			
+			showToast('❌ Erreur installation: ' + (res?.error || 'inconnue'), 'error');
 			return false;
 		}
 	} catch (e) {
 		console.error('[installVoiceApp] Error:', e);
+		
+		const errorHtml = `
+			<div style="text-align:center; padding: 20px;">
+				<div style="font-size: 80px; margin-bottom: 20px;">⚠️</div>
+				<h2 style="color:#e74c3c; margin-bottom: 16px;">Erreur de connexion</h2>
+				<p style="color:#bdc3c7; margin-bottom: 24px;">
+					Impossible de communiquer avec le serveur.<br>
+					<small style="color:#7f8c8d;">${e.message}</small>
+				</p>
+				
+				<button onclick="downloadVoiceApk()" style="
+					background: linear-gradient(135deg, #3498db, #2980b9);
+					color: #fff;
+					border: none;
+					padding: 12px 24px;
+					border-radius: 8px;
+					font-size: 14px;
+					font-weight: bold;
+					cursor: pointer;
+				">💾 Télécharger APK manuellement</button>
+			</div>
+		`;
+		
+		const modal = document.getElementById('modal');
+		if (modal) {
+			modal.querySelector('div').innerHTML = errorHtml + '<br><button onclick="closeModal()" style="background:#e74c3c;color:#fff;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;font-weight:bold;margin-top:12px;">❌ Fermer</button>';
+		}
+		
 		showToast('❌ Erreur: ' + e.message, 'error');
 		return false;
 	}
