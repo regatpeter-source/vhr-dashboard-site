@@ -1524,13 +1524,41 @@ const socket = io({
 	}
 });
 
+let socketConnected = false;
+let pollingFallbackInterval = null;
+let offlineToastShown = false;
+
+function startPollingFallback() {
+	if (pollingFallbackInterval) return;
+	console.warn('[fallback] Socket offline, switching to HTTP polling');
+	if (!offlineToastShown) {
+		showToast('🌐 Socket indisponible — passage en mode polling', 'info', 4000);
+		offlineToastShown = true;
+	}
+	// Poll devices every 6s to keep UI alive when socket is down
+	pollingFallbackInterval = setInterval(() => {
+		loadDevices();
+	}, 6000);
+}
+
+function stopPollingFallback() {
+	if (pollingFallbackInterval) {
+		clearInterval(pollingFallbackInterval);
+		pollingFallbackInterval = null;
+	}
+}
+
 // Handle socket errors gracefully
 socket.on('connect_error', (err) => {
 	console.warn('[socket] Connection error:', err.message);
+	socketConnected = false;
+	startPollingFallback();
 });
 
 socket.on('disconnect', (reason) => {
 	console.warn('[socket] Disconnected:', reason);
+	socketConnected = false;
+	startPollingFallback();
 	// Clean up audio on disconnect to prevent orphaned sessions
 	if (activeAudioStream) {
 		console.log('[socket] Cleaning up audio stream due to disconnect');
@@ -1540,6 +1568,18 @@ socket.on('disconnect', (reason) => {
 
 socket.on('reconnect', (attemptNumber) => {
 	console.log('[socket] Reconnected after', attemptNumber, 'attempts');
+	socketConnected = true;
+	stopPollingFallback();
+	offlineToastShown = false;
+	// Refresh once to sync state after reconnection
+	loadDevices();
+});
+
+socket.on('connect', () => {
+	console.log('[socket] Connected');
+	socketConnected = true;
+	stopPollingFallback();
+	offlineToastShown = false;
 });
 
 window.vhrSocket = socket; // Make socket available globally for sessions
