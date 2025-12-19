@@ -62,6 +62,102 @@ const db = process.env.DATABASE_URL ? require('./db-postgres') : null;
 const USE_POSTGRES = !!process.env.DATABASE_URL;
 console.log(`[DB] Mode: ${USE_POSTGRES ? 'PostgreSQL' : 'JSON Files (Development)'}`);
 
+// ========== PROCESS TRACKING & CLEANUP ==========
+// Track all spawned processes for proper cleanup
+const trackedProcesses = new Map(); // pid -> { process, type, serial, startTime }
+let cleanupIntervalId = null;
+
+function trackProcess(proc, type, serial = null) {
+  if (proc && proc.pid) {
+    trackedProcesses.set(proc.pid, { 
+      process: proc, 
+      type, 
+      serial, 
+      startTime: Date.now() 
+    });
+    console.log(`[Process] Tracking ${type} process (PID: ${proc.pid})`);
+  }
+}
+
+function untrackProcess(pid) {
+  if (trackedProcesses.has(pid)) {
+    trackedProcesses.delete(pid);
+    console.log(`[Process] Untracked process (PID: ${pid})`);
+  }
+}
+
+// Cleanup zombie processes periodically
+function startProcessCleanup() {
+  if (cleanupIntervalId) clearInterval(cleanupIntervalId);
+  
+  cleanupIntervalId = setInterval(() => {
+    const now = Date.now();
+    const maxAge = 30 * 60 * 1000; // 30 minutes max for any process
+    
+    for (const [pid, info] of trackedProcesses) {
+      // Check if process is still running
+      try {
+        process.kill(pid, 0); // Throws if process doesn't exist
+        
+        // Kill old processes
+        if (now - info.startTime > maxAge) {
+          console.log(`[Cleanup] Killing old ${info.type} process (PID: ${pid}, age: ${Math.round((now - info.startTime) / 60000)}min)`);
+          try {
+            spawn('taskkill', ['/F', '/T', '/PID', pid.toString()]);
+          } catch (e) {}
+          trackedProcesses.delete(pid);
+        }
+      } catch (e) {
+        // Process no longer exists, remove from tracking
+        trackedProcesses.delete(pid);
+      }
+    }
+  }, 60000); // Check every minute
+}
+
+// Graceful shutdown
+function gracefulShutdown() {
+  console.log('\n[Server] Initiating graceful shutdown...');
+  
+  // Stop cleanup interval
+  if (cleanupIntervalId) clearInterval(cleanupIntervalId);
+  if (adbTrackFallbackInterval) clearInterval(adbTrackFallbackInterval);
+  
+  // Kill all tracked processes
+  console.log(`[Shutdown] Cleaning up ${trackedProcesses.size} tracked processes...`);
+  for (const [pid, info] of trackedProcesses) {
+    try {
+      console.log(`[Shutdown] Killing ${info.type} (PID: ${pid})`);
+      spawn('taskkill', ['/F', '/T', '/PID', pid.toString()]);
+    } catch (e) {}
+  }
+  trackedProcesses.clear();
+  
+  // Close all streams
+  console.log(`[Shutdown] Closing ${streams ? streams.size : 0} streams...`);
+  if (streams) {
+    for (const [serial, entry] of streams) {
+      try {
+        if (entry.sendInterval) clearInterval(entry.sendInterval);
+        if (entry.adbProc && entry.adbProc.pid) {
+          spawn('taskkill', ['/F', '/T', '/PID', entry.adbProc.pid.toString()]);
+        }
+      } catch (e) {}
+    }
+    streams.clear();
+  }
+  
+  console.log('[Shutdown] Cleanup complete, exiting...');
+  process.exit(0);
+}
+
+// Handle shutdown signals
+process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', gracefulShutdown);
+
+// Start cleanup on server init
+startProcessCleanup();
+
 // ========== GLOBAL ERROR HANDLERS =========
 // Capture unhandled exceptions to prevent server crashes
 process.on('uncaughtException', (err) => {
@@ -3470,8 +3566,16 @@ app.post('/api/scrcpy-gui', async (req, res) => {
       detached: true,
       stdio: 'ignore'
     });
+    
+    // Track scrcpy process for cleanup (even though detached)
+    if (proc.pid) {
+      trackProcess(proc, 'scrcpy', serial);
+      // Auto-untrack after 2 hours (max reasonable session)
+      setTimeout(() => untrackProcess(proc.pid), 2 * 60 * 60 * 1000);
+    }
+    
     proc.unref();
-    return res.json({ ok: true, audioOutput: audioOutput || 'headset' });
+    return res.json({ ok: true, audioOutput: audioOutput || 'headset', pid: proc.pid });
   } catch (e) {
     console.error('[api] scrcpy-gui:', e);
     return res.status(500).json({ ok: false, error: e.message });
@@ -3741,6 +3845,14 @@ async function startStream(serial, opts = {}) {
   
 
   const adbProc = spawn('adb', adbArgs);
+  
+  // Track the ADB process for cleanup
+  trackProcess(adbProc, 'adb-screenrecord', serial);
+  
+  // Untrack when process exits
+  adbProc.on('exit', () => {
+    if (adbProc.pid) untrackProcess(adbProc.pid);
+  });
 
   const entry = streams.get(serial) || { clients: new Set(), mpeg1Clients: new Set(), h264Clients: new Set() };
   entry.adbProc = adbProc;
@@ -4615,6 +4727,88 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
     });
   } catch (e) {
     console.error('[api] device/open-audio-receiver:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Force cleanup all processes (admin only)
+app.post('/api/admin/cleanup-processes', authMiddleware, async (req, res) => {
+  try {
+    const user = users.find(u => u.username === req.user.username);
+    if (!user || user.role !== 'admin') {
+      return res.status(403).json({ ok: false, error: 'Admin access required' });
+    }
+    
+    console.log('[Admin] Force cleanup requested');
+    
+    // Count before cleanup
+    const beforeCount = trackedProcesses.size;
+    const beforeStreams = streams ? streams.size : 0;
+    
+    // Kill all tracked processes
+    for (const [pid, info] of trackedProcesses) {
+      try {
+        console.log(`[Cleanup] Force killing ${info.type} (PID: ${pid})`);
+        spawn('taskkill', ['/F', '/T', '/PID', pid.toString()]);
+      } catch (e) {}
+    }
+    trackedProcesses.clear();
+    
+    // Clear all streams
+    if (streams) {
+      for (const [serial, entry] of streams) {
+        try {
+          if (entry.sendInterval) clearInterval(entry.sendInterval);
+          if (entry.adbProc && entry.adbProc.pid) {
+            spawn('taskkill', ['/F', '/T', '/PID', entry.adbProc.pid.toString()]);
+          }
+        } catch (e) {}
+      }
+      streams.clear();
+    }
+    
+    // Restart ADB server
+    try {
+      execSync('adb kill-server', { timeout: 5000 });
+      execSync('adb start-server', { timeout: 5000 });
+    } catch (e) {
+      console.warn('[Cleanup] ADB restart warning:', e.message);
+    }
+    
+    res.json({ 
+      ok: true, 
+      message: 'Cleanup complete',
+      cleaned: {
+        processes: beforeCount,
+        streams: beforeStreams
+      }
+    });
+  } catch (e) {
+    console.error('[api] admin/cleanup-processes:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Get server status (admin only)
+app.get('/api/admin/server-status', authMiddleware, async (req, res) => {
+  try {
+    const user = users.find(u => u.username === req.user.username);
+    if (!user || user.role !== 'admin') {
+      return res.status(403).json({ ok: false, error: 'Admin access required' });
+    }
+    
+    res.json({
+      ok: true,
+      status: {
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        trackedProcesses: trackedProcesses.size,
+        activeStreams: streams ? streams.size : 0,
+        audioStreams: audioStreams ? audioStreams.size : 0,
+        devices: devices ? devices.length : 0
+      }
+    });
+  } catch (e) {
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
