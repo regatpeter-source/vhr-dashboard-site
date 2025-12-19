@@ -1,6 +1,69 @@
 // VHR DASHBOARD PRO - Version complète avec fond noir et vue tableau
 // Date: 2025-12-03
 
+// ========== TAB/SESSION MANAGEMENT ==========
+// Unique ID for this browser tab to manage multiple connections
+const VHR_TAB_ID = 'vhr_tab_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+const VHR_BROADCAST_CHANNEL = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('vhr_dashboard_sync') : null;
+
+// Track active audio session across tabs
+let isAudioSessionOwner = false;
+
+// Listen for messages from other tabs
+if (VHR_BROADCAST_CHANNEL) {
+	VHR_BROADCAST_CHANNEL.onmessage = (event) => {
+		const { type, tabId, serial } = event.data;
+		
+		if (tabId === VHR_TAB_ID) return; // Ignore own messages
+		
+		switch(type) {
+			case 'audio-started':
+				// Another tab started audio - close ours if active
+				if (activeAudioStream) {
+					console.log('[VHR Multi-Tab] Another tab started audio, closing local stream');
+					window.closeAudioStream(true); // true = silent close (no toast)
+				}
+				break;
+				
+			case 'audio-stopped':
+				console.log('[VHR Multi-Tab] Another tab stopped audio for', serial);
+				break;
+				
+			case 'request-audio-status':
+				// Another tab is asking who owns the audio
+				if (activeAudioStream && isAudioSessionOwner) {
+					VHR_BROADCAST_CHANNEL.postMessage({
+						type: 'audio-status-response',
+						tabId: VHR_TAB_ID,
+						serial: activeAudioSerial,
+						active: true
+					});
+				}
+				break;
+		}
+	};
+}
+
+// Notify other tabs when audio starts/stops
+function broadcastAudioState(type, serial) {
+	if (VHR_BROADCAST_CHANNEL) {
+		VHR_BROADCAST_CHANNEL.postMessage({ type, tabId: VHR_TAB_ID, serial });
+	}
+}
+
+// Clean up on page unload
+window.addEventListener('beforeunload', () => {
+	if (activeAudioStream) {
+		broadcastAudioState('audio-stopped', activeAudioSerial);
+		// Attempt synchronous cleanup
+		try {
+			if (activeAudioStream.localStream) {
+				activeAudioStream.localStream.getTracks().forEach(t => t.stop());
+			}
+		} catch (e) { /* ignore */ }
+	}
+});
+
 // ========== HELPER FUNCTIONS ========== 
 // Toggle password visibility in forms
 window.toggleDashboardPassword = function(inputId) {
@@ -933,14 +996,18 @@ let activeAudioStream = null;  // Global audio stream instance
 let activeAudioSerial = null;  // Serial of device receiving audio
 
 window.sendVoiceToHeadset = async function(serial) {
-	// Check if stream already active
-	if (activeAudioStream && activeAudioStream.targetSerial === serial) {
-		showToast('🎤 Streaming déjà actif pour ce casque', 'warning');
-		return;
+	// Close any existing stream first (same or different device)
+	if (activeAudioStream) {
+		console.log('[sendVoiceToHeadset] Closing existing stream before starting new one');
+		await window.closeAudioStream(true); // true = silent close
 	}
 
 	const device = devices.find(d => d.serial === serial);
 	const deviceName = device ? device.name : 'Casque';
+	
+	// Notify other tabs that we're starting audio
+	broadcastAudioState('audio-started', serial);
+	isAudioSessionOwner = true;
 	
 	// Create audio control panel
 	let panel = document.getElementById('audioStreamPanel');
@@ -1451,7 +1518,10 @@ const socket = io({
 	reconnectionAttempts: 5,
 	reconnectionDelay: 1000,
 	reconnectionDelayMax: 5000,
-	timeout: 20000
+	timeout: 20000,
+	query: {
+		tabId: VHR_TAB_ID // Send tab ID to server for connection tracking
+	}
 });
 
 // Handle socket errors gracefully
@@ -1461,6 +1531,11 @@ socket.on('connect_error', (err) => {
 
 socket.on('disconnect', (reason) => {
 	console.warn('[socket] Disconnected:', reason);
+	// Clean up audio on disconnect to prevent orphaned sessions
+	if (activeAudioStream) {
+		console.log('[socket] Cleaning up audio stream due to disconnect');
+		window.closeAudioStream(true);
+	}
 });
 
 socket.on('reconnect', (attemptNumber) => {
@@ -2126,7 +2201,7 @@ window.connectWifiAuto = async function(serial) {
 };
 
 // ========== VOICE TO HEADSET (TTS) ========== 
-window.closeAudioStream = async function() {
+window.closeAudioStream = async function(silent = false) {
 	// ALWAYS remove the panel first to ensure UI is responsive
 	const panel = document.getElementById('audioStreamPanel');
 	if (panel) {
@@ -2138,6 +2213,12 @@ window.closeAudioStream = async function() {
 	const serialToStop = activeAudioSerial;
 	activeAudioStream = null;
 	activeAudioSerial = null;
+	isAudioSessionOwner = false;
+	
+	// Notify other tabs
+	if (serialToStop) {
+		broadcastAudioState('audio-stopped', serialToStop);
+	}
 	
 	try {
 		// Stop background voice app on headset if running
@@ -2172,10 +2253,14 @@ window.closeAudioStream = async function() {
 			}
 		}
 		
-		showToast('⏹️ Streaming arrêté', 'success');
+		if (!silent) {
+			showToast('⏹️ Streaming arrêté', 'success');
+		}
 	} catch (error) {
 		console.error('[Audio Stream] Error closing:', error);
-		showToast('⏹️ Streaming arrêté', 'info');
+		if (!silent) {
+			showToast('⏹️ Streaming arrêté', 'info');
+		}
 	}
 };
 
