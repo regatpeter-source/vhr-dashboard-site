@@ -1629,7 +1629,6 @@ function renderDevicesTable() {
 						<option value='ultra'>Ultra</option>
 					</select><br>
 					<button onclick='startStreamFromTable("${safeSerial}")' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>▶️ Scrcpy</button>
-					<button onclick='startStreamJSMpeg("${safeSerial}")' style='background:#9b59b6;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin-left:4px;'>🎬 JSMpeg</button>
 				` : `
 					<button onclick='stopStreamFromTable("${safeSerial}")' style='background:#e74c3c;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>⏹️ Stop</button>
 				`}
@@ -1717,7 +1716,6 @@ function renderDevicesCards() {
 						<option value='ultra'>Ultra</option>
 					</select>
 					<button onclick='startStreamFromCard("${safeSerial}")' style='width:100%;background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>▶️ Scrcpy</button>
-					<button onclick='startStreamJSMpeg("${safeSerial}")' style='width:100%;background:#9b59b6;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>🎬 JSMpeg</button>
 				` : `
 					<button onclick='stopStreamFromTable("${safeSerial}")' style='width:100%;background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>⏹️ Stop Stream</button>
 				`}
