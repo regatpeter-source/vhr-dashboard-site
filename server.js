@@ -3627,8 +3627,17 @@ const audioStreams = new Map();
 const wssAudio = new WebSocket.Server({ noServer: true });
 const AUDIO_BUFFER_SIZE = 50; // Keep last 50 chunks in buffer
 
+// ---------- ADB Track with single interval fallback ----------
+let adbTrackFallbackInterval = null;  // Prevent multiple intervals
+
 function startAdbTrack() {
   let debounceTimer = null;
+  
+  // Clear any existing fallback interval
+  if (adbTrackFallbackInterval) {
+    clearInterval(adbTrackFallbackInterval);
+    adbTrackFallbackInterval = null;
+  }
   
   try {
     const track = spawn('adb', ['track-devices']);
@@ -3642,10 +3651,23 @@ function startAdbTrack() {
         debounceTimer = setTimeout(refreshDevices, 200);
       }
     });
-    track.on('error', () => setInterval(refreshDevices, 2000));
-    track.on('exit', () => setInterval(refreshDevices, 2000));
+    track.on('error', () => {
+      console.warn('[ADB] track-devices error, falling back to polling');
+      if (!adbTrackFallbackInterval) {
+        adbTrackFallbackInterval = setInterval(refreshDevices, 3000);
+      }
+    });
+    track.on('exit', () => {
+      console.warn('[ADB] track-devices exited, falling back to polling');
+      if (!adbTrackFallbackInterval) {
+        adbTrackFallbackInterval = setInterval(refreshDevices, 3000);
+      }
+    });
   } catch (e) {
-    setInterval(refreshDevices, 2000);
+    console.warn('[ADB] track-devices failed to start, falling back to polling');
+    if (!adbTrackFallbackInterval) {
+      adbTrackFallbackInterval = setInterval(refreshDevices, 3000);
+    }
   }
 }
 

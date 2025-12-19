@@ -990,15 +990,29 @@ let devices = [];
 let games = [];
 let favorites = [];
 let runningApps = {}; // Track running apps: { serial: [pkg1, pkg2, ...] }
+let batteryPollInterval = null;  // Single interval reference
 
-// Auto-refresh battery levels every 10 seconds
-setInterval(() => {
-	if (devices && devices.length > 0) {
-		devices.forEach(d => {
-			fetchBatteryLevel(d.serial);
-		});
-	}
-}, 10000);
+// Auto-refresh battery levels every 30 seconds (reduced from 10s for performance)
+function startBatteryPolling() {
+	if (batteryPollInterval) clearInterval(batteryPollInterval);
+	batteryPollInterval = setInterval(() => {
+		if (devices && devices.length > 0) {
+			// Fetch battery for devices sequentially to reduce ADB load
+			let index = 0;
+			const fetchNext = () => {
+				if (index < devices.length) {
+					fetchBatteryLevel(devices[index].serial);
+					index++;
+					setTimeout(fetchNext, 1000); // 1s between each device
+				}
+			};
+			fetchNext();
+		}
+	}, 30000);  // Every 30 seconds instead of 10
+}
+
+// Start polling when page loads
+startBatteryPolling();
 
 async function api(path, opts = {}) {
 	try {
