@@ -43,7 +43,7 @@ class VHRAudioStream {
     this.micGain = null;
     this.compressor = null;
     this.localMonitorGain = null;  // For controlling local playback volume
-    this.isLocalMonitoring = true;  // Local monitoring ON by default
+    this.isLocalMonitoring = false;  // Local monitoring OFF by default (sound goes to headset)
     this.micSource = null;  // Store reference to mic source
   }
 

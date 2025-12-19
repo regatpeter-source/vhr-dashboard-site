@@ -528,7 +528,7 @@ window.sendVoiceToHeadset = async function(serial) {
 	panel = document.createElement('div');
 	panel.id = 'audioStreamPanel';
 	panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:2000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
-	panel.onclick = (e) => { if (e.target === panel) closeAudioStream(); };
+	panel.onclick = (e) => { if (e.target === panel) window.closeAudioStream(); };
 	
 	panel.innerHTML = `
 		<div style='background:#1a1d24;border:3px solid #2ecc71;border-radius:16px;padding:0;max-width:900px;width:95%;max-height:85vh;overflow-y:auto;box-shadow:0 8px 32px #000;color:#fff;'>
@@ -551,13 +551,13 @@ window.sendVoiceToHeadset = async function(serial) {
 					<label style='color:#fff;font-size:13px;display:flex;align-items:center;gap:8px;'>
 						🔊 Sortie audio:
 						<select id='voiceAudioOutputSelect' style='background:#1a1d24;color:#fff;border:1px solid #2ecc71;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:12px;'>
-							<option value='headset'>📱 Casque uniquement</option>
+							<option value='headset' selected>📱 Casque uniquement</option>
 							<option value='pc'>💻 PC uniquement</option>
-							<option value='both' selected>🔊 Casque + PC</option>
+							<option value='both'>🔊 Casque + PC</option>
 						</select>
 					</label>
-					<button id='localMonitorBtn' onclick='window.toggleLocalVoiceMonitor()' style='background:linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>
-						🎧 Écouter localement: ON
+					<button id='localMonitorBtn' onclick='window.toggleLocalVoiceMonitor()' style='background:linear-gradient(135deg, #7f8c8d 0%, #95a5a6 100%);color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>
+						🔇 Écouter localement: OFF
 					</button>
 				</div>
 			</div>
@@ -567,7 +567,7 @@ window.sendVoiceToHeadset = async function(serial) {
 					<button id='pauseAudioBtn' onclick='window.toggleAudioStreamPause()' style='background:linear-gradient(135deg, #3498db 0%, #2980b9 100%);color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:13px;'>
 						⏸️ Pause
 					</button>
-					<button onclick='closeAudioStream()' style='background:linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:13px;'>
+					<button onclick='window.closeAudioStream()' style='background:linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:13px;'>
 						🛑 Arrêter
 					</button>
 				</div>
@@ -588,8 +588,9 @@ window.sendVoiceToHeadset = async function(serial) {
 		});
 		await activeAudioStream.start(serial);
 		
-		// Local monitoring is ON by default (hear yourself on PC)
-		activeAudioStream.isLocalMonitoring = true;
+		// Local monitoring is OFF by default (sound goes to headset only)
+		activeAudioStream.isLocalMonitoring = false;
+		activeAudioStream.setLocalMonitoring(false);
 		
 		// Open audio receiver on headset browser automatically
 		try {
