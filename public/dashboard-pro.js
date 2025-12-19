@@ -929,6 +929,8 @@ window.switchAccountTab = function(tab) {
 };
 
 // ========== AUDIO STREAMING (WebRTC) ==========
+let activeAudioStream = null;  // Global audio stream instance
+let activeAudioSerial = null;  // Serial of device receiving audio
 
 window.sendVoiceToHeadset = async function(serial) {
 	// Check if stream already active
@@ -1090,7 +1092,7 @@ window.sendVoiceToHeadset = async function(serial) {
 		showToast(`🎤 Streaming vers ${deviceName} (+ PC)`, 'success');
 	} catch (e) {
 		console.error('[sendVoiceToHeadset] Error:', e);
-		closeAudioStream();
+		window.closeAudioStream();
 		showToast(`❌ Erreur: ${e.message}`, 'error');
 	}
 };
@@ -1126,18 +1128,27 @@ window.toggleLocalVoiceMonitor = function() {
 };
 
 window.animateAudioVisualizer = function() {
-	if (!activeAudioStream || !document.getElementById('audioVizContainer')) return;
+	// Stop animation if stream is closed or panel is gone
+	if (!activeAudioStream || !document.getElementById('audioVizContainer')) {
+		return; // Don't call requestAnimationFrame - stop the loop
+	}
 	
 	const bars = document.querySelectorAll('#audioVizContainer > div');
-	const freqData = activeAudioStream.getFrequencyData();
 	
-	if (freqData) {
-		const barCount = bars.length;
-		for (let i = 0; i < barCount; i++) {
-			const idx = Math.floor((i / barCount) * freqData.length);
-			const height = (freqData[idx] / 255) * 100;
-			bars[i].style.height = height + '%';
+	try {
+		const freqData = activeAudioStream.getFrequencyData();
+		
+		if (freqData && bars.length > 0) {
+			const barCount = bars.length;
+			for (let i = 0; i < barCount; i++) {
+				const idx = Math.floor((i / barCount) * freqData.length);
+				const height = Math.max(4, (freqData[idx] / 255) * 100);
+				bars[i].style.height = height + '%';
+			}
 		}
+	} catch (e) {
+		// If there's an error getting frequency data, just skip this frame
+		console.warn('[animateAudioVisualizer] Error:', e.message);
 	}
 	
 	requestAnimationFrame(window.animateAudioVisualizer);
@@ -2115,48 +2126,56 @@ window.connectWifiAuto = async function(serial) {
 };
 
 // ========== VOICE TO HEADSET (TTS) ========== 
-// ========== AUDIO STREAMING (WebRTC) ==========
-let activeAudioStream = null;  // Global audio stream instance
-let activeAudioSerial = null;  // Serial of device receiving audio
-
 window.closeAudioStream = async function() {
+	// ALWAYS remove the panel first to ensure UI is responsive
+	const panel = document.getElementById('audioStreamPanel');
+	if (panel) {
+		panel.remove();
+	}
+	
+	// Store references and reset globals immediately to prevent re-entry issues
+	const streamToClose = activeAudioStream;
+	const serialToStop = activeAudioSerial;
+	activeAudioStream = null;
+	activeAudioSerial = null;
+	
 	try {
 		// Stop background voice app on headset if running
-		if (activeAudioSerial) {
+		if (serialToStop) {
 			try {
 				await api('/api/device/stop-audio-receiver', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ serial: activeAudioSerial })
+					body: JSON.stringify({ serial: serialToStop })
 				});
 				console.log('[closeAudioStream] Stopped background voice app');
 			} catch (e) {
 				console.warn('[closeAudioStream] Error stopping background app:', e);
 			}
-			activeAudioSerial = null;
 		}
 		
-		if (activeAudioStream) {
+		if (streamToClose) {
 			// Stop audio relay first
 			try {
-				activeAudioStream.stopAudioRelay();
+				if (typeof streamToClose.stopAudioRelay === 'function') {
+					streamToClose.stopAudioRelay();
+				}
 			} catch (e) {
 				console.warn('[closeAudioStream] Error stopping relay:', e);
 			}
 			
 			// Then stop main WebRTC stream
-			await activeAudioStream.stop();
-			activeAudioStream = null;
+			try {
+				await streamToClose.stop();
+			} catch (e) {
+				console.warn('[closeAudioStream] Error stopping WebRTC stream:', e);
+			}
 		}
-		
-		const panel = document.getElementById('audioStreamPanel');
-		if (panel) panel.remove();
 		
 		showToast('⏹️ Streaming arrêté', 'success');
 	} catch (error) {
 		console.error('[Audio Stream] Error closing:', error);
-		const panel = document.getElementById('audioStreamPanel');
-		if (panel) panel.remove();
+		showToast('⏹️ Streaming arrêté', 'info');
 	}
 };
 
