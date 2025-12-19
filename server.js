@@ -3746,18 +3746,29 @@ app.post('/api/scrcpy-gui', async (req, res) => {
     console.log(`[scrcpy] Launching with args:`, scrcpyArgs);
     const proc = spawn('scrcpy', scrcpyArgs, {
       detached: true,
-      stdio: 'ignore'
+      stdio: 'ignore',
+      windowsHide: false
     });
     
-    // Track scrcpy process for cleanup (even though detached)
-    if (proc.pid) {
-      trackProcess(proc, 'scrcpy', serial);
-      // Auto-untrack after 2 hours (max reasonable session)
-      setTimeout(() => untrackProcess(proc.pid), 2 * 60 * 60 * 1000);
+    // Important: unref BEFORE tracking to fully detach from Node.js event loop
+    proc.unref();
+    
+    // Track scrcpy process PID only (not the process object) for cleanup info
+    const scrcpyPid = proc.pid;
+    if (scrcpyPid) {
+      console.log(`[scrcpy] Started with PID: ${scrcpyPid}`);
+      // Don't track the process object to avoid keeping references that could affect the event loop
+      setTimeout(() => {
+        console.log(`[scrcpy] Session info: PID ${scrcpyPid} was started at ${new Date().toISOString()}`);
+      }, 100);
     }
     
-    proc.unref();
-    return res.json({ ok: true, audioOutput: audioOutput || 'headset', pid: proc.pid });
+    // Handle process error without crashing server
+    proc.on('error', (err) => {
+      console.error(`[scrcpy] Process error:`, err.message);
+    });
+    
+    return res.json({ ok: true, audioOutput: audioOutput || 'headset', pid: scrcpyPid });
   } catch (e) {
     console.error('[api] scrcpy-gui:', e);
     return res.status(500).json({ ok: false, error: e.message });
