@@ -198,6 +198,23 @@
             width: 100%;
             margin-bottom: 16px;
         }
+        
+        .debug-info {
+            margin-top: 16px;
+            padding: 12px;
+            background: #0d0f14;
+            border-radius: 8px;
+            font-size: 11px;
+            color: #7f8c8d;
+            text-align: left;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        
+        .debug-info div {
+            margin-bottom: 4px;
+            font-family: monospace;
+        }
     </style>
 </head>
 <body>
@@ -238,7 +255,11 @@
             1. Entrez le numéro de série de votre casque<br>
             2. Cliquez sur "Connecter"<br>
             3. L'audio du PC sera joué automatiquement<br>
-            4. Le visualiseur montre l'activité audio
+            4. Touchez l'écran si le son ne sort pas
+        </div>
+        
+        <div class="debug-info" id="debugInfo">
+            <div>🔧 Debug console...</div>
         </div>
     </div>
     
@@ -251,16 +272,35 @@
         const visualizer = document.getElementById('visualizer');
         const errorBox = document.getElementById('errorBox');
         const audioPlayer = document.getElementById('audioPlayer');
+        const debugInfo = document.getElementById('debugInfo');
         
         let ws = null;
         let audioContext = null;
         let analyser = null;
         let animationId = null;
+        let gainNode = null;
+        let chunksReceived = 0;
+        let nextPlayTime = 0;
+        let isContextReady = false;
+        
+        // Debug logging
+        function log(msg) {
+            console.log('[Audio Receiver]', msg);
+            const div = document.createElement('div');
+            div.textContent = new Date().toLocaleTimeString() + ': ' + msg;
+            debugInfo.appendChild(div);
+            debugInfo.scrollTop = debugInfo.scrollHeight;
+            // Keep only last 20 messages
+            while (debugInfo.children.length > 20) {
+                debugInfo.removeChild(debugInfo.firstChild);
+            }
+        }
         
         function showError(message) {
             errorBox.textContent = message;
             errorBox.classList.add('active');
             setTimeout(() => errorBox.classList.remove('active'), 5000);
+            log('ERROR: ' + message);
         }
         
         function setStatus(text, connected) {
@@ -269,63 +309,175 @@
             statusEl.classList.add(connected ? 'connected' : 'disconnected');
         }
         
-        function connect() {
+        async function initAudioContext() {
+            if (audioContext && audioContext.state !== 'closed') return true;
+            
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ 
+                    sampleRate: 48000,
+                    latencyHint: 'interactive'
+                });
+                
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+                analyser.smoothingTimeConstant = 0.8;
+                
+                gainNode = audioContext.createGain();
+                gainNode.gain.value = 1.0;
+                
+                gainNode.connect(analyser);
+                analyser.connect(audioContext.destination);
+                
+                log('AudioContext créé, sampleRate: ' + audioContext.sampleRate);
+                
+                // Resume if suspended
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                    log('AudioContext resumed');
+                }
+                
+                isContextReady = true;
+                nextPlayTime = audioContext.currentTime;
+                return true;
+                
+            } catch (e) {
+                log('AudioContext error: ' + e.message);
+                showError('❌ Erreur audio: ' + e.message);
+                return false;
+            }
+        }
+        
+        // Play audio chunk using AudioContext decode
+        async function playAudioChunk(arrayBuffer) {
+            if (!audioContext || !isContextReady) {
+                log('AudioContext not ready');
+                return false;
+            }
+            
+            // Resume if suspended (needed for Quest browser)
+            if (audioContext.state === 'suspended') {
+                try {
+                    await audioContext.resume();
+                    log('AudioContext resumed during playback');
+                } catch (e) {
+                    log('Resume failed: ' + e.message);
+                }
+            }
+            
+            try {
+                // Clone buffer for decoding
+                const buffer = arrayBuffer.slice(0);
+                const audioBuffer = await audioContext.decodeAudioData(buffer);
+                
+                // Create source and play
+                const source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(gainNode);
+                
+                // Schedule for gapless playback
+                const now = audioContext.currentTime;
+                if (nextPlayTime < now) {
+                    nextPlayTime = now + 0.02;
+                }
+                
+                source.start(nextPlayTime);
+                nextPlayTime += audioBuffer.duration;
+                
+                return true;
+                
+            } catch (e) {
+                // Partial chunks often fail to decode - normal for streaming
+                if (chunksReceived > 5 && chunksReceived % 50 === 0) {
+                    log('Decode skip (normal): ' + e.message.substring(0, 30));
+                }
+                return false;
+            }
+        }
+        
+        async function connect() {
             const serial = serialInput.value.trim();
             if (!serial) {
                 showError('⚠️ Entrez le numéro de série du casque');
                 return;
             }
             
+            log('Initializing audio...');
+            const audioOk = await initAudioContext();
+            if (!audioOk) {
+                showError('❌ Impossible d\'initialiser l\'audio');
+                return;
+            }
+            
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            // Important: mode=receiver tells server this is a headset receiving audio
             const wsUrl = `${protocol}//${window.location.host}/api/audio/stream?serial=${encodeURIComponent(serial)}&mode=receiver`;
+            
+            log('Connecting to: ' + wsUrl);
+            chunksReceived = 0;
             
             try {
                 ws = new WebSocket(wsUrl);
+                ws.binaryType = 'arraybuffer';
                 
                 ws.onopen = () => {
-                    console.log('[Audio Receiver] Connecté au serveur');
-                    setStatus('✅ Connecté', true);
+                    log('WebSocket connected!');
+                    setStatus('✅ Connecté - En attente...', true);
                     connectBtn.style.display = 'none';
                     disconnectBtn.classList.add('active');
                     serialInput.disabled = true;
-                    
-                    // Initialiser le contexte audio pour la visualisation
-                    if (!audioContext) {
-                        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                        analyser = audioContext.createAnalyser();
-                        analyser.fftSize = 256;
-                    }
                 };
                 
-                ws.onmessage = (event) => {
-                    if (event.data instanceof Blob) {
-                        // Créer une URL blob pour l'audio
-                        const audioUrl = URL.createObjectURL(event.data);
-                        audioPlayer.src = audioUrl;
-                        audioPlayer.play().catch(e => console.log('[Audio] Auto-play bloqué:', e));
+                ws.onmessage = async (event) => {
+                    if (event.data instanceof ArrayBuffer) {
+                        chunksReceived++;
                         
-                        // Mettre à jour la visualisation
-                        if (audioContext && analyser) {
+                        if (chunksReceived === 1) {
+                            log('Premier chunk reçu! (' + event.data.byteLength + ' bytes)');
+                            setStatus('🔊 Réception audio...', true);
+                        }
+                        
+                        if (chunksReceived % 50 === 0) {
+                            setStatus(`🔊 Audio (${chunksReceived} chunks)`, true);
+                        }
+                        
+                        // Play the audio chunk
+                        await playAudioChunk(event.data);
+                        
+                        // Update visualizer
+                        if (!animationId) {
                             updateVisualizer();
                         }
+                        
+                    } else if (event.data instanceof Blob) {
+                        chunksReceived++;
+                        const arrayBuffer = await event.data.arrayBuffer();
+                        await playAudioChunk(arrayBuffer);
+                        
                     } else if (typeof event.data === 'string') {
-                        const data = JSON.parse(event.data);
-                        if (data.type === 'ping') {
-                            // Répondre aux pings du serveur
-                            ws.send(JSON.stringify({ type: 'pong' }));
-                        }
+                        try {
+                            const msg = JSON.parse(event.data);
+                            log('Server message: ' + msg.type);
+                            
+                            if (msg.type === 'sender-connected') {
+                                setStatus('✅ Émetteur connecté!', true);
+                                log('PC sender is now connected');
+                            } else if (msg.type === 'sender-disconnected') {
+                                setStatus('⚠️ Émetteur déconnecté', true);
+                                log('PC sender disconnected');
+                            } else if (msg.type === 'ping') {
+                                ws.send(JSON.stringify({ type: 'pong' }));
+                            }
+                        } catch (e) {}
                     }
                 };
                 
                 ws.onerror = (error) => {
-                    console.error('[Audio Receiver] WebSocket error:', error);
-                    showError('❌ Erreur de connexion WebSocket');
+                    log('WebSocket error!');
+                    showError('❌ Erreur WebSocket');
                     setStatus('❌ Erreur', false);
                 };
                 
-                ws.onclose = () => {
-                    console.log('[Audio Receiver] Déconnecté');
+                ws.onclose = (event) => {
+                    log('WebSocket closed: ' + event.code);
                     setStatus('❌ Déconnecté', false);
                     connectBtn.style.display = 'block';
                     disconnectBtn.classList.remove('active');
@@ -335,22 +487,31 @@
                 
             } catch (error) {
                 showError('❌ Erreur: ' + error.message);
-                console.error('[Audio Receiver]', error);
+                log('Connection error: ' + error.message);
             }
         }
         
         function disconnect() {
+            log('Disconnecting...');
+            
             if (ws) {
                 ws.close();
                 ws = null;
             }
-            if (audioContext) {
+            
+            if (audioContext && audioContext.state !== 'closed') {
                 audioContext.close();
                 audioContext = null;
             }
+            
             if (animationId) {
                 cancelAnimationFrame(animationId);
+                animationId = null;
             }
+            
+            chunksReceived = 0;
+            isContextReady = false;
+            
             setStatus('❌ Déconnecté', false);
             connectBtn.style.display = 'block';
             disconnectBtn.classList.remove('active');
@@ -358,58 +519,81 @@
         }
         
         function updateVisualizer() {
-            if (!analyser) return;
+            if (!analyser) {
+                animationId = null;
+                return;
+            }
             
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteFrequencyData(dataArray);
             
             const bars = visualizer.querySelectorAll('div');
-            const barCount = bars.length;
             
-            for (let i = 0; i < barCount; i++) {
-                const idx = Math.floor((i / barCount) * dataArray.length);
-                const height = (dataArray[idx] / 255) * 100;
-                bars[i].style.height = height + '%';
+            for (let i = 0; i < bars.length; i++) {
+                const idx = Math.floor((i / bars.length) * dataArray.length);
+                let height = (dataArray[idx] / 255) * 100;
+                
+                // Show activity indicator when receiving
+                if (chunksReceived > 0 && height < 5) {
+                    height = 5 + Math.random() * 10;
+                }
+                
+                bars[i].style.height = Math.max(4, height) + '%';
             }
             
             animationId = requestAnimationFrame(updateVisualizer);
         }
         
+        // Handle user interaction for audio
+        async function handleUserInteraction() {
+            log('User interaction detected');
+            if (audioContext && audioContext.state === 'suspended') {
+                try {
+                    await audioContext.resume();
+                    log('AudioContext resumed by user!');
+                    setStatus('🔊 Audio activé!', true);
+                } catch (e) {
+                    log('Resume failed: ' + e.message);
+                }
+            }
+        }
+        
+        document.body.addEventListener('click', handleUserInteraction);
+        document.body.addEventListener('touchstart', handleUserInteraction);
+        document.body.addEventListener('touchend', handleUserInteraction);
+        
         connectBtn.addEventListener('click', connect);
         disconnectBtn.addEventListener('click', disconnect);
         
-        // Auto-connect si le serial est dans l'URL
+        // Auto-connect from URL parameters
         const urlParams = new URLSearchParams(window.location.search);
         const autoSerial = urlParams.get('serial');
         const autoConnect = urlParams.get('autoconnect');
         
         if (autoSerial) {
             serialInput.value = autoSerial;
-            // Auto-connect si demandé ou après un court délai
+            log('Serial from URL: ' + autoSerial);
+            
             if (autoConnect === 'true') {
-                console.log('[Audio Receiver] Auto-connecting to', autoSerial);
+                log('Auto-connect enabled, connecting in 1s...');
                 setTimeout(() => {
                     connect();
-                    // Resume audio context on user interaction (required by browsers)
-                    document.body.addEventListener('click', () => {
-                        if (audioContext && audioContext.state === 'suspended') {
-                            audioContext.resume();
-                        }
-                    }, { once: true });
                 }, 1000);
             }
         }
         
-        // Charger le serial depuis le localStorage
+        // Load saved serial from localStorage
         const savedSerial = localStorage.getItem('vhr_receiver_serial');
         if (savedSerial && !autoSerial) {
             serialInput.value = savedSerial;
         }
         
-        // Sauvegarder le serial
         serialInput.addEventListener('change', () => {
             localStorage.setItem('vhr_receiver_serial', serialInput.value);
         });
+        
+        log('Audio Receiver ready!');
+        log('Touchez l\'écran après connexion pour activer le son');
     </script>
 </body>
 </html>
