@@ -1527,6 +1527,7 @@ const socket = io({
 let socketConnected = false;
 let pollingFallbackInterval = null;
 let offlineToastShown = false;
+const API_TIMEOUT_MS = 8000; // 8s timeout for HTTP requests
 
 function startPollingFallback() {
 	if (pollingFallbackInterval) return;
@@ -1588,6 +1589,7 @@ let games = [];
 let favorites = [];
 let runningApps = {}; // Track running apps: { serial: [pkg1, pkg2, ...] }
 let batteryPollInterval = null;  // Single interval reference
+const batteryBackoff = {}; // { serial: { failures, backoffUntil } }
 
 // Initialize collaborative session socket handlers
 initSessionSocket();
@@ -1620,7 +1622,11 @@ async function api(path, opts = {}) {
 		if (!opts.credentials) {
 			opts.credentials = 'include';
 		}
-		const res = await fetch(path, opts);
+
+		// Timeout support
+		const controller = new AbortController();
+		const t = setTimeout(() => controller.abort(), opts.timeout || API_TIMEOUT_MS);
+		const res = await fetch(path, { ...opts, signal: controller.signal }).finally(() => clearTimeout(t));
 		
 		// Check if response is JSON
 		const contentType = res.headers.get('content-type');
@@ -1635,7 +1641,7 @@ async function api(path, opts = {}) {
 		return data;
 	} catch (e) {
 		console.error('[api]', path, e);
-		return { ok: false, error: e.message };
+		return { ok: false, error: e.name === 'AbortError' ? 'timeout' : e.message };
 	}
 }
 
@@ -1892,6 +1898,12 @@ function renderDevicesCards() {
 
 // Fetch and update battery level for a device
 async function fetchBatteryLevel(serial) {
+	// Backoff if previous failures occurred
+	const backoff = batteryBackoff[serial];
+	if (backoff && backoff.backoffUntil && Date.now() < backoff.backoffUntil) {
+		return; // Skip until cooldown ends
+	}
+
 	try {
 		const data = await api(`/api/battery/${encodeURIComponent(serial)}`);
 		if (data.ok && data.level !== null) {
@@ -1903,9 +1915,22 @@ async function fetchBatteryLevel(serial) {
 				const batteryIcon = data.level > 80 ? '🔋' : data.level > 50 ? '🪫' : data.level > 20 ? '⚠️' : '🔴';
 				element.innerHTML = `<span style='color:${batteryColor};'>${batteryIcon} ${data.level}%</span>`;
 			}
+			// Reset backoff on success
+			if (batteryBackoff[serial]) delete batteryBackoff[serial];
 		}
 	} catch (err) {
 		console.error(`Battery fetch error for ${serial}:`, err);
+		const entry = batteryBackoff[serial] || { failures: 0, backoffUntil: 0 };
+		entry.failures += 1;
+		// Simple backoff: 1st fail no delay, then 2 min cooldown
+		if (entry.failures >= 2) {
+			entry.backoffUntil = Date.now() + 2 * 60 * 1000; // 2 minutes
+			if (!entry.notified) {
+				showToast(`🔌 Impossible de joindre ${serial} (batterie). Pause 2 min.`, 'warning', 3500);
+				entry.notified = true;
+			}
+		}
+		batteryBackoff[serial] = entry;
 	}
 }
 
@@ -2595,7 +2620,14 @@ window.renameDevice = async function(device) {
 
 window.showAppsDialog = async function(device) {
 	const res = await api(`/api/apps/${device.serial}`);
-	if (!res.ok) return showToast('❌ Erreur chargement apps', 'error');
+	if (!res.ok) {
+		if (res.error === 'timeout') {
+			showToast('⏱️ Apps: délai dépassé, réessaye', 'warning');
+		} else {
+			showToast('❌ Erreur chargement apps', 'error');
+		}
+		return;
+	}
 	const apps = res.apps || [];
 	const favs = JSON.parse(localStorage.getItem('vhr_favorites_' + device.serial) || '[]');
 	const running = runningApps[device.serial] || [];
