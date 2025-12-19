@@ -1,0 +1,129 @@
+-- Merging decision tree log ---
+manifest
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:2:1-61:12
+INJECTED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:2:1-61:12
+INJECTED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:2:1-61:12
+INJECTED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:2:1-61:12
+	package
+		INJECTED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml
+	android:versionName
+		INJECTED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml
+	android:versionCode
+		INJECTED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml
+	xmlns:android
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:2:11-69
+uses-permission#android.permission.INTERNET
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:5:5-67
+	android:name
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:5:22-64
+uses-permission#android.permission.FOREGROUND_SERVICE
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:6:5-77
+	android:name
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:6:22-74
+uses-permission#android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:7:5-92
+	android:name
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:7:22-89
+uses-permission#android.permission.RECEIVE_BOOT_COMPLETED
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:8:5-81
+	android:name
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:8:22-78
+uses-permission#android.permission.WAKE_LOCK
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:9:5-68
+	android:name
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:9:22-65
+uses-feature#android.hardware.vr.headtracking
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:12:5-94
+	android:required
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:12:67-91
+	android:name
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:12:19-66
+application
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:14:5-60:19
+INJECTED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:14:5-60:19
+	android:extractNativeLibs
+		INJECTED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml
+	android:supportsRtl
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:19:9-35
+	android:label
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:17:9-34
+	android:roundIcon
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:18:9-54
+	android:icon
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:16:9-43
+	android:allowBackup
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:15:9-35
+	android:theme
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:20:9-40
+	android:usesCleartextTraffic
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:21:9-44
+activity#com.vhr.voice.MainActivity
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:24:9-40:20
+	android:label
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:28:13-47
+	android:launchMode
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:27:13-43
+	android:exported
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:26:13-36
+	android:name
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:25:13-41
+intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:29:13-32:29
+action#android.intent.action.MAIN
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:30:17-69
+	android:name
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:30:25-66
+category#android.intent.category.LAUNCHER
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:31:17-77
+	android:name
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:31:27-74
+intent-filter#action:name:android.intent.action.VIEW+category:name:android.intent.category.DEFAULT+data:scheme:vhrvoice
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:35:13-39:29
+action#android.intent.action.VIEW
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:36:17-69
+	android:name
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:36:25-66
+category#android.intent.category.DEFAULT
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:37:17-76
+	android:name
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:37:27-73
+data
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:38:17-51
+	android:scheme
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:38:23-48
+service#com.vhr.voice.VoiceReceiverService
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:43:9-47:61
+	android:enabled
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:45:13-35
+	android:exported
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:46:13-37
+	android:foregroundServiceType
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:47:13-58
+	android:name
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:44:13-49
+receiver#com.vhr.voice.VoiceCommandReceiver
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:50:9-58:20
+	android:enabled
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:52:13-35
+	android:exported
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:53:13-36
+	android:name
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:51:13-49
+intent-filter#action:name:com.vhr.voice.START+action:name:com.vhr.voice.STOP
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:54:13-57:29
+action#com.vhr.voice.START
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:55:17-62
+	android:name
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:55:25-59
+action#com.vhr.voice.STOP
+ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:56:17-61
+	android:name
+		ADDED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml:56:25-58
+uses-sdk
+INJECTED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml
+INJECTED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from C:\Users\peter\VR-Manager\vhr-voice-app\app\src\main\AndroidManifest.xml

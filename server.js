@@ -1014,6 +1014,68 @@ app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
   }
 });
 
+// Download VHR Voice APK for Quest background audio
+app.get('/download/vhr-voice-apk', (req, res) => {
+  const apkPath = path.join(__dirname, 'public', 'downloads', 'vhr-voice.apk');
+  
+  try {
+    if (!fs.existsSync(apkPath)) {
+      return res.status(404).json({ 
+        ok: false, 
+        error: 'VHR Voice APK not found' 
+      });
+    }
+    
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    res.setHeader('Content-Disposition', 'attachment; filename="vhr-voice.apk"');
+    res.setHeader('Cache-Control', 'no-cache');
+    return res.sendFile(apkPath);
+  } catch (e) {
+    console.error('[vhr-voice-apk] error:', e);
+    return res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+// Install VHR Voice APK directly on connected Quest device
+app.post('/api/device/install-voice-app', async (req, res) => {
+  const { serial } = req.body || {};
+  if (!serial) {
+    return res.status(400).json({ ok: false, error: 'serial required' });
+  }
+
+  const apkPath = path.join(__dirname, 'public', 'downloads', 'vhr-voice.apk');
+  
+  if (!fs.existsSync(apkPath)) {
+    return res.status(404).json({ ok: false, error: 'VHR Voice APK not found on server' });
+  }
+
+  try {
+    console.log(`[install-voice-app] Installing VHR Voice on ${serial}...`);
+    
+    // Install APK via ADB
+    const result = await runAdbCommand(serial, ['install', '-r', apkPath]);
+    
+    if (result.code === 0 || result.stdout.includes('Success')) {
+      console.log(`[install-voice-app] Successfully installed on ${serial}`);
+      res.json({ 
+        ok: true, 
+        message: 'VHR Voice installed successfully',
+        stdout: result.stdout 
+      });
+    } else {
+      console.error(`[install-voice-app] Failed:`, result.stderr);
+      res.status(500).json({ 
+        ok: false, 
+        error: result.stderr || 'Installation failed',
+        stdout: result.stdout 
+      });
+    }
+  } catch (e) {
+    console.error('[install-voice-app] error:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 // Route générique pour tous les téléchargements du dashboard (sans restriction de démo)
 // Launcher script download - kept for local dashboard launch
 // Force redeploy: serve batch wrapper file for auto-execution on Windows
