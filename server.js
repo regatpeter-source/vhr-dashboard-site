@@ -3,7 +3,7 @@
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const util = require('util');
 const execp = util.promisify(require('child_process').exec);
 const path = require('path');
@@ -21,6 +21,41 @@ const https = require('https');
 const http_module = require('http');
 const unzipper = require('unzipper');
 const fetch = require('node-fetch');
+
+// ========== SINGLE SERVER INSTANCE ENFORCEMENT ==========
+// Kill any existing server on port 3000 before starting
+(function ensureSingleInstance() {
+  const PORT = process.env.PORT || 3000;
+  const currentPid = process.pid;
+  
+  try {
+    // Windows: Find process using the port
+    const result = execSync(`netstat -ano | findstr ":${PORT}" | findstr "LISTENING"`, { encoding: 'utf8', timeout: 5000 });
+    const lines = result.trim().split('\n');
+    
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      const pid = parseInt(parts[parts.length - 1], 10);
+      
+      if (pid && pid !== currentPid && !isNaN(pid)) {
+        console.log(`[Server] Found existing server on port ${PORT} (PID: ${pid}), killing it...`);
+        try {
+          execSync(`taskkill /F /PID ${pid}`, { timeout: 5000 });
+          console.log(`[Server] ✓ Killed previous server (PID: ${pid})`);
+        } catch (killErr) {
+          console.warn(`[Server] Could not kill PID ${pid}:`, killErr.message);
+        }
+      }
+    }
+  } catch (e) {
+    // No process found on port or command failed - this is fine
+    if (!e.message.includes('ENOENT') && !e.status) {
+      // Silent: port is free
+    }
+  }
+  
+  console.log(`[Server] ✓ Port ${PORT} is now available (current PID: ${currentPid})`);
+})();
 
 // PostgreSQL database module
 const db = process.env.DATABASE_URL ? require('./db-postgres') : null;
