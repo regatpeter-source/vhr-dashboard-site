@@ -142,35 +142,71 @@ class VHRAudioStream {
     try {
       this._setState('stopped');
       
+      // Disconnect mic source first to prevent further audio processing
+      if (this.micSource) {
+        try {
+          this.micSource.disconnect();
+        } catch (e) {
+          // Ignore disconnect errors
+        }
+        this.micSource = null;
+      }
+      
       // Stop all tracks
       if (this.localStream) {
-        this.localStream.getTracks().forEach(track => track.stop());
+        try {
+          this.localStream.getTracks().forEach(track => {
+            try { track.stop(); } catch (e) { /* ignore */ }
+          });
+        } catch (e) {
+          // Ignore track stop errors
+        }
         this.localStream = null;
       }
 
       // Close peer connection
       if (this.peer) {
-        this.peer.close();
+        try {
+          this.peer.close();
+        } catch (e) {
+          // Ignore close errors
+        }
         this.peer = null;
       }
 
       // Close data channel
       if (this.dataChannel) {
-        this.dataChannel.close();
+        try {
+          this.dataChannel.close();
+        } catch (e) {
+          // Ignore close errors
+        }
         this.dataChannel = null;
       }
 
-      // Close audio context
+      // Close audio context (with state check)
       if (this.audioContext) {
-        this.audioContext.close();
+        try {
+          if (this.audioContext.state !== 'closed') {
+            await this.audioContext.close();
+          }
+        } catch (e) {
+          // Ignore close errors
+        }
         this.audioContext = null;
       }
+      
+      // Reset gain nodes
+      this.micGain = null;
+      this.localMonitorGain = null;
+      this.compressor = null;
+      this.analyser = null;
 
-      // Notify server
-      await this._sendSignal({
+      // Notify server (don't await to prevent blocking)
+      this._sendSignal({
         type: 'close',
         sessionId: this.sessionId
-      });
+      }).catch(e => this._log('Signal close error (ignored): ' + e.message));
 
       this._log('Streaming stopped');
     } catch (error) {
