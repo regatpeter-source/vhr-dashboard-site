@@ -1655,6 +1655,99 @@ app.post('/api/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+// --- Route pour créer un utilisateur dashboard (simplifié, sans email) ---
+app.post('/api/dashboard/register', async (req, res) => {
+  console.log('[api/dashboard/register] request received');
+  reloadUsers();
+  const { username, password, role } = req.body;
+  
+  if (!username || !password) {
+    return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur et mot de passe requis' });
+  }
+  
+  if (password.length < 4) {
+    return res.status(400).json({ ok: false, error: 'Le mot de passe doit contenir au moins 4 caractères' });
+  }
+  
+  // Check if username already exists
+  if (getUserByUsername(username)) {
+    return res.status(400).json({ ok: false, error: 'Cet utilisateur existe déjà' });
+  }
+  
+  try {
+    const passwordHash = await bcrypt.hash(password, 10);
+    const newUser = {
+      id: `dash_${username}_${Date.now()}`,
+      username,
+      email: `${username}@dashboard.local`,
+      passwordHash,
+      role: role || 'user',
+      demoStartDate: new Date().toISOString(),
+      subscriptionStatus: 'dashboard',
+      createdAt: new Date().toISOString()
+    };
+    
+    persistUser(newUser);
+    console.log('[api/dashboard/register] user created:', username);
+    
+    const token = jwt.sign({ username: newUser.username, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    
+    res.json({ 
+      ok: true, 
+      token,
+      user: { username: newUser.username, role: newUser.role }
+    });
+  } catch (e) {
+    console.error('[api/dashboard/register] error:', e);
+    res.status(500).json({ ok: false, error: 'Erreur lors de la création' });
+  }
+});
+
+// --- Route pour vérifier un utilisateur dashboard ---
+app.post('/api/dashboard/login', async (req, res) => {
+  console.log('[api/dashboard/login] request received');
+  const { username, password } = req.body;
+  
+  if (!username || !password) {
+    return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur et mot de passe requis' });
+  }
+  
+  reloadUsers();
+  const user = getUserByUsername(username);
+  
+  if (!user) {
+    return res.status(401).json({ ok: false, error: 'Utilisateur non trouvé' });
+  }
+  
+  const valid = await bcrypt.compare(password, user.passwordhash || user.passwordHash);
+  if (!valid) {
+    return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
+  }
+  
+  const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+  
+  res.json({ 
+    ok: true, 
+    token,
+    user: { username: user.username, role: user.role, email: user.email }
+  });
+});
+
+// --- Liste des sessions collaboratives actives (pour admin) ---
+app.get('/api/sessions/active', authMiddleware, (req, res) => {
+  const sessions = [];
+  collaborativeSessions.forEach((session, code) => {
+    sessions.push({
+      code,
+      host: session.host,
+      userCount: session.users.length,
+      createdAt: session.createdAt,
+      lastActivity: session.lastActivity
+    });
+  });
+  res.json({ ok: true, sessions });
+});
+
 // Initialize default admin users (maintenance endpoint - for production fix)
 app.post('/api/admin/init-users', async (req, res) => {
   console.log('[api/admin/init-users] Initializing default users...');
@@ -4994,14 +5087,185 @@ app.post('/api/stream/audio-output', async (req, res) => {
   }
 });
 
+// ---------- Collaborative Sessions Storage ----------
+const collaborativeSessions = new Map(); // sessionCode -> { host, hostSocket, users: [{username, socketId}], createdAt }
+
+function generateSessionCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
 // ---------- Socket.IO ----------
 io.on('connection', socket => {
-  console.log('[Socket.IO] ­ƒöî Client connected');
+  console.log('[Socket.IO] 🔌 Client connected:', socket.id);
   socket.emit('devices-update', devices);
   socket.emit('games-update', gamesList);
   socket.emit('favorites-update', favoritesList);
+  
+  // === Collaborative Session Events ===
+  
+  // Create a new collaborative session
+  socket.on('create-session', (data) => {
+    const { username } = data;
+    const sessionCode = generateSessionCode();
+    
+    collaborativeSessions.set(sessionCode, {
+      host: username,
+      hostSocketId: socket.id,
+      users: [{ username, socketId: socket.id, role: 'host', joinedAt: new Date() }],
+      createdAt: new Date(),
+      lastActivity: new Date()
+    });
+    
+    socket.join(`session-${sessionCode}`);
+    socket.sessionCode = sessionCode;
+    socket.sessionUsername = username;
+    
+    console.log(`[Session] ✅ Created session ${sessionCode} by ${username}`);
+    socket.emit('session-created', { sessionCode, users: collaborativeSessions.get(sessionCode).users });
+  });
+  
+  // Join an existing session
+  socket.on('join-session', (data) => {
+    const { sessionCode, username } = data;
+    const session = collaborativeSessions.get(sessionCode);
+    
+    if (!session) {
+      socket.emit('session-error', { error: 'Session non trouvée. Vérifiez le code.' });
+      return;
+    }
+    
+    // Check if username already in session
+    const existingUser = session.users.find(u => u.username === username);
+    if (existingUser) {
+      // Update socket ID if reconnecting
+      existingUser.socketId = socket.id;
+    } else {
+      session.users.push({ username, socketId: socket.id, role: 'member', joinedAt: new Date() });
+    }
+    session.lastActivity = new Date();
+    
+    socket.join(`session-${sessionCode}`);
+    socket.sessionCode = sessionCode;
+    socket.sessionUsername = username;
+    
+    console.log(`[Session] 👤 ${username} joined session ${sessionCode}`);
+    
+    // Notify all users in session
+    io.to(`session-${sessionCode}`).emit('session-updated', { 
+      sessionCode, 
+      users: session.users,
+      message: `${username} a rejoint la session`
+    });
+    
+    socket.emit('session-joined', { sessionCode, users: session.users, host: session.host });
+  });
+  
+  // Leave session
+  socket.on('leave-session', () => {
+    if (socket.sessionCode) {
+      const session = collaborativeSessions.get(socket.sessionCode);
+      if (session) {
+        session.users = session.users.filter(u => u.socketId !== socket.id);
+        
+        if (session.users.length === 0) {
+          // Delete empty session
+          collaborativeSessions.delete(socket.sessionCode);
+          console.log(`[Session] 🗑️ Session ${socket.sessionCode} deleted (empty)`);
+        } else {
+          // Notify remaining users
+          io.to(`session-${socket.sessionCode}`).emit('session-updated', {
+            sessionCode: socket.sessionCode,
+            users: session.users,
+            message: `${socket.sessionUsername} a quitté la session`
+          });
+          
+          // If host left, assign new host
+          if (session.hostSocketId === socket.id && session.users.length > 0) {
+            session.host = session.users[0].username;
+            session.hostSocketId = session.users[0].socketId;
+            session.users[0].role = 'host';
+            io.to(`session-${socket.sessionCode}`).emit('session-updated', {
+              sessionCode: socket.sessionCode,
+              users: session.users,
+              message: `${session.host} est maintenant l'hôte`
+            });
+          }
+        }
+      }
+      
+      socket.leave(`session-${socket.sessionCode}`);
+      console.log(`[Session] 👋 ${socket.sessionUsername} left session ${socket.sessionCode}`);
+      socket.sessionCode = null;
+      socket.sessionUsername = null;
+    }
+  });
+  
+  // Sync action to all session members
+  socket.on('session-action', (data) => {
+    const { action, payload } = data;
+    if (socket.sessionCode) {
+      const session = collaborativeSessions.get(socket.sessionCode);
+      if (session) {
+        session.lastActivity = new Date();
+        // Broadcast to all session members except sender
+        socket.to(`session-${socket.sessionCode}`).emit('session-action', {
+          action,
+          payload,
+          from: socket.sessionUsername
+        });
+      }
+    }
+  });
+  
+  // Get session info
+  socket.on('get-session-info', (data) => {
+    const { sessionCode } = data;
+    const session = collaborativeSessions.get(sessionCode);
+    if (session) {
+      socket.emit('session-info', {
+        sessionCode,
+        host: session.host,
+        users: session.users,
+        createdAt: session.createdAt
+      });
+    } else {
+      socket.emit('session-error', { error: 'Session non trouvée' });
+    }
+  });
+  
   socket.on('disconnect', () => {
-    console.log('[Socket.IO] ­ƒöî Client disconnected');
+    console.log('[Socket.IO] 🔌 Client disconnected:', socket.id);
+    
+    // Handle session cleanup on disconnect
+    if (socket.sessionCode) {
+      const session = collaborativeSessions.get(socket.sessionCode);
+      if (session) {
+        session.users = session.users.filter(u => u.socketId !== socket.id);
+        
+        if (session.users.length === 0) {
+          collaborativeSessions.delete(socket.sessionCode);
+          console.log(`[Session] 🗑️ Session ${socket.sessionCode} auto-deleted (all disconnected)`);
+        } else {
+          io.to(`session-${socket.sessionCode}`).emit('session-updated', {
+            sessionCode: socket.sessionCode,
+            users: session.users,
+            message: `${socket.sessionUsername} s'est déconnecté`
+          });
+          
+          // Transfer host if needed
+          if (session.hostSocketId === socket.id) {
+            session.host = session.users[0].username;
+            session.hostSocketId = session.users[0].socketId;
+            session.users[0].role = 'host';
+          }
+        }
+      }
+    }
   });
 });
 
