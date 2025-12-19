@@ -4934,6 +4934,54 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
   }
 });
 
+// Start VHR Voice app with pre-filled parameters
+app.post('/api/device/start-voice-app', async (req, res) => {
+  const { serial, serverUrl } = req.body || {};
+  if (!serial) {
+    return res.status(400).json({ ok: false, error: 'serial required' });
+  }
+
+  try {
+    // Build server URL from request if not provided
+    const hostUrl = serverUrl || `http://${req.hostname}:${PORT}`;
+    
+    console.log(`[start-voice-app] Starting VHR Voice on ${serial} with URL ${hostUrl}`);
+    
+    // Launch the app with intent extras for auto-configuration
+    const result = await runAdbCommand(serial, [
+      'shell', 'am', 'start',
+      '-n', 'com.vhr.voice/.MainActivity',
+      '-e', 'serverUrl', hostUrl,
+      '-e', 'serial', serial,
+      '--ez', 'autostart', 'true'
+    ]);
+    
+    if (result.code === 0 || result.stdout.includes('Starting')) {
+      res.json({ 
+        ok: true, 
+        message: 'VHR Voice started with auto-configuration',
+        serverUrl: hostUrl,
+        serial: serial
+      });
+    } else {
+      // Try just opening the app without extras if first method fails
+      const fallbackResult = await runAdbCommand(serial, [
+        'shell', 'monkey', '-p', 'com.vhr.voice', '-c', 'android.intent.category.LAUNCHER', '1'
+      ]);
+      
+      res.json({ 
+        ok: fallbackResult.code === 0, 
+        message: 'VHR Voice opened (manual config required)',
+        stdout: result.stdout,
+        stderr: result.stderr
+      });
+    }
+  } catch (e) {
+    console.error('[api] device/start-voice-app:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 // Stop background voice app
 app.post('/api/device/stop-audio-receiver', async (req, res) => {
   const { serial } = req.body || {};

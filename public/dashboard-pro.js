@@ -2275,6 +2275,28 @@ window.downloadVoiceApk = function() {
 	showToast('📥 Téléchargement de VHR Voice APK...', 'info');
 };
 
+window.startVoiceApp = async function(serial) {
+	try {
+		showToast('🚀 Lancement de VHR Voice...', 'info');
+		
+		const res = await api('/api/device/start-voice-app', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ serial })
+		});
+		
+		if (res && res.ok) {
+			showToast('✅ VHR Voice lancé ! Vérifiez le casque.', 'success');
+			closeModal();
+		} else {
+			showToast('⚠️ ' + (res?.message || 'Vérifiez l\'installation'), 'warning');
+		}
+	} catch (e) {
+		console.error('[startVoiceApp] Error:', e);
+		showToast('❌ Erreur: ' + e.message, 'error');
+	}
+};
+
 window.showVoiceAppDialog = function(serial) {
 	const html = `
 		<div style="text-align:center; padding: 20px;">
@@ -2296,20 +2318,35 @@ window.showVoiceAppDialog = function(serial) {
 			</div>
 			
 			${serial ? `
-			<button onclick="installVoiceApp('${serial}')" style="
-				background: linear-gradient(135deg, #2ecc71, #27ae60);
-				color: #fff;
-				border: none;
-				padding: 14px 28px;
-				border-radius: 8px;
-				font-size: 16px;
-				font-weight: bold;
-				cursor: pointer;
-				margin: 8px;
-				display: inline-flex;
-				align-items: center;
-				gap: 8px;
-			">📲 Installer sur le casque</button>
+			<div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-bottom: 16px;">
+				<button onclick="startVoiceApp('${serial}')" style="
+					background: linear-gradient(135deg, #9b59b6, #8e44ad);
+					color: #fff;
+					border: none;
+					padding: 14px 28px;
+					border-radius: 8px;
+					font-size: 16px;
+					font-weight: bold;
+					cursor: pointer;
+					display: inline-flex;
+					align-items: center;
+					gap: 8px;
+				">▶️ Démarrer l'app</button>
+				
+				<button onclick="installVoiceApp('${serial}')" style="
+					background: linear-gradient(135deg, #2ecc71, #27ae60);
+					color: #fff;
+					border: none;
+					padding: 14px 28px;
+					border-radius: 8px;
+					font-size: 16px;
+					font-weight: bold;
+					cursor: pointer;
+					display: inline-flex;
+					align-items: center;
+					gap: 8px;
+				">📲 Installer</button>
+			</div>
 			` : ''}
 			
 			<button onclick="downloadVoiceApk()" style="
@@ -2329,10 +2366,8 @@ window.showVoiceAppDialog = function(serial) {
 			
 			<div style="margin-top: 24px; padding: 12px; background: rgba(26, 188, 156, 0.1); border-radius: 8px; border-left: 4px solid #1abc9c;">
 				<p style="color:#95a5a6; font-size: 12px; margin: 0;">
-					💡 <strong>Installation manuelle:</strong> Téléchargez l'APK puis installez avec:<br>
-					<code style="background:#0d0f14; padding: 4px 8px; border-radius: 4px; margin-top: 8px; display: inline-block;">
-						adb install vhr-voice.apk
-					</code>
+					💡 <strong>Première utilisation:</strong> Cliquez d'abord sur "Installer", puis sur "Démarrer".<br>
+					L'app se configurera automatiquement avec l'IP du serveur et le serial du casque.
 				</p>
 			</div>
 		</div>
