@@ -1435,7 +1435,27 @@ if (!currentUser) {
 
 // ========== API & DATA ========== 
 const API_BASE = '/api';
-const socket = io();
+const socket = io({
+	reconnection: true,
+	reconnectionAttempts: 5,
+	reconnectionDelay: 1000,
+	reconnectionDelayMax: 5000,
+	timeout: 20000
+});
+
+// Handle socket errors gracefully
+socket.on('connect_error', (err) => {
+	console.warn('[socket] Connection error:', err.message);
+});
+
+socket.on('disconnect', (reason) => {
+	console.warn('[socket] Disconnected:', reason);
+});
+
+socket.on('reconnect', (attemptNumber) => {
+	console.log('[socket] Reconnected after', attemptNumber, 'attempts');
+});
+
 window.vhrSocket = socket; // Make socket available globally for sessions
 let devices = [];
 let games = [];
