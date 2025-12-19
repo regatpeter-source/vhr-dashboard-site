@@ -277,7 +277,8 @@
             }
             
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/api/audio/stream?serial=${encodeURIComponent(serial)}`;
+            // Important: mode=receiver tells server this is a headset receiving audio
+            const wsUrl = `${protocol}//${window.location.host}/api/audio/stream?serial=${encodeURIComponent(serial)}&mode=receiver`;
             
             try {
                 ws = new WebSocket(wsUrl);
@@ -380,14 +381,28 @@
         // Auto-connect si le serial est dans l'URL
         const urlParams = new URLSearchParams(window.location.search);
         const autoSerial = urlParams.get('serial');
+        const autoConnect = urlParams.get('autoconnect');
+        
         if (autoSerial) {
             serialInput.value = autoSerial;
-            setTimeout(connect, 500);
+            // Auto-connect si demandé ou après un court délai
+            if (autoConnect === 'true') {
+                console.log('[Audio Receiver] Auto-connecting to', autoSerial);
+                setTimeout(() => {
+                    connect();
+                    // Resume audio context on user interaction (required by browsers)
+                    document.body.addEventListener('click', () => {
+                        if (audioContext && audioContext.state === 'suspended') {
+                            audioContext.resume();
+                        }
+                    }, { once: true });
+                }, 1000);
+            }
         }
         
         // Charger le serial depuis le localStorage
         const savedSerial = localStorage.getItem('vhr_receiver_serial');
-        if (savedSerial) {
+        if (savedSerial && !autoSerial) {
             serialInput.value = savedSerial;
         }
         

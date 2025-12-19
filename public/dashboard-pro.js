@@ -591,6 +591,26 @@ window.sendVoiceToHeadset = async function(serial) {
 		// Local monitoring is ON by default (hear yourself on PC)
 		activeAudioStream.isLocalMonitoring = true;
 		
+		// Open audio receiver on headset browser automatically
+		try {
+			const serverUrl = window.location.origin;
+			showToast('📱 Ouverture du récepteur audio sur le casque...', 'info');
+			const openRes = await api('/api/device/open-audio-receiver', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ serial, serverUrl })
+			});
+			if (openRes && openRes.ok) {
+				console.log('[sendVoiceToHeadset] Audio receiver opened on headset:', openRes.url);
+				showToast('✅ Récepteur audio ouvert sur le casque!', 'success');
+			} else {
+				console.warn('[sendVoiceToHeadset] Failed to open audio receiver on headset:', openRes);
+				showToast('⚠️ Ouvrez audio-receiver.html sur le casque manuellement', 'warning');
+			}
+		} catch (openError) {
+			console.warn('[sendVoiceToHeadset] Could not open audio receiver on headset:', openError);
+		}
+		
 		// Also start audio relay to headset via WebSocket for simple receivers
 		try {
 			await activeAudioStream.startAudioRelay(serial);

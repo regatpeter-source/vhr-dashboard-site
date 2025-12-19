@@ -4564,6 +4564,39 @@ app.post('/api/adb/command', async (req, res) => {
   }
 });
 
+// Open audio receiver in Quest browser for voice streaming
+app.post('/api/device/open-audio-receiver', async (req, res) => {
+  const { serial, serverUrl } = req.body || {};
+  if (!serial) {
+    return res.status(400).json({ ok: false, error: 'serial required' });
+  }
+
+  try {
+    // Build the audio receiver URL with the serial pre-filled
+    const receiverUrl = `${serverUrl || 'http://localhost:3000'}/audio-receiver.html?serial=${encodeURIComponent(serial)}&autoconnect=true`;
+    
+    console.log(`[open-audio-receiver] Opening ${receiverUrl} on ${serial}`);
+    
+    // Use ADB to open URL in Quest browser
+    // am start -a android.intent.action.VIEW -d "URL"
+    const result = await runAdbCommand(serial, [
+      'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', 
+      '-d', receiverUrl
+    ]);
+    
+    console.log(`[open-audio-receiver] Result:`, result);
+    res.json({ 
+      ok: result.code === 0, 
+      url: receiverUrl,
+      stdout: result.stdout, 
+      stderr: result.stderr 
+    });
+  } catch (e) {
+    console.error('[api] device/open-audio-receiver:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 // Home button - Open Oculus/Meta Quest menu
 app.post('/api/device/home-button', async (req, res) => {
   const { serial } = req.body || {};
