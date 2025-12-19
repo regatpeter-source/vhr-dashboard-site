@@ -992,6 +992,8 @@ async function loadDevices() {
 		renderDevices();
 	}
 }
+// Expose loadDevices globally for onclick handlers in HTML
+window.loadDevices = loadDevices;
 
 // ========== RENDER: TABLE VIEW ========== 
 function renderDevicesTable() {
@@ -1786,6 +1788,8 @@ function showModal(html) {
 	</div>`;
 	modal.style.display = 'flex';
 }
+// Expose showModal globally for onclick handlers
+window.showModal = showModal;
 
 window.closeModal = function() {
 	const modal = document.getElementById('modal');
@@ -2408,15 +2412,18 @@ function hideDashboardContent() {
 // Check JWT authentication FIRST - this will show auth modal if needed
 checkJWTAuth().then(isAuth => {
 	if (isAuth) {
-		// User is authenticated - check license/subscription status
+		// User is authenticated - always show dashboard content first
+		showDashboardContent();
+		createNavbar();
+		
+		// Then check license/subscription status
 		checkLicense().then(hasAccess => {
 			if (hasAccess) {
 				// User has access (demo valid or active subscription)
-				showDashboardContent();
-				createNavbar();
 				loadDevices();
 			}
 			// else: Access blocked - unlock modal already shown by checkLicense()
+			// Dashboard content stays visible but unlock modal blocks interaction
 		});
 	} else {
 		// Auth failed - hide the loading overlay, auth modal will show
