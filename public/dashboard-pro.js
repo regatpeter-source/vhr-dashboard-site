@@ -1038,6 +1038,8 @@ function renderDevicesTable() {
 		// Escape special characters for HTML attributes
 		const safeSerial = d.serial.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 		const safeName = (d.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+		// Create safe ID for HTML (no colons, dots, or special chars)
+		const safeId = d.serial.replace(/[^a-zA-Z0-9]/g, '_');
 		
 		table += `<tr style='background:${bgColor};border-bottom:1px solid #34495e;'>
 			<td style='padding:12px;'>
@@ -1045,7 +1047,7 @@ function renderDevicesTable() {
 				<div style='font-size:11px;color:#95a5a6;margin-top:2px;'>${d.serial}</div>
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				<div id='battery_${safeSerial}' style='font-size:14px;font-weight:bold;color:#f39c12;'>🔋 --</div>
+				<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#f39c12;'>🔋 --</div>
 			</td>
 			<td style='padding:12px;'>
 				<span style='background:${statusColor};color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:bold;'>
@@ -1057,7 +1059,7 @@ function renderDevicesTable() {
 			</td>
 			<td style='padding:12px;text-align:center;'>
 				${d.status !== 'streaming' ? `
-					<select id='profile_${safeSerial}' style='background:#34495e;color:#fff;border:1px solid #2ecc71;padding:6px;border-radius:4px;margin-bottom:4px;width:140px;'>
+					<select id='profile_${safeId}' style='background:#34495e;color:#fff;border:1px solid #2ecc71;padding:6px;border-radius:4px;margin-bottom:4px;width:140px;'>
 						<option value='ultra-low'>Ultra Low</option>
 						<option value='low'>Low</option>
 						<option value='wifi'>WiFi</option>
@@ -1127,11 +1129,13 @@ function renderDevicesCards() {
 		// Escape special characters for HTML attributes
 		const safeSerial = d.serial.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 		const safeName = (d.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+		// Create safe ID for HTML (no colons, dots, or special chars)
+		const safeId = d.serial.replace(/[^a-zA-Z0-9]/g, '_');
 		
 		card.innerHTML = `
 			<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'>
 				<div style='font-weight:bold;font-size:18px;color:#2ecc71;'>${d.name}</div>
-				<div id='battery_${safeSerial}' style='font-size:14px;font-weight:bold;color:#f39c12;'>🔋 --</div>
+				<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#f39c12;'>🔋 --</div>
 			</div>
 			<div style='font-size:11px;color:#95a5a6;margin-bottom:12px;'>${d.serial}</div>
 			<div style='margin-bottom:12px;'>
@@ -1142,7 +1146,7 @@ function renderDevicesCards() {
 			${runningGameDisplay}
 			<div style='margin-bottom:10px;'>
 					${d.status !== 'streaming' ? `
-					<select id='profile_card_${safeSerial}' style='width:100%;background:#34495e;color:#fff;border:1px solid #2ecc71;padding:8px;border-radius:6px;margin-bottom:6px;'>
+					<select id='profile_card_${safeId}' style='width:100%;background:#34495e;color:#fff;border:1px solid #2ecc71;padding:8px;border-radius:6px;margin-bottom:6px;'>
 						<option value='ultra-low'>Ultra Low</option>
 						<option value='low'>Low</option>
 						<option value='wifi'>WiFi</option>
@@ -1180,9 +1184,11 @@ function renderDevicesCards() {
 // Fetch and update battery level for a device
 async function fetchBatteryLevel(serial) {
 	try {
-		const data = await api(`/api/battery/${serial}`);
+		const data = await api(`/api/battery/${encodeURIComponent(serial)}`);
 		if (data.ok && data.level !== null) {
-			const element = document.getElementById(`battery_${serial}`);
+			// Use safe ID for HTML element lookup
+			const safeId = serial.replace(/[^a-zA-Z0-9]/g, '_');
+			const element = document.getElementById(`battery_${safeId}`);
 			if (element) {
 				const batteryColor = data.level > 50 ? '#2ecc71' : data.level > 20 ? '#f39c12' : '#e74c3c';
 				const batteryIcon = data.level > 80 ? '🔋' : data.level > 50 ? '🪫' : data.level > 20 ? '⚠️' : '🔴';
@@ -1201,7 +1207,9 @@ function renderDevices() {
 
 // ========== STREAMING FUNCTIONS ========== 
 window.startStreamFromTable = async function(serial) {
-	const profileSelect = document.getElementById(`profile_${serial}`);
+	// Use safe ID for HTML element lookup
+	const safeId = serial.replace(/[^a-zA-Z0-9]/g, '_');
+	const profileSelect = document.getElementById(`profile_${safeId}`);
 	const profile = profileSelect ? profileSelect.value : 'default';
 	
 	// Launch Scrcpy directly (simple and works great)
@@ -1221,7 +1229,9 @@ window.startStreamFromTable = async function(serial) {
 };
 
 window.startStreamFromCard = async function(serial) {
-	const profileSelect = document.getElementById(`profile_card_${serial}`);
+	// Use safe ID for HTML element lookup
+	const safeId = serial.replace(/[^a-zA-Z0-9]/g, '_');
+	const profileSelect = document.getElementById(`profile_card_${safeId}`);
 	const profile = profileSelect ? profileSelect.value : 'default';
 	
 	// Launch Scrcpy directly (simple and works great)
@@ -1810,8 +1820,13 @@ window.closeModal = function() {
 
 // ========== SOCKET.IO EVENTS ========== 
 socket.on('devices-update', (data) => {
-	devices = data;
-	renderDevices();
+	console.log('[socket] devices-update received:', data);
+	if (Array.isArray(data)) {
+		devices = data;
+		renderDevices();
+	} else {
+		console.warn('[socket] Invalid devices data received:', data);
+	}
 });
 
 socket.on('games-update', (data) => {
