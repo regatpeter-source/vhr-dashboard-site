@@ -1001,6 +1001,8 @@ function renderDevicesTable() {
 	container.innerHTML = '';
 	container.style.display = 'block';
 	container.style.padding = '20px';
+	container.style.opacity = '1';
+	container.style.pointerEvents = 'auto';
 	
 	if (devices.length === 0) {
 		container.innerHTML = `<div style='text-align:center;color:#fff;font-size:18px;padding:40px;'>
@@ -1099,6 +1101,8 @@ function renderDevicesCards() {
 	grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(300px, 1fr))';
 	grid.style.gap = '20px';
 	grid.style.padding = '20px';
+	grid.style.opacity = '1';
+	grid.style.pointerEvents = 'auto';
 	
 	if (devices.length === 0) {
 		grid.innerHTML = `<div style='text-align:center;color:#fff;grid-column:1/-1;padding:40px;'>
