@@ -125,30 +125,441 @@ function showUserMenu() {
 	userList.forEach(u => {
 		let role = userRoles[u]||'user';
 		let roleColor = role==='admin' ? '#ff9800' : '#2196f3';
+		const isAuthenticated = authenticatedUsers[u] ? '✅' : '🔒';
 		html += `<li style='margin-bottom:8px;padding:8px;background:#23272f;border-radius:6px;'>
-			<span style='cursor:pointer;color:${u===currentUser?'#2ecc71':'#fff'};font-weight:bold;' onclick='setUser("${u}")'>${u}</span>
+			<span style='cursor:pointer;color:${u===currentUser?'#2ecc71':'#fff'};font-weight:bold;' onclick='switchToUser("${u}")'>${isAuthenticated} ${u}</span>
 			<span style='font-size:10px;background:${roleColor};color:#fff;padding:2px 6px;border-radius:4px;margin-left:6px;'>${role}</span>
 			${u!=='Invité'?`<button onclick='removeUser("${u}")' style='margin-left:8px;font-size:10px;'>❌</button>`:''}
 			<button onclick='setUserRolePrompt("${u}")' style='margin-left:4px;font-size:10px;'>🔧</button>
 		</li>`;
 	});
 	html += `</ul>`;
-	html += `<button onclick='addUserPrompt()' style='background:#2ecc71;color:#000;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;'>➕ Ajouter</button> `;
-	html += `<button onclick='closeUserMenu()' style='background:#e74c3c;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;'>❌ Fermer</button>`;
+	html += `<div style='display:flex;gap:8px;flex-wrap:wrap;'>`;
+	html += `<button onclick='showAddUserDialog()' style='background:#2ecc71;color:#000;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;'>➕ Ajouter</button>`;
+	html += `<button onclick='showLoginDialog()' style='background:#3498db;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;'>🔑 Connexion</button>`;
+	html += `<button onclick='showSessionMenu()' style='background:#9b59b6;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;'>🌐 Session</button>`;
+	html += `<button onclick='closeUserMenu()' style='background:#e74c3c;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;'>❌</button>`;
+	html += `</div>`;
 	menu.innerHTML = html;
 	document.body.appendChild(menu);
 }
 
+// ========== AUTHENTICATION SYSTEM ==========
+let authenticatedUsers = JSON.parse(localStorage.getItem('vhr_auth_users') || '{}');
+let currentSession = null;
+
+function saveAuthUsers() {
+	localStorage.setItem('vhr_auth_users', JSON.stringify(authenticatedUsers));
+}
+
 window.setUser = setUser;
 window.removeUser = removeUser;
+
+window.switchToUser = function(u) {
+	if (authenticatedUsers[u]) {
+		setUser(u);
+		showToast(`✅ Connecté en tant que ${u}`, 'success');
+	} else {
+		showLoginDialogForUser(u);
+	}
+};
+
 window.setUserRolePrompt = function(u) {
 	const role = prompt('Rôle pour '+u+' ? (admin/user/guest)', userRoles[u]||'user');
 	if (role && role.trim()) setUserRole(u, role.trim());
 };
-window.addUserPrompt = function() {
-	const name = prompt('Nom du nouvel utilisateur ?');
-	if (name && name.trim()) setUser(name.trim());
+
+// Show dialog to add a new user with password
+window.showAddUserDialog = function() {
+	closeUserMenu();
+	let dialog = document.getElementById('addUserDialog');
+	if (dialog) dialog.remove();
+	
+	dialog = document.createElement('div');
+	dialog.id = 'addUserDialog';
+	dialog.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:3000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
+	dialog.onclick = (e) => { if (e.target === dialog) dialog.remove(); };
+	
+	dialog.innerHTML = `
+		<div style='background:#1a1d24;border:3px solid #2ecc71;border-radius:16px;padding:30px;width:400px;color:#fff;'>
+			<h2 style='color:#2ecc71;margin:0 0 20px;text-align:center;'>➕ Nouvel Utilisateur</h2>
+			<div style='margin-bottom:15px;'>
+				<label style='display:block;margin-bottom:5px;color:#95a5a6;'>Nom d'utilisateur</label>
+				<input type='text' id='newUserName' placeholder='Nom' style='width:100%;padding:12px;border:2px solid #34495e;border-radius:8px;background:#23272f;color:#fff;font-size:16px;box-sizing:border-box;'>
+			</div>
+			<div style='margin-bottom:15px;'>
+				<label style='display:block;margin-bottom:5px;color:#95a5a6;'>Mot de passe</label>
+				<div style='position:relative;'>
+					<input type='password' id='newUserPass' placeholder='Mot de passe (min 4 caractères)' style='width:100%;padding:12px;border:2px solid #34495e;border-radius:8px;background:#23272f;color:#fff;font-size:16px;box-sizing:border-box;'>
+					<button type='button' onclick='toggleDashboardPassword("newUserPass")' style='position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:#95a5a6;cursor:pointer;font-size:18px;'>👁️</button>
+				</div>
+			</div>
+			<div style='margin-bottom:20px;'>
+				<label style='display:block;margin-bottom:5px;color:#95a5a6;'>Rôle</label>
+				<select id='newUserRole' style='width:100%;padding:12px;border:2px solid #34495e;border-radius:8px;background:#23272f;color:#fff;font-size:16px;'>
+					<option value='user'>👤 Utilisateur</option>
+					<option value='admin'>👑 Administrateur</option>
+					<option value='guest'>👥 Invité</option>
+				</select>
+			</div>
+			<div style='display:flex;gap:10px;'>
+				<button onclick='createNewUser()' style='flex:1;background:#2ecc71;color:#000;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>✅ Créer</button>
+				<button onclick='document.getElementById("addUserDialog").remove()' style='flex:1;background:#e74c3c;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>❌ Annuler</button>
+			</div>
+			<p style='text-align:center;color:#95a5a6;font-size:12px;margin-top:15px;'>Le compte sera créé sur le serveur avec authentification sécurisée</p>
+		</div>
+	`;
+	document.body.appendChild(dialog);
+	document.getElementById('newUserName').focus();
 };
+
+window.createNewUser = async function() {
+	const username = document.getElementById('newUserName').value.trim();
+	const password = document.getElementById('newUserPass').value;
+	const role = document.getElementById('newUserRole').value;
+	
+	if (!username) {
+		showToast('❌ Entrez un nom d\'utilisateur', 'error');
+		return;
+	}
+	if (password.length < 4) {
+		showToast('❌ Le mot de passe doit contenir au moins 4 caractères', 'error');
+		return;
+	}
+	
+	try {
+		const res = await fetch('/api/dashboard/register', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ username, password, role })
+		});
+		const data = await res.json();
+		
+		if (data.ok) {
+			// Add to local list
+			if (!userList.includes(username)) {
+				userList.push(username);
+			}
+			userRoles[username] = role;
+			authenticatedUsers[username] = { token: data.token, role };
+			saveUserList();
+			saveAuthUsers();
+			setUser(username);
+			document.getElementById('addUserDialog').remove();
+			showToast(`✅ Utilisateur ${username} créé avec succès!`, 'success');
+		} else {
+			showToast(`❌ ${data.error || 'Erreur lors de la création'}`, 'error');
+		}
+	} catch (e) {
+		console.error('[createNewUser]', e);
+		showToast('❌ Erreur de connexion au serveur', 'error');
+	}
+};
+
+// Show login dialog
+window.showLoginDialog = function() {
+	closeUserMenu();
+	showLoginDialogForUser('');
+};
+
+window.showLoginDialogForUser = function(username) {
+	let dialog = document.getElementById('loginDialog');
+	if (dialog) dialog.remove();
+	
+	dialog = document.createElement('div');
+	dialog.id = 'loginDialog';
+	dialog.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:3000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
+	dialog.onclick = (e) => { if (e.target === dialog) dialog.remove(); };
+	
+	dialog.innerHTML = `
+		<div style='background:#1a1d24;border:3px solid #3498db;border-radius:16px;padding:30px;width:400px;color:#fff;'>
+			<h2 style='color:#3498db;margin:0 0 20px;text-align:center;'>🔑 Connexion</h2>
+			<div style='margin-bottom:15px;'>
+				<label style='display:block;margin-bottom:5px;color:#95a5a6;'>Nom d'utilisateur</label>
+				<input type='text' id='loginUserName' value='${username}' placeholder='Nom' style='width:100%;padding:12px;border:2px solid #34495e;border-radius:8px;background:#23272f;color:#fff;font-size:16px;box-sizing:border-box;'>
+			</div>
+			<div style='margin-bottom:20px;'>
+				<label style='display:block;margin-bottom:5px;color:#95a5a6;'>Mot de passe</label>
+				<div style='position:relative;'>
+					<input type='password' id='loginUserPass' placeholder='Mot de passe' style='width:100%;padding:12px;border:2px solid #34495e;border-radius:8px;background:#23272f;color:#fff;font-size:16px;box-sizing:border-box;' onkeypress='if(event.key==="Enter")loginUser()'>
+					<button type='button' onclick='toggleDashboardPassword("loginUserPass")' style='position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:#95a5a6;cursor:pointer;font-size:18px;'>👁️</button>
+				</div>
+			</div>
+			<div style='display:flex;gap:10px;'>
+				<button onclick='loginUser()' style='flex:1;background:#3498db;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>🔓 Connexion</button>
+				<button onclick='document.getElementById("loginDialog").remove()' style='flex:1;background:#e74c3c;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>❌ Annuler</button>
+			</div>
+			<p style='text-align:center;color:#95a5a6;font-size:12px;margin-top:15px;'>Pas de compte? <a href='#' onclick='document.getElementById("loginDialog").remove();showAddUserDialog();' style='color:#2ecc71;'>Créer un compte</a></p>
+		</div>
+	`;
+	document.body.appendChild(dialog);
+	if (username) {
+		document.getElementById('loginUserPass').focus();
+	} else {
+		document.getElementById('loginUserName').focus();
+	}
+};
+
+window.loginUser = async function() {
+	const username = document.getElementById('loginUserName').value.trim();
+	const password = document.getElementById('loginUserPass').value;
+	
+	if (!username || !password) {
+		showToast('❌ Entrez nom d\'utilisateur et mot de passe', 'error');
+		return;
+	}
+	
+	try {
+		const res = await fetch('/api/dashboard/login', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ username, password })
+		});
+		const data = await res.json();
+		
+		if (data.ok) {
+			if (!userList.includes(username)) {
+				userList.push(username);
+			}
+			userRoles[username] = data.user.role;
+			authenticatedUsers[username] = { token: data.token, role: data.user.role };
+			saveUserList();
+			saveAuthUsers();
+			setUser(username);
+			document.getElementById('loginDialog').remove();
+			showToast(`✅ Bienvenue ${username}!`, 'success');
+		} else {
+			showToast(`❌ ${data.error || 'Identifiants incorrects'}`, 'error');
+		}
+	} catch (e) {
+		console.error('[loginUser]', e);
+		showToast('❌ Erreur de connexion au serveur', 'error');
+	}
+};
+
+// ========== COLLABORATIVE SESSIONS ==========
+window.showSessionMenu = function() {
+	closeUserMenu();
+	let menu = document.getElementById('sessionMenu');
+	if (menu) menu.remove();
+	
+	menu = document.createElement('div');
+	menu.id = 'sessionMenu';
+	menu.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:3000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
+	menu.onclick = (e) => { if (e.target === menu) menu.remove(); };
+	
+	const sessionInfo = currentSession ? `
+		<div style='background:#27ae60;padding:15px;border-radius:8px;margin-bottom:20px;'>
+			<h3 style='margin:0 0 10px;'>✅ Session Active: ${currentSession.code}</h3>
+			<p style='margin:0;font-size:14px;'>Hôte: ${currentSession.host}</p>
+			<p style='margin:5px 0 0;font-size:14px;'>${currentSession.users?.length || 1} utilisateur(s) connecté(s)</p>
+			<div id='sessionUsersList' style='margin-top:10px;font-size:12px;'></div>
+		</div>
+		<button onclick='leaveSession()' style='width:100%;background:#e74c3c;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;margin-bottom:15px;'>🚪 Quitter la session</button>
+	` : '';
+	
+	menu.innerHTML = `
+		<div style='background:#1a1d24;border:3px solid #9b59b6;border-radius:16px;padding:30px;width:450px;color:#fff;'>
+			<h2 style='color:#9b59b6;margin:0 0 20px;text-align:center;'>🌐 Sessions Collaboratives</h2>
+			<p style='color:#95a5a6;text-align:center;margin-bottom:20px;font-size:14px;'>
+				Partagez votre dashboard avec d'autres utilisateurs à distance
+			</p>
+			
+			${sessionInfo}
+			
+			<div style='display:grid;gap:15px;'>
+				<button onclick='createSession()' style='background:#9b59b6;color:#fff;border:none;padding:16px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;${currentSession ? 'opacity:0.5;' : ''}' ${currentSession ? 'disabled' : ''}>
+					🎯 Créer une session
+				</button>
+				
+				<div style='text-align:center;color:#95a5a6;'>— ou —</div>
+				
+				<div style='display:flex;gap:10px;'>
+					<input type='text' id='joinSessionCode' placeholder='Code session (ex: ABC123)' maxlength='6' 
+						style='flex:1;padding:14px;border:2px solid #34495e;border-radius:8px;background:#23272f;color:#fff;font-size:16px;text-transform:uppercase;text-align:center;letter-spacing:4px;'
+						oninput='this.value = this.value.toUpperCase()'>
+					<button onclick='joinSession()' style='background:#3498db;color:#fff;border:none;padding:14px 20px;border-radius:8px;cursor:pointer;font-weight:bold;'>
+						🔗 Rejoindre
+					</button>
+				</div>
+			</div>
+			
+			<button onclick='document.getElementById("sessionMenu").remove()' style='width:100%;background:#34495e;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;margin-top:20px;'>
+				❌ Fermer
+			</button>
+		</div>
+	`;
+	document.body.appendChild(menu);
+	
+	if (currentSession) {
+		updateSessionUsersList();
+	}
+};
+
+function updateSessionUsersList() {
+	const list = document.getElementById('sessionUsersList');
+	if (list && currentSession && currentSession.users) {
+		list.innerHTML = currentSession.users.map(u => 
+			`<span style='display:inline-block;background:#34495e;padding:4px 8px;border-radius:4px;margin:2px;'>${u.role === 'host' ? '👑' : '👤'} ${u.username}</span>`
+		).join('');
+	}
+}
+
+// Socket.IO session handlers
+function initSessionSocket() {
+	if (typeof io === 'undefined') return;
+	
+	const socket = window.vhrSocket || io();
+	window.vhrSocket = socket;
+	
+	socket.on('session-created', (data) => {
+		currentSession = { code: data.sessionCode, users: data.users, host: currentUser };
+		showToast(`🎯 Session créée! Code: ${data.sessionCode}`, 'success', 5000);
+		// Show the code prominently
+		showSessionCodePopup(data.sessionCode);
+	});
+	
+	socket.on('session-joined', (data) => {
+		currentSession = { code: data.sessionCode, users: data.users, host: data.host };
+		showToast(`✅ Connecté à la session ${data.sessionCode}`, 'success');
+		document.getElementById('sessionMenu')?.remove();
+	});
+	
+	socket.on('session-updated', (data) => {
+		if (currentSession) {
+			currentSession.users = data.users;
+			if (data.message) {
+				showToast(`🌐 ${data.message}`, 'info');
+			}
+			updateSessionUsersList();
+			updateSessionIndicator();
+		}
+	});
+	
+	socket.on('session-error', (data) => {
+		showToast(`❌ ${data.error}`, 'error');
+	});
+	
+	socket.on('session-action', (data) => {
+		// Handle synchronized actions from other users
+		console.log('[Session] Action received:', data);
+		handleSessionAction(data);
+	});
+}
+
+function handleSessionAction(data) {
+	const { action, payload, from } = data;
+	
+	switch(action) {
+		case 'launch-game':
+			showToast(`🎮 ${from} lance ${payload.gameName}`, 'info');
+			break;
+		case 'device-selected':
+			showToast(`📱 ${from} a sélectionné ${payload.deviceName}`, 'info');
+			break;
+		case 'settings-changed':
+			showToast(`⚙️ ${from} a modifié les paramètres`, 'info');
+			break;
+	}
+}
+
+window.createSession = function() {
+	if (!currentUser || currentUser === 'Invité') {
+		showToast('❌ Connectez-vous d\'abord pour créer une session', 'error');
+		return;
+	}
+	
+	if (window.vhrSocket) {
+		window.vhrSocket.emit('create-session', { username: currentUser });
+	} else {
+		showToast('❌ Connexion socket non disponible', 'error');
+	}
+};
+
+window.joinSession = function() {
+	const code = document.getElementById('joinSessionCode')?.value.trim().toUpperCase();
+	if (!code || code.length !== 6) {
+		showToast('❌ Entrez un code de session valide (6 caractères)', 'error');
+		return;
+	}
+	
+	if (!currentUser || currentUser === 'Invité') {
+		showToast('❌ Connectez-vous d\'abord pour rejoindre une session', 'error');
+		return;
+	}
+	
+	if (window.vhrSocket) {
+		window.vhrSocket.emit('join-session', { sessionCode: code, username: currentUser });
+	}
+};
+
+window.leaveSession = function() {
+	if (window.vhrSocket && currentSession) {
+		window.vhrSocket.emit('leave-session');
+		currentSession = null;
+		showToast('👋 Session quittée', 'info');
+		document.getElementById('sessionMenu')?.remove();
+		updateSessionIndicator();
+	}
+};
+
+function showSessionCodePopup(code) {
+	let popup = document.getElementById('sessionCodePopup');
+	if (popup) popup.remove();
+	
+	popup = document.createElement('div');
+	popup.id = 'sessionCodePopup';
+	popup.style = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1a1d24;border:4px solid #9b59b6;border-radius:20px;padding:40px;z-index:4000;text-align:center;color:#fff;box-shadow:0 10px 40px rgba(0,0,0,0.5);';
+	
+	popup.innerHTML = `
+		<h2 style='color:#9b59b6;margin:0 0 10px;'>🎯 Session Créée!</h2>
+		<p style='color:#95a5a6;margin:0 0 20px;'>Partagez ce code avec vos collaborateurs:</p>
+		<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:20px;'>
+			<span style='font-size:48px;font-weight:bold;letter-spacing:8px;color:#2ecc71;font-family:monospace;'>${code}</span>
+		</div>
+		<button onclick='copySessionCode("${code}")' style='background:#3498db;color:#fff;border:none;padding:12px 24px;border-radius:8px;cursor:pointer;font-weight:bold;margin-right:10px;'>📋 Copier</button>
+		<button onclick='document.getElementById("sessionCodePopup").remove()' style='background:#34495e;color:#fff;border:none;padding:12px 24px;border-radius:8px;cursor:pointer;font-weight:bold;'>✅ OK</button>
+	`;
+	
+	document.body.appendChild(popup);
+	document.getElementById('sessionMenu')?.remove();
+	updateSessionIndicator();
+}
+
+window.copySessionCode = function(code) {
+	navigator.clipboard.writeText(code).then(() => {
+		showToast('📋 Code copié!', 'success');
+	});
+};
+
+function updateSessionIndicator() {
+	let indicator = document.getElementById('sessionIndicator');
+	
+	if (currentSession) {
+		if (!indicator) {
+			indicator = document.createElement('div');
+			indicator.id = 'sessionIndicator';
+			indicator.style = 'position:fixed;top:60px;right:20px;background:#9b59b6;color:#fff;padding:8px 16px;border-radius:8px;z-index:1000;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,0.3);';
+			indicator.onclick = showSessionMenu;
+			document.body.appendChild(indicator);
+		}
+		indicator.innerHTML = `🌐 Session: ${currentSession.code} (${currentSession.users?.length || 1})`;
+	} else if (indicator) {
+		indicator.remove();
+	}
+}
+
+// Broadcast action to session
+function broadcastSessionAction(action, payload) {
+	if (currentSession && window.vhrSocket) {
+		window.vhrSocket.emit('session-action', { action, payload });
+	}
+}
+
+window.addUserPrompt = function() {
+	showAddUserDialog();
+};
+
 window.closeUserMenu = function() {
 	const menu = document.getElementById('userMenu');
 	if (menu) menu.remove();
@@ -998,11 +1409,15 @@ if (!currentUser) {
 // ========== API & DATA ========== 
 const API_BASE = '/api';
 const socket = io();
+window.vhrSocket = socket; // Make socket available globally for sessions
 let devices = [];
 let games = [];
 let favorites = [];
 let runningApps = {}; // Track running apps: { serial: [pkg1, pkg2, ...] }
 let batteryPollInterval = null;  // Single interval reference
+
+// Initialize collaborative session socket handlers
+initSessionSocket();
 
 // Auto-refresh battery levels every 30 seconds (reduced from 10s for performance)
 function startBatteryPolling() {
