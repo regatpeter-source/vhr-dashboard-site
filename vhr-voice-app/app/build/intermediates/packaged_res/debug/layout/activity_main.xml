@@ -19,7 +19,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="URL du serveur:"
+        android:text="URL du serveur (IP de votre PC):"
         android:textColor="#95a5a6"
         android:textSize="14sp"
         android:layout_marginBottom="8dp" />
@@ -28,20 +28,19 @@
         android:id="@+id/serverUrl"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="http://192.168.1.3:3000"
-        android:text="http://192.168.1.3:3000"
+        android:hint="http://192.168.1.XXX:3000"
         android:textColor="#ffffff"
         android:textColorHint="#7f8c8d"
         android:background="#1a1d24"
         android:padding="16dp"
-        android:textSize="14sp"
+        android:textSize="16sp"
         android:inputType="textUri"
         android:layout_marginBottom="16dp" />
     
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Numéro de série du casque:"
+        android:text="Numéro de série (détecté automatiquement):"
         android:textColor="#95a5a6"
         android:textSize="14sp"
         android:layout_marginBottom="8dp" />
@@ -50,12 +49,13 @@
         android:id="@+id/serial"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="1WMHHA6CLT2436"
-        android:textColor="#ffffff"
+        android:hint="Détection automatique..."
+        android:textColor="#2ecc71"
         android:textColorHint="#7f8c8d"
         android:background="#1a1d24"
         android:padding="16dp"
-        android:textSize="14sp"
+        android:textSize="18sp"
+        android:textStyle="bold"
         android:inputType="text"
         android:layout_marginBottom="24dp" />
     

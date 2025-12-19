@@ -31,12 +31,14 @@ public class VoiceReceiverService extends Service {
     private static final String CHANNEL_ID = "vhr_voice_channel";
     private static final int NOTIFICATION_ID = 1001;
     
+    // Static flag to check if service is running from other activities
+    public static boolean isRunning = false;
+    
     private WebSocketClient webSocketClient;
     private AudioTrack audioTrack;
     private ExecutorService executor;
     private String serverUrl;
     private String deviceSerial;
-    private boolean isRunning = false;
     
     // Audio configuration
     private static final int SAMPLE_RATE = 48000;
