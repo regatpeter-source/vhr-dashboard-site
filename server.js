@@ -4006,6 +4006,12 @@ try {
 
 // ---------- HTTP + Socket.IO ----------
 const server = http.createServer(app);
+
+// Increase server timeout to prevent 408 errors
+server.timeout = 120000; // 2 minutes
+server.keepAliveTimeout = 65000; // 65 seconds
+server.headersTimeout = 66000; // Slightly higher than keepAliveTimeout
+
 const io = new SocketIOServer(server, { cors: { origin: '*' } });
 
 // ---------- State ----------
