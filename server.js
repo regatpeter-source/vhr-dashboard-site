@@ -3445,17 +3445,33 @@ app.post('/api/contact', async (req, res) => {
 
 // ========== SCRCPY GUI LAUNCH ============ 
 app.post('/api/scrcpy-gui', async (req, res) => {
-  const { serial } = req.body || {};
+  const { serial, audioOutput } = req.body || {};
   if (!serial) return res.status(400).json({ ok: false, error: 'serial requis' });
   try {
     // Lancer scrcpy en mode GUI natif (pas de redirection stdout)
     // Taille de fenêtre réduite (ex: 640x360)
-    const proc = spawn('scrcpy', ['-s', serial, '--window-width', '640', '--window-height', '360'], {
+    // audioOutput: 'headset' = audio reste sur casque, 'pc' ou 'both' = audio sur PC aussi
+    const scrcpyArgs = ['-s', serial, '--window-width', '640', '--window-height', '360'];
+    
+    // Add audio forwarding if requested (PC or both)
+    if (audioOutput === 'pc' || audioOutput === 'both') {
+      // Enable audio forwarding to PC
+      // scrcpy 2.0+ supports --audio-codec=opus
+      scrcpyArgs.push('--audio-codec=opus');
+      console.log(`[scrcpy] Audio enabled: forwarding to PC`);
+    } else {
+      // No audio forwarding (audio stays on headset)
+      scrcpyArgs.push('--no-audio');
+      console.log(`[scrcpy] Audio disabled: stays on headset only`);
+    }
+    
+    console.log(`[scrcpy] Launching with args:`, scrcpyArgs);
+    const proc = spawn('scrcpy', scrcpyArgs, {
       detached: true,
       stdio: 'ignore'
     });
     proc.unref();
-    return res.json({ ok: true });
+    return res.json({ ok: true, audioOutput: audioOutput || 'headset' });
   } catch (e) {
     console.error('[api] scrcpy-gui:', e);
     return res.status(500).json({ ok: false, error: e.message });
