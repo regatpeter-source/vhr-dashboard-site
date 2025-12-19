@@ -2258,6 +2258,7 @@ window.loginUser = async function() {
 			
 			// Initialize dashboard
 			setTimeout(() => {
+				showDashboardContent();
 				createNavbar();
 				checkLicense();
 				loadDevices();
@@ -2316,6 +2317,7 @@ window.registerUser = async function() {
 			
 			// Initialize dashboard
 			setTimeout(() => {
+				showDashboardContent();
 				createNavbar();
 				checkLicense();
 				loadDevices();
