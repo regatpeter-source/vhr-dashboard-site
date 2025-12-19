@@ -1747,6 +1747,10 @@ function renderDevices() {
 
 // Show audio output selection dialog for stream
 window.showStreamAudioDialog = function(serial, callback) {
+	// Récupérer le nom du casque
+	const device = devices.find(d => d.serial === serial);
+	const deviceName = device ? device.name : serial;
+	
 	let dialog = document.getElementById('streamAudioDialog');
 	if (dialog) dialog.remove();
 	
@@ -1757,8 +1761,9 @@ window.showStreamAudioDialog = function(serial, callback) {
 	
 	dialog.innerHTML = `
 		<div style='background:#1a1d24;border:2px solid #2ecc71;border-radius:12px;padding:24px;max-width:400px;width:90%;text-align:center;'>
-			<h3 style='color:#2ecc71;margin:0 0 20px 0;'>🔊 Sortie Audio du Stream</h3>
-			<p style='color:#bdc3c7;margin-bottom:20px;font-size:14px;'>Où voulez-vous entendre le son du casque ?</p>
+			<h3 style='color:#2ecc71;margin:0 0 8px 0;'>🎮 Scrcpy - ${deviceName}</h3>
+			<p style='color:#95a5a6;margin:0 0 20px 0;font-size:12px;'>${serial}</p>
+			<p style='color:#bdc3c7;margin-bottom:20px;font-size:14px;'>🔊 Où voulez-vous entendre le son ?</p>
 			<div style='display:flex;flex-direction:column;gap:10px;'>
 				<button onclick='window.launchStreamWithAudio("${serial}", "headset")' style='background:linear-gradient(135deg, #3498db 0%, #2980b9 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
 					📱 Casque uniquement
@@ -1823,6 +1828,10 @@ window.startStreamJSMpeg = async function(serial) {
 };
 
 window.showStreamViewer = function(serial) {
+	// Récupérer le nom du casque
+	const device = devices.find(d => d.serial === serial);
+	const deviceName = device ? device.name : serial;
+	
 	let modal = document.getElementById('streamModal');
 	if (!modal) {
 		modal = document.createElement('div');
@@ -1837,7 +1846,7 @@ window.showStreamViewer = function(serial) {
 	modal.innerHTML = `
 		<div style='width:90%;max-width:960px;background:#1a1d24;border-radius:12px;overflow:hidden;box-shadow:0 8px 32px #000;'>
 			<div style='background:#23272f;padding:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;'>
-				<h2 style='color:#2ecc71;margin:0;'>📹 Stream - ${serial}</h2>
+				<h2 style='color:#2ecc71;margin:0;'>📹 Stream - ${deviceName}</h2>
 				<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;'>
 					<label style='color:#fff;font-size:12px;display:flex;align-items:center;gap:6px;'>
 						🔊 Son:
@@ -1847,11 +1856,15 @@ window.showStreamViewer = function(serial) {
 							<option value='both'>🔊 Les deux</option>
 						</select>
 					</label>
-					<button onclick='closeStreamViewer()' style='background:#e74c3c;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>✕ Fermer</button>
+					<button onclick='window.closeStreamViewer()' style='background:#e74c3c;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>✕ Fermer</button>
 				</div>
 			</div>
 			<div id='streamContainer' style='width:100%;background:#000;position:relative;padding-bottom:56.25%;'>
 				<canvas id='streamCanvas' style='position:absolute;top:0;left:0;width:100%;height:100%;display:block;'></canvas>
+				<!-- Overlay transparent avec le nom du casque -->
+				<div id='streamDeviceOverlay' style='position:absolute;top:12px;left:12px;background:rgba(0,0,0,0.6);color:#fff;padding:8px 14px;border-radius:8px;font-size:14px;font-weight:bold;z-index:15;backdrop-filter:blur(4px);border:1px solid rgba(46,204,113,0.5);display:flex;align-items:center;gap:8px;'>
+					<span style='color:#2ecc71;'>🥽</span> ${deviceName}
+				</div>
 				<div id='streamLoading' style='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;text-align:center;font-size:16px;z-index:10;'>
 					⏳ Connexion au stream...
 				</div>
