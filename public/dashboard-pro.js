@@ -1203,6 +1203,7 @@ function renderDevicesTable() {
 			</td>
 			<td style='padding:12px;text-align:center;'>
 				<button onclick='sendVoiceToHeadset("${safeSerial}")' style='background:#1abc9c;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>🎤 Envoyer Voix</button>
+				<button onclick='showVoiceAppDialog("${safeSerial}")' style='background:#34495e;color:#fff;border:none;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:11px;margin-left:4px;' title='Installer VHR Voice App'>📲</button>
 			</td>
 			<td style='padding:12px;text-align:center;'>
 				<button onclick='renameDevice({serial:"${safeSerial}",name:"${safeName}"})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>✏️</button>
@@ -1283,7 +1284,10 @@ function renderDevicesCards() {
 				<button onclick='showAppsDialog({serial:"${safeSerial}",name:"${safeName}"})' style='background:#f39c12;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>📱 Apps</button>
 				<button onclick='showFavoritesDialog({serial:"${safeSerial}",name:"${safeName}"})' style='background:#e67e22;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>⭐ Favoris</button>
 			</div>
-			<button onclick='sendVoiceToHeadset("${safeSerial}")' style='width:100%;background:#1abc9c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>🎤 Voix PC→Casque</button>
+			<div style='display:flex;gap:6px;margin-bottom:6px;'>
+				<button onclick='sendVoiceToHeadset("${safeSerial}")' style='flex:1;background:#1abc9c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;'>🎤 Voix PC→Casque</button>
+				<button onclick='showVoiceAppDialog("${safeSerial}")' style='background:#34495e;color:#fff;border:none;padding:10px 12px;border-radius:6px;cursor:pointer;' title='Installer VHR Voice App'>📲</button>
+			</div>
 			${!d.serial.includes(':') ? `
 				<button onclick='connectWifiAuto("${safeSerial}")' style='width:100%;background:#9b59b6;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>📶 WiFi Auto</button>
 			` : ''}
@@ -1681,6 +1685,102 @@ window.closeAudioStream = async function() {
 		const panel = document.getElementById('audioStreamPanel');
 		if (panel) panel.remove();
 	}
+};
+
+// ========== VHR VOICE APP INSTALLATION ==========
+window.installVoiceApp = async function(serial) {
+	try {
+		showToast('📲 Installation de VHR Voice en cours...', 'info');
+		
+		const res = await api('/api/device/install-voice-app', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ serial })
+		});
+		
+		if (res && res.ok) {
+			showToast('✅ VHR Voice installé avec succès!', 'success');
+			return true;
+		} else {
+			showToast('❌ Erreur installation: ' + (res.error || 'inconnue'), 'error');
+			return false;
+		}
+	} catch (e) {
+		console.error('[installVoiceApp] Error:', e);
+		showToast('❌ Erreur: ' + e.message, 'error');
+		return false;
+	}
+};
+
+window.downloadVoiceApk = function() {
+	window.open('/download/vhr-voice-apk', '_blank');
+	showToast('📥 Téléchargement de VHR Voice APK...', 'info');
+};
+
+window.showVoiceAppDialog = function(serial) {
+	const html = `
+		<div style="text-align:center; padding: 20px;">
+			<h2 style="color:#1abc9c; margin-bottom: 20px;">🎤 VHR Voice App</h2>
+			
+			<p style="color:#bdc3c7; margin-bottom: 24px; line-height: 1.6;">
+				Cette application permet de recevoir l'audio du PC sur le casque Quest 
+				<strong style="color:#2ecc71;">en arrière-plan</strong>, sans interrompre vos jeux.
+			</p>
+			
+			<div style="background:#23272f; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+				<h4 style="color:#f39c12; margin-bottom: 12px;">✨ Avantages</h4>
+				<ul style="text-align:left; color:#95a5a6; font-size: 13px; padding-left: 20px;">
+					<li>Audio en arrière-plan pendant les jeux</li>
+					<li>Reconnexion automatique</li>
+					<li>Notification pour contrôler le service</li>
+					<li>Pas besoin d'ouvrir le navigateur</li>
+				</ul>
+			</div>
+			
+			${serial ? `
+			<button onclick="installVoiceApp('${serial}')" style="
+				background: linear-gradient(135deg, #2ecc71, #27ae60);
+				color: #fff;
+				border: none;
+				padding: 14px 28px;
+				border-radius: 8px;
+				font-size: 16px;
+				font-weight: bold;
+				cursor: pointer;
+				margin: 8px;
+				display: inline-flex;
+				align-items: center;
+				gap: 8px;
+			">📲 Installer sur le casque</button>
+			` : ''}
+			
+			<button onclick="downloadVoiceApk()" style="
+				background: linear-gradient(135deg, #3498db, #2980b9);
+				color: #fff;
+				border: none;
+				padding: 14px 28px;
+				border-radius: 8px;
+				font-size: 16px;
+				font-weight: bold;
+				cursor: pointer;
+				margin: 8px;
+				display: inline-flex;
+				align-items: center;
+				gap: 8px;
+			">💾 Télécharger APK</button>
+			
+			<div style="margin-top: 24px; padding: 12px; background: rgba(26, 188, 156, 0.1); border-radius: 8px; border-left: 4px solid #1abc9c;">
+				<p style="color:#95a5a6; font-size: 12px; margin: 0;">
+					💡 <strong>Installation manuelle:</strong> Téléchargez l'APK puis installez avec:<br>
+					<code style="background:#0d0f14; padding: 4px 8px; border-radius: 4px; margin-top: 8px; display: inline-block;">
+						adb install vhr-voice.apk
+					</code>
+				</p>
+			</div>
+		</div>
+	`;
+	
+	showModal(html);
 };
 
 // ========== DEVICE ACTIONS ========== 

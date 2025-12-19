@@ -1,61 +1,75 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.vhr.voice"
+    android:versionCode="1"
+    android:versionName="1.0.0" >
+
+    <uses-sdk
+        android:minSdkVersion="29"
+        android:targetSdkVersion="34" />
+
     <!-- Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    
+
     <!-- Quest specific -->
-    <uses-feature android:name="android.hardware.vr.headtracking" android:required="false" />
-    
+    <uses-feature
+        android:name="android.hardware.vr.headtracking"
+        android:required="false" />
+
     <application
         android:allowBackup="true"
+        android:debuggable="true"
+        android:extractNativeLibs="false"
         android:icon="@mipmap/ic_launcher"
         android:label="VHR Voice"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
-        android:usesCleartextTraffic="true">
-        
+        android:usesCleartextTraffic="true" >
+
         <!-- Main Activity (optional, for manual config) -->
         <activity
-            android:name=".MainActivity"
+            android:name="com.vhr.voice.MainActivity"
             android:exported="true"
-            android:launchMode="singleTop"
-            android:label="VHR Voice Receiver">
+            android:label="VHR Voice Receiver"
+            android:launchMode="singleTop" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
+
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            
+
             <!-- Allow launching with parameters -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
+
                 <category android:name="android.intent.category.DEFAULT" />
+
                 <data android:scheme="vhrvoice" />
             </intent-filter>
         </activity>
-        
+
         <!-- Background Voice Service -->
         <service
-            android:name=".VoiceReceiverService"
+            android:name="com.vhr.voice.VoiceReceiverService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
-        
+
         <!-- Broadcast Receiver for ADB control -->
         <receiver
-            android:name=".VoiceCommandReceiver"
+            android:name="com.vhr.voice.VoiceCommandReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="true" >
             <intent-filter>
                 <action android:name="com.vhr.voice.START" />
                 <action android:name="com.vhr.voice.STOP" />
             </intent-filter>
         </receiver>
-        
     </application>
+
 </manifest>
