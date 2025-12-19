@@ -1468,8 +1468,9 @@ window.showStreamViewer = function(serial) {
 		}
 	}, 100);
 	
-	// Mettre à jour l'heure en temps réel
-	setInterval(() => {
+	// Mettre à jour l'heure en temps réel (store reference for cleanup)
+	if (window.streamTimeInterval) clearInterval(window.streamTimeInterval);
+	window.streamTimeInterval = setInterval(() => {
 		const timeEl = document.getElementById('streamTime');
 		if (timeEl) timeEl.textContent = new Date().toLocaleTimeString('fr-FR');
 	}, 1000);
@@ -1510,6 +1511,13 @@ window.captureStreamScreenshot = function() {
 window.closeStreamViewer = function() {
 	const modal = document.getElementById('streamModal');
 	if (modal) modal.style.display = 'none';
+	
+	// Clean up stream time interval
+	if (window.streamTimeInterval) {
+		clearInterval(window.streamTimeInterval);
+		window.streamTimeInterval = null;
+	}
+	
 	if (window.jsmpegPlayer) {
 		window.jsmpegPlayer.destroy();
 		window.jsmpegPlayer = null;
