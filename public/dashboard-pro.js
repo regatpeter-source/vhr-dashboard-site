@@ -1035,13 +1035,17 @@ function renderDevicesTable() {
 		const runningGamesList = runningApps[d.serial] || [];
 		const runningGameDisplay = runningGamesList.length > 0 ? `<span style='background:#27ae60;color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;font-weight:bold;'>🎮 ${runningGamesList.join(', ')}</span>` : `<span style='color:#95a5a6;'>-</span>`;
 		
+		// Escape special characters for HTML attributes
+		const safeSerial = d.serial.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+		const safeName = (d.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+		
 		table += `<tr style='background:${bgColor};border-bottom:1px solid #34495e;'>
 			<td style='padding:12px;'>
 				<div style='font-weight:bold;font-size:16px;color:#2ecc71;'>${d.name}</div>
 				<div style='font-size:11px;color:#95a5a6;margin-top:2px;'>${d.serial}</div>
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				<div id='battery_${d.serial}' style='font-size:14px;font-weight:bold;color:#f39c12;'>🔋 --</div>
+				<div id='battery_${safeSerial}' style='font-size:14px;font-weight:bold;color:#f39c12;'>🔋 --</div>
 			</td>
 			<td style='padding:12px;'>
 				<span style='background:${statusColor};color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:bold;'>
@@ -1053,7 +1057,7 @@ function renderDevicesTable() {
 			</td>
 			<td style='padding:12px;text-align:center;'>
 				${d.status !== 'streaming' ? `
-					<select id='profile_${d.serial}' style='background:#34495e;color:#fff;border:1px solid #2ecc71;padding:6px;border-radius:4px;margin-bottom:4px;width:140px;'>
+					<select id='profile_${safeSerial}' style='background:#34495e;color:#fff;border:1px solid #2ecc71;padding:6px;border-radius:4px;margin-bottom:4px;width:140px;'>
 						<option value='ultra-low'>Ultra Low</option>
 						<option value='low'>Low</option>
 						<option value='wifi'>WiFi</option>
@@ -1061,27 +1065,27 @@ function renderDevicesTable() {
 						<option value='high'>High</option>
 						<option value='ultra'>Ultra</option>
 					</select><br>
-					<button onclick='startStreamFromTable("${d.serial}")' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>▶️ Scrcpy</button>
-					<button onclick='startStreamJSMpeg("${d.serial}")' style='background:#9b59b6;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin-left:4px;'>🎬 JSMpeg</button>
+					<button onclick='startStreamFromTable("${safeSerial}")' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>▶️ Scrcpy</button>
+					<button onclick='startStreamJSMpeg("${safeSerial}")' style='background:#9b59b6;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin-left:4px;'>🎬 JSMpeg</button>
 				` : `
-					<button onclick='stopStreamFromTable("${d.serial}")' style='background:#e74c3c;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>⏹️ Stop</button>
+					<button onclick='stopStreamFromTable("${safeSerial}")' style='background:#e74c3c;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>⏹️ Stop</button>
 				`}
 			</td>
 			<td style='padding:12px;text-align:center;'>
 				${!d.serial.includes(':') ? `
-					<button onclick='connectWifiAuto("${d.serial}")' style='background:#9b59b6;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📶 WiFi Auto</button>
+					<button onclick='connectWifiAuto("${safeSerial}")' style='background:#9b59b6;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📶 WiFi Auto</button>
 				` : `<span style='color:#95a5a6;'>-</span>`}
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				<button onclick='showAppsDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#f39c12;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📱 Apps</button>
-				<button onclick='showFavoritesDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#e67e22;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin-top:4px;'>⭐ Favoris</button>
+				<button onclick='showAppsDialog({serial:"${safeSerial}",name:"${safeName}"})' style='background:#f39c12;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📱 Apps</button>
+				<button onclick='showFavoritesDialog({serial:"${safeSerial}",name:"${safeName}"})' style='background:#e67e22;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin-top:4px;'>⭐ Favoris</button>
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				<button onclick='sendVoiceToHeadset("${d.serial}")' style='background:#1abc9c;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>🎤 Envoyer Voix</button>
+				<button onclick='sendVoiceToHeadset("${safeSerial}")' style='background:#1abc9c;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>🎤 Envoyer Voix</button>
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				<button onclick='renameDevice({serial:"${d.serial}",name:"${d.name}"})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>✏️</button>
-				<button onclick='showStorageDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>💾</button>
+				<button onclick='renameDevice({serial:"${safeSerial}",name:"${safeName}"})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>✏️</button>
+				<button onclick='showStorageDialog({serial:"${safeSerial}",name:"${safeName}"})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>💾</button>
 			</td>
 		</tr>`;
 		
@@ -1120,10 +1124,14 @@ function renderDevicesCards() {
 		const runningGamesList = runningApps[d.serial] || [];
 		const runningGameDisplay = runningGamesList.length > 0 ? `<div style='background:#27ae60;color:#fff;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:bold;margin-bottom:10px;'>🎮 ${runningGamesList.join(', ')}</div>` : '';
 		
+		// Escape special characters for HTML attributes
+		const safeSerial = d.serial.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+		const safeName = (d.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+		
 		card.innerHTML = `
 			<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'>
 				<div style='font-weight:bold;font-size:18px;color:#2ecc71;'>${d.name}</div>
-				<div id='battery_${d.serial}' style='font-size:14px;font-weight:bold;color:#f39c12;'>🔋 --</div>
+				<div id='battery_${safeSerial}' style='font-size:14px;font-weight:bold;color:#f39c12;'>🔋 --</div>
 			</div>
 			<div style='font-size:11px;color:#95a5a6;margin-bottom:12px;'>${d.serial}</div>
 			<div style='margin-bottom:12px;'>
@@ -1134,7 +1142,7 @@ function renderDevicesCards() {
 			${runningGameDisplay}
 			<div style='margin-bottom:10px;'>
 					${d.status !== 'streaming' ? `
-					<select id='profile_card_${d.serial}' style='width:100%;background:#34495e;color:#fff;border:1px solid #2ecc71;padding:8px;border-radius:6px;margin-bottom:6px;'>
+					<select id='profile_card_${safeSerial}' style='width:100%;background:#34495e;color:#fff;border:1px solid #2ecc71;padding:8px;border-radius:6px;margin-bottom:6px;'>
 						<option value='ultra-low'>Ultra Low</option>
 						<option value='low'>Low</option>
 						<option value='wifi'>WiFi</option>
@@ -1142,23 +1150,23 @@ function renderDevicesCards() {
 						<option value='high'>High</option>
 						<option value='ultra'>Ultra</option>
 					</select>
-					<button onclick='startStreamFromCard("${d.serial}")' style='width:100%;background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>▶️ Scrcpy</button>
-					<button onclick='startStreamJSMpeg("${d.serial}")' style='width:100%;background:#9b59b6;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>🎬 JSMpeg</button>
+					<button onclick='startStreamFromCard("${safeSerial}")' style='width:100%;background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>▶️ Scrcpy</button>
+					<button onclick='startStreamJSMpeg("${safeSerial}")' style='width:100%;background:#9b59b6;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>🎬 JSMpeg</button>
 				` : `
-					<button onclick='stopStreamFromTable("${d.serial}")' style='width:100%;background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>⏹️ Stop Stream</button>
+					<button onclick='stopStreamFromTable("${safeSerial}")' style='width:100%;background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>⏹️ Stop Stream</button>
 				`}
 			</div>
 			<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;'>
-				<button onclick='showAppsDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#f39c12;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>📱 Apps</button>
-				<button onclick='showFavoritesDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#e67e22;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>⭐ Favoris</button>
+				<button onclick='showAppsDialog({serial:"${safeSerial}",name:"${safeName}"})' style='background:#f39c12;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>📱 Apps</button>
+				<button onclick='showFavoritesDialog({serial:"${safeSerial}",name:"${safeName}"})' style='background:#e67e22;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>⭐ Favoris</button>
 			</div>
-			<button onclick='sendVoiceToHeadset("${d.serial}")' style='width:100%;background:#1abc9c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>🎤 Voix PC→Casque</button>
+			<button onclick='sendVoiceToHeadset("${safeSerial}")' style='width:100%;background:#1abc9c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>🎤 Voix PC→Casque</button>
 			${!d.serial.includes(':') ? `
-				<button onclick='connectWifiAuto("${d.serial}")' style='width:100%;background:#9b59b6;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>📶 WiFi Auto</button>
+				<button onclick='connectWifiAuto("${safeSerial}")' style='width:100%;background:#9b59b6;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>📶 WiFi Auto</button>
 			` : ''}
 			<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;'>
-				<button onclick='renameDevice({serial:"${d.serial}",name:"${d.name}"})' style='background:#34495e;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>✏️ Renommer</button>
-				<button onclick='showStorageDialog({serial:"${d.serial}",name:"${d.name}"})' style='background:#34495e;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>💾 Stockage</button>
+				<button onclick='renameDevice({serial:"${safeSerial}",name:"${safeName}"})' style='background:#34495e;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>✏️ Renommer</button>
+				<button onclick='showStorageDialog({serial:"${safeSerial}",name:"${safeName}"})' style='background:#34495e;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>💾 Stockage</button>
 			</div>
 		`;
 		
