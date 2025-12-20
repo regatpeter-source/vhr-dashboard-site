@@ -3342,8 +3342,8 @@ window.showAuthModal = function(mode = 'login') {
 			<!-- Login Form -->
 			<div id="loginForm" style="display:${isLogin ? 'block' : 'none'};">
 				<div style="margin-bottom:16px;">
-					<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Email</label>
-					<input type="email" id="loginEmail" placeholder="votre@email.com" style="width:100%;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+					<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Email ou nom d'utilisateur</label>
+					<input type="text" id="loginIdentifier" placeholder="email ou utilisateur" style="width:100%;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
 				</div>
 				<div style="margin-bottom:20px;">
 					<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Mot de passe</label>
@@ -3408,39 +3408,46 @@ window.switchAuthTab = function(tab) {
 };
 
 window.loginUser = async function() {
-	const email = document.getElementById('loginEmail').value.trim();
+	const identifier = document.getElementById('loginIdentifier').value.trim();
 	const password = document.getElementById('loginPassword').value;
 	
-	if (!email || !password) {
-		showToast('❌ Email et mot de passe requis', 'error');
+	if (!identifier || !password) {
+		showToast('❌ Identifiant et mot de passe requis', 'error');
 		return;
 	}
 	
 	showToast('🔄 Connexion en cours...', 'info');
 	
 	try {
-		const res = await fetch('/api/auth/login', {
+		let res, data;
+		// Essayer login par username d'abord (route /api/login)
+		res = await fetch('/api/login', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			credentials: 'include', // Important: send cookies
-			body: JSON.stringify({ email, password })
+			credentials: 'include',
+			body: JSON.stringify({ username: identifier, password })
 		});
+		data = await res.json();
 		
-		const data = await res.json();
+		if (!(res.ok && data.ok)) {
+			// Fallback: login par email (route /api/auth/login)
+			res = await fetch('/api/auth/login', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'include',
+				body: JSON.stringify({ email: identifier, password })
+			});
+			data = await res.json();
+		}
 		
 		if (res.ok && data.ok) {
-			// JWT token is now in httpOnly cookie
 			showToast('✅ Connecté avec succès !', 'success');
-			
-			// Set the username from response
-			currentUser = data.user.name || data.user.email;
+			currentUser = data.user?.name || data.user?.username || data.user?.email || identifier;
 			localStorage.setItem('vhr_current_user', currentUser);
 			
-			// Close auth modal
 			const modal = document.getElementById('authModal');
 			if (modal) modal.remove();
 			
-			// Initialize dashboard
 			setTimeout(() => {
 				showDashboardContent();
 				createNavbar();
