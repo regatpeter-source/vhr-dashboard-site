@@ -1092,7 +1092,8 @@ window.sendVoiceToHeadset = async function(serial) {
 			const openRes = await api('/api/device/open-audio-receiver', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ serial, serverUrl, useBackgroundApp: true })
+				body: JSON.stringify({ serial, serverUrl, useBackgroundApp: true }),
+				timeout: 35000 // align with adb 30s + margin
 			});
 			
 			if (openRes && openRes.ok) {
@@ -1103,6 +1104,9 @@ window.sendVoiceToHeadset = async function(serial) {
 					console.log('[sendVoiceToHeadset] Audio receiver opened in browser:', openRes.url);
 					showToast('✅ Récepteur audio ouvert (navigateur)', 'success');
 				}
+			} else if (openRes && openRes.timeout) {
+				console.warn('[sendVoiceToHeadset] Audio receiver timeout');
+				showToast('⏳ Casque ne répond pas (ADB). Réveillez-le et vérifiez ADB.', 'warning');
 			} else {
 				console.warn('[sendVoiceToHeadset] Failed to open audio receiver:', openRes);
 				showToast('⚠️ Installez VHR Voice app pour le mode arrière-plan', 'warning');
@@ -1113,8 +1117,12 @@ window.sendVoiceToHeadset = async function(serial) {
 		
 		// Also start audio relay to headset via WebSocket for simple receivers
 		try {
-			await activeAudioStream.startAudioRelay(serial);
-			console.log('[sendVoiceToHeadset] Audio relay started for simple headset receivers');
+			if (activeAudioStream && typeof activeAudioStream.startAudioRelay === 'function') {
+				await activeAudioStream.startAudioRelay(serial);
+				console.log('[sendVoiceToHeadset] Audio relay started for simple headset receivers');
+			} else {
+				console.warn('[sendVoiceToHeadset] Audio relay skipped: stream not ready');
+			}
 		} catch (relayError) {
 			console.warn('[sendVoiceToHeadset] Audio relay failed (WebRTC will still work):', relayError);
 		}
@@ -2344,7 +2352,8 @@ window.closeAudioStream = async function(silent = false) {
 				await api('/api/device/stop-audio-receiver', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ serial: serialToStop })
+					body: JSON.stringify({ serial: serialToStop }),
+					timeout: 35000 // allow adb broadcast to finish on slow links
 				});
 				console.log('[closeAudioStream] Stopped background voice app');
 			} catch (e) {
