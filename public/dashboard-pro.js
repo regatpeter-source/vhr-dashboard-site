@@ -1527,7 +1527,45 @@ const socket = io({
 let socketConnected = false;
 let pollingFallbackInterval = null;
 let offlineToastShown = false;
-const API_TIMEOUT_MS = 8000; // 8s timeout for HTTP requests
+const API_TIMEOUT_MS = 15000; // 15s timeout for HTTP requests to avoid false timeouts on slow links
+let offlineReasons = new Set();
+let offlineBannerEl = null;
+let isLoadingDevices = false;
+let lastDevicesLoadTs = 0;
+const MIN_LOAD_DEVICES_INTERVAL_MS = 3000; // throttle to avoid overlapping fetches
+
+function renderOfflineBanner() {
+	if (offlineReasons.size === 0) {
+		if (offlineBannerEl) {
+			offlineBannerEl.remove();
+			offlineBannerEl = null;
+		}
+		return;
+	}
+
+	const reasonText = Array.from(offlineReasons).join(' • ');
+	if (!offlineBannerEl) {
+		offlineBannerEl = document.createElement('div');
+		offlineBannerEl.id = 'offlineBanner';
+		offlineBannerEl.style = 'position:fixed;top:0;left:0;width:100%;z-index:2500;background:linear-gradient(135deg,#e74c3c,#c0392b);color:#fff;padding:10px 16px;font-weight:bold;box-shadow:0 4px 12px rgba(0,0,0,0.4);display:flex;align-items:center;gap:10px;';
+		document.body.appendChild(offlineBannerEl);
+	}
+
+	offlineBannerEl.innerHTML = `
+		<span>🚧 Hors ligne — reconnexion en cours...</span>
+		<span style="font-weight:normal;opacity:0.9;">(${reasonText})</span>
+	`;
+}
+
+function addOfflineReason(reason) {
+	offlineReasons.add(reason);
+	renderOfflineBanner();
+}
+
+function removeOfflineReason(reason) {
+	offlineReasons.delete(reason);
+	renderOfflineBanner();
+}
 
 function startPollingFallback() {
 	if (pollingFallbackInterval) return;
@@ -1553,12 +1591,14 @@ function stopPollingFallback() {
 socket.on('connect_error', (err) => {
 	console.warn('[socket] Connection error:', err.message);
 	socketConnected = false;
+	addOfflineReason('socket');
 	startPollingFallback();
 });
 
 socket.on('disconnect', (reason) => {
 	console.warn('[socket] Disconnected:', reason);
 	socketConnected = false;
+	addOfflineReason('socket');
 	startPollingFallback();
 	// Clean up audio on disconnect to prevent orphaned sessions
 	if (activeAudioStream) {
@@ -1570,6 +1610,7 @@ socket.on('disconnect', (reason) => {
 socket.on('reconnect', (attemptNumber) => {
 	console.log('[socket] Reconnected after', attemptNumber, 'attempts');
 	socketConnected = true;
+	removeOfflineReason('socket');
 	stopPollingFallback();
 	offlineToastShown = false;
 	// Refresh once to sync state after reconnection
@@ -1579,6 +1620,7 @@ socket.on('reconnect', (attemptNumber) => {
 socket.on('connect', () => {
 	console.log('[socket] Connected');
 	socketConnected = true;
+	removeOfflineReason('socket');
 	stopPollingFallback();
 	offlineToastShown = false;
 });
@@ -1588,15 +1630,22 @@ let devices = [];
 let games = [];
 let favorites = [];
 let runningApps = {}; // Track running apps: { serial: [pkg1, pkg2, ...] }
-let batteryPollInterval = null;  // Single interval reference (disabled)
-const batteryBackoff = {}; // (disabled with battery gauge)
+let batteryPollInterval = null;  // Single interval reference
+const batteryBackoff = {}; // backoff per serial on repeated errors
 
 // Initialize collaborative session socket handlers
 initSessionSocket();
 
-// Auto-refresh battery levels DISABLED to prevent errors on unreachable WiFi devices
 function startBatteryPolling() {
-	// no-op
+	if (batteryPollInterval) return;
+	const poll = async () => {
+		for (const d of devices) {
+			fetchBatteryLevel(d.serial);
+		}
+	};
+	// poll immediately then on interval
+	poll();
+	batteryPollInterval = setInterval(poll, 30000); // 30s cadence
 }
 
 async function api(path, opts = {}) {
@@ -1621,10 +1670,16 @@ async function api(path, opts = {}) {
 		const data = await res.json();
 		// Attach status code to response for better error checking
 		data._status = res.status;
+		removeOfflineReason('api-timeout');
 		return data;
 	} catch (e) {
+		if (e.name === 'AbortError') {
+			console.warn('[api timeout]', path, 'after', opts.timeout || API_TIMEOUT_MS, 'ms');
+			addOfflineReason('api-timeout');
+			return { ok: false, error: 'timeout', timeout: true };
+		}
 		console.error('[api]', path, e);
-		return { ok: false, error: e.name === 'AbortError' ? 'timeout' : e.message };
+		return { ok: false, error: e.message };
 	}
 }
 
@@ -1669,23 +1724,39 @@ async function refreshDevicesList() {
 }
 
 async function loadDevices() {
-	const data = await api('/api/devices');
-	if (data.ok && Array.isArray(data.devices)) {
-		devices = data.devices;
-		
-		// Mettre à jour le nombre de casques gérés
-		if (devices.length > 0) {
-			const stats = JSON.parse(localStorage.getItem('vhr_user_stats_' + currentUser) || '{}');
-			const currentMax = stats.devicesManaged || 0;
-			if (devices.length > currentMax) {
-				stats.devicesManaged = devices.length;
-				stats.lastLogin = new Date().toISOString();
-				if (!stats.joinedAt) stats.joinedAt = new Date().toISOString();
-				localStorage.setItem('vhr_user_stats_' + currentUser, JSON.stringify(stats));
+	const now = Date.now();
+	if (isLoadingDevices) {
+		console.warn('[devices] Ignored loadDevices: already loading');
+		return;
+	}
+	if (now - lastDevicesLoadTs < MIN_LOAD_DEVICES_INTERVAL_MS) {
+		console.warn('[devices] Ignored loadDevices: throttled');
+		return;
+	}
+	isLoadingDevices = true;
+	try {
+		const data = await api('/api/devices');
+		if (data.ok && Array.isArray(data.devices)) {
+			devices = data.devices;
+			lastDevicesLoadTs = Date.now();
+			
+			// Mettre à jour le nombre de casques gérés
+			if (devices.length > 0) {
+				const stats = JSON.parse(localStorage.getItem('vhr_user_stats_' + currentUser) || '{}');
+				const currentMax = stats.devicesManaged || 0;
+				if (devices.length > currentMax) {
+					stats.devicesManaged = devices.length;
+					stats.lastLogin = new Date().toISOString();
+					if (!stats.joinedAt) stats.joinedAt = new Date().toISOString();
+					localStorage.setItem('vhr_user_stats_' + currentUser, JSON.stringify(stats));
+				}
 			}
+			
+			renderDevices();
+			startBatteryPolling();
 		}
-		
-		renderDevices();
+	} finally {
+		isLoadingDevices = false;
 	}
 }
 // Expose loadDevices globally for onclick handlers in HTML
@@ -1743,7 +1814,7 @@ function renderDevicesTable() {
 				<div style='font-size:11px;color:#95a5a6;margin-top:2px;'>${d.serial}</div>
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#95a5a6;'>🔋 Batterie désactivée</div>
+				<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#95a5a6;'>🔋 Batterie...</div>
 			</td>
 			<td style='padding:12px;'>
 				<span style='background:${statusColor};color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:bold;'>
@@ -1830,7 +1901,7 @@ function renderDevicesCards() {
 		card.innerHTML = `
 			<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'>
 				<div style='font-weight:bold;font-size:18px;color:#2ecc71;'>${d.name}</div>
-				<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#95a5a6;'>🔋 Batterie désactivée</div>
+				<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#95a5a6;'>🔋 Batterie...</div>
 			</div>
 			<div style='font-size:11px;color:#95a5a6;margin-bottom:12px;'>${d.serial}</div>
 			<div style='margin-bottom:12px;'>
@@ -1879,8 +1950,40 @@ function renderDevicesCards() {
 
 // Fetch and update battery level for a device
 async function fetchBatteryLevel(serial) {
-	// Battery gauge disabled
-	return;
+	if (!serial) return;
+	const now = Date.now();
+	const nextAllowed = batteryBackoff[serial] || 0;
+	if (now < nextAllowed) return;
+
+	const el = document.getElementById('battery_' + serial.replace(/[^a-zA-Z0-9]/g, '_'));
+	if (el) el.innerText = '🔄 Lecture...';
+
+	try {
+		const res = await api(`/api/battery/${encodeURIComponent(serial)}`, { timeout: 12000 });
+		if (res.ok && typeof res.level === 'number') {
+			const lvl = res.level;
+			let color = '#2ecc71';
+			if (lvl < 20) color = '#e74c3c';
+			else if (lvl < 50) color = '#f1c40f';
+			if (el) {
+				el.style.color = color;
+				el.innerText = `🔋 ${lvl}%`;
+			}
+			batteryBackoff[serial] = now + 30000; // normal cadence
+		} else {
+			if (el) {
+				el.style.color = '#e67e22';
+				el.innerText = '⚠️ Batterie inconnue';
+			}
+			batteryBackoff[serial] = now + 60000; // slow down on errors
+		}
+	} catch (e) {
+		if (el) {
+			el.style.color = '#e74c3c';
+			el.innerText = '❌ Batterie (err)';
+		}
+		batteryBackoff[serial] = now + 60000; // backoff 60s on failure
+	}
 }
 
 function renderDevices() {
