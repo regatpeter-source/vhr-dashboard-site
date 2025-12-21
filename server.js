@@ -1605,6 +1605,9 @@ function removeUserByUsername(username) {
 const JWT_SECRET = process.env.JWT_SECRET || 'change_this_secret';
 const JWT_EXPIRES = '2h';
 
+// Suivi des jeux lancés (persistance en mémoire côté serveur)
+const runningAppState = {}; // { serial: [pkg1, pkg2, ...] }
+
 // --- Middleware de vérification du token ---
 function authMiddleware(req, res, next) {
   // Accept token from Authorization header (Bearer) OR cookie 'vhr_token'
@@ -4580,6 +4583,31 @@ app.get('/api/apps/:serial', async (req, res) => {
   }
 });
 
+// État des jeux/applications en cours (persistant sur le serveur entre rafraîchissements UI)
+app.get('/api/apps/running', (req, res) => {
+  res.json({ ok: true, running: runningAppState });
+});
+
+app.post('/api/apps/running/mark', (req, res) => {
+  const serial = req.body?.serial;
+  const pkg = req.body?.package;
+  const action = req.body?.action; // 'add' | 'remove'
+
+  if (!serial || !pkg || !['add', 'remove'].includes(action)) {
+    return res.status(400).json({ ok: false, error: 'serial, package et action (add/remove) requis' });
+  }
+
+  if (!runningAppState[serial]) runningAppState[serial] = [];
+  if (action === 'add') {
+    if (!runningAppState[serial].includes(pkg)) runningAppState[serial].push(pkg);
+  } else {
+    runningAppState[serial] = runningAppState[serial].filter(p => p !== pkg);
+    if (runningAppState[serial].length === 0) delete runningAppState[serial];
+  }
+
+  res.json({ ok: true, running: runningAppState });
+});
+
 app.post('/api/apps/:serial/launch', async (req, res) => {
   const serial = req.params.serial;
   const pkg = req.body?.package;
@@ -4617,6 +4645,10 @@ app.post('/api/apps/:serial/launch', async (req, res) => {
       if (success) {
         console.log(`[launch] ${pkg} lancé`);
         try { io.emit('app-launch', { serial, package: pkg, method: 'am_start', success: true, startedAt: Date.now() }); } catch (e) {}
+        try {
+          if (!runningAppState[serial]) runningAppState[serial] = [];
+          if (!runningAppState[serial].includes(pkg)) runningAppState[serial].push(pkg);
+        } catch (e) {}
         res.json({ ok: true, msg: `Jeu lancé: ${pkg}` });
         return;
       }
@@ -4631,6 +4663,10 @@ app.post('/api/apps/:serial/launch', async (req, res) => {
     if (monkeyResult.code === 0 || monkeyResult.stdout.includes('Events injected')) {
       console.log(`[launch] ${pkg} lancé via monkey`);
       try { io.emit('app-launch', { serial, package: pkg, method: 'monkey', success: true, startedAt: Date.now() }); } catch (e) {}
+      try {
+        if (!runningAppState[serial]) runningAppState[serial] = [];
+        if (!runningAppState[serial].includes(pkg)) runningAppState[serial].push(pkg);
+      } catch (e) {}
       res.json({ ok: true, msg: `Jeu lancé: ${pkg}` });
       return;
     }
@@ -4647,6 +4683,10 @@ app.post('/api/apps/:serial/launch', async (req, res) => {
     if (success) {
       console.log(`[launch] ${pkg} lancé via am start`);
       try { io.emit('app-launch', { serial, package: pkg, method: 'am_start_fallback', success: true, startedAt: Date.now() }); } catch (e) {}
+      try {
+        if (!runningAppState[serial]) runningAppState[serial] = [];
+        if (!runningAppState[serial].includes(pkg)) runningAppState[serial].push(pkg);
+      } catch (e) {}
       res.json({ ok: true, msg: `Jeu lancé: ${pkg}` });
     } else {
       console.log(`[launch] ${pkg} - échec:\n${amResult.stdout}\n${amResult.stderr}`);
@@ -4680,6 +4720,12 @@ app.post('/api/apps/:serial/stop', async (req, res) => {
     if (success) {
       console.log(`[stop] ${pkg} arrêté avec succès`);
       try { io.emit('app-stop', { serial, package: pkg, success: true, stoppedAt: Date.now() }); } catch (e) {}
+      try {
+        if (runningAppState[serial]) {
+          runningAppState[serial] = runningAppState[serial].filter(p => p !== pkg);
+          if (runningAppState[serial].length === 0) delete runningAppState[serial];
+        }
+      } catch (e) {}
       res.json({ ok: true, msg: `Jeu arrêté: ${pkg}` });
     } else {
       console.log(`[stop] ${pkg} - Erreur lors de l'arrêt:\n${stopResult.stderr}`);

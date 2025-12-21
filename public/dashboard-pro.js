@@ -1638,6 +1638,19 @@ let devices = [];
 let games = [];
 let favorites = [];
 let runningApps = {}; // Track running apps: { serial: [pkg1, pkg2, ...] }
+
+async function syncRunningAppsFromServer() {
+	try {
+		const res = await api('/api/apps/running', { timeout: 8000 });
+		if (res.ok && res.running) {
+			runningApps = res.running || {};
+			return true;
+		}
+	} catch (e) {
+		console.warn('[runningApps] sync failed', e);
+	}
+	return false;
+}
 let batteryPollInterval = null;  // Single interval reference
 const batteryBackoff = {}; // backoff per serial on repeated errors
 
@@ -1747,6 +1760,8 @@ async function loadDevices() {
 		if (data.ok && Array.isArray(data.devices)) {
 			devices = data.devices;
 			lastDevicesLoadTs = Date.now();
+			// Récupérer l'état des jeux en cours depuis le serveur avant de rendre
+			await syncRunningAppsFromServer();
 			
 			// Mettre à jour le nombre de casques gérés
 			if (devices.length > 0) {
@@ -2723,6 +2738,12 @@ window.launchApp = async function(serial, pkg) {
 		if (!runningApps[serial].includes(pkg)) {
 			runningApps[serial].push(pkg);
 		}
+		// Notifier le serveur pour persister l'état
+		api('/api/apps/running/mark', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ serial, package: pkg, action: 'add' })
+		}).catch(() => {});
 		// Refresh the apps dialog
 		const device = { serial, name: 'Device' };
 		showAppsDialog(device);
@@ -2779,6 +2800,12 @@ window.stopGame = async function(serial, pkg) {
 			if (runningApps[serial]) {
 				runningApps[serial] = runningApps[serial].filter(p => p !== pkg);
 			}
+			// Notifier le serveur pour aligner l'état si le fallback a été utilisé
+			api('/api/apps/running/mark', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ serial, package: pkg, action: 'remove' })
+			}).catch(() => {});
 			// Refresh the apps dialog
 			const device = { serial, name: 'Device' };
 			showAppsDialog(device);
