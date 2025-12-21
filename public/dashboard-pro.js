@@ -2774,6 +2774,14 @@ window.stopGame = async function(serial, pkg) {
 				if (runningApps[serial]) {
 					runningApps[serial] = runningApps[serial].filter(p => p !== pkg);
 				}
+				// Aligner l'état serveur
+				api('/api/apps/running/mark', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ serial, package: pkg, action: 'remove' })
+				}).catch(() => {});
+				// Rafraîchir les listes
+				renderDevices();
 				// Refresh the apps dialog
 				const device = { serial, name: 'Device' };
 				showAppsDialog(device);
