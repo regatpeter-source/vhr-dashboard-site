@@ -9,6 +9,7 @@ class VHRAudioStream {
     this.config = {
       signalingServer: config.signalingServer || window.location.origin,
       signalingPath: '/api/audio/signal',
+      relayBase: config.relayBase || window.location.origin,
       iceServers: config.iceServers || [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
@@ -457,8 +458,10 @@ class VHRAudioStream {
       });
       
       // Build WebSocket URL
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${wsProtocol}//${window.location.host}/api/audio/stream?serial=${encodeURIComponent(targetSerial)}&mode=sender`;
+      const relayBase = this.config.relayBase || window.location.origin;
+      const relayUrl = new URL(relayBase);
+      const wsProtocol = relayUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${relayUrl.host}/api/audio/stream?serial=${encodeURIComponent(targetSerial)}&mode=sender`;
       
       this._log('Connecting to relay: ' + wsUrl);
       

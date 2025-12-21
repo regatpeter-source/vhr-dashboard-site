@@ -1084,7 +1084,8 @@ window.sendVoiceToHeadset = async function(serial) {
 
 		activeAudioStream = new window.VHRAudioStream({
 			signalingServer: resolvedServerUrl,
-			signalingPath: '/api/audio/signal'
+			signalingPath: '/api/audio/signal',
+			relayBase: resolvedServerUrl
 		});
 		await activeAudioStream.start(serial);
 		
