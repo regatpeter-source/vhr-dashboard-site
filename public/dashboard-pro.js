@@ -86,6 +86,14 @@ let licenseStatus = { licensed: false, trial: false, expired: false };
 
 // ========== NAVBAR ========== 
 function createNavbar() {
+				// Aligner l'état serveur (au cas où)
+				api('/api/apps/running/mark', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ serial, package: pkg, action: 'remove' })
+				}).catch(() => {});
+				// Rafraîchir les listes
+				renderDevices();
 	let nav = document.getElementById('mainNavbar');
 	if (!nav) {
 		nav = document.createElement('nav');
@@ -2806,6 +2814,8 @@ window.stopGame = async function(serial, pkg) {
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ serial, package: pkg, action: 'remove' })
 			}).catch(() => {});
+			// Rafraîchir les listes
+			renderDevices();
 			// Refresh the apps dialog
 			const device = { serial, name: 'Device' };
 			showAppsDialog(device);
