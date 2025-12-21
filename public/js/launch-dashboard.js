@@ -12,18 +12,28 @@ async function launchDashboard() {
     successMsg.classList.remove('show');
     
     try {
-        // Download the launcher script
-        const response = await fetch('/download/launch-script');
-        
-        if (!response.ok) {
-            throw new Error(`Erreur HTTP ${response.status}`);
+        // Download the launcher script (.bat). If blocked, fall back to .ps1
+        let blob = null;
+        let filename = 'launch-dashboard.bat';
+
+        const tryDownload = async (url) => {
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            return resp.blob();
+        };
+
+        try {
+            blob = await tryDownload('/download/launch-script');
+        } catch (e) {
+            console.warn('BAT download blocked, trying PS1 fallback:', e.message);
+            blob = await tryDownload('/download/launch-script-ps1');
+            filename = 'launch-dashboard.ps1';
         }
-        
-        const blob = await response.blob();
+
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'launch-dashboard.bat';
+        a.download = filename;
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
