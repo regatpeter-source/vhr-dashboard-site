@@ -1071,31 +1071,7 @@ window.sendVoiceToHeadset = async function(serial) {
 	// Start audio streaming
 	try {
 		// Build headset-accessible server URL (avoid localhost inside headset)
-		let resolvedServerUrl = window.location.origin;
-		const host = window.location.hostname;
-		if (host === 'localhost' || host === '127.0.0.1') {
-			const info = await getServerInfo();
-			if (info && info.lanIp) {
-				const port = info.port || window.location.port || 3000;
-				resolvedServerUrl = `${window.location.protocol}//${info.lanIp}:${port}`;
-				console.log('[voice] Rewriting serverUrl for headset (LAN):', resolvedServerUrl);
-			} else {
-				const manual = getLanOverride();
-				if (manual) {
-					const port = window.location.port || 3000;
-					resolvedServerUrl = `${window.location.protocol}//${manual}:${port}`;
-					console.log('[voice] Using manual LAN override:', resolvedServerUrl);
-				} else {
-					const ip = prompt('IP LAN du PC (pour le casque, ex: 192.168.1.20) ?');
-					const chosen = setLanOverride(ip || '');
-					if (chosen) {
-						const port = window.location.port || 3000;
-						resolvedServerUrl = `${window.location.protocol}//${chosen}:${port}`;
-						showToast('🌐 URL audio basculée sur ' + resolvedServerUrl, 'info');
-					}
-				}
-			}
-		}
+		const resolvedServerUrl = await resolveAudioServerUrl();
 
 		activeAudioStream = new window.VHRAudioStream({
 			signalingServer: resolvedServerUrl,
@@ -1747,6 +1723,32 @@ function setLanOverride(ip) {
 		return ip.trim();
 	}
 	return '';
+}
+
+async function resolveAudioServerUrl() {
+	const proto = window.location.protocol;
+	const port = window.location.port || 3000;
+	const host = window.location.hostname;
+	// 1) Manual override wins
+	const manual = getLanOverride();
+	if (manual) return `${proto}//${manual}:${port}`;
+
+	// 2) If not localhost, use current origin
+	if (host !== 'localhost' && host !== '127.0.0.1') return window.location.origin;
+
+	// 3) Try server-info
+	const info = await getServerInfo();
+	if (info && info.lanIp) {
+		return `${proto}//${info.lanIp}:${info.port || port}`;
+	}
+
+	// 4) Prompt user once if still localhost
+	const ip = prompt('IP LAN du PC (pour le casque, ex: 192.168.1.20) ?');
+	const chosen = setLanOverride(ip || '');
+	if (chosen) return `${proto}//${chosen}:${port}`;
+
+	// 5) Fallback to origin (may fail on casque if localhost)
+	return window.location.origin;
 }
 
 async function syncRunningAppsFromServer() {
