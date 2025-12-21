@@ -1078,7 +1078,22 @@ window.sendVoiceToHeadset = async function(serial) {
 			if (info && info.lanIp) {
 				const port = info.port || window.location.port || 3000;
 				resolvedServerUrl = `${window.location.protocol}//${info.lanIp}:${port}`;
-				console.log('[voice] Rewriting serverUrl for headset:', resolvedServerUrl);
+				console.log('[voice] Rewriting serverUrl for headset (LAN):', resolvedServerUrl);
+			} else {
+				const manual = getLanOverride();
+				if (manual) {
+					const port = window.location.port || 3000;
+					resolvedServerUrl = `${window.location.protocol}//${manual}:${port}`;
+					console.log('[voice] Using manual LAN override:', resolvedServerUrl);
+				} else {
+					const ip = prompt('IP LAN du PC (pour le casque, ex: 192.168.1.20) ?');
+					const chosen = setLanOverride(ip || '');
+					if (chosen) {
+						const port = window.location.port || 3000;
+						resolvedServerUrl = `${window.location.protocol}//${chosen}:${port}`;
+						showToast('🌐 URL audio basculée sur ' + resolvedServerUrl, 'info');
+					}
+				}
 			}
 		}
 
@@ -1654,6 +1669,7 @@ let runningApps = {}; // Track running apps: { serial: [pkg1, pkg2, ...] }
 let gameMetaMap = {}; // Map packageId -> { name, icon }
 const DEFAULT_GAME_ICON = 'https://cdn-icons-png.flaticon.com/512/1005/1005141.png';
 let serverInfoCache = null; // { lanIp, port, host }
+const VOICE_LAN_OVERRIDE_KEY = 'vhr_voice_lan_ip_override';
 
 function updateGameMetaFromList(list) {
 	gameMetaMap = {};
@@ -1717,6 +1733,18 @@ async function getServerInfo() {
 		console.warn('[server-info] fetch failed', e);
 	}
 	return null;
+}
+
+function getLanOverride() {
+	return localStorage.getItem(VOICE_LAN_OVERRIDE_KEY) || '';
+}
+
+function setLanOverride(ip) {
+	if (ip && ip.trim()) {
+		localStorage.setItem(VOICE_LAN_OVERRIDE_KEY, ip.trim());
+		return ip.trim();
+	}
+	return '';
 }
 
 async function syncRunningAppsFromServer() {
