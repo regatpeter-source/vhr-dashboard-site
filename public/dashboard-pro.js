@@ -1070,8 +1070,20 @@ window.sendVoiceToHeadset = async function(serial) {
 	
 	// Start audio streaming
 	try {
+		// Build headset-accessible server URL (avoid localhost inside headset)
+		let resolvedServerUrl = window.location.origin;
+		const host = window.location.hostname;
+		if (host === 'localhost' || host === '127.0.0.1') {
+			const info = await getServerInfo();
+			if (info && info.lanIp) {
+				const port = info.port || window.location.port || 3000;
+				resolvedServerUrl = `${window.location.protocol}//${info.lanIp}:${port}`;
+				console.log('[voice] Rewriting serverUrl for headset:', resolvedServerUrl);
+			}
+		}
+
 		activeAudioStream = new window.VHRAudioStream({
-			signalingServer: window.location.origin,
+			signalingServer: resolvedServerUrl,
 			signalingPath: '/api/audio/signal'
 		});
 		await activeAudioStream.start(serial);
@@ -1085,7 +1097,7 @@ window.sendVoiceToHeadset = async function(serial) {
 		
 		// Start audio receiver on headset - try background app first, then browser
 		try {
-			const serverUrl = window.location.origin;
+			const serverUrl = resolvedServerUrl || window.location.origin;
 			showToast('📱 Activation du récepteur audio sur le casque...', 'info');
 			
 			// First try background app (doesn't pause games)
@@ -1640,6 +1652,7 @@ let favorites = [];
 let runningApps = {}; // Track running apps: { serial: [pkg1, pkg2, ...] }
 let gameMetaMap = {}; // Map packageId -> { name, icon }
 const DEFAULT_GAME_ICON = 'https://cdn-icons-png.flaticon.com/512/1005/1005141.png';
+let serverInfoCache = null; // { lanIp, port, host }
 
 function updateGameMetaFromList(list) {
 	gameMetaMap = {};
@@ -1689,6 +1702,20 @@ async function syncFavorites() {
 		console.warn('[favorites] sync failed', e);
 	}
 	return favorites;
+}
+
+async function getServerInfo() {
+	if (serverInfoCache) return serverInfoCache;
+	try {
+		const res = await api('/api/server-info', { timeout: 5000 });
+		if (res.ok) {
+			serverInfoCache = res;
+			return serverInfoCache;
+		}
+	} catch (e) {
+		console.warn('[server-info] fetch failed', e);
+	}
+	return null;
 }
 
 async function syncRunningAppsFromServer() {
