@@ -325,6 +325,8 @@
     let dataArray = null;
     let animationId = null;
     let nextPlayTime = 0; // scheduling to avoid gaps
+    let chunkQueue = [];
+    let isProcessing = false;
     
     const elements = {
       serverInput: document.getElementById('serverInput'),
@@ -476,7 +478,8 @@
           } else {
             // Binary data - audio chunk
             console.log('Received audio chunk:', event.data.byteLength, 'bytes');
-            playAudioChunk(event.data);
+            chunkQueue.push(event.data);
+            processQueue();
           }
         };
         
@@ -511,6 +514,19 @@
       }
     }
     
+    async function processQueue() {
+      if (isProcessing) return;
+      isProcessing = true;
+      try {
+        while (chunkQueue.length) {
+          const buf = chunkQueue.shift();
+          await playAudioChunk(buf);
+        }
+      } finally {
+        isProcessing = false;
+      }
+    }
+
     // Play received audio chunk by decoding and scheduling (smooth)
     async function playAudioChunk(arrayBuffer) {
       try {
@@ -525,10 +541,10 @@
         src.connect(gainNode);
 
         // Schedule to avoid gaps: keep slight overlap safeguard
-        const startAt = Math.max(audioContext.currentTime, nextPlayTime);
+        const startAt = Math.max(audioContext.currentTime + 0.05, nextPlayTime); // 50ms safety lead
         src.start(startAt);
         const duration = audioBuffer.duration || (arrayBuffer.byteLength / (48000 * 2));
-        nextPlayTime = startAt + duration * 0.98; // tiny overlap to prevent holes
+        nextPlayTime = startAt + duration * 0.995; // tiny overlap to prevent holes
 
       } catch (e) {
         console.error('Failed to decode/play chunk, fallback to <audio> tag:', e);
