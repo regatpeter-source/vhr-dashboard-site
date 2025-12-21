@@ -1678,6 +1678,19 @@ async function loadGamesCatalog() {
 	}
 }
 
+async function syncFavorites() {
+	try {
+		const res = await api('/api/favorites', { timeout: 8000 });
+		if (res.ok && Array.isArray(res.favorites)) {
+			favorites = res.favorites;
+			return favorites;
+		}
+	} catch (e) {
+		console.warn('[favorites] sync failed', e);
+	}
+	return favorites;
+}
+
 async function syncRunningAppsFromServer() {
 	try {
 		const res = await api('/api/apps/running', { timeout: 8000 });
@@ -2777,13 +2790,13 @@ window.showAppsDialog = async function(device) {
 		}
 		return;
 	}
+	await syncFavorites();
 	const apps = res.apps || [];
-	const favs = JSON.parse(localStorage.getItem('vhr_favorites_' + device.serial) || '[]');
 	const running = runningApps[device.serial] || [];
 	let html = `<h3 style='color:#2ecc71;'>Apps installées sur ${device.name}</h3>`;
 	html += `<div style='max-height:400px;overflow-y:auto;'>`;
 	apps.forEach(pkg => {
-		const isFav = favs.includes(pkg);
+		const isFav = favorites.some(f => f.packageId === pkg);
 		const isRunning = running.includes(pkg);
 		const statusBg = isRunning ? '#27ae60' : '#23272f';
 		const statusIndicator = isRunning ? '🟢 En cours' : '';
@@ -2938,17 +2951,35 @@ window.resumeGame = async function(serial, pkg) {
 	return launchApp(serial, pkg);
 };
 
-window.toggleFavorite = function(serial, pkg) {
-	const favs = JSON.parse(localStorage.getItem('vhr_favorites_' + serial) || '[]');
-	const idx = favs.indexOf(pkg);
-	if (idx >= 0) {
-		favs.splice(idx, 1);
-		showToast('⭐ Retiré des favoris', 'info');
-	} else {
-		favs.push(pkg);
-		showToast('⭐ Ajouté aux favoris', 'success');
+window.toggleFavorite = async function(serial, pkg) {
+	const meta = getGameMeta(pkg);
+	const existing = favorites.find(f => f.packageId === pkg);
+	try {
+		if (existing) {
+			const res = await api('/api/favorites/remove', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ id: existing.id })
+			});
+			if (res.ok) {
+				showToast('⭐ Retiré des favoris', 'info');
+				favorites = favorites.filter(f => f.id !== existing.id);
+			}
+		} else {
+			const res = await api('/api/favorites/add', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ name: meta.name || pkg, packageId: pkg, icon: meta.icon })
+			});
+			if (res.ok) {
+				showToast('⭐ Ajouté aux favoris', 'success');
+				if (res.favorite) favorites.push(res.favorite);
+			}
+		}
+	} catch (e) {
+		console.error('[favorites] toggle', e);
+		showToast('❌ Erreur favoris', 'error');
 	}
-	localStorage.setItem('vhr_favorites_' + serial, JSON.stringify(favs));
 	// Rafraîchir la liste sans fermer la modal
 	const device = { serial, name: 'Device' };
 	showAppsDialog(device);
