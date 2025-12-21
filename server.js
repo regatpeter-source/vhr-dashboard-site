@@ -1109,7 +1109,8 @@ app.get('/download/launch-script', (req, res) => {
       });
     }
     
-    res.setHeader('Content-Type', 'application/x-bat');
+    // Use a generic binary content type to avoid browser AV false positives
+    res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', 'attachment; filename="launch-dashboard.bat"');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
@@ -1117,6 +1118,25 @@ app.get('/download/launch-script', (req, res) => {
     return res.sendFile(scriptPath);
   } catch (e) {
     console.error('[launch-script] error:', e);
+    return res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+// Alternative download: PowerShell version forced as attachment (fallback si le .bat est bloqué)
+app.get('/download/launch-script-ps1', (req, res) => {
+  const scriptPath = path.join(__dirname, 'scripts', 'launch-dashboard.ps1');
+  try {
+    if (!fs.existsSync(scriptPath)) {
+      return res.status(404).json({ ok: false, error: 'Launch script not found' });
+    }
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment; filename="launch-dashboard.ps1"');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    return res.sendFile(scriptPath);
+  } catch (e) {
+    console.error('[launch-script-ps1] error:', e);
     return res.status(500).json({ ok: false, error: 'Server error' });
   }
 });
