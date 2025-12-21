@@ -2744,6 +2744,8 @@ window.launchApp = async function(serial, pkg) {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ serial, package: pkg, action: 'add' })
 		}).catch(() => {});
+		// Rafraîchir immédiatement la vue tableau/cartes
+		renderDevices();
 		// Refresh the apps dialog
 		const device = { serial, name: 'Device' };
 		showAppsDialog(device);
