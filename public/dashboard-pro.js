@@ -1114,6 +1114,8 @@ window.sendVoiceToHeadset = async function(serial) {
 		// Start audio receiver on headset - try background app first, then browser
 		try {
 			const serverUrl = resolvedServerUrl || window.location.origin;
+			console.log('[voice] Receiver serverUrl:', serverUrl);
+			console.log('[voice] Receiver serverUrl:', serverUrl);
 			showToast('📱 Activation du récepteur audio sur le casque...', 'info');
 			
 			// First try background app (doesn't pause games)
