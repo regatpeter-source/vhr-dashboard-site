@@ -600,17 +600,7 @@ app.use(helmet({
       // Allow loading remote fonts (Google Fonts)
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:', 'https://cdn-icons-png.flaticon.com', 'https://cdn.botpress.cloud'],
-      // Allow LAN-origin requests (Quest headset) for signaling + WebSocket relay
-      connectSrc: [
-        "'self'",
-        'https://api.stripe.com',
-        'https://messaging.botpress.cloud',
-        'https://cdn.botpress.cloud',
-        'http://*:*',
-        'https://*:*',
-        'ws://*:*',
-        'wss://*:*'
-      ],
+      connectSrc: ["'self'", 'https://api.stripe.com', 'https://messaging.botpress.cloud', 'https://cdn.botpress.cloud'],
       frameSrc: ["'self'", 'https://messaging.botpress.cloud', 'https://checkout.stripe.com', 'https://js.stripe.com'],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
