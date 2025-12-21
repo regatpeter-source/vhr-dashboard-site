@@ -1763,15 +1763,30 @@ app.get('/api/ping', (req, res) => {
 // --- Create desktop shortcut ---
 app.post('/api/create-desktop-shortcut', authMiddleware, async (req, res) => {
   try {
+    // Disponibilité uniquement en environnement Windows local
+    if (process.platform !== 'win32') {
+      return res.status(400).json({ ok: false, error: 'Disponible uniquement sous Windows pour créer un raccourci local.' });
+    }
+
     const os = require('os');
     const path = require('path');
     const fs = require('fs');
     const { exec } = require('child_process');
-    
+
     const homeDir = os.homedir();
     const desktopPath = path.join(homeDir, 'Desktop');
     const projectDir = __dirname;
-    
+
+    // S'assurer que le dossier Desktop existe
+    try {
+      if (!fs.existsSync(desktopPath)) {
+        fs.mkdirSync(desktopPath, { recursive: true });
+      }
+    } catch (dirErr) {
+      console.error('[shortcut] Impossible de créer/accéder au Desktop:', dirErr);
+      return res.status(500).json({ ok: false, error: 'Accès au dossier Bureau impossible: ' + dirErr.message });
+    }
+
     // Créer le fichier VBS pour un lancement invisible
     const vbsContent = `' VHR Dashboard Pro - Invisible Launcher
 Set WshShell = CreateObject("WScript.Shell")
@@ -1781,7 +1796,7 @@ projectDir = "${projectDir.replace(/\\/g, '\\\\')}"
 dashboardUrl = "http://localhost:3000/vhr-dashboard-pro.html"
 
 ' Vérifier si le serveur est déjà en cours
-Set objExec = WshShell.Exec("cmd /c netstat -ano | find "":3000""")
+Set objExec = WshShell.Exec("cmd /c netstat -ano | find "":3000"")
 output = objExec.StdOut.ReadAll()
 
 If Len(Trim(output)) = 0 Then
@@ -1796,32 +1811,33 @@ End If
 ' Ouvrir le dashboard dans le navigateur
 WshShell.Run dashboardUrl, 1, False
 `;
-    
+
     const vbsPath = path.join(projectDir, 'VHR-Dashboard-Launcher.vbs');
     fs.writeFileSync(vbsPath, vbsContent, 'utf8');
-    
-    // Créer le raccourci avec PowerShell
+
+    // Créer le raccourci avec PowerShell (échappement renforcé pour espaces et accents)
     const shortcutPath = path.join(desktopPath, 'VHR Dashboard Pro.lnk');
+    const esc = (p) => p.replace(/`/g, '``').replace(/"/g, '`"');
     const psCommand = `
-      $WshShell = New-Object -ComObject WScript.Shell
-      $Shortcut = $WshShell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
-      $Shortcut.TargetPath = 'wscript.exe'
-      $Shortcut.Arguments = '"${vbsPath.replace(/'/g, "''")}"'
-      $Shortcut.WorkingDirectory = '${projectDir.replace(/'/g, "''")}'
-      $Shortcut.IconLocation = 'C:\\Windows\\System32\\shell32.dll,13'
-      $Shortcut.Description = 'Lance VHR Dashboard Pro'
-      $Shortcut.Save()
+      $WshShell = New-Object -ComObject WScript.Shell;
+      $Shortcut = $WshShell.CreateShortcut("${esc(shortcutPath)}");
+      $Shortcut.TargetPath = "wscript.exe";
+      $Shortcut.Arguments = '"${esc(vbsPath)}"';
+      $Shortcut.WorkingDirectory = "${esc(projectDir)}";
+      $Shortcut.IconLocation = "C:\\Windows\\System32\\shell32.dll,13";
+      $Shortcut.Description = "Lance VHR Dashboard Pro";
+      $Shortcut.Save();
     `;
-    
-    exec(`powershell -Command "${psCommand.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, (err, stdout, stderr) => {
+
+    exec(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${psCommand.replace(/"/g, '\\"').replace(/\n+/g, ' ')}"`, (err, stdout, stderr) => {
       if (err) {
-        console.error('[shortcut] Error:', err);
-        return res.status(500).json({ ok: false, error: 'Erreur lors de la création du raccourci' });
+        console.error('[shortcut] Error:', err, stderr);
+        return res.status(500).json({ ok: false, error: 'Erreur lors de la création du raccourci', detail: stderr || err.message });
       }
       console.log('[shortcut] Desktop shortcut created at:', shortcutPath);
       res.json({ ok: true, path: shortcutPath });
     });
-    
+
   } catch (e) {
     console.error('[api] create-desktop-shortcut:', e);
     res.status(500).json({ ok: false, error: e.message });
