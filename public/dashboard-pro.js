@@ -1638,6 +1638,45 @@ let devices = [];
 let games = [];
 let favorites = [];
 let runningApps = {}; // Track running apps: { serial: [pkg1, pkg2, ...] }
+let gameMetaMap = {}; // Map packageId -> { name, icon }
+const DEFAULT_GAME_ICON = 'https://cdn-icons-png.flaticon.com/512/1005/1005141.png';
+
+function updateGameMetaFromList(list) {
+	gameMetaMap = {};
+	(list || []).forEach(g => {
+		if (!g?.packageId) return;
+		gameMetaMap[g.packageId] = {
+			name: g.name || g.packageId,
+			icon: g.icon || null
+		};
+	});
+}
+
+function normalizeGameIcon(icon) {
+	if (!icon) return DEFAULT_GAME_ICON;
+	if (icon.startsWith('data:') || icon.startsWith('http')) return icon;
+	return `data:image/png;base64,${icon}`;
+}
+
+function getGameMeta(pkg) {
+	const meta = gameMetaMap[pkg] || {};
+	return {
+		name: meta.name || pkg,
+		icon: normalizeGameIcon(meta.icon)
+	};
+}
+
+async function loadGamesCatalog() {
+	try {
+		const res = await api('/api/games', { timeout: 8000 });
+		if (res.ok && Array.isArray(res.games)) {
+			games = res.games;
+			updateGameMetaFromList(res.games);
+		}
+	} catch (e) {
+		console.warn('[games] load failed', e);
+	}
+}
 
 async function syncRunningAppsFromServer() {
 	try {
@@ -1823,7 +1862,24 @@ function renderDevicesTable() {
 		const statusColor = d.status === 'device' ? '#2ecc71' : d.status === 'streaming' ? '#3498db' : '#e74c3c';
 		const statusIcon = d.status === 'device' ? '✅' : d.status === 'streaming' ? '🟢' : '❌';
 		const runningGamesList = runningApps[d.serial] || [];
-		const runningGameDisplay = runningGamesList.length > 0 ? `<span style='background:#27ae60;color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;font-weight:bold;'>🎮 ${runningGamesList.join(', ')}</span>` : `<span style='color:#95a5a6;'>-</span>`;
+		const serialJson = JSON.stringify(d.serial);
+		const runningGameDisplay = runningGamesList.length > 0 ? runningGamesList.map(pkg => {
+			const meta = getGameMeta(pkg);
+			const safeName = meta.name.replace(/"/g, '&quot;');
+			return `
+			<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center;background:#0f1117;padding:8px;border-radius:10px;'>
+				<img src="${meta.icon}" alt="${safeName}" style='width:42px;height:42px;border-radius:8px;object-fit:cover;border:1px solid #2ecc71;' onerror="this.onerror=null;this.src='${DEFAULT_GAME_ICON}'" />
+				<div style='display:flex;flex-direction:column;gap:6px;align-items:flex-start;'>
+					<span class='pill pill-muted'>🎮 ${safeName}</span>
+					<div style='display:flex;gap:6px;flex-wrap:wrap;'>
+						<button class='btn btn-ghost btn-compact' onclick='pauseGame(${serialJson}, "${pkg}")'>⏸️ Pause</button>
+						<button class='btn btn-accent btn-compact' onclick='resumeGame(${serialJson}, "${pkg}")'>▶️ Reprendre</button>
+						<button class='btn btn-danger btn-compact' onclick='stopGame(${serialJson}, "${pkg}")'>⏹️ Stop</button>
+					</div>
+				</div>
+			</div>
+			`;
+		}).join('') : `<span style='color:#95a5a6;'>-</span>`;
 		
 		// Escape special characters for HTML attributes
 		const safeSerial = d.serial.replace(/'/g, "\\'").replace(/"/g, '&quot;');
@@ -1913,7 +1969,24 @@ function renderDevicesCards() {
 		
 		const statusColor = d.status === 'device' ? '#2ecc71' : d.status === 'streaming' ? '#3498db' : '#e74c3c';
 		const runningGamesList = runningApps[d.serial] || [];
-		const runningGameDisplay = runningGamesList.length > 0 ? `<div style='background:#27ae60;color:#fff;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:bold;margin-bottom:10px;'>🎮 ${runningGamesList.join(', ')}</div>` : '';
+		const serialJson = JSON.stringify(d.serial);
+		const runningGameDisplay = runningGamesList.length > 0 ? runningGamesList.map(pkg => {
+			const meta = getGameMeta(pkg);
+			const safeName = meta.name.replace(/"/g, '&quot;');
+			return `
+			<div style='margin-bottom:10px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:#0f1117;padding:10px;border-radius:10px;'>
+				<img src="${meta.icon}" alt="${safeName}" style='width:46px;height:46px;border-radius:10px;object-fit:cover;border:1px solid #2ecc71;' onerror="this.onerror=null;this.src='${DEFAULT_GAME_ICON}'" />
+				<div style='display:flex;flex-direction:column;gap:6px;align-items:flex-start;'>
+					<span class="pill pill-muted">🎮 ${safeName}</span>
+					<div style='display:flex;gap:6px;flex-wrap:wrap;'>
+						<button class='btn btn-ghost btn-compact' onclick='pauseGame(${serialJson}, "${pkg}")'>⏸️ Pause</button>
+						<button class='btn btn-accent btn-compact' onclick='resumeGame(${serialJson}, "${pkg}")'>▶️ Reprendre</button>
+						<button class='btn btn-danger btn-compact' onclick='stopGame(${serialJson}, "${pkg}")'>⏹️ Stop</button>
+					</div>
+				</div>
+			</div>
+			`;
+		}).join('') : '';
 		
 		// Escape special characters for HTML attributes
 		const safeSerial = d.serial.replace(/'/g, "\\'").replace(/"/g, '&quot;');
@@ -2757,6 +2830,17 @@ window.launchApp = async function(serial, pkg) {
 window.stopGame = async function(serial, pkg) {
 	try {
 		showToast('⏹️ Arrêt du jeu...', 'info');
+		const previouslyRunning = Array.isArray(runningApps[serial]) && runningApps[serial].includes(pkg);
+
+		// 🔄 Optimistic UI update for immediate feedback
+		if (runningApps[serial]) {
+			runningApps[serial] = runningApps[serial].filter(p => p !== pkg);
+			if (runningApps[serial].length === 0) {
+				delete runningApps[serial];
+			}
+			// Re-render right away so "Jeu en cours" updates without page refresh
+			renderDevices();
+		}
 		
 		// Try primary endpoint first
 		try {
@@ -2770,10 +2854,6 @@ window.stopGame = async function(serial, pkg) {
 			
 			if (stopRes && stopRes.ok) {
 				showToast('✅ Jeu arrêté!', 'success');
-				// Remove from running apps
-				if (runningApps[serial]) {
-					runningApps[serial] = runningApps[serial].filter(p => p !== pkg);
-				}
 				// Aligner l'état serveur
 				api('/api/apps/running/mark', {
 					method: 'POST',
@@ -2806,10 +2886,6 @@ window.stopGame = async function(serial, pkg) {
 		
 		if (fallbackRes && fallbackRes.ok) {
 			showToast('✅ Jeu arrêté!', 'success');
-			// Remove from running apps
-			if (runningApps[serial]) {
-				runningApps[serial] = runningApps[serial].filter(p => p !== pkg);
-			}
 			// Notifier le serveur pour aligner l'état si le fallback a été utilisé
 			api('/api/apps/running/mark', {
 				method: 'POST',
@@ -2822,14 +2898,44 @@ window.stopGame = async function(serial, pkg) {
 			const device = { serial, name: 'Device' };
 			showAppsDialog(device);
 		} else {
-			console.error('[stopGame] Fallback failed:', fallbackRes);
-			showToast('⚠️ Erreur lors de l\'arrêt du jeu', 'error');
+			console.warn('[stopGame] Fallback did not confirm stop (peut déjà être arrêté):', fallbackRes);
+			if (!previouslyRunning) {
+				showToast('ℹ️ Jeu déjà arrêté', 'info');
+			} else {
+				showToast('⚠️ Arrêt non confirmé (peut déjà être stoppé)', 'warning');
+			}
 		}
 		
 	} catch (error) {
 		console.error('[stopGame] Unexpected error:', error);
 		showToast('⚠️ Erreur lors de l\'arrêt du jeu', 'error');
 	}
+};
+
+// Pause game (envoie HOME pour quitter proprement vers Oculus Home sans tuer l'app)
+window.pauseGame = async function(serial, pkg) {
+	try {
+		showToast('⏸️ Pause du jeu...', 'info');
+		const res = await api('/api/adb/command', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ serial, command: ['shell', 'input', 'keyevent', 'KEYCODE_HOME'] })
+		});
+		if (res && res.ok) {
+			showToast('✅ Jeu mis en pause (Home)', 'success');
+		} else {
+			showToast('⚠️ Impossible de mettre en pause', 'warning');
+		}
+	} catch (e) {
+		console.error('[pauseGame]', e);
+		showToast('⚠️ Erreur pause', 'error');
+	}
+};
+
+// Reprendre le jeu (relance l'activité)
+window.resumeGame = async function(serial, pkg) {
+	showToast('▶️ Reprise du jeu...', 'info');
+	return launchApp(serial, pkg);
 };
 
 window.toggleFavorite = function(serial, pkg) {
@@ -3022,7 +3128,13 @@ socket.on('devices-update', (data) => {
 });
 
 socket.on('games-update', (data) => {
-	games = data;
+	if (Array.isArray(data)) {
+		games = data;
+		updateGameMetaFromList(data);
+		renderDevices();
+	} else {
+		games = [];
+	}
 });
 
 socket.on('favorites-update', (data) => {
@@ -3490,8 +3602,11 @@ window.loginUser = async function() {
 			setTimeout(() => {
 				showDashboardContent();
 				createNavbar();
-				checkLicense();
-				loadDevices();
+				checkLicense().then(hasAccess => {
+					if (hasAccess) {
+						loadGamesCatalog().finally(() => loadDevices());
+					}
+				});
 			}, 200);
 		} else {
 			showToast('❌ ' + (data.error || 'Connexion échouée'), 'error');
@@ -3549,8 +3664,11 @@ window.registerUser = async function() {
 			setTimeout(() => {
 				showDashboardContent();
 				createNavbar();
-				checkLicense();
-				loadDevices();
+				checkLicense().then(hasAccess => {
+					if (hasAccess) {
+						loadGamesCatalog().finally(() => loadDevices());
+					}
+				});
 			}, 200);
 		} else {
 			showToast('❌ ' + (data.error || 'Inscription échouée'), 'error');
@@ -3646,7 +3764,7 @@ checkJWTAuth().then(isAuth => {
 		checkLicense().then(hasAccess => {
 			if (hasAccess) {
 				// User has access (demo valid or active subscription)
-				loadDevices();
+				loadGamesCatalog().finally(() => loadDevices());
 			}
 			// else: Access blocked - unlock modal already shown by checkLicense()
 			// Dashboard content stays visible but unlock modal blocks interaction
