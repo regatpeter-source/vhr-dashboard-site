@@ -21,6 +21,7 @@ const https = require('https');
 const http_module = require('http');
 const unzipper = require('unzipper');
 const fetch = require('node-fetch');
+const os = require('os');
 
 // ========== SINGLE SERVER INSTANCE ENFORCEMENT ==========
 // Kill any existing server on port 3000 before starting
