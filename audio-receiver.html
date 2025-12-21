@@ -321,8 +321,10 @@
     let ws = null;
     let audioContext = null;
     let analyser = null;
+    let gainNode = null;
     let dataArray = null;
     let animationId = null;
+    let nextPlayTime = 0; // scheduling to avoid gaps
     
     const elements = {
       serverInput: document.getElementById('serverInput'),
@@ -338,19 +340,19 @@
     
     // ========== Initialization ==========
     
-    // Initialize Web Audio API
+    // Initialize Web Audio API (decode & schedule to remove gaps)
     function initAudioContext() {
       if (!audioContext) {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+        nextPlayTime = audioContext.currentTime;
       }
       
       if (!analyser) {
         analyser = audioContext.createAnalyser();
         analyser.fftSize = 256; // 128 bars in frequency domain
-        
-        // Get audio from the audio element
-        const audioSource = audioContext.createMediaElementAudioSource(elements.audioPlayer);
-        audioSource.connect(analyser);
+        gainNode = audioContext.createGain();
+        gainNode.gain.value = 1.0;
+        gainNode.connect(analyser);
         analyser.connect(audioContext.destination);
         
         const bufferLength = analyser.frequencyBinCount;
@@ -509,24 +511,36 @@
       }
     }
     
-    // Play received audio chunk
-    function playAudioChunk(arrayBuffer) {
+    // Play received audio chunk by decoding and scheduling (smooth)
+    async function playAudioChunk(arrayBuffer) {
       try {
-        // Create a Blob from the audio data
-        const blob = new Blob([arrayBuffer], { type: 'audio/wav' });
-        const url = URL.createObjectURL(blob);
-        
-        // Play the audio
-        elements.audioPlayer.src = url;
-        elements.audioPlayer.play().catch(e => {
-          console.warn('Auto-play prevented by browser:', e);
-        });
-        
-        // Clean up previous URLs to avoid memory leak
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
-        
+        if (!audioContext || !analyser || !gainNode) {
+          console.warn('AudioContext not ready');
+          return;
+        }
+        // Decode WebM/Opus chunk
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+        const src = audioContext.createBufferSource();
+        src.buffer = audioBuffer;
+        src.connect(gainNode);
+
+        // Schedule to avoid gaps: keep slight overlap safeguard
+        const startAt = Math.max(audioContext.currentTime, nextPlayTime);
+        src.start(startAt);
+        const duration = audioBuffer.duration || (arrayBuffer.byteLength / (48000 * 2));
+        nextPlayTime = startAt + duration * 0.98; // tiny overlap to prevent holes
+
       } catch (e) {
-        console.error('Failed to play audio chunk:', e);
+        console.error('Failed to decode/play chunk, fallback to <audio> tag:', e);
+        try {
+          const blob = new Blob([arrayBuffer], { type: 'audio/webm;codecs=opus' });
+          const url = URL.createObjectURL(blob);
+          elements.audioPlayer.src = url;
+          elements.audioPlayer.play().catch(()=>{});
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+        } catch (ee) {
+          console.error('Fallback playback failed:', ee);
+        }
       }
     }
     
