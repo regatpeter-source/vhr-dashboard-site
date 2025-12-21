@@ -4009,6 +4009,21 @@ let nameMap = {};
 let gamesList = [];
 let favoritesList = [];
 
+// Helper to get LAN IPv4 for headset access
+function getLanIPv4() {
+  try {
+    const nets = os.networkInterfaces();
+    for (const name of Object.keys(nets)) {
+      for (const net of nets[name]) {
+        if (net.family === 'IPv4' && !net.internal) return net.address;
+      }
+    }
+  } catch (e) {
+    console.warn('[server] cannot determine LAN IP', e.message);
+  }
+  return null;
+}
+
 try {
   if (fs.existsSync(NAMES_FILE)) nameMap = JSON.parse(fs.readFileSync(NAMES_FILE, 'utf8') || '{}');
   else fs.writeFileSync(NAMES_FILE, JSON.stringify({}, null, 2));
@@ -4975,6 +4990,15 @@ app.post('/api/games/remove', (req, res) => {
 
 app.get('/api/favorites', (req, res) => {
   res.json({ ok: true, favorites: favoritesList });
+});
+
+// Expose server info (LAN IP) so headset can reach the signaling server
+app.get('/api/server-info', (req, res) => {
+  const lanIp = getLanIPv4();
+  const hostHeader = req.headers.host || '';
+  const portMatch = hostHeader.match(/:(\d+)/);
+  const port = portMatch ? Number(portMatch[1]) : PORT;
+  res.json({ ok: true, host: hostHeader, lanIp, port });
 });
 
 app.post('/api/favorites/add', (req, res) => {
