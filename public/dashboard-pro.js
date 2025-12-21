@@ -1736,18 +1736,13 @@ async function resolveAudioServerUrl() {
 	// 2) If not localhost, use current origin
 	if (host !== 'localhost' && host !== '127.0.0.1') return window.location.origin;
 
-	// 3) Try server-info
+	// 3) Try server-info (no prompt)
 	const info = await getServerInfo();
 	if (info && info.lanIp) {
 		return `${proto}//${info.lanIp}:${info.port || port}`;
 	}
 
-	// 4) Prompt user once if still localhost
-	const ip = prompt('IP LAN du PC (pour le casque, ex: 192.168.1.20) ?');
-	const chosen = setLanOverride(ip || '');
-	if (chosen) return `${proto}//${chosen}:${port}`;
-
-	// 5) Fallback to origin (may fail on casque if localhost)
+	// 4) Fallback to origin without interrompre l'utilisateur
 	return window.location.origin;
 }
 

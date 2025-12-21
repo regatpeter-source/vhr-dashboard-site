@@ -470,7 +470,8 @@ class VHRAudioStream {
       
       relayWs.onopen = () => {
         this._log('Relay WebSocket connected, starting recording');
-        mediaRecorder.start(100); // Collect data every 100ms for real-time streaming
+        // Collect smaller chunks to reduce jitter on receiver
+        mediaRecorder.start(40);
       };
       
       mediaRecorder.ondataavailable = (event) => {
