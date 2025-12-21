@@ -2960,13 +2960,25 @@ window.showFavoritesDialog = async function(device) {
 	const favs = res.favorites || [];
 	let html = `<h3 style='color:#2ecc71;'>Favoris pour ${device.name}</h3>`;
 	html += `<div style='max-height:400px;overflow-y:auto;'>`;
-	favs.forEach(fav => {
-		html += `<div style='padding:8px;margin:4px 0;background:#23272f;border-radius:6px;display:flex;justify-content:space-between;align-items:center;'>
-			<span style='color:#fff;flex:1;'>${fav.name}</span>
-			<button onclick="launchApp('${device.serial}','${fav.packageId}')" style='background:#e67e22;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;margin-right:4px;'>⭐ Lancer</button>
-			<button onclick="stopGame('${device.serial}','${fav.packageId}')" style='background:#e74c3c;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;'>⏹️ Stop</button>
-		</div>`;
-	});
+	if (favs.length === 0) {
+		html += `<div style='padding:12px;color:#95a5a6;text-align:center;'>Aucun favori pour ce casque.</div>`;
+	} else {
+		favs.forEach(fav => {
+			const meta = getGameMeta(fav.packageId || fav.name || '');
+			const safeName = (meta.name || fav.name || fav.packageId || 'Favori').replace(/"/g, '&quot;');
+			html += `<div style='padding:10px;margin:6px 0;background:#23272f;border-radius:8px;display:flex;align-items:center;gap:10px;border-left:4px solid #2ecc71;'>
+				<img src="${meta.icon}" alt="${safeName}" style='width:38px;height:38px;border-radius:8px;object-fit:cover;border:1px solid #2ecc71;' onerror="this.onerror=null;this.src='${DEFAULT_GAME_ICON}'" />
+				<div style='flex:1;display:flex;flex-direction:column;gap:4px;'>
+					<span style='color:#fff;font-weight:bold;'>${safeName}</span>
+					<span style='color:#95a5a6;font-size:11px;'>${fav.packageId || ''}</span>
+				</div>
+				<div style='display:flex;gap:6px;'>
+					<button onclick="launchApp('${device.serial}','${fav.packageId}')" style='background:#e67e22;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-weight:bold;'>⭐ Lancer</button>
+					<button onclick="stopGame('${device.serial}','${fav.packageId}')" style='background:#e74c3c;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-weight:bold;'>⏹️ Stop</button>
+				</div>
+			</div>`;
+		});
+	}
 	html += `</div>`;
 	showModal(html);
 };
