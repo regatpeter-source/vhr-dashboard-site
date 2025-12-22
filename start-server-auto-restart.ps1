@@ -59,5 +59,5 @@ for ($i = 0; $i -lt $maxRetries; $i++) {
 	}
 }
 
-Write-Host "Limite de relances atteinte. Appuie sur Entrée pour fermer."
+Write-Host 'Limite de relances atteinte. Appuie sur Entrée pour fermer.'
 Read-Host 'Entrer pour fermer'
