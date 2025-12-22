@@ -3,6 +3,8 @@
  * Gère l'envoi des emails de confirmation de paiement et notifications
  */
 
+const os = require('os');
+
 let nodemailer = null;
 try {
   nodemailer = require('nodemailer');
@@ -12,6 +14,30 @@ try {
 }
 
 const purchaseConfig = require('../config/purchase.config');
+
+const sanitizeBaseUrl = (url) => {
+  if (!url) return '';
+  return url.replace(/\/$/, '');
+};
+
+function detectLanBaseUrl() {
+  if (process.env.LAN_BASE_URL) return process.env.LAN_BASE_URL;
+  if (process.env.FRONTEND_URL) return process.env.FRONTEND_URL;
+
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const net of interfaces[name] || []) {
+      if (!net || net.family !== 'IPv4' || net.internal) continue;
+      if (!net.address || net.address.startsWith('169.254')) continue;
+      return `http://${net.address}:3000`;
+    }
+  }
+  return 'http://localhost:3000';
+}
+
+const LAN_BASE_URL = sanitizeBaseUrl(detectLanBaseUrl());
+const DASHBOARD_PRO_URL = `${LAN_BASE_URL}/vhr-dashboard-pro.html`;
+const ACCOUNT_URL = `${LAN_BASE_URL}/account.html`;
 
 // Créer le transporteur de mail
 let transporter = null;
@@ -140,7 +166,7 @@ async function sendPurchaseSuccessEmail(user, purchaseData) {
       
       <h2 style="color: #2ecc71; margin-top: 30px;">📋 Prochaines Étapes</h2>
       <ol class="steps-list">
-        <li>Ouvrez <a href="http://localhost:3000/vhr-dashboard-pro.html" style="color: #3498db;">votre Dashboard</a></li>
+        <li>Ouvrez <a href="${DASHBOARD_PRO_URL}" style="color: #3498db;">votre Dashboard</a></li>
         <li>Cliquez sur le bouton <strong>"🚀 Débloquer"</strong></li>
         <li>Sélectionnez <strong>"🔑 Vous avez déjà une licence"</strong></li>
         <li>Collez votre clé de licence</li>
@@ -274,7 +300,7 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
       
       <h2 style="color: #3498db; margin-top: 30px;">🚀 Accès Instantané</h2>
       <p>Votre accès est activé immédiatement. Vous pouvez commencer à utiliser VHR Dashboard maintenant :</p>
-      <a href="http://localhost:3000/vhr-dashboard-pro.html" class="button">Ouvrir mon Dashboard</a>
+      <a href="${DASHBOARD_PRO_URL}" class="button">Ouvrir mon Dashboard</a>
       
       <h2 style="color: #3498db; margin-top: 30px;">✨ Avantages de votre abonnement</h2>
       <ul class="features-list">
@@ -289,9 +315,9 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
       <h2 style="color: #3498db; margin-top: 30px;">⚙️ Gérer votre Abonnement</h2>
       <p>Vous pouvez gérer votre abonnement à tout moment :</p>
       <ul style="color: #666;">
-        <li><a href="http://localhost:3000/account.html" style="color: #3498db;">Voir vos factures</a></li>
-        <li><a href="http://localhost:3000/account.html" style="color: #3498db;">Mettre à jour le paiement</a></li>
-        <li><a href="http://localhost:3000/account.html" style="color: #3498db;">Annuler l'abonnement (à tout moment)</a></li>
+        <li><a href="${ACCOUNT_URL}" style="color: #3498db;">Voir vos factures</a></li>
+        <li><a href="${ACCOUNT_URL}" style="color: #3498db;">Mettre à jour le paiement</a></li>
+        <li><a href="${ACCOUNT_URL}" style="color: #3498db;">Annuler l'abonnement (à tout moment)</a></li>
       </ul>
       
       <div class="alert">
@@ -308,7 +334,7 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
     
     <div class="footer">
       <p>Merci d'avoir choisi VHR Dashboard !</p>
-      <p><a href="http://localhost:3000/account.html" style="color: #3498db;">Mon Compte</a> | <a href="${purchaseConfig.EMAIL.DOCUMENTATION_URL}" style="color: #3498db;">Documentation</a></p>
+      <p><a href="${ACCOUNT_URL}" style="color: #3498db;">Mon Compte</a> | <a href="${purchaseConfig.EMAIL.DOCUMENTATION_URL}" style="color: #3498db;">Documentation</a></p>
       <p>&copy; 2025 VHR Dashboard. Tous droits réservés.</p>
     </div>
   </div>
@@ -402,7 +428,7 @@ async function sendCredentialsEmail(user) {
       <h2 style="color: #3498db; margin-top: 30px;">🚀 Accéder à VHR Dashboard</h2>
       <p>Vous pouvez maintenant vous connecter en visitant :</p>
       <p style="text-align: center;">
-        <a href="http://localhost:3000/vhr-dashboard-pro.html" style="color: #3498db; font-weight: bold;">http://localhost:3000/vhr-dashboard-pro.html</a>
+        <a href="${DASHBOARD_PRO_URL}" style="color: #3498db; font-weight: bold;">${DASHBOARD_PRO_URL}</a>
       </p>
       
       <div class="alert">
@@ -419,7 +445,7 @@ async function sendCredentialsEmail(user) {
     
     <div class="footer">
       <p>Bienvenue dans VHR Dashboard !</p>
-      <p><a href="http://localhost:3000/account.html" style="color: #3498db;">Mon Compte</a> | <a href="${purchaseConfig.EMAIL.DOCUMENTATION_URL}" style="color: #3498db;">Documentation</a></p>
+      <p><a href="${ACCOUNT_URL}" style="color: #3498db;">Mon Compte</a> | <a href="${purchaseConfig.EMAIL.DOCUMENTATION_URL}" style="color: #3498db;">Documentation</a></p>
       <p>&copy; 2025 VHR Dashboard. Tous droits réservés.</p>
     </div>
   </div>

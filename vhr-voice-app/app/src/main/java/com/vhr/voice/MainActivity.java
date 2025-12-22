@@ -73,8 +73,8 @@ public class MainActivity extends Activity {
         if (!savedUrl.isEmpty()) {
             serverUrlInput.setText(savedUrl);
         } else {
-            // Default to local network - user should change this
-            serverUrlInput.setText("http://192.168.1.XXX:3000");
+            // Default to local network placeholder - user should replace with the LAN IP displayed in the dashboard
+            serverUrlInput.setText("http://<LAN_IP>:3000");
             serverUrlInput.setSelection(serverUrlInput.getText().length());
         }
         

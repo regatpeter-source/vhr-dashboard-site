@@ -272,7 +272,7 @@ EMAIL_PORT=587
 rm data/demo-status.json
 
 # 2. Ouvrir dashboard
-http://localhost:3000/vhr-dashboard-pro.html
+http://localhost:3000/vhr-dashboard-pro.html (le bouton "🗣️ Voix" ouvre l'URL LAN si vous utilisez un casque)
 
 # 3. Vérifier
 ✅ Bannière orange "7 jours restants"

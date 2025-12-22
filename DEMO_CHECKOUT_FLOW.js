@@ -219,7 +219,7 @@ Contenu:
 │ Email: contact@mastartup-vr.com                       │
 │                                                       │
 │ 🚀 Accéder à VHR Dashboard                            │
-│ http://localhost:3000/vhr-dashboard-pro.html          │
+│ http://localhost:3000/vhr-dashboard-pro.html (le tableau de bord peut ouvrir la version LAN via le bouton "🗣️ Voix") │
 │                                                       │
 │ ⚠️ Renouvellement Automatique                         │
 │ Votre abonnement se renouvelle automatiquement        │

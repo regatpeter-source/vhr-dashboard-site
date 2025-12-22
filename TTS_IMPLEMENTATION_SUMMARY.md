@@ -125,7 +125,7 @@ curl -X POST http://localhost:3000/api/tts/send \
 
 ### **Test 2: Via Dashboard** (1 min)
 
-1. Ouvrir `http://localhost:3000/vhr-dashboard-pro.html`
+1. Ouvrir `http://localhost:3000/vhr-dashboard-pro.html` (le bouton "🗣️ Voix" ouvre automatiquement l'adresse LAN si votre casque est sur le réseau)
 2. Scroller jusqu'à "🎙️ Envoyeur de Voix"
 3. Saisir un message
 4. Cliquer "📤 Envoyer au casque"

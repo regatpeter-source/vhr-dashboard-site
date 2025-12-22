@@ -164,8 +164,9 @@ cp TtsReceiver.kt sample-android/app/src/main/java/com/vhr/dashboard/
 ## 🧪 Tests
 
 ### Test 1: Via Dashboard
+
 ```bash
-# Ouvrir http://localhost:3000/vhr-dashboard-pro.html
+# Ouvrir http://localhost:3000/vhr-dashboard-pro.html (la page ouvre automatiquement une version LAN si nécessaire via le bouton "🗣️ Voix")
 # Saisir un message comme "Bienvenue sur VHR"
 # Cliquer "📤 Envoyer au casque"
 # Vérifier que le casque prononce le texte

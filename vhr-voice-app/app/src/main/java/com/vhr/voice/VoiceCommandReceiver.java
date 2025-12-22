@@ -7,7 +7,8 @@ import android.util.Log;
 
 /**
  * Broadcast receiver to start voice service via ADB command
- * Usage: adb shell am broadcast -a com.vhr.voice.START --es serverUrl "http://192.168.1.3:3000" --es serial "DEVICE_SERIAL"
+ * Usage: adb shell am broadcast -a com.vhr.voice.START --es serverUrl "http://<LAN_IP>:3000" --es serial "DEVICE_SERIAL"
+ * (copiez l'adresse LAN affichée par le bouton 🗣️ Voix du dashboard)
  */
 public class VoiceCommandReceiver extends BroadcastReceiver {
     private static final String TAG = "VHRVoice";

@@ -270,7 +270,7 @@
       <input 
         type="text" 
         id="serverInput" 
-        placeholder="e.g., ws://192.168.1.100:3000"
+        placeholder="e.g., ws://<LAN_IP>:3000 (copié depuis le bouton 🗣️ Voix)"
         value="ws://localhost:3000"
       >
     </div>
@@ -306,11 +306,12 @@
     
     <div class="info-box">
       <strong>How to use:</strong><br>
-      1. Enter your server address (usually your PC's IP)<br>
-      2. Enter the device serial or custom name<br>
-      3. Click "Connect" to start receiving audio<br>
-      4. Use the visualizer to monitor audio levels<br>
-      5. Audio will play automatically when received
+      1. Start the dashboard on your PC at http://localhost:3000/vhr-dashboard-pro.html.<br>
+      2. Click the 🗣️ Voix button so the Quest receives the LAN URL that opens this page.<br>
+      3. The LAN WebSocket address (ws://<LAN_IP>:3000) will be available for copy/paste.<br>
+      4. Enter the device serial or a custom name.<br>
+      5. Click "Connect" to receive audio from the PC.<br>
+      6. Audio will play automatically when the stream arrives.
     </div>
   </div>
   
@@ -358,7 +359,7 @@
       }
       // Si on ne trouve pas, on laisse le champ vide et on affiche une alerte
       elements.serverInput.value = '';
-      showError("Impossible de détecter l'adresse du serveur. Merci de la saisir manuellement (ex: ws://192.168.x.x:3000)");
+      showError("Impossible de détecter l'adresse du serveur. Merci de la saisir manuellement (ex: ws://<LAN_IP>:3000) ou de copier l'adresse fournie par le bouton 🗣️ Voix.");
     }
     
     // ========== Initialization ==========
@@ -440,12 +441,12 @@
       const serial = elements.serialInput.value.trim();
       
       if (!server || !serial) {
-        showError('Merci de saisir l\'adresse du serveur (ex: ws://192.168.x.x:3000) et le numéro de série.');
+        showError('Merci de saisir l\'adresse du serveur (ex: ws://<LAN_IP>:3000) et le numéro de série. Vous pouvez récupérer l\'IP LAN via le bouton 🗣️ Voix du dashboard.');
         return;
       }
       // Bloque toute connexion à localhost ou 127.0.0.1
       if (server.includes('localhost') || server.includes('127.0.0.1')) {
-        showError('Connexion à localhost impossible depuis le casque. Merci de saisir l\'adresse IP locale du PC (ex: ws://192.168.x.x:3000)');
+        showError('Connexion à localhost impossible depuis le casque. Merci d\'utiliser l\'adresse LAN (ws://<LAN_IP>:3000) fournie par le bouton 🗣️ Voix.');
         return;
       }
       
@@ -643,7 +644,7 @@
             }
           }
           // Si pas d'IP, affiche une erreur
-          showError("Impossible de détecter l'adresse IP du serveur. Merci d'ouvrir cette page depuis l'adresse IP du PC (ex: http://192.168.x.x:3000/audio-receiver.html)");
+          showError("Impossible de détecter l'adresse IP du serveur. Ouvrez plutôt le dashboard sur http://localhost:3000/vhr-dashboard-pro.html et cliquez sur le bouton 🗣️ Voix pour être redirigé ici via l'IP LAN.");
         });
       } else if (elements.serverInput.value.includes('localhost') || elements.serverInput.value.includes('127.0.0.1') || !elements.serverInput.value) {
         autoDetectServerIP();

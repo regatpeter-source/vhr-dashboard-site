@@ -9,6 +9,7 @@ echo.
 
 REM Project directory
 set "PROJECT_DIR=C:\Users\peter\VR-Manager"
+set "DASH_URL=http://localhost:3000/vhr-dashboard-pro.html"
 
 if not exist "!PROJECT_DIR!\package.json" (
   echo ERROR: Project not found at !PROJECT_DIR!
@@ -49,11 +50,11 @@ if errorlevel 1 (
 
 echo.
 echo Opening dashboard in browser...
-echo http://localhost:3000/vhr-dashboard-pro.html
+echo %DASH_URL%
 echo.
 
 REM Open dashboard in default browser
-start http://localhost:3000/vhr-dashboard-pro.html
+start "" "%DASH_URL%"
 
 echo.
 echo Dashboard opened! You can close this window.
