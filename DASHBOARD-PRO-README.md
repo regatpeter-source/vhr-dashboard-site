@@ -189,7 +189,17 @@ Response:
 ### Démarrage
 1. Double-cliquez sur `VHR Dashboard.bat`
 2. Le serveur démarre automatiquement
-3. Le navigateur s'ouvre sur `http://localhost:3000/vhr-dashboard-pro.html`
+3. Le navigateur s'ouvre sur `http://localhost:3000/vhr-dashboard-pro.html` (le bouton "🗣️ Voix" ouvre automatiquement la version LAN si nécessaire)
+
+#### 🔐 HTTPS local sans avertissement
+
+Pour éviter l'erreur `ERR_CERT_AUTHORITY_INVALID` dans Chrome/Edge lorsque le navigateur charge `https://localhost:3000/vhr-dashboard-pro.html`, créez un certificat local signé par une autorité reconnue :
+
+1. `npm run generate:cert`
+2. Redémarrez le serveur et le navigateur
+3. Accédez à `https://localhost:3000/vhr-dashboard-pro.html`
+
+Le script installe un CA local via `devcert` et écrit `cert.pem`/`key.pem` à la racine, ce qui permet au navigateur de faire confiance à `https://localhost:3000`.
 
 ### Gestion Multi-Casques
 1. Branchez tous vos casques en USB
