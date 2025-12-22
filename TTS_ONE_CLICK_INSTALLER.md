@@ -320,7 +320,7 @@ Utilisateur
 ## 🤝 Support
 
 **Erreur ou question?**
-- 📧 Email: support@vhr-dashboard.com
+- 📧 Email: support@vhr-dashboard-site.com
 - 🔗 Contact: https://vhr-dashboard-site.onrender.com/contact.html
 - 📖 Docs: Consultez les fichiers README et QUICK_START
 

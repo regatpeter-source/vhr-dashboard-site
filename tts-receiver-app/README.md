@@ -188,4 +188,4 @@ Licence compatible avec VHR Dashboard
 
 ## 📞 Support
 
-contact@vhrdashboard.com
+contact@vhr-dashboard-site.com

@@ -247,7 +247,7 @@
 ### Advanced Analytics Tools ⏳
 - [ ] SEMrush account:
   - [ ] Rank tracking (top 50 keywords)
-  - [ ] Competitor analysis (vhr-dashboard.com vs competitors)
+  - [ ] Competitor analysis (vhr-dashboard-site.com vs competitors)
   - [ ] Backlink monitoring
   - [ ] Content gap analysis
   - [ ] Monthly reporting

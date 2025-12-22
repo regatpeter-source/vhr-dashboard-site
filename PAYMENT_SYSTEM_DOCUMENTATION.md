@@ -206,7 +206,7 @@ Contenu:
 EMAIL_ENABLED=true
 BREVO_SMTP_USER=9d4018001@smtp-brevo.com
 BREVO_SMTP_PASS=6E37aw1L4An2XcSZ
-EMAIL_FROM=noreply@vhr-dashboard.com
+EMAIL_FROM=noreply@vhr-dashboard-site.com
 STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 STRIPE_PRICE_ID_STANDARD=price_1SWhBW7g8FcyfmlJZ5rJGh6N

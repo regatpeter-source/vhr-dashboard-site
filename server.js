@@ -915,7 +915,7 @@ async function sendReplyToContact(originalMessage, replyText, repliedBy) {
 // Send license email
 async function sendLicenseEmail(email, licenseKey, username) {
   const mailOptions = {
-    from: process.env.EMAIL_FROM || 'noreply@vhr-dashboard.com',
+    from: process.env.EMAIL_FROM || 'noreply@vhr-dashboard-site.com',
     to: email,
     subject: '🎉 Votre licence VHR Dashboard',
     html: `
@@ -940,7 +940,7 @@ async function sendLicenseEmail(email, licenseKey, username) {
         </p>
         <p style="text-align: center; margin-top: 20px;">
           <strong style="color: #2ecc71;">Besoin d'aide ?</strong><br>
-          <a href="mailto:support@vhr-dashboard.com" style="color: #3498db;">support@vhr-dashboard.com</a>
+          <a href="mailto:support@vhr-dashboard-site.com" style="color: #3498db;">support@vhr-dashboard-site.com</a>
         </p>
       </div>
     `

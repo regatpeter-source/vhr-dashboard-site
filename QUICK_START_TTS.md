@@ -224,4 +224,4 @@ Une fois l'app installée et testée:
 
 **Durée totale: ~10 minutes**  
 **Difficulté: ⭐ Très facile**  
-**Support: contact@vhrdashboard.com**
+**Support: contact@vhr-dashboard-site.com**

@@ -607,4 +607,4 @@ sendVoiceMessage('192.168.1.28:5555', 'La caméra a détecté un mouvement');
 
 **Version**: 1.0  
 **Mise à jour**: 2025-12-07  
-**Support**: contact@vhrdashboard.com
+**Support**: contact@vhr-dashboard-site.com

@@ -431,7 +431,7 @@ jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
 **Questions?** Consultez:
 - 📖 `ANDROID_INSTALLER_GUIDE.md` (guide complet)
 - 📖 `QUICK_START_TTS.md` (quick start)
-- 📧 `contact@vhrdashboard.com`
+- 📧 `contact@vhr-dashboard-site.com`
 
 ---
 

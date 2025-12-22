@@ -42,15 +42,15 @@ module.exports = {
 
   // Configuration des emails
   EMAIL: {
-    FROM: process.env.EMAIL_FROM || 'noreply@vhr-dashboard.com',
+    FROM: process.env.EMAIL_FROM || 'noreply@vhr-dashboard-site.com',
     SMTP_HOST: process.env.BREVO_SMTP_HOST || process.env.SMTP_HOST || 'smtp-relay.brevo.com',
     SMTP_PORT: process.env.BREVO_SMTP_PORT || process.env.SMTP_PORT || 587,
     SMTP_USER: process.env.BREVO_SMTP_USER || process.env.SMTP_USER || '',
     SMTP_PASS: process.env.BREVO_SMTP_PASS || process.env.SMTP_PASS || '',
     ENABLED: process.env.EMAIL_ENABLED === 'true' || false,
     DOWNLOAD_URL: process.env.DOWNLOAD_URL || 'http://localhost:3000/downloads/vhr-dashboard-demo.zip',
-    SUPPORT_EMAIL: process.env.SUPPORT_EMAIL || 'support@vhr-dashboard.com',
-    DOCUMENTATION_URL: process.env.DOCUMENTATION_URL || 'https://docs.vhr-dashboard.com'
+    SUPPORT_EMAIL: process.env.SUPPORT_EMAIL || 'support@vhr-dashboard-site.com',
+    DOCUMENTATION_URL: process.env.DOCUMENTATION_URL || 'https://docs.vhr-dashboard-site.com'
   },
 
   // Templates d'email pour les notifications

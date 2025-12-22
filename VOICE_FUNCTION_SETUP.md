@@ -244,7 +244,7 @@ Si vous avez des questions:
 1. Consultez `VHR_TTS_RECEIVER_APP.md` pour les détails
 2. Vérifiez les logs: `adb logcat`
 3. Testez avec cURL avant d'utiliser le Dashboard
-4. Contactez: contact@vhrdashboard.com
+4. Contactez: contact@vhr-dashboard-site.com
 
 ---
 

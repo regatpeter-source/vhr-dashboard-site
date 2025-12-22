@@ -237,7 +237,7 @@ async function sendContactMessageToAdmin(msg) {
 // Send license email
 async function sendLicenseEmail(email, licenseKey, username) {
   const mailOptions = {
-    from: process.env.EMAIL_USER || 'noreply@vhr-dashboard.com',
+    from: process.env.EMAIL_USER || 'noreply@vhr-dashboard-site.com',
     to: email,
     subject: '🎉 Votre licence VHR Dashboard',
     html: `
@@ -262,7 +262,7 @@ async function sendLicenseEmail(email, licenseKey, username) {
         </p>
         <p style="text-align: center; margin-top: 20px;">
           <strong style="color: #2ecc71;">Besoin d'aide ?</strong><br>
-          <a href="mailto:support@vhr-dashboard.com" style="color: #3498db;">support@vhr-dashboard.com</a>
+          <a href="mailto:support@vhr-dashboard-site.com" style="color: #3498db;">support@vhr-dashboard-site.com</a>
         </p>
       </div>
     `
@@ -1203,7 +1203,7 @@ app.post('/api/license/activate', async (req, res) => {
 // Send license email
 async function sendLicenseEmail(email, licenseKey, username) {
   const mailOptions = {
-    from: process.env.EMAIL_USER || 'noreply@vhr-dashboard.com',
+    from: process.env.EMAIL_USER || 'noreply@vhr-dashboard-site.com',
     to: email,
     subject: '🎉 Votre licence VHR Dashboard',
     html: `
@@ -1228,7 +1228,7 @@ async function sendLicenseEmail(email, licenseKey, username) {
         </p>
         <p style="text-align: center; margin-top: 20px;">
           <strong style="color: #2ecc71;">Besoin d'aide ?</strong><br>
-          <a href="mailto:support@vhr-dashboard.com" style="color: #3498db;">support@vhr-dashboard.com</a>
+          <a href="mailto:support@vhr-dashboard-site.com" style="color: #3498db;">support@vhr-dashboard-site.com</a>
         </p>
       </div>
     `

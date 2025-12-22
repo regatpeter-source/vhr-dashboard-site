@@ -95,12 +95,12 @@ Test local exécuté: ✅ SUCCÈS
       ✅ Connexion SMTP vérifiée avec Brevo
 
 [3/5] Simulation d'un message depuis contact.html...
-      ✅ Email admin envoyé avec succès
-      Message ID: <4614d1b7-a600-1205-2bac-6cca2a68c109@vhr-dashboard.com>
+   ✅ Email admin envoyé avec succès
+   Message ID: <4614d1b7-a600-1205-2bac-6cca2a68c109@vhr-dashboard-site.com>
 
 [4/5] Simulation d'une réponse depuis admin-dashboard.html...
-      ✅ Email de réponse envoyé avec succès
-      Message ID: <bd738f1c-45dc-57f1-77bf-8af1144ebcdc@vhr-dashboard.com>
+   ✅ Email de réponse envoyé avec succès
+   Message ID: <bd738f1c-45dc-57f1-77bf-8af1144ebcdc@vhr-dashboard-site.com>
 
 [5/5] Résumé...
       ✅ Connexion SMTP: OK
@@ -199,7 +199,7 @@ WORKFLOW COMPLET:
 4️⃣ Vérifier l'email de réponse
    Vérifier: Votre boîte email
    Attendre: 10-15 secondes
-   Vérifier: Email reçu de noreply@vhr-dashboard.com
+   Vérifier: Email reçu de noreply@vhr-dashboard-site.com
    
    Contenu:
    ├─ Sujet: "Réponse: Test Message"

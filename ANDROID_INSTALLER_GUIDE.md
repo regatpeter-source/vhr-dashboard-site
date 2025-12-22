@@ -425,7 +425,7 @@ echo "org.gradle.jvmargs=-Xmx4g" >> gradle.properties
 Besoin d'aide?
 - 📖 Lire `QUICK_START_TTS.md`
 - 📖 Lire `VHR_TTS_RECEIVER_APP.md`
-- 📧 Contacter: `contact@vhrdashboard.com`
+- 📧 Contacter: `contact@vhr-dashboard-site.com`
 
 ---
 

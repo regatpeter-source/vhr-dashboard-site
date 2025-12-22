@@ -152,7 +152,7 @@ SUPPORT:
 
 Documentation: Consultez QUICK_START.md ou DOCUMENTATION.md
 Contact: https://vhr-dashboard-site.onrender.com/contact.html
-Email: support@vhr-dashboard.com
+Email: support@vhr-dashboard-site.com
 
 
 VERSION: 2.0

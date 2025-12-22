@@ -305,4 +305,4 @@ Tout ce qu'il vous faut est en place. Il ne vous reste qu'à:
 **Version:** 1.0  
 **Date:** 2025-12-07  
 **Auteur:** VHR Dashboard Team  
-**Support:** contact@vhrdashboard.com
+**Support:** contact@vhr-dashboard-site.com

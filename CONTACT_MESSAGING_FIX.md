@@ -125,7 +125,7 @@ APRÈS (Fonctionnel):
       
       BREVO_SMTP_USER=9d4018001@smtp-brevo.com
       BREVO_SMTP_PASS=6E37aw1L4An2XcSZ
-      EMAIL_FROM=noreply@vhr-dashboard.com
+      EMAIL_FROM=noreply@vhr-dashboard-site.com
       EMAIL_ENABLED=true
 
    Si absent: Ajouter immédiatement
