@@ -3,25 +3,10 @@ $dir=Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $dir
 $port=3000;$max=5;$delay=3
 
-# Always clear FORCE_HTTP in this launcher so the server can démarrer en HTTPS
-$originalForceHttp = $env:FORCE_HTTP
-if ($originalForceHttp -eq '1') {
-	Write-Host "[Launcher] FORCE_HTTP=1 détecté dans l'environnement - suppression pour forcer le mode HTTPS" -ForegroundColor Yellow
-	$env:FORCE_HTTP = $null
-}
-
-# Detect whether local certificates are present
-$hasCert = (Test-Path (Join-Path $dir 'cert.pem')) -and (Test-Path (Join-Path $dir 'key.pem'))
-if ($hasCert) {
-	$protocol = 'https'
-	$dashboardUrl = "https://localhost:$port/vhr-dashboard-pro.html"
-} else {
-	$protocol = 'http'
-	$dashboardUrl = "http://localhost:$port/vhr-dashboard-pro.html"
-	Write-Host "[Launcher] ⚠️ Certificats introuvables (cert.pem + key.pem). Ouverture en HTTP." -ForegroundColor Yellow
-}
-
-Write-Host "[Launcher] Protocol sélectionné : $protocol (FORCE_HTTP initial=${originalForceHttp})"
+# Forcer toujours l'utilisation de HTTP pour le dashboard pro (nécessaire pour détecter les casques)
+$env:FORCE_HTTP = '1'
+$dashboardUrl = "http://localhost:$port/vhr-dashboard-pro.html"
+Write-Host "[Launcher] FORCED HTTP (FORCE_HTTP=1) – ouverture de $dashboardUrl"
 
 function t{try{(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction Stop).Count -gt 0}catch{$false}}
 function o{param($waitSeconds=2) Start-Sleep $waitSeconds;Start-Process $script:dashboardUrl}
