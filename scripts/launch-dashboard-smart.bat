@@ -9,7 +9,11 @@ echo.
 
 REM Project directory
 set "PROJECT_DIR=C:\Users\peter\VR-Manager"
+set "HTTP_LOCAL=https://localhost:3000/vhr-dashboard-pro.html"
 set "DASH_URL=http://localhost:3000/vhr-dashboard-pro.html"
+if exist "C:\Users\peter\VR-Manager\cert.pem" if exist "C:\Users\peter\VR-Manager\key.pem" (
+  set "DASH_URL=%HTTP_LOCAL%"
+)
 
 if not exist "!PROJECT_DIR!\package.json" (
   echo ERROR: Project not found at !PROJECT_DIR!
