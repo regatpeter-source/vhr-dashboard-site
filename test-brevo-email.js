@@ -70,7 +70,7 @@ async function testBrevoEmail() {
     const testEmail = process.env.TEST_EMAIL || 'test@example.com';
     
     const mailOptions = {
-      from: process.env.EMAIL_FROM || 'noreply@vhr-dashboard.com',
+      from: process.env.EMAIL_FROM || 'noreply@vhr-dashboard-site.com',
       to: testEmail,
       subject: '🧪 Test Email Brevo - VHR Dashboard',
       html: `
@@ -147,7 +147,7 @@ async function testBrevoEmail() {
   console.log('   - BREVO_SMTP_USER: (login Brevo)');
   console.log('   - BREVO_SMTP_PASS: (clé SMTP Brevo)');
   console.log('   - EMAIL_ENABLED: true');
-  console.log('   - EMAIL_FROM: noreply@vhr-dashboard.com');
+  console.log('   - EMAIL_FROM: noreply@vhr-dashboard-site.com');
   console.log('   - TEST_EMAIL: votre-email@gmail.com\n');
 
   console.log('2. Vos credentials Brevo:');

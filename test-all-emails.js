@@ -24,7 +24,7 @@ async function testAllEmails() {
   const emailPass = process.env.BREVO_SMTP_PASS || process.env.EMAIL_PASS;
   const emailHost = process.env.BREVO_SMTP_HOST || process.env.EMAIL_HOST || 'smtp-relay.brevo.com';
   const emailPort = parseInt(process.env.BREVO_SMTP_PORT || process.env.EMAIL_PORT || '587');
-  const emailFrom = process.env.EMAIL_FROM || 'noreply@vhr-dashboard.com';
+  const emailFrom = process.env.EMAIL_FROM || 'noreply@vhr-dashboard-site.com';
 
   // Test 1: Vérifier configuration
   console.log('[1/6] Vérification de la configuration Brevo...\n');
@@ -64,7 +64,7 @@ async function testAllEmails() {
   try {
     await transporter.sendMail({
       from: emailFrom,
-      to: process.env.ADMIN_EMAIL || 'admin@vhr-dashboard.com',
+      to: process.env.ADMIN_EMAIL || 'admin@vhr-dashboard-site.com',
       subject: '[TEST] Nouveau message de contact VHR Dashboard',
       html: `
         <div style="font-family: Arial, sans-serif; padding: 20px;">

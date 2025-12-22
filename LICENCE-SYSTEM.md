@@ -137,7 +137,7 @@ async function sendLicenseEmail(email, licenseKey, username) {
   // Template HTML avec gradient noir/vert
   // Clé de licence en grand au centre
   // Instructions d'activation
-  // Support: support@vhr-dashboard.com
+  // Support: support@vhr-dashboard-site.com
 }
 ```
 
@@ -419,7 +419,7 @@ STRIPE_WEBHOOK_SECRET=whsec_xxxxx
 JWT_SECRET=random-secret-256-bits
 EMAIL_HOST=smtp.gmail.com
 EMAIL_PORT=587
-EMAIL_USER=noreply@vhr-dashboard.com
+EMAIL_USER=noreply@vhr-dashboard-site.com
 EMAIL_PASS=app-password-here
 LICENSE_SECRET=another-random-secret
 ```
@@ -489,14 +489,14 @@ function migrateLicenses() {
 ### Documentation Utilisateur
 1. **FAQ** : Ajouter section dans `pricing.html`
 2. **Tutoriel** : Vidéo YouTube activation licence
-3. **Email Support** : `support@vhr-dashboard.com`
+3. **Email Support** : `support@vhr-dashboard-site.com`
 
 ### Email de Support Automatique
 ```javascript
 async function sendSupportEmail(userEmail, issue) {
   const mailOptions = {
     from: process.env.EMAIL_USER,
-    to: 'support@vhr-dashboard.com',
+    to: 'support@vhr-dashboard-site.com',
     subject: `Support VHR Dashboard - ${userEmail}`,
     html: `
       <h2>Nouveau ticket support</h2>

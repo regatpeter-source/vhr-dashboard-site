@@ -21,7 +21,7 @@
 
 Exemple:
 ```
-BREVO_SMTP_USER: contact@vhr-dashboard.com
+BREVO_SMTP_USER: contact@vhr-dashboard-site.com
 BREVO_SMTP_PASS: xxxxxxxxxxxxxxxxxxx
 ```
 
@@ -37,7 +37,7 @@ BREVO_SMTP_PASS: xxxxxxxxxxxxxxxxxxx
 BREVO_SMTP_USER = <ton-email-brevo>
 BREVO_SMTP_PASS = <ta-cle-smtp-brevo>
 EMAIL_ENABLED = true
-EMAIL_FROM = noreply@vhr-dashboard.com
+EMAIL_FROM = noreply@vhr-dashboard-site.com
 ```
 
 ### Étape 3: Redéployer

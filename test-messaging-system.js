@@ -18,7 +18,7 @@ async function testMessagingSystem() {
   const emailPass = process.env.BREVO_SMTP_PASS || process.env.EMAIL_PASS;
   const emailHost = process.env.BREVO_SMTP_HOST || process.env.EMAIL_HOST || 'smtp-relay.brevo.com';
   const emailPort = parseInt(process.env.BREVO_SMTP_PORT || process.env.EMAIL_PORT || '587');
-  const emailFrom = process.env.EMAIL_FROM || 'noreply@vhr-dashboard.com';
+  const emailFrom = process.env.EMAIL_FROM || 'noreply@vhr-dashboard-site.com';
 
   // Test 1: Vérifier la configuration
   console.log('[1/5] Vérification de la configuration SMTP...\n');
@@ -76,7 +76,7 @@ async function testMessagingSystem() {
     // Simuler l'email admin (celui qui reçoit le message)
     const adminEmailOptions = {
       from: emailFrom,
-      to: process.env.ADMIN_EMAIL || 'admin@vhr-dashboard.com',
+      to: process.env.ADMIN_EMAIL || 'admin@vhr-dashboard-site.com',
       subject: `Nouveau message de contact: ${testMessage.subject}`,
       html: `
         <div style="font-family: Arial, sans-serif; padding: 20px;">

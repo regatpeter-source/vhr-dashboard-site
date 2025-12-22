@@ -328,7 +328,7 @@ async function respondToMessage(messageId) {
   }
   
   // Add VHR Dashboard signature to response
-  const signature = `\n\n---\n📱 VHR Dashboard Support\nPeter Vhr Dashboard\nYour VR Management Solution\ncontact@vhrdashboard.com`;
+  const signature = `\n\n---\n📱 VHR Dashboard Support\nPeter Vhr Dashboard\nYour VR Management Solution\ncontact@vhr-dashboard-site.com`;
   const responseWithSignature = response + signature;
   
   console.log('[respond] Sending response for message', messageId);

@@ -103,15 +103,15 @@ Un système complet de paiement permettant:
 ```bash
 # === EMAIL ===
 EMAIL_ENABLED=true
-EMAIL_FROM=support@vhr-dashboard.com
+EMAIL_FROM=noreply@vhr-dashboard-site.com
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=votre-email@gmail.com
 SMTP_PASS=votre-mot-passe-app
 
 # Support et documentation
-SUPPORT_EMAIL=support@vhr-dashboard.com
-DOCUMENTATION_URL=https://docs.vhr-dashboard.com
+SUPPORT_EMAIL=support@vhr-dashboard-site.com
+DOCUMENTATION_URL=https://docs.vhr-dashboard-site.com
 DOWNLOAD_URL=http://localhost:3000/downloads/vhr-dashboard-demo.zip
 
 # === STRIPE ===
@@ -256,8 +256,8 @@ Mises à jour incluses jusqu'au: À jamais
 📋 PROCHAINES ÉTAPES
 1. Téléchargez le fichier ZIP
 2. Extrayez-le sur votre serveur
-3. Consultez la documentation: https://docs.vhr-dashboard.com
-4. Contactez le support: support@vhr-dashboard.com
+3. Consultez la documentation: https://docs.vhr-dashboard-site.com
+4. Contactez le support: support@vhr-dashboard-site.com
 
 Bienvenue dans VHR Dashboard!
 
@@ -289,7 +289,7 @@ Votre accès est activé maintenant: http://localhost:3000
 • Mettre à jour le paiement
 • Annuler l'abonnement
 
-Support: support@vhr-dashboard.com
+Support: support@vhr-dashboard-site.com
 
 Merci d'avoir choisi VHR Dashboard!
 

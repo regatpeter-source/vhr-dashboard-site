@@ -143,7 +143,7 @@ Cette licence est valide à vie.
 Conservez cette clé en lieu sûr.
 
 Besoin d'aide ?
-support@vhr-dashboard.com
+support@vhr-dashboard-site.com
 ```
 
 ---
@@ -305,7 +305,7 @@ STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 EMAIL_HOST=smtp.gmail.com
 EMAIL_PORT=587
-EMAIL_USER=noreply@vhr-dashboard.com
+EMAIL_USER=noreply@vhr-dashboard-site.com
 EMAIL_PASS=abcd efgh ijkl mnop
 LICENSE_SECRET=random-secret-256-bits
 JWT_SECRET=another-random-secret

@@ -58,7 +58,7 @@ async function testEmailService() {
   console.log('     EMAIL_ENABLED=true');
   console.log('     SMTP_USER=your-email@gmail.com');
   console.log('     SMTP_PASS=your-app-password');
-  console.log('     EMAIL_FROM=noreply@vhr-dashboard.com\n');
+  console.log('     EMAIL_FROM=noreply@vhr-dashboard-site.com\n');
 
   console.log('  2. Pour Gmail:');
   console.log('     - Activer "App Password": https://myaccount.google.com/apppasswords');

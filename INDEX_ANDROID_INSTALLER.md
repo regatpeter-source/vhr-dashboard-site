@@ -219,7 +219,7 @@ Code → Modifier → Compiler → Tester (répétition rapide)
 - 📖 Lire `ANDROID_INSTALLER_QUICKSTART.md` (3 min)
 - 📖 Lire `ANDROID_INSTALLER_GUIDE.md` (détails)
 - 🔧 Dépannage dans les guides
-- 📧 `contact@vhrdashboard.com`
+- 📧 `contact@vhr-dashboard-site.com`
 
 ---
 

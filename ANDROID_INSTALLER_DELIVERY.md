@@ -296,7 +296,7 @@ Modifier code → [🚀 Démarrer] → Tester → Répéter
 1. Lire `ANDROID_INSTALLER_QUICKSTART.md` (3 min)
 2. Consulter `ANDROID_INSTALLER_GUIDE.md` (20 min)
 3. Chercher dans `ANDROID_INSTALLER_DEPLOYMENT.md` (15 min)
-4. Contacter: `contact@vhrdashboard.com`
+4. Contacter: `contact@vhr-dashboard-site.com`
 
 ---
 

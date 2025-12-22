@@ -172,7 +172,7 @@ Message: {Full content}
 Visitor receives:
 ```
 Subject: Réponse: {Original Subject}
-From: system@vhr-dashboard.com
+From: system@vhr-dashboard-site.com
 
 Replied by: vhr
 Date replied: 2025-12-16 16:23:24
