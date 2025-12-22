@@ -3,13 +3,25 @@ $dir=Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $dir
 $port=3000;$max=5;$delay=3
 
-# Detect the correct protocol to open the dashboard with (HTTPS when certs exist and FORCE_HTTP≠1)
-$hasCert = (Test-Path (Join-Path $dir 'cert.pem')) -and (Test-Path (Join-Path $dir 'key.pem'))
-$forceHttp = $env:FORCE_HTTP -eq '1'
-if ($hasCert -and -not $forceHttp) { $protocol = 'https' } else { $protocol = 'http' }
-$dashboardUrl = "$protocol://localhost:$port/vhr-dashboard-pro.html"
+# Always clear FORCE_HTTP in this launcher so the server can démarrer en HTTPS
+$originalForceHttp = $env:FORCE_HTTP
+if ($originalForceHttp -eq '1') {
+	Write-Host "[Launcher] FORCE_HTTP=1 détecté dans l'environnement - suppression pour forcer le mode HTTPS" -ForegroundColor Yellow
+	$env:FORCE_HTTP = $null
+}
 
-Write-Host "[Launcher] Protocol sélectionné : $protocol (FORCE_HTTP=${forceHttp})"
+# Detect whether local certificates are present
+$hasCert = (Test-Path (Join-Path $dir 'cert.pem')) -and (Test-Path (Join-Path $dir 'key.pem'))
+if ($hasCert) {
+	$protocol = 'https'
+	$dashboardUrl = "https://localhost:$port/vhr-dashboard-pro.html"
+} else {
+	$protocol = 'http'
+	$dashboardUrl = "http://localhost:$port/vhr-dashboard-pro.html"
+	Write-Host "[Launcher] ⚠️ Certificats introuvables (cert.pem + key.pem). Ouverture en HTTP." -ForegroundColor Yellow
+}
+
+Write-Host "[Launcher] Protocol sélectionné : $protocol (FORCE_HTTP initial=${originalForceHttp})"
 
 function t{try{(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction Stop).Count -gt 0}catch{$false}}
 function o{param($waitSeconds=2) Start-Sleep $waitSeconds;Start-Process $script:dashboardUrl}
