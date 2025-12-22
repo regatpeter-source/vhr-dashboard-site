@@ -84,7 +84,7 @@ function Ensure-Server {
     return $true
 }
 
-$pingUrl = 'https://localhost:3000/ping'
+$pingUrl = 'http://localhost:3000/ping'
 $dashboardUrl = "http://localhost:3000/vhr-dashboard-pro.html"
 
 Write-Log '-----'
