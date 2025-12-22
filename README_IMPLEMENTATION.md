@@ -37,6 +37,14 @@ npm start
 http://localhost:3000
 ```
 
+### 🔐 Accès HTTPS local (pour Chrome/Edge)
+
+1. Exécutez une fois `npm run generate:cert` pour que `devcert` installe un certificat local de confiance et génère `cert.pem` / `key.pem` à la racine du projet.
+2. Redémarrez `node server.js` (ou `npm start`).
+3. Ouvrez ensuite `https://localhost:3000/vhr-dashboard-pro.html` pour bénéficier d'un certificat reconnu et éviter `ERR_CERT_AUTHORITY_INVALID`.
+
+> 💡 Si vous avez déjà un ancien certificat, supprimez `cert.pem` et `key.pem` puis relancez `npm run generate:cert`.
+
 ### 3️⃣ Utiliser le streaming audio
 
 - Sélectionner un casque

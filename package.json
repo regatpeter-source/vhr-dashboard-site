@@ -21,12 +21,14 @@
     "build-demo-apk": "node -e \"const os=require('os'); if(os.platform()==='win32'){ require('child_process').spawnSync('powershell',['-ExecutionPolicy','Bypass','-File','scripts/build-demo-apk.ps1'],{stdio:'inherit'});} else { require('child_process').spawnSync('bash',['scripts/build-demo-apk.sh'],{stdio:'inherit'}); }\"",
     "build:demo": "node scripts/package-demo.js",
     "build:demo:zip": "node scripts/package-demo.js zip",
-    "package:dashboard": "node scripts/package-dashboard.js"
+    "package:dashboard": "node scripts/package-dashboard.js",
+    "generate:cert": "node scripts/create-local-cert.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+    "devcert": "^1.2.2",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "helmet": "^7.1.0",
