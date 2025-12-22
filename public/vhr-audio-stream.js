@@ -476,7 +476,10 @@ class VHRAudioStream {
       
       mediaRecorder.ondataavailable = (event) => {
         if (relayWs.readyState === WebSocket.OPEN && event.data.size > 0) {
+          console.log('[VHR-AudioRelay] Sending chunk:', event.data.size, 'bytes');
           relayWs.send(event.data);
+        } else {
+          console.warn('[VHR-AudioRelay] Chunk not sent: ws not open or empty');
         }
       };
       

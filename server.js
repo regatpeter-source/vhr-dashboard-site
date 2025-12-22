@@ -1,3 +1,5 @@
+// ...existing code...
+// ...existing code...
 // ========== IMPORTS & INIT ========== 
 
 require('dotenv').config();
@@ -61,6 +63,21 @@ const os = require('os');
 // PostgreSQL database module
 const db = process.env.DATABASE_URL ? require('./db-postgres') : null;
 const USE_POSTGRES = !!process.env.DATABASE_URL;
+// ========== HTTPS SUPPORT (PRODUCTION) ==========
+let useHttps = false;
+let httpsOptions = {};
+try {
+  if (fs.existsSync('./cert.pem') && fs.existsSync('./key.pem')) {
+    httpsOptions = {
+      cert: fs.readFileSync('./cert.pem'),
+      key: fs.readFileSync('./key.pem')
+    };
+    useHttps = true;
+    console.log('[HTTPS] Certificat SSL détecté, le serveur va démarrer en HTTPS.');
+  }
+} catch (e) {
+  console.warn('[HTTPS] Erreur lors du chargement du certificat SSL:', e.message);
+}
 console.log(`[DB] Mode: ${USE_POSTGRES ? 'PostgreSQL' : 'JSON Files (Development)'}`);
 
 // ========== PROCESS TRACKING & CLEANUP ==========
@@ -1679,14 +1696,21 @@ app.post('/api/login', async (req, res) => {
   // On Render/production, always use secure HTTPS cookies
   // On localhost, allow insecure cookies for development
   const isLocalhost = req.hostname === 'localhost' || req.hostname === '127.0.0.1';
-  const cookieOptions = {
+  // En production (HTTPS), on force secure et SameSite=Strict pour la sécurité maximale
+  // En développement (localhost), on autorise HTTP pour faciliter les tests
+  const cookieOptions = isLocalhost ? {
     httpOnly: true,
     sameSite: 'lax',
-    secure: !isLocalhost,  // Only require HTTPS on production, allow HTTP on localhost
+    secure: false,
+    maxAge: 2 * 60 * 60 * 1000 // 2h
+  } : {
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: true,
     maxAge: 2 * 60 * 60 * 1000 // 2h
   };
   res.cookie('vhr_token', token, cookieOptions);
-  console.log('[api/login] cookie set with secure=' + !isLocalhost + ', maxAge=2h, isLocalhost=' + isLocalhost);
+  console.log('[api/login] cookie set with secure=' + cookieOptions.secure + ', sameSite=' + cookieOptions.sameSite + ', maxAge=2h, isLocalhost=' + isLocalhost);
   res.json({ ok: true, token, userId: user.id, username: user.username, role: user.role, email: user.email || null });
 });
 
@@ -4405,20 +4429,23 @@ function handleAudioWebSocket(serial, ws, req) {
       if (audioEntry.buffer.length > AUDIO_BUFFER_SIZE) {
         audioEntry.buffer.shift();
       }
-      
       // Relay audio chunk to all connected receivers
       const receivers = audioEntry.receivers;
       console.log(`[Audio] Sender relaying chunk (${data.length} bytes) to ${receivers.size} receiver(s)`);
-      
+      let sentCount = 0;
       for (const receiverWs of receivers) {
         if (receiverWs.readyState === WebSocket.OPEN) {
           try {
             receiverWs.send(data);
+            sentCount++;
           } catch (e) {
             console.error(`[Audio] Failed to send to receiver:`, e.message);
             receivers.delete(receiverWs);
           }
         }
+      }
+      if (sentCount === 0) {
+        console.warn('[Audio] No receivers got the chunk');
       }
     });
     
@@ -5108,7 +5135,31 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
   }
 
   try {
-    const server = serverUrl || 'http://localhost:3000';
+    // Correction : forcer l'utilisation de l'IP LAN si serverUrl est localhost ou absent
+    let server = serverUrl;
+    if (!server || server.includes('localhost') || server.includes('127.0.0.1')) {
+      // Tente de détecter l'IP LAN
+      const os = require('os');
+      let lanIp = null;
+      const ifaces = os.networkInterfaces();
+      for (const name of Object.keys(ifaces)) {
+        for (const iface of ifaces[name]) {
+          if (iface.family === 'IPv4' && !iface.internal) {
+            lanIp = iface.address;
+            break;
+          }
+        }
+        if (lanIp) break;
+      }
+      if (lanIp) {
+        server = `http://${lanIp}:3000`;
+        console.log(`[open-audio-receiver] Correction: IP LAN détectée pour receiver: ${server}`);
+      } else {
+        server = 'http://localhost:3000';
+        console.warn('[open-audio-receiver] Aucune IP LAN détectée, fallback sur localhost!');
+      }
+    }
+    console.log(`[open-audio-receiver] URL envoyée au Quest: ${server}/audio-receiver.html?serial=${encodeURIComponent(serial)}&autoconnect=true`);
     
     if (useBackgroundApp) {
       // Use VHR Voice app (background service) - doesn't interrupt games
@@ -5593,6 +5644,27 @@ io.on('connection', socket => {
 })();
 
 const PORT = process.env.PORT || 3000;
+if (useHttps) {
+  // Serveur HTTPS principal
+  const httpsServer = https.createServer(httpsOptions, app);
+  httpsServer.listen(PORT, () => {
+    console.log(`[Server] ✓ Running in HTTPS mode on https://localhost:${PORT}`);
+  });
+  // Serveur HTTP pour rediriger vers HTTPS
+  http.createServer((req, res) => {
+    const host = req.headers['host'] ? req.headers['host'].replace(/:.*/, ':' + PORT) : 'localhost:' + PORT;
+    res.writeHead(301, { "Location": `https://${host}${req.url}` });
+    res.end();
+  }).listen(80, () => {
+    console.log('[Server] HTTP -> HTTPS redirection active sur le port 80');
+  });
+} else {
+  // Mode HTTP classique (dev/local)
+  const server = http.createServer(app);
+  server.listen(PORT, () => {
+    console.log(`[Server] ✓ Running on http://localhost:${PORT}`);
+  });
+}
 
 // Start server after initializing app
 initializeApp().then(() => {

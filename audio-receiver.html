@@ -317,7 +317,7 @@
   <audio id="audioPlayer" crossorigin="anonymous"></audio>
   
   <script>
-    // ========== Configuration ==========
+    // ========== Configuration ========== 
     let ws = null;
     let audioContext = null;
     let analyser = null;
@@ -327,7 +327,7 @@
     let nextPlayTime = 0; // scheduling to avoid gaps
     let chunkQueue = [];
     let isProcessing = false;
-    
+
     const elements = {
       serverInput: document.getElementById('serverInput'),
       serialInput: document.getElementById('serialInput'),
@@ -339,6 +339,27 @@
       audioPlayer: document.getElementById('audioPlayer'),
       errorBox: document.getElementById('errorBox')
     };
+
+    // Détection automatique de l'IP du PC (backend)
+    async function autoDetectServerIP() {
+      // On tente de récupérer l'IP du serveur via une API dédiée
+      try {
+        const res = await fetch('/api/server-info');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.lanIp) {
+            // Préremplir le champ avec l'IP détectée
+            elements.serverInput.value = `ws://${data.lanIp}:3000`;
+            return;
+          }
+        }
+      } catch (e) {
+        // Silencieux, on garde la valeur par défaut
+      }
+      // Si on ne trouve pas, on laisse le champ vide et on affiche une alerte
+      elements.serverInput.value = '';
+      showError("Impossible de détecter l'adresse du serveur. Merci de la saisir manuellement (ex: ws://192.168.x.x:3000)");
+    }
     
     // ========== Initialization ==========
     
@@ -419,7 +440,12 @@
       const serial = elements.serialInput.value.trim();
       
       if (!server || !serial) {
-        showError('Please enter both server address and device serial');
+        showError('Merci de saisir l\'adresse du serveur (ex: ws://192.168.x.x:3000) et le numéro de série.');
+        return;
+      }
+      // Bloque toute connexion à localhost ou 127.0.0.1
+      if (server.includes('localhost') || server.includes('127.0.0.1')) {
+        showError('Connexion à localhost impossible depuis le casque. Merci de saisir l\'adresse IP locale du PC (ex: ws://192.168.x.x:3000)');
         return;
       }
       
@@ -520,6 +546,7 @@
       try {
         while (chunkQueue.length) {
           const buf = chunkQueue.shift();
+          console.log('[Receiver] Got chunk from queue:', buf.byteLength, 'bytes');
           await playAudioChunk(buf);
         }
       } finally {
@@ -531,10 +558,11 @@
     async function playAudioChunk(arrayBuffer) {
       try {
         if (!audioContext || !analyser || !gainNode) {
-          console.warn('AudioContext not ready');
+          console.warn('[Receiver] AudioContext not ready');
           return;
         }
         // Decode WebM/Opus chunk
+        console.log('[Receiver] Decoding chunk:', arrayBuffer.byteLength, 'bytes');
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
         const src = audioContext.createBufferSource();
         src.buffer = audioBuffer;
@@ -542,12 +570,13 @@
 
         // Schedule to avoid gaps: keep slight overlap safeguard
         const startAt = Math.max(audioContext.currentTime + 0.05, nextPlayTime); // 50ms safety lead
+        console.log('[Receiver] Scheduling chunk at', startAt, 'duration', audioBuffer.duration);
         src.start(startAt);
         const duration = audioBuffer.duration || (arrayBuffer.byteLength / (48000 * 2));
         nextPlayTime = startAt + duration * 0.995; // tiny overlap to prevent holes
 
       } catch (e) {
-        console.error('Failed to decode/play chunk, fallback to <audio> tag:', e);
+        console.error('[Receiver] Failed to decode/play chunk, fallback to <audio> tag:', e);
         try {
           const blob = new Blob([arrayBuffer], { type: 'audio/webm;codecs=opus' });
           const url = URL.createObjectURL(blob);
@@ -555,7 +584,7 @@
           elements.audioPlayer.play().catch(()=>{});
           setTimeout(() => URL.revokeObjectURL(url), 5000);
         } catch (ee) {
-          console.error('Fallback playback failed:', ee);
+          console.error('[Receiver] Fallback playback failed:', ee);
         }
       }
     }
@@ -596,7 +625,31 @@
     
     // Load saved serial on page load
     loadSerialFromStorage();
-    
+
+    // Détection automatique de l'IP serveur si localhost détecté ou sur Quest
+    window.addEventListener('DOMContentLoaded', () => {
+      // Si la page est ouverte sur localhost, on tente de rediriger automatiquement vers l'IP du PC
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      if (isLocalhost) {
+        // On tente de détecter l'IP du serveur et de rediriger
+        fetch('/api/server-info').then(async res => {
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.lanIp) {
+              // Reconstruit l'URL avec l'IP détectée
+              const newUrl = window.location.href.replace('localhost', data.lanIp).replace('127.0.0.1', data.lanIp);
+              window.location.href = newUrl;
+              return;
+            }
+          }
+          // Si pas d'IP, affiche une erreur
+          showError("Impossible de détecter l'adresse IP du serveur. Merci d'ouvrir cette page depuis l'adresse IP du PC (ex: http://192.168.x.x:3000/audio-receiver.html)");
+        });
+      } else if (elements.serverInput.value.includes('localhost') || elements.serverInput.value.includes('127.0.0.1') || !elements.serverInput.value) {
+        autoDetectServerIP();
+      }
+    });
+
     // Set initial state
     updateStatus('disconnected', 'Disconnected');
   </script>
