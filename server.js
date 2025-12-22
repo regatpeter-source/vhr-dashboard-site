@@ -64,6 +64,7 @@ const os = require('os');
 const db = process.env.DATABASE_URL ? require('./db-postgres') : null;
 const USE_POSTGRES = !!process.env.DATABASE_URL;
 // ========== HTTPS SUPPORT (PRODUCTION) ==========
+const FORCE_HTTP = process.env.FORCE_HTTP === '1';
 let useHttps = false;
 let httpsOptions = {};
 try {
@@ -77,6 +78,10 @@ try {
   }
 } catch (e) {
   console.warn('[HTTPS] Erreur lors du chargement du certificat SSL:', e.message);
+}
+if (useHttps && FORCE_HTTP) {
+  useHttps = false;
+  console.log('[HTTPS] FORCE_HTTP=1 détecté - démarrage forcé en HTTP malgré les certificats présents.');
 }
 console.log(`[DB] Mode: ${USE_POSTGRES ? 'PostgreSQL' : 'JSON Files (Development)'}`);
 
@@ -1643,6 +1648,37 @@ function removeUserByUsername(username) {
 const JWT_SECRET = process.env.JWT_SECRET || 'change_this_secret';
 const JWT_EXPIRES = '2h';
 
+function isSecureRequest(req) {
+  if (!req) return false;
+  if (req.secure) return true;
+  if (req.protocol === 'https') return true;
+  const xfProtoHeader = (req.headers && req.headers['x-forwarded-proto']) || '';
+  const xfProto = xfProtoHeader.split(',')[0].trim().toLowerCase();
+  if (xfProto === 'https') return true;
+  const cfVisitor = req.headers && req.headers['cf-visitor'];
+  if (typeof cfVisitor === 'string' && cfVisitor.toLowerCase().includes('"scheme":"https"')) {
+    return true;
+  }
+  return false;
+}
+
+function getCookieSecurityOptions(req) {
+  const secure = isSecureRequest(req);
+  return {
+    httpOnly: true,
+    sameSite: secure ? 'strict' : 'lax',
+    secure
+  };
+}
+
+function buildAuthCookieOptions(req, overrides = {}) {
+  return {
+    ...getCookieSecurityOptions(req),
+    maxAge: 2 * 60 * 60 * 1000,
+    ...overrides
+  };
+}
+
 // Suivi des jeux lancés (persistance en mémoire côté serveur)
 const runningAppState = {}; // { serial: [pkg1, pkg2, ...] }
 
@@ -1692,31 +1728,15 @@ app.post('/api/login', async (req, res) => {
   }
   console.log('[api/login] login successful for:', username);
   const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-  // Set cookie for better protection in browsers (httpOnly)
-  // On Render/production, always use secure HTTPS cookies
-  // On localhost, allow insecure cookies for development
-  const isLocalhost = req.hostname === 'localhost' || req.hostname === '127.0.0.1';
-  // En production (HTTPS), on force secure et SameSite=Strict pour la sécurité maximale
-  // En développement (localhost), on autorise HTTP pour faciliter les tests
-  const cookieOptions = isLocalhost ? {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: false,
-    maxAge: 2 * 60 * 60 * 1000 // 2h
-  } : {
-    httpOnly: true,
-    sameSite: 'strict',
-    secure: true,
-    maxAge: 2 * 60 * 60 * 1000 // 2h
-  };
+  const cookieOptions = buildAuthCookieOptions(req);
   res.cookie('vhr_token', token, cookieOptions);
-  console.log('[api/login] cookie set with secure=' + cookieOptions.secure + ', sameSite=' + cookieOptions.sameSite + ', maxAge=2h, isLocalhost=' + isLocalhost);
+  console.log('[api/login] cookie set with secure=' + cookieOptions.secure + ', sameSite=' + cookieOptions.sameSite + ', maxAge=' + cookieOptions.maxAge);
   res.json({ ok: true, token, userId: user.id, username: user.username, role: user.role, email: user.email || null });
 });
 
 // --- Route de logout (optionnelle, côté client il suffit de supprimer le token) ---
 app.post('/api/logout', (req, res) => {
-  res.clearCookie('vhr_token');
+  res.clearCookie('vhr_token', getCookieSecurityOptions(req));
   res.json({ ok: true });
 });
 
@@ -2223,15 +2243,7 @@ app.post('/api/auth/login', async (req, res) => {
   console.log('[api/auth/login] login successful for:', user.username);
   
   const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-  
-  // Set httpOnly cookie for better security in browsers
-  const isLocalhost = req.hostname === 'localhost' || req.hostname === '127.0.0.1';
-  const cookieOptions = {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: !isLocalhost,  // Only require HTTPS on production
-    maxAge: 2 * 60 * 60 * 1000 // 2h
-  };
+  const cookieOptions = buildAuthCookieOptions(req);
   res.cookie('vhr_token', token, cookieOptions);
   
   res.json({ 
@@ -2296,16 +2308,7 @@ app.post('/api/auth/register', async (req, res) => {
     
     // Create JWT token for automatic login
     const token = jwt.sign({ username: newUser.username, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-    
-    // Set httpOnly cookie
-    const isLocalhost = req.hostname === 'localhost' || req.hostname === '127.0.0.1';
-    const cookieOptions = {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: !isLocalhost,
-      maxAge: 2 * 60 * 60 * 1000 // 2h
-    };
-    res.cookie('vhr_token', token, cookieOptions);
+    res.cookie('vhr_token', token, buildAuthCookieOptions(req));
     
     res.json({ 
       ok: true, 
@@ -3558,7 +3561,7 @@ app.patch('/api/me', authMiddleware, async (req, res) => {
     try { console.log('[users] about to persist user', user && user.username); persistUser(user); console.log('[users] persist successful'); } catch (e) { console.error('[users] persist error', e && (e.stack || e.message)); }
     // If username changed, reissue JWT and cookie
     const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-    res.cookie('vhr_token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 2 * 60 * 60 * 1000 });
+    res.cookie('vhr_token', token, buildAuthCookieOptions(req));
     res.json({ ok: true, token, user: { username: user.username, role: user.role, email: user.email || null } });
   } catch (e) {
     console.error('[api] me patch:', e);
@@ -3587,7 +3590,7 @@ app.delete('/api/users/self', authMiddleware, async (req, res) => {
       removeUserByUsername(req.user.username);
     }
     
-    res.clearCookie('vhr_token');
+    res.clearCookie('vhr_token', getCookieSecurityOptions(req));
     res.json({ ok: true, message: 'Compte supprimé avec succès' });
   } catch (e) {
     console.error('[api] delete self:', e);
@@ -4084,7 +4087,8 @@ try {
 }
 
 // ---------- HTTP + Socket.IO ----------
-const server = http.createServer(app);
+// Create a single primary server instance (HTTP by default, HTTPS when certificates are available)
+const server = useHttps ? https.createServer(httpsOptions, app) : http.createServer(app);
 
 // Increase server timeout to prevent 408 errors
 server.timeout = 120000; // 2 minutes
@@ -5644,52 +5648,66 @@ io.on('connection', socket => {
 })();
 
 const PORT = process.env.PORT || 3000;
+const REDIRECT_PORT = Number(process.env.HTTP_REDIRECT_PORT || 80);
+let serverStarted = false;
+
 if (useHttps) {
-  // Serveur HTTPS principal
-  const httpsServer = https.createServer(httpsOptions, app);
-  httpsServer.listen(PORT, () => {
-    console.log(`[Server] ✓ Running in HTTPS mode on https://localhost:${PORT}`);
-  });
-  // Serveur HTTP pour rediriger vers HTTPS
+  // Serveur HTTP pour rediriger vers HTTPS (port personnalisable via HTTP_REDIRECT_PORT)
   http.createServer((req, res) => {
     const host = req.headers['host'] ? req.headers['host'].replace(/:.*/, ':' + PORT) : 'localhost:' + PORT;
     res.writeHead(301, { "Location": `https://${host}${req.url}` });
     res.end();
-  }).listen(80, () => {
-    console.log('[Server] HTTP -> HTTPS redirection active sur le port 80');
+  }).listen(REDIRECT_PORT, () => {
+    console.log(`[Server] HTTP -> HTTPS redirection active sur le port ${REDIRECT_PORT}`);
+  }).on('error', (err) => {
+    console.error(`[Server] Impossible de démarrer la redirection HTTP sur le port ${REDIRECT_PORT}:`, err.message);
   });
-} else {
-  // Mode HTTP classique (dev/local)
-  const server = http.createServer(app);
+}
+
+function logServerBanner(initializationFailed = false) {
+  if (initializationFailed) {
+    console.log(`\n[WARNING] Server running on port ${PORT} but initialization failed`);
+    console.log(`[INSTRUCTION] Run: curl -X POST http://localhost:${PORT}/api/admin/init-users\n`);
+    return;
+  }
+
+  const protocol = useHttps ? 'https' : 'http';
+  const protocolEmoji = useHttps ? 'ƒôñ' : 'ƒôí';
+  console.log(`\nVHR DASHBOARD - Optimisé Anti-Scintillement`);
+  console.log(`${protocolEmoji} Server: ${protocol}://localhost:${PORT}`);
+  console.log(`\nƒôè Profils disponibles (ADB screenrecord - stable):`);
+  console.log(`   · ultra-low: 320p, 600K (WiFi faible)`);
+  console.log(`   · low:       480p, 1.5M`);
+  console.log(`   • wifi:      640p, 2M (WiFi optimisé)`);
+  console.log(`   · default:   720p, 3M`);
+  console.log(`   · high:      1280p, 8M (USB)`);
+  console.log(`   · ultra:     1920p, 12M (USB uniquement)`);
+  console.log(`   Ô£à Pas de scintillement avec ADB natif`);
+  console.log(`\nCrop œil gauche activé par défaut\n`);
+}
+
+function startPrimaryServer(initializationFailed = false) {
+  if (serverStarted) return;
   server.listen(PORT, () => {
-    console.log(`[Server] ✓ Running on http://localhost:${PORT}`);
+    if (useHttps) {
+      console.log(`[Server] ✓ Running in HTTPS mode on https://localhost:${PORT}`);
+    } else {
+      console.log(`[Server] ✓ Running on http://localhost:${PORT}`);
+    }
+    logServerBanner(initializationFailed);
   });
+  serverStarted = true;
 }
 
 // Start server after initializing app
 initializeApp().then(() => {
-  server.listen(PORT, () => {
-    console.log(`\nVHR DASHBOARD - Optimisé Anti-Scintillement`);
-    console.log(`­ƒôí Server: http://localhost:${PORT}`);
-    console.log(`\n­ƒôè Profils disponibles (ADB screenrecord - stable):`);
-    console.log(`   · ultra-low: 320p, 600K (WiFi faible)`);
-    console.log(`   · low:       480p, 1.5M`);
-    console.log(`   • wifi:      640p, 2M (WiFi optimisé)`);
-    console.log(`   · default:   720p, 3M`);
-    console.log(`   · high:      1280p, 8M (USB)`);
-    console.log(`   · ultra:     1920p, 12M (USB uniquement)`);
-    console.log(`   Ô£à Pas de scintillement avec ADB natif`);
-    console.log(`\nCrop œil gauche activé par défaut\n`);
-  });
+  startPrimaryServer(false);
 }).catch(err => {
   console.error('[FATAL] Initialization failed:', err && err.message ? err.message : err);
   console.error('[FATAL] Stack:', err && err.stack);
   console.log('[INFO] Server will start anyway, but users table may not be initialized.');
   console.log('[INFO] To fix: POST to /api/admin/init-users once server is running');
-  server.listen(PORT, () => {
-    console.log(`\n[WARNING] Server running on port ${PORT} but initialization failed`);
-    console.log(`[INSTRUCTION] Run: curl -X POST http://localhost:${PORT}/api/admin/init-users\n`);
-  });
+  startPrimaryServer(true);
 });
 
 // Handler de fermeture propre
@@ -6002,8 +6020,7 @@ app.post('/api/register', async (req, res) => {
     }
     // create token and set cookie
     const token = jwt.sign({ username: newUser.username, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-    const cookieOptions = { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 2 * 60 * 60 * 1000 };
-    res.cookie('vhr_token', token, cookieOptions);
+    res.cookie('vhr_token', token, buildAuthCookieOptions(req));
     res.json({ ok: true, token, userId: newUser.id, username: newUser.username, role: newUser.role, email: newUser.email });
   } catch (e) {
     console.error('[api] register:', e);
