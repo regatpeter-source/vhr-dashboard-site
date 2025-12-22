@@ -1091,31 +1091,44 @@ window.sendVoiceToHeadset = async function(serial) {
 		try {
 			const serverUrl = resolvedServerUrl || window.location.origin;
 			console.log('[voice] Receiver serverUrl:', serverUrl);
-			console.log('[voice] Receiver serverUrl:', serverUrl);
 			showToast('📱 Activation du récepteur audio sur le casque...', 'info');
-			
-			// First try background app (doesn't pause games)
-			const openRes = await api('/api/device/open-audio-receiver', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ serial, serverUrl, useBackgroundApp: true }),
-				timeout: 35000 // align with adb 30s + margin
-			});
-			
-			if (openRes && openRes.ok) {
-				if (openRes.method === 'background-app' || openRes.method === 'background-app-activity') {
-					console.log('[sendVoiceToHeadset] Background voice app started');
-					showToast('✅ Audio en arrière-plan activé (jeu non interrompu)', 'success');
+
+					   // Ouvre la page receiver sur le PC (toujours)
+					   const receiverUrl = `${serverUrl}/audio-receiver.html?serial=${encodeURIComponent(serial)}&autoconnect=true`;
+					   // Si on est en production (pas localhost), on redirige dans l'onglet courant
+					   if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+						   window.location.href = receiverUrl;
+					   } else {
+						   // En dev, on ouvre dans un nouvel onglet pour ne pas gêner les tests
+						   window.open(receiverUrl, '_blank');
+					   }
+
+			// Essaie aussi d'ouvrir sur le Quest via ADB (optionnel)
+			try {
+				const openRes = await api('/api/device/open-audio-receiver', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ serial, serverUrl, useBackgroundApp: true }),
+					timeout: 35000 // align with adb 30s + margin
+				});
+
+				if (openRes && openRes.ok) {
+					if (openRes.method === 'background-app' || openRes.method === 'background-app-activity') {
+						console.log('[sendVoiceToHeadset] Background voice app started');
+						showToast('✅ Audio en arrière-plan activé (jeu non interrompu)', 'success');
+					} else {
+						console.log('[sendVoiceToHeadset] Audio receiver opened in browser:', openRes.url);
+						showToast('✅ Récepteur audio ouvert (navigateur)', 'success');
+					}
+				} else if (openRes && openRes.timeout) {
+					console.warn('[sendVoiceToHeadset] Audio receiver timeout');
+					showToast('⏳ Casque ne répond pas (ADB). Réveillez-le et vérifiez ADB.', 'warning');
 				} else {
-					console.log('[sendVoiceToHeadset] Audio receiver opened in browser:', openRes.url);
-					showToast('✅ Récepteur audio ouvert (navigateur)', 'success');
+					console.warn('[sendVoiceToHeadset] Failed to open audio receiver:', openRes);
+					showToast('⚠️ Installez VHR Voice app pour le mode arrière-plan', 'warning');
 				}
-			} else if (openRes && openRes.timeout) {
-				console.warn('[sendVoiceToHeadset] Audio receiver timeout');
-				showToast('⏳ Casque ne répond pas (ADB). Réveillez-le et vérifiez ADB.', 'warning');
-			} else {
-				console.warn('[sendVoiceToHeadset] Failed to open audio receiver:', openRes);
-				showToast('⚠️ Installez VHR Voice app pour le mode arrière-plan', 'warning');
+			} catch (openError) {
+				console.warn('[sendVoiceToHeadset] Could not open audio receiver on Quest:', openError);
 			}
 		} catch (openError) {
 			console.warn('[sendVoiceToHeadset] Could not open audio receiver:', openError);
@@ -1728,22 +1741,32 @@ function setLanOverride(ip) {
 async function resolveAudioServerUrl() {
 	const proto = window.location.protocol;
 	const port = window.location.port || 3000;
-	const host = window.location.hostname;
 	// 1) Manual override wins
 	const manual = getLanOverride();
 	if (manual) return `${proto}//${manual}:${port}`;
 
-	// 2) If not localhost, use current origin
-	if (host !== 'localhost' && host !== '127.0.0.1') return window.location.origin;
-
-	// 3) Try server-info (no prompt)
+	// 2) Toujours essayer de détecter l'IP LAN (jamais localhost)
 	const info = await getServerInfo();
 	if (info && info.lanIp) {
 		return `${proto}//${info.lanIp}:${info.port || port}`;
 	}
 
-	// 4) Fallback to origin without interrompre l'utilisateur
-	return window.location.origin;
+	// 3) Fallback: si pas d'IP, utiliser window.location.origin SAUF si localhost, auquel cas on bloque
+	const host = window.location.hostname;
+	if (host !== 'localhost' && host !== '127.0.0.1') return window.location.origin;
+	// Si on est encore sur localhost, on bloque explicitement
+	const msg = `🚫 <b>Fonction Voix bloquée</b><br><br>
+	Pour utiliser la fonction Voix, ouvrez le dashboard via l'adresse IP locale de votre PC <b>en HTTPS</b>.<br>
+	<span style='color:#1abc9c;font-weight:bold;'>Exemple d'adresse complète à saisir :</span><br>
+	<span style='background:#23272f;padding:6px 14px;border-radius:6px;color:#fff;font-size:17px;display:inline-block;margin:10px 0;'>https://192.168.1.42:3000/vhr-dashboard-pro.html</span><br>
+	(remplacez 192.168.1.42 par l'IP de votre PC)<br><br>
+	<b>Ne pas utiliser localhost, 127.0.0.1 ou http://</b>.<br><br>
+	<span style='color:#e67e22;'>Pourquoi ?</span> Le Quest et les autres appareils du réseau ne peuvent pas accéder à localhost, et la sécurité du navigateur exige HTTPS pour toutes les fonctions avancées.<br><br>
+	<span style='color:#95a5a6;'>Astuce : Ajoutez l'adresse IP complète en <b>https</b> à vos favoris pour un accès rapide.<br>Si vous tombez sur la page vitrine, ajoutez <b>/vhr-dashboard-pro.html</b> à l'adresse.</span>`;
+	const div = document.createElement('div');
+	div.innerHTML = `<div style='position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;'><div style='background:#1a1d24;border:3px solid #e74c3c;border-radius:16px;padding:40px;max-width:500px;width:95%;color:#fff;font-size:17px;text-align:center;box-shadow:0 8px 32px #000;'>${msg}<br><br><button style='margin-top:24px;padding:12px 24px;background:#2ecc71;color:#000;border:none;border-radius:8px;font-weight:bold;font-size:16px;cursor:pointer;' onclick='this.parentNode.parentNode.remove()'>OK</button></div></div>`;
+	document.body.appendChild(div);
+	throw new Error('Dashboard ouvert sur localhost, impossible de lancer la voix sur le Quest.');
 }
 
 async function syncRunningAppsFromServer() {
