@@ -38,8 +38,8 @@ if exist "!SHORTCUT_PATH!" (
   echo SUCCESS! Shortcut created on Desktop
   echo.
   echo You can now:
-  echo  1. Double-click "VHR Dashboard" on your Desktop
-  echo  2. OR add http://localhost:3000/vhr-dashboard-pro.html to browser favorites
+  echo  1. Double-click "VHR Dashboard" on your Desktop (ouvre http://localhost:3000)
+  echo  2. Utiliser le bouton Voix dans le dashboard si vous avez besoin de l'URL IP locale pour le Quest
   echo.
   timeout /t 3 /nobreak
 ) else (

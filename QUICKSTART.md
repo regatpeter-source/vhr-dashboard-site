@@ -59,7 +59,8 @@ npm start
 ```
 
 ### Access Dashboard URL:
-- `http://localhost:3000/vhr-dashboard-pro.html`
+- `http://localhost:3000/vhr-dashboard-pro.html` (par défaut)
+- Pour les casques qui ne peuvent pas voir `localhost`, cliquez sur le bouton **Voix** dans le dashboard : il ouvre automatiquement l'URL LAN nécessaire.
 
 ### Stop Server:
 - Close the server command window or press Ctrl+C

@@ -91,7 +91,7 @@ Vous devriez voir l'app sur le casque avec:
 ### **Test 1: Via cURL** (30 sec)
 
 ```bash
-# Depuis le terminal de votre PC:
+# Depuis le terminal de votre PC (serveur local):
 curl -X POST http://localhost:3000/api/tts/send \
   -H "Content-Type: application/json" \
   -d '{
@@ -108,7 +108,8 @@ curl -X POST http://localhost:3000/api/tts/send \
 ### **Test 2: Via Dashboard** (1 min)
 
 1. Ouvrir `http://localhost:3000/vhr-dashboard-pro.html`
-2. Scroller jusqu'à "🎙️ Envoyeur de Voix"
+2. (Optionnel) Cliquez sur le bouton **Voix** pour ouvrir automatiquement la version IP/LAN si vous utilisez un Quest.
+3. Scroller jusqu'à "🎙️ Envoyeur de Voix"
 3. Saisir: "Bienvenue sur VHR"
 4. Cliquer "📤 Envoyer au casque"
 5. Écouter le casque prononcer
@@ -133,7 +134,7 @@ adb shell ps | grep com.vhr.dashboard
 # Terminal 1: Lancer les logs
 adb logcat | grep TtsReceiver
 
-# Terminal 2: Envoyer un message
+# Terminal 2: Envoyer un message (local)
 curl -X POST http://localhost:3000/api/tts/send \
   -H "Content-Type: application/json" \
   -d '{"serial": "192.168.1.28:5555", "text": "Test"}'

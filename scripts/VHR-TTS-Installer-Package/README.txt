@@ -140,7 +140,7 @@ L'app est maintenant installee!
 
 Pour utiliser la fonction voix:
 
-1. Ouvrez le Dashboard: http://localhost:3000/vhr-dashboard-pro.html
+1. Ouvrez le Dashboard: http://localhost:3000/vhr-dashboard-pro.html (le bouton "🗣️ Voix" ouvre la version LAN si votre casque est sur le réseau)
 2. Allez a: "Envoyeur de Voix"
 3. Entrez un texte
 4. Cliquez: "Envoyer au casque"

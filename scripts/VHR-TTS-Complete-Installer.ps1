@@ -408,7 +408,7 @@ function Test-Installation {
             Write-Success "L'app TTS est installée sur le casque"
             Write-Info ""
             Write-Info "Prochaines étapes:"
-            Write-Info "  1. Ouvrez le Dashboard: http://localhost:3000/vhr-dashboard-pro.html"
+            Write-Info "  1. Ouvrez le Dashboard: http://localhost:3000/vhr-dashboard-pro.html (le bouton '🗣️ Voix' ouvre la version LAN si nécessaire)"
             Write-Info "  2. Allez à la section 'Envoyeur de Voix'"
             Write-Info "  3. Entrez un texte et cliquez 'Envoyer au casque'"
             Write-Info "  4. Écoutez le casque prononcer le texte!"

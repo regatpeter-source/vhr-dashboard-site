@@ -202,7 +202,7 @@ curl -X POST http://localhost:3000/api/tts/send \
 ```
 
 ### Test 3: Via le Dashboard
-1. Ouvrez: http://localhost:3000/vhr-dashboard-pro.html
+1. Ouvrez: http://localhost:3000/vhr-dashboard-pro.html (le bouton "🗣️ Voix" ouvre automatiquement l'adresse LAN quand nécessaire)
 2. Allez à: "🎙️ Envoyeur de Voix"
 3. Entrez: "Bienvenue sur VHR"
 4. Cliquez: "Envoyer au casque"

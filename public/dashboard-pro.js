@@ -1738,6 +1738,24 @@ function setLanOverride(ip) {
 	return '';
 }
 
+async function promptLanRedirectForVoice() {
+	const info = await getServerInfo();
+	const port = (info && info.port) || window.location.port || 3000;
+	const proto = window.location.protocol === 'https:' ? 'https:' : 'http:';
+	const lanIp = info && info.lanIp ? info.lanIp : '';
+	const fallbackHost = window.location.hostname || 'localhost';
+	const targetHost = lanIp || fallbackHost;
+	const lanUrl = `${proto}//${targetHost}:${port}/vhr-dashboard-pro.html`;
+	if (lanIp) {
+		try {
+			window.open(lanUrl, '_blank', 'noopener,noreferrer');
+		} catch (e) {
+			console.warn('[voice] window.open blocked', e);
+		}
+	}
+	return lanUrl;
+}
+
 async function resolveAudioServerUrl() {
 	const proto = window.location.protocol;
 	const port = window.location.port || 3000;
@@ -1755,14 +1773,13 @@ async function resolveAudioServerUrl() {
 	const host = window.location.hostname;
 	if (host !== 'localhost' && host !== '127.0.0.1') return window.location.origin;
 	// Si on est encore sur localhost, on bloque explicitement
-	const msg = `🚫 <b>Fonction Voix bloquée</b><br><br>
-	Pour utiliser la fonction Voix, ouvrez le dashboard via l'adresse IP locale de votre PC <b>en HTTPS</b>.<br>
-	<span style='color:#1abc9c;font-weight:bold;'>Exemple d'adresse complète à saisir :</span><br>
-	<span style='background:#23272f;padding:6px 14px;border-radius:6px;color:#fff;font-size:17px;display:inline-block;margin:10px 0;'>https://192.168.1.42:3000/vhr-dashboard-pro.html</span><br>
-	(remplacez 192.168.1.42 par l'IP de votre PC)<br><br>
-	<b>Ne pas utiliser localhost, 127.0.0.1 ou http://</b>.<br><br>
-	<span style='color:#e67e22;'>Pourquoi ?</span> Le Quest et les autres appareils du réseau ne peuvent pas accéder à localhost, et la sécurité du navigateur exige HTTPS pour toutes les fonctions avancées.<br><br>
-	<span style='color:#95a5a6;'>Astuce : Ajoutez l'adresse IP complète en <b>https</b> à vos favoris pour un accès rapide.<br>Si vous tombez sur la page vitrine, ajoutez <b>/vhr-dashboard-pro.html</b> à l'adresse.</span>`;
+	const lanUrl = await promptLanRedirectForVoice();
+	const msg = `🚫 <b>Fonction Voix indisponible depuis localhost</b><br><br>
+	Nous venons d'ouvrir (ou tenter d'ouvrir) un nouvel onglet vers:<br>
+	<span style='background:#23272f;padding:6px 14px;border-radius:6px;color:#fff;font-size:17px;display:inline-block;margin:10px 0;'>${lanUrl}</span><br>
+	Utilisez cette adresse sur votre navigateur ou votre casque pour profiter de la Voix.<br><br>
+	<b>Pourquoi ?</b> Le Quest et vos appareils réseau ne peuvent pas accéder à <code>localhost</code>, et les fonctions audio exigent l'IP réelle du PC.<br><br>
+	<span style='color:#95a5a6;'>Astuce : Ajoutez l'adresse IP complète à vos favoris pour la retrouver instantanément.<br>Si vous retombez sur la vitrine, ajoutez <b>/vhr-dashboard-pro.html</b> à la fin.</span>`;
 	const div = document.createElement('div');
 	div.innerHTML = `<div style='position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;'><div style='background:#1a1d24;border:3px solid #e74c3c;border-radius:16px;padding:40px;max-width:500px;width:95%;color:#fff;font-size:17px;text-align:center;box-shadow:0 8px 32px #000;'>${msg}<br><br><button style='margin-top:24px;padding:12px 24px;background:#2ecc71;color:#000;border:none;border-radius:8px;font-weight:bold;font-size:16px;cursor:pointer;' onclick='this.parentNode.parentNode.remove()'>OK</button></div></div>`;
 	document.body.appendChild(div);

@@ -66,7 +66,7 @@ Le scintillement du stream vidéo du dashboard pro a été **éliminé** grâce 
 ```bash
 cd C:\Users\peter\VR-Manager
 node server.js
-# Puis ouvrir http://localhost:3000/vhr-dashboard-pro.html
+# Puis ouvrir http://localhost:3000/vhr-dashboard-pro.html (le bouton "🗣️ Voix" ouvre automatiquement l'URL LAN si nécessaire)
 ```
 
 ---

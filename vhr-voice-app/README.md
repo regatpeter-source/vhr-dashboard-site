@@ -44,9 +44,9 @@ Quand vous cliquez sur "🎤 Envoyer Voix" dans le dashboard, l'app sera automat
 
 ### Méthode 2: Via ADB (manuel)
 
-**Démarrer la réception audio:**
+**Démarrer la réception audio (manuelle):**
 ```powershell
-adb shell am broadcast -a com.vhr.voice.START --es serverUrl "http://192.168.1.3:3000" --es serial "VOTRE_SERIAL"
+adb shell am broadcast -a com.vhr.voice.START --es serverUrl "http://<LAN_IP>:3000" --es serial "VOTRE_SERIAL"
 ```
 
 **Arrêter la réception audio:**
@@ -57,7 +57,7 @@ adb shell am broadcast -a com.vhr.voice.STOP
 ### Méthode 3: Via l'app (interface)
 
 1. Ouvrez "VHR Voice" depuis la bibliothèque d'apps Quest
-2. Entrez l'URL du serveur (ex: `http://192.168.1.3:3000`)
+2. Entrez l'URL du serveur (par exemple `http://<LAN_IP>:3000`). Copiez l'adresse LAN affichée par le bouton **🗣️ Voix** du dashboard pour que le Quest puisse y accéder.
 3. Entrez le numéro de série du casque
 4. Cliquez sur "Démarrer la réception"
 5. Retournez dans votre jeu - l'audio continuera en arrière-plan

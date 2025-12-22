@@ -215,7 +215,7 @@ activateLicense() → POST /api/license/activate
 rm data/demo-status.json
 
 # 2. Ouvrir dashboard
-http://localhost:3000/vhr-dashboard-pro.html
+http://localhost:3000/vhr-dashboard-pro.html (utilisez le bouton "🗣️ Voix" pour accéder automatiquement à la version LAN si nécessaire)
 
 # 3. Vérifier
 ✅ Bannière "7 jours restants"
