@@ -83,6 +83,36 @@ let userList = JSON.parse(localStorage.getItem('vhr_user_list') || '[]');
 let userRoles = JSON.parse(localStorage.getItem('vhr_user_roles') || '{}');
 let licenseKey = localStorage.getItem('vhr_license_key') || '';
 let licenseStatus = { licensed: false, trial: false, expired: false };
+const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
+
+function readAuthToken() {
+	return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
+}
+
+function saveAuthToken(token) {
+	if (token && token.trim()) {
+		localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token.trim());
+		return token.trim();
+	}
+	localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+	return '';
+}
+
+function captureTokenFromQuery() {
+	if (!window || !window.location || !window.history) return;
+	const params = new URLSearchParams(window.location.search || '');
+	const tokenParam = params.get('token') || params.get('vhr_token');
+	if (!tokenParam) return;
+	saveAuthToken(tokenParam);
+	params.delete('token');
+	params.delete('vhr_token');
+	const baseUrl = window.location.origin + window.location.pathname;
+	const search = params.toString();
+	const newUrl = `${baseUrl}${search ? ('?' + search) : ''}${window.location.hash || ''}`;
+	window.history.replaceState(null, document.title, newUrl);
+}
+
+captureTokenFromQuery();
 
 // ========== NAVBAR ========== 
 function createNavbar() {
@@ -1726,6 +1756,19 @@ async function getServerInfo() {
 	return null;
 }
 
+async function buildLanDashboardUrl() {
+	const info = await getServerInfo();
+	const port = (info && info.port) || window.location.port || 3000;
+	const proto = 'http:'; // LAN access requires HTTP to avoid SSL errors on local IPs
+	const lanIp = info && info.lanIp ? info.lanIp : '';
+	const fallbackHost = window.location.hostname || 'localhost';
+	const targetHost = lanIp || fallbackHost;
+	const baseUrl = `${proto}//${targetHost}:${port}/vhr-dashboard-pro.html`;
+	const storedToken = readAuthToken();
+	const url = storedToken ? `${baseUrl}?token=${encodeURIComponent(storedToken)}` : baseUrl;
+	return { url, lanIp };
+}
+
 function getLanOverride() {
 	return localStorage.getItem(VOICE_LAN_OVERRIDE_KEY) || '';
 }
@@ -1739,13 +1782,7 @@ function setLanOverride(ip) {
 }
 
 async function promptLanRedirectForVoice() {
-	const info = await getServerInfo();
-	const port = (info && info.port) || window.location.port || 3000;
-	const proto = window.location.protocol === 'https:' ? 'https:' : 'http:';
-	const lanIp = info && info.lanIp ? info.lanIp : '';
-	const fallbackHost = window.location.hostname || 'localhost';
-	const targetHost = lanIp || fallbackHost;
-	const lanUrl = `${proto}//${targetHost}:${port}/vhr-dashboard-pro.html`;
+	const { url: lanUrl, lanIp } = await buildLanDashboardUrl();
 	if (lanIp) {
 		try {
 			window.open(lanUrl, '_blank', 'noopener,noreferrer');
@@ -1754,6 +1791,24 @@ async function promptLanRedirectForVoice() {
 		}
 	}
 	return lanUrl;
+}
+
+async function openVoiceDashboardLanLink() {
+	try {
+		const { url, lanIp } = await buildLanDashboardUrl();
+		if (lanIp) {
+			showToast('🗺️ IP LAN détectée — ouverture du dashboard', 'info');
+			window.open(url, '_blank', 'noopener,noreferrer');
+			return url;
+		}
+
+		showToast('⚠️ IP LAN introuvable, ouverture du dashboard via l’hôte actuel', 'warning');
+		window.open(url, '_blank', 'noopener,noreferrer');
+		return url;
+	} catch (e) {
+		console.error('[voice] openVoiceDashboardLanLink failed', e);
+		showToast('❌ Impossible d’ouvrir l’URL de la voix: ' + (e.message || 'erreur inconnue'), 'error');
+	}
 }
 
 async function resolveAudioServerUrl() {
@@ -1821,6 +1876,13 @@ async function api(path, opts = {}) {
 		// Include cookies in request (for httpOnly vhr_token cookie)
 		if (!opts.credentials) {
 			opts.credentials = 'include';
+		}
+		const storedToken = readAuthToken();
+		if (storedToken) {
+			opts.headers = {
+				...(opts.headers || {}),
+				Authorization: 'Bearer ' + storedToken
+			};
 		}
 
 		// Timeout support
@@ -2036,7 +2098,7 @@ function renderDevicesTable() {
 				<button onclick='showFavoritesDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#e67e22;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin-top:4px;'>⭐ Favoris</button>
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='background:#1abc9c;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>🎤 Envoyer Voix</button>
+				<button onclick='openVoiceDashboardLanLink()' style='background:#16a085;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;'>🗣️ Voix LAN</button>
 				<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:11px;margin-left:4px;' title='Installer VHR Voice App'>📲</button>
 			</td>
 			<td style='padding:12px;text-align:center;'>
@@ -2134,7 +2196,7 @@ function renderDevicesCards() {
 				<button onclick='showFavoritesDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#e67e22;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>⭐ Favoris</button>
 			</div>
 			<div style='display:flex;gap:6px;margin-bottom:6px;'>
-				<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='flex:1;background:#1abc9c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;'>🎤 Voix PC→Casque</button>
+				<button onclick='openVoiceDashboardLanLink()' style='flex:1;background:#16a085;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;'>🗣️ Voix LAN</button>
 				<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:10px 12px;border-radius:6px;cursor:pointer;' title='Installer VHR Voice App'>📲</button>
 			</div>
 			${!d.serial.includes(':') ? `
@@ -3604,6 +3666,10 @@ window.activateLicense = async function() {
 window.showAuthModal = function(mode = 'login') {
 	let modal = document.getElementById('authModal');
 	if (modal) modal.remove();
+	const overlay = document.getElementById('authOverlay');
+	if (overlay) {
+		overlay.style.display = 'none';
+	}
 	
 	modal = document.createElement('div');
 	modal.id = 'authModal';
@@ -3697,8 +3763,14 @@ window.switchAuthTab = function(tab) {
 };
 
 window.loginUser = async function() {
-	const identifier = document.getElementById('loginIdentifier').value.trim();
-	const password = document.getElementById('loginPassword').value;
+	const identifierInput = document.getElementById('loginIdentifier') || document.getElementById('loginUserName');
+	const passwordInput = document.getElementById('loginPassword') || document.getElementById('loginUserPass');
+	if (!identifierInput || !passwordInput) {
+		showToast('🔐 Impossible de trouver les champs de connexion', 'error');
+		return;
+	}
+	const identifier = identifierInput.value.trim();
+	const password = passwordInput.value;
 	
 	if (!identifier || !password) {
 		showToast('❌ Identifiant et mot de passe requis', 'error');
@@ -3730,6 +3802,9 @@ window.loginUser = async function() {
 		}
 		
 		if (res.ok && data.ok) {
+			if (data.token) {
+				saveAuthToken(data.token);
+			}
 			showToast('✅ Connecté avec succès !', 'success');
 			currentUser = data.user?.name || data.user?.username || data.user?.email || identifier;
 			localStorage.setItem('vhr_current_user', currentUser);
@@ -3783,6 +3858,9 @@ window.registerUser = async function() {
 		const data = await res.json();
 		
 		if (res.ok && data.ok) {
+			if (data.token) {
+				saveAuthToken(data.token);
+			}
 			// JWT token is now in httpOnly cookie
 			// Trial period starts now (set by server)
 			const trialStart = new Date();

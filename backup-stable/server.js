@@ -98,19 +98,19 @@ const LICENSES_FILE = path.join(__dirname, 'data', 'licenses.json');
 
 // ========== EMAIL CONFIGURATION ==========
 const emailTransporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.EMAIL_PORT) || 587,
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: parseInt(process.env.SMTP_PORT) || 587,
   secure: process.env.EMAIL_SECURE === 'true' ? true : false,
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASSWORD
   },
   logger: true,  // Enable logging
   debug: true    // Show debug info
 });
 
 // Verify email configuration at startup
-if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+if (process.env.SMTP_USER && process.env.SMTP_PASSWORD) {
   emailTransporter.verify((err, success) => {
     if (err) {
       console.error('[email] Configuration error - SMTP verification failed:', err.message);
