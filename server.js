@@ -628,7 +628,10 @@ app.use(helmet({
       baseUri: ["'self'"],
       formAction: ["'self'"]
     }
-  }
+  },
+  crossOriginOpenerPolicy: false,
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: false
 }));
 // Set a friendlier referrer policy - allows third-party services like Google Translate
 // to work without CSP warnings
@@ -774,24 +777,40 @@ function findActiveLicenseByUsername(username) {
   return licenses.find(l => l.username === username && l.status === 'active');
 }
 
-// Send contact message to admin email
+// Send contact message to inbox (admin/support)
 async function sendContactMessageToAdmin(msg) {
-  const adminEmail = process.env.EMAIL_USER;
-  if (!adminEmail) {
-    console.error('[email] EMAIL_USER not configured, cannot send contact notification');
+  // Where the notification should be delivered (a real mailbox)
+  // NOTE: BREVO_SMTP_USER is a credential, not necessarily a mailbox you read.
+  const inboxEmail =
+    process.env.CONTACT_INBOX_EMAIL ||
+    process.env.CONTACT_TO ||
+    process.env.EMAIL_TO ||
+    process.env.ADMIN_EMAIL ||
+    process.env.EMAIL_USER;
+
+  if (!inboxEmail) {
+    console.error('[email] No inbox recipient configured for contact notifications');
+    console.error('[email] Set CONTACT_INBOX_EMAIL (recommended) or EMAIL_TO/ADMIN_EMAIL');
     return false;
   }
-  
-  if (!process.env.EMAIL_PASS) {
-    console.error('[email] EMAIL_PASS not configured, cannot send contact notification');
+
+  // Use resolved credentials (supports BREVO_SMTP_* or EMAIL_*)
+  if (!emailUser || !emailPass) {
+    console.error('[email] SMTP credentials not configured, cannot send contact notification');
+    console.error('[email] Configure: BREVO_SMTP_USER/BREVO_SMTP_PASS (or EMAIL_USER/EMAIL_PASS)');
     return false;
   }
-  
-  console.log('[email] Preparing contact message to:', adminEmail, 'from:', msg.email);
-  
+
+  if (!emailTransporter) {
+    console.error('[email] emailTransporter not initialized, cannot send contact notification');
+    return false;
+  }
+
+  console.log('[email] Preparing contact notification to:', inboxEmail, 'replyTo:', msg.email);
+
   const mailOptions = {
-    from: adminEmail,
-    to: adminEmail,
+    from: process.env.EMAIL_FROM || process.env.EMAIL_USER || emailUser,
+    to: inboxEmail,
     replyTo: msg.email,
     subject: `📩 [VHR Contact] ${msg.subject}`,
     html: `
@@ -841,8 +860,8 @@ async function sendReplyToContact(originalMessage, replyText, repliedBy) {
   console.log('[email] Recipient email:', recipientEmail);
   console.log('[email] Reply text length:', replyText ? replyText.length : 0);
   console.log('[email] Replied by:', repliedBy);
-  console.log('[email] EMAIL_USER configured:', !!process.env.EMAIL_USER);
-  console.log('[email] EMAIL_PASS configured:', !!process.env.EMAIL_PASS);
+  console.log('[email] SMTP user configured:', !!emailUser);
+  console.log('[email] SMTP pass configured:', !!emailPass);
   console.log('[email] EMAIL_FROM:', process.env.EMAIL_FROM || 'not set');
   
   if (!recipientEmail) {
@@ -850,8 +869,8 @@ async function sendReplyToContact(originalMessage, replyText, repliedBy) {
     return false;
   }
 
-  if (!process.env.EMAIL_PASS) {
-    console.error('[email] ✗ EMAIL_PASS not configured, cannot send reply');
+  if (!emailUser || !emailPass) {
+    console.error('[email] ✗ SMTP credentials not configured, cannot send reply');
     return false;
   }
 
@@ -863,7 +882,7 @@ async function sendReplyToContact(originalMessage, replyText, repliedBy) {
   console.log('[email] → Preparing reply to:', recipientEmail);
 
   const mailOptions = {
-    from: process.env.EMAIL_USER || process.env.EMAIL_FROM || 'noreply@vhr-dashboard.local',
+    from: process.env.EMAIL_FROM || process.env.EMAIL_USER || emailUser || 'noreply@vhr-dashboard.local',
     to: recipientEmail,
     subject: `Réponse: ${originalMessage.subject}`,
     html: `
@@ -1684,9 +1703,12 @@ const runningAppState = {}; // { serial: [pkg1, pkg2, ...] }
 
 // --- Middleware de vérification du token ---
 function authMiddleware(req, res, next) {
-  // Accept token from Authorization header (Bearer) OR cookie 'vhr_token'
+  // Accept token from querystring, Authorization header (Bearer), or cookie 'vhr_token'
   let token = null;
-  if (req.headers && req.headers.authorization && req.headers.authorization.split(' ')[1]) {
+  const queryToken = (req.query && (req.query.token || req.query.vhr_token)) || null;
+  if (queryToken) {
+    token = queryToken;
+  } else if (req.headers && req.headers.authorization && req.headers.authorization.split(' ')[1]) {
     token = req.headers.authorization.split(' ')[1];
   } else if (req.cookies && req.cookies.vhr_token) {
     token = req.cookies.vhr_token;
@@ -3921,10 +3943,10 @@ app.post('/api/contact', async (req, res) => {
     if (emailSent) {
       console.log('[contact] ✓ Email forwarded to admin');
     } else {
-      console.warn('[contact] ⚠️ Email NOT sent (check EMAIL_USER/EMAIL_PASS in .env)');
+      console.warn('[contact] ⚠️ Email NOT sent (check BREVO_SMTP_* or EMAIL_* and CONTACT_INBOX_EMAIL in .env)');
     }
     
-    res.json({ ok: true, message: 'Message reçu. Nous vous répondrons bientôt.' });
+    res.json({ ok: true, message: 'Message reçu. Nous vous répondrons bientôt.', emailSent: !!emailSent });
   } catch (e) {
     console.error('[api] contact error:', e);
     res.status(500).json({ ok: false, error: String(e) });

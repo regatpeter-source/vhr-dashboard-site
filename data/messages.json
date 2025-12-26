@@ -31,5 +31,14 @@
     "message": "This is a test message to verify the message system is working correctly. Reply date should be recorded.",
     "status": "unread",
     "createdAt": "2025-12-16T21:48:33.457Z"
+  },
+  {
+    "id": 5,
+    "name": "Test Contact",
+    "email": "regatpeter@hotmail.fr",
+    "subject": "Test contact vitrine",
+    "message": "Ceci est un test envoy� depuis /api/contact le 2025-12-23T21:39:38",
+    "status": "unread",
+    "createdAt": "2025-12-23T20:39:38.505Z"
   }
 ]
