@@ -702,6 +702,18 @@ app.use((req, res, next) => {
   next();
 });
 
+// If running in HTTP/forced HTTP, redirect any HTTPS requests back to HTTP
+if (FORCE_HTTP || !useHttps) {
+  app.use((req, res, next) => {
+    const proto = (req.headers['x-forwarded-proto'] || (req.socket?.encrypted ? 'https' : 'http')).toString().toLowerCase();
+    if (proto === 'https') {
+      const host = req.headers['host'] || 'localhost:3000';
+      return res.redirect(301, `http://${host}${req.url}`);
+    }
+    next();
+  });
+}
+
 // ========== CONFIGURATION MANAGEMENT ==========
 const subscriptionConfig = require('./config/subscription.config');
 const purchaseConfig = require('./config/purchase.config');
