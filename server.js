@@ -65,8 +65,32 @@ const db = process.env.DATABASE_URL ? require('./db-postgres') : null;
 const USE_POSTGRES = !!process.env.DATABASE_URL;
 // ========== HTTPS SUPPORT (PRODUCTION) ==========
 const FORCE_HTTP = process.env.FORCE_HTTP === '1';
+const QUIET_MODE = process.env.QUIET_MODE === '1';
+const SUPPRESS_WARNINGS = process.env.SUPPRESS_WARNINGS === '1';
 let useHttps = false;
 let httpsOptions = {};
+
+// Optional quiet mode to silence non-critical logs for local users
+if (QUIET_MODE) {
+  const noop = () => {};
+  console.log = noop;
+  console.info = noop;
+  // keep console.warn and console.error for important issues
+  console.warn('[quiet] QUIET_MODE=1 actif: logs info masqués');
+}
+
+// Optional warning filter: only keep server warnings, hide noisy services (email/stripe/db)
+if (SUPPRESS_WARNINGS) {
+  const origWarn = console.warn.bind(console);
+  console.warn = (msg, ...args) => {
+    const m = String(msg || '');
+    // Show only warnings starting with [server]
+    if (m.startsWith('[server')) {
+      origWarn(msg, ...args);
+    }
+  };
+  console.warn('[quiet] SUPPRESS_WARNINGS=1 actif: warnings non-serveur masqués');
+}
 try {
   if (fs.existsSync('./cert.pem') && fs.existsSync('./key.pem')) {
     httpsOptions = {

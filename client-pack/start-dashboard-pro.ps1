@@ -2,6 +2,7 @@
 $env:FORCE_HTTP = "1"
 $env:QUIET_MODE = "1"
 $env:NODE_ENV = "production"
+$env:SUPPRESS_WARNINGS = "1"
 
 # Utiliser automatiquement le Node portable inclus (../node-portable)
 $nodePortable = Join-Path $PSScriptRoot "..\node-portable"
