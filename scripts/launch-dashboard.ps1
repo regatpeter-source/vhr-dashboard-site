@@ -6,12 +6,41 @@ $root = (Resolve-Path $projectDir).Path
 Write-Host "VHR Dashboard Launcher" -ForegroundColor Cyan
 Write-Host "Project: $root"
 
-# --- Vérif Node.js ---
-$node = Get-Command node -ErrorAction SilentlyContinue
-if (-not $node) {
-  Write-Host "[ERREUR] Node.js n'est pas installe. Installe-le depuis https://nodejs.org" -ForegroundColor Red
-  pause; exit 1
+# --- Node.js portable (auto-install si absent) ---
+$nodeDir = Join-Path $root 'node-portable'
+$nodeExe = Join-Path $nodeDir 'node.exe'
+
+function Ensure-NodePortable {
+  param(
+    [string]$TargetDir,
+    [string]$NodeVersion = 'v20.11.1'
+  )
+
+  if (Test-Path $nodeExe) { return }
+
+  Write-Host "[INFO] Node portable manquant, téléchargement..." -ForegroundColor Yellow
+  New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
+  $zipUrl = "https://nodejs.org/dist/$NodeVersion/node-$NodeVersion-win-x64.zip"
+  $zipPath = Join-Path $env:TEMP "node-$NodeVersion-win-x64.zip"
+
+  try {
+    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+    Expand-Archive -Path $zipPath -DestinationPath $env:TEMP -Force
+    $extracted = Join-Path $env:TEMP "node-$NodeVersion-win-x64"
+    if (-not (Test-Path $extracted)) { throw "Extraction échouée" }
+    Move-Item -Force $extracted\* $TargetDir
+    Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+  } catch {
+    Write-Host "[ERREUR] Impossible de télécharger/extraire Node portable : $($_.Exception.Message)" -ForegroundColor Red
+    pause; exit 1
+  }
 }
+
+Ensure-NodePortable -TargetDir $nodeDir
+
+# Préfixer le PATH pour cette session (pour npm et node)
+$env:Path = "$nodeDir;$env:Path"
+Write-Host "[OK] Node portable prêt: $nodeExe" -ForegroundColor Green
 
 # --- Installer les dépendances si absentes ---
 $pkg = Join-Path $root 'package.json'
