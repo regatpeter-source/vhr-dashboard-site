@@ -3,6 +3,7 @@ REM Démarrage local du Dashboard Pro (HTTP) avec logs silencieux
 set FORCE_HTTP=1
 set QUIET_MODE=1
 set NODE_ENV=production
+set SUPPRESS_WARNINGS=1
 
 REM Utiliser automatiquement le Node portable inclus (../node-portable)
 set "NODE_PORTABLE=%~dp0..\node-portable"
