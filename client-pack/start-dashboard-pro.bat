@@ -15,9 +15,9 @@ if not exist "%~dp0..\.env" (
 	if exist "%~dp0.env.client-example" copy "%~dp0.env.client-example" "%~dp0..\.env" >nul
 )
 
-REM Lancer le serveur
+REM Lancer l'ouverture du navigateur après 2s (en parallèle)
+start "" cmd /c "timeout /T 2 /NOBREAK >nul & start \"\" http://localhost:3000/vhr-dashboard-pro.html"
+
+REM Lancer le serveur (console courante)
 cd /d "%~dp0.."
 node server.js
-
-REM Ouvrir le dashboard pro dans le navigateur par défaut
-start "" http://localhost:3000/vhr-dashboard-pro.html

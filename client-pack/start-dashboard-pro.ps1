@@ -16,7 +16,11 @@ if (-not (Test-Path $envTarget) -and (Test-Path $envExample)) {
 	Copy-Item $envExample $envTarget -Force | Out-Null
 }
 
+# Ouvrir le navigateur après 2s (job en arrière-plan)
+Start-Job -ScriptBlock {
+	Start-Sleep -Seconds 2
+	Start-Process "http://localhost:3000/vhr-dashboard-pro.html"
+} | Out-Null
+
 Set-Location (Join-Path $PSScriptRoot "..")
 node server.js
-
-Start-Process "http://localhost:3000/vhr-dashboard-pro.html"
