@@ -12,25 +12,35 @@ async function testBrevoEmail() {
   console.log('📧 TEST EMAIL BREVO');
   console.log('========================================\n');
 
-  // Configuration Brevo SMTP
-  const brevoConfig = {
-    host: process.env.BREVO_SMTP_HOST || 'smtp-relay.brevo.com',
-    port: process.env.BREVO_SMTP_PORT || 587,
-    secure: false, // TLS (587) pas SSL (465)
-    auth: {
-      user: process.env.BREVO_SMTP_USER || '',
-      pass: process.env.BREVO_SMTP_PASS || ''
-    }
+  // Configuration SMTP (supporte BREVO_* puis fallback SMTP_*)
+  const host = process.env.BREVO_SMTP_HOST || process.env.SMTP_HOST || 'smtp-relay.brevo.com';
+  const port = parseInt(process.env.BREVO_SMTP_PORT || process.env.SMTP_PORT || '587', 10);
+  const user = process.env.BREVO_SMTP_USER || process.env.SMTP_USER || '';
+  const pass = process.env.BREVO_SMTP_PASS || process.env.SMTP_PASS || '';
+
+  const brevoConfigPrimary = {
+    host,
+    port,
+    secure: port === 465, // si on force 465 on passe en SSL
+    auth: { user, pass }
+  };
+
+  // Fallback 465/SSL
+  const brevoConfigSsl465 = {
+    host,
+    port: 465,
+    secure: true,
+    auth: { user, pass }
   };
 
   console.log('[1/5] Vérification de la configuration Brevo...\n');
   console.log('Configuration:');
-  console.log(`  BREVO_SMTP_HOST: ${brevoConfig.host}`);
-  console.log(`  BREVO_SMTP_PORT: ${brevoConfig.port}`);
-  console.log(`  BREVO_SMTP_USER: ${brevoConfig.auth.user ? '✓ Configuré' : '✗ Non configuré'}`);
-  console.log(`  BREVO_SMTP_PASS: ${brevoConfig.auth.pass ? '✓ Configuré' : '✗ Non configuré'}\n`);
+  console.log(`  SMTP_HOST: ${brevoConfigPrimary.host}`);
+  console.log(`  SMTP_PORT: ${brevoConfigPrimary.port}`);
+  console.log(`  SMTP_USER: ${brevoConfigPrimary.auth.user ? '✓ Configuré' : '✗ Non configuré'}`);
+  console.log(`  SMTP_PASS: ${brevoConfigPrimary.auth.pass ? '✓ Configuré' : '✗ Non configuré'}\n`);
 
-  if (!brevoConfig.auth.user || !brevoConfig.auth.pass) {
+  if (!brevoConfigPrimary.auth.user || !brevoConfigPrimary.auth.pass) {
     console.error('❌ ERREUR: Variables Brevo manquantes\n');
     console.log('📋 À configurer dans Render (Environment Variables):');
     console.log('   - BREVO_SMTP_USER: Votre login Brevo SMTP');
@@ -45,24 +55,40 @@ async function testBrevoEmail() {
   console.log('[2/5] Création du transporter Nodemailer...');
   let transporter;
   try {
-    transporter = nodemailer.createTransport(brevoConfig);
-    console.log('✅ Transporter créé\n');
+    transporter = nodemailer.createTransport(brevoConfigPrimary);
+    console.log(`✅ Transporter créé (port ${brevoConfigPrimary.port}, secure=${brevoConfigPrimary.secure})\n`);
   } catch (e) {
     console.error('❌ Erreur création transporter:', e.message);
     process.exit(1);
   }
 
   console.log('[3/5] Vérification de la connexion SMTP...');
+  let verified = false;
   try {
     await transporter.verify();
-    console.log('✅ Connexion SMTP vérifiée avec succès\n');
+    verified = true;
+    console.log('✅ Connexion SMTP vérifiée avec succès (config primaire)\n');
   } catch (e) {
-    console.error('❌ Erreur de connexion SMTP:', e.message);
-    console.error('\nVérifiez:');
-    console.error('  - Les credentials sont corrects');
-    console.error('  - Votre compte Brevo est actif');
-    console.error('  - Accès SMTP est activé dans Brevo\n');
-    process.exit(1);
+    console.error('⚠️ Connexion SMTP échouée sur config primaire:', e.message);
+    if (brevoConfigPrimary.port !== 465) {
+      console.log('➡️ Tentative fallback 465/SSL...');
+      try {
+        transporter = nodemailer.createTransport(brevoConfigSsl465);
+        await transporter.verify();
+        verified = true;
+        console.log('✅ Connexion SMTP vérifiée avec succès (fallback 465/SSL)\n');
+      } catch (e2) {
+        console.error('❌ Erreur de connexion SMTP sur fallback 465:', e2.message);
+      }
+    }
+    if (!verified) {
+      console.error('\nVérifiez:');
+      console.error('  - Les credentials sont corrects');
+      console.error('  - Votre compte Brevo est actif');
+      console.error('  - Accès SMTP est activé dans Brevo');
+      console.error('  - Essayez de régénérer une clé SMTP');
+      process.exit(1);
+    }
   }
 
   console.log('[4/5] Envoi d\'un email de test...');
