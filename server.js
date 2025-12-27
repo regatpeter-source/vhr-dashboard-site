@@ -693,6 +693,15 @@ app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(cookieParser());
 
+// For local packs: prevent browser from forcing HTTPS (disable HSTS) and OAC warning
+app.use((req, res, next) => {
+  // Disable HSTS so the browser stops upgrading HTTP -> HTTPS on 192.168.x.x/localhost
+  res.setHeader('Strict-Transport-Security', 'max-age=0');
+  // Disable Origin-Agent-Cluster to avoid Chrome warning when switching schemes
+  res.setHeader('Origin-Agent-Cluster', '?0');
+  next();
+});
+
 // ========== CONFIGURATION MANAGEMENT ==========
 const subscriptionConfig = require('./config/subscription.config');
 const purchaseConfig = require('./config/purchase.config');
