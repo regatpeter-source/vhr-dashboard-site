@@ -16,8 +16,8 @@ if not exist "%~dp0..\.env" (
 	if exist "%~dp0.env.client-example" copy "%~dp0.env.client-example" "%~dp0..\.env" >nul
 )
 
-REM Lancer l'ouverture du navigateur après 2s (en parallèle, via PowerShell pour fiabilité)
-start "" powershell -Command "Start-Sleep -Seconds 2; Start-Process 'http://localhost:3000/vhr-dashboard-pro.html'"
+REM Lancer l'ouverture du navigateur après 2s (en parallèle, fenêtre masquée)
+start "" powershell -NoLogo -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; Start-Process 'http://localhost:3000/vhr-dashboard-pro.html'"
 
 REM Lancer le serveur (console courante)
 cd /d "%~dp0.."
