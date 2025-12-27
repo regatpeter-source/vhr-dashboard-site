@@ -67,6 +67,8 @@ const USE_POSTGRES = !!process.env.DATABASE_URL;
 const FORCE_HTTP = process.env.FORCE_HTTP === '1';
 const QUIET_MODE = process.env.QUIET_MODE === '1';
 const SUPPRESS_WARNINGS = process.env.SUPPRESS_WARNINGS === '1';
+const HTTPS_ENABLED = process.env.HTTPS_ENABLED === '1';
+
 let useHttps = false;
 let httpsOptions = {};
 
@@ -90,6 +92,31 @@ if (SUPPRESS_WARNINGS) {
     }
   };
   console.warn('[quiet] SUPPRESS_WARNINGS=1 actif: warnings non-serveur masqués');
+}
+
+// HTTPS opt-in: only enabled if HTTPS_ENABLED=1 and certs are present
+if (HTTPS_ENABLED) {
+  try {
+    if (fs.existsSync('./cert.pem') && fs.existsSync('./key.pem')) {
+      httpsOptions = {
+        cert: fs.readFileSync('./cert.pem'),
+        key: fs.readFileSync('./key.pem')
+      };
+      useHttps = true;
+      console.log('[HTTPS] Certificat SSL détecté, le serveur va démarrer en HTTPS.');
+    } else {
+      console.warn('[HTTPS] HTTPS_ENABLED=1 mais cert.pem/key.pem manquants - démarrage en HTTP.');
+    }
+  } catch (e) {
+    console.warn('[HTTPS] Erreur lors du chargement du certificat SSL:', e.message);
+  }
+} else {
+  console.log('[HTTPS] HTTPS désactivé (HTTPS_ENABLED!=1) - démarrage en HTTP.');
+}
+
+if (useHttps && FORCE_HTTP) {
+  useHttps = false;
+  console.log('[HTTPS] FORCE_HTTP=1 détecté - démarrage forcé en HTTP malgré les certificats présents.');
 }
 try {
   if (fs.existsSync('./cert.pem') && fs.existsSync('./key.pem')) {
@@ -5773,7 +5800,7 @@ const PORT = process.env.PORT || 3000;
 const REDIRECT_PORT = Number(process.env.HTTP_REDIRECT_PORT || 80);
 let serverStarted = false;
 
-if (useHttps) {
+if (useHttps && !FORCE_HTTP) {
   // Serveur HTTP pour rediriger vers HTTPS (port personnalisable via HTTP_REDIRECT_PORT)
   http.createServer((req, res) => {
     const host = req.headers['host'] ? req.headers['host'].replace(/:.*/, ':' + PORT) : 'localhost:' + PORT;
