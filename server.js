@@ -4732,6 +4732,12 @@ app.post('/api/stream/stop', (req, res) => {
   res.json({ ok });
 });
 
+// État des jeux/applications en cours (persistant sur le serveur entre rafraîchissements UI)
+// Placé AVANT /api/apps/:serial pour éviter que "running" soit interprété comme un numéro de série ADB
+app.get('/api/apps/running', (req, res) => {
+  res.json({ ok: true, running: runningAppState });
+});
+
 app.get('/api/apps/:serial', async (req, res) => {
   const serial = req.params.serial;
   try {
@@ -4745,11 +4751,6 @@ app.get('/api/apps/:serial', async (req, res) => {
     console.error('[api] apps:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
-});
-
-// État des jeux/applications en cours (persistant sur le serveur entre rafraîchissements UI)
-app.get('/api/apps/running', (req, res) => {
-  res.json({ ok: true, running: runningAppState });
 });
 
 app.post('/api/apps/running/mark', (req, res) => {
