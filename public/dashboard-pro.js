@@ -2759,17 +2759,7 @@ window.installVoiceApp = async function(serial) {
 						</ul>
 					</div>
 					
-					<button onclick="downloadVoiceApk()" style="
-						background: linear-gradient(135deg, #3498db, #2980b9);
-						color: #fff;
-						border: none;
-						padding: 12px 24px;
-						border-radius: 8px;
-						font-size: 14px;
-						font-weight: bold;
-						cursor: pointer;
-						margin-right: 10px;
-					">💾 Télécharger APK</button>
+					<!-- Bouton téléchargement retiré -->
 				</div>
 			`;
 			
@@ -2793,16 +2783,7 @@ window.installVoiceApp = async function(serial) {
 					<small style="color:#7f8c8d;">${e.message}</small>
 				</p>
 				
-				<button onclick="downloadVoiceApk()" style="
-					background: linear-gradient(135deg, #3498db, #2980b9);
-					color: #fff;
-					border: none;
-					padding: 12px 24px;
-					border-radius: 8px;
-					font-size: 14px;
-					font-weight: bold;
-					cursor: pointer;
-				">💾 Télécharger APK manuellement</button>
+				<!-- Bouton téléchargement retiré -->
 			</div>
 		`;
 		
@@ -2895,20 +2876,7 @@ window.showVoiceAppDialog = function(serial) {
 			</div>
 			` : ''}
 			
-			<button onclick="downloadVoiceApk()" style="
-				background: linear-gradient(135deg, #3498db, #2980b9);
-				color: #fff;
-				border: none;
-				padding: 14px 28px;
-				border-radius: 8px;
-				font-size: 16px;
-				font-weight: bold;
-				cursor: pointer;
-				margin: 8px;
-				display: inline-flex;
-				align-items: center;
-				gap: 8px;
-			">💾 Télécharger APK</button>
+			<!-- Bouton téléchargement retiré -->
 			
 			<div style="margin-top: 24px; padding: 12px; background: rgba(26, 188, 156, 0.1); border-radius: 8px; border-left: 4px solid #1abc9c;">
 				<p style="color:#95a5a6; font-size: 12px; margin: 0;">
