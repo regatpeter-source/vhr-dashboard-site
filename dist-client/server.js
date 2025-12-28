@@ -69,7 +69,6 @@ const FORCE_HTTP = process.env.FORCE_HTTP === '1';
 const QUIET_MODE = process.env.QUIET_MODE === '1';
 const SUPPRESS_WARNINGS = process.env.SUPPRESS_WARNINGS === '1';
 const HTTPS_ENABLED = process.env.HTTPS_ENABLED === '1';
-
 let useHttps = false;
 let httpsOptions = {};
 let hasCert = false;
@@ -95,8 +94,6 @@ if (SUPPRESS_WARNINGS) {
   };
   console.warn('[quiet] SUPPRESS_WARNINGS=1 actif: warnings non-serveur masqués');
 }
-
-// HTTPS opt-in: only enabled if HTTPS_ENABLED=1 and certs are present
 try {
   if (fs.existsSync('./cert.pem') && fs.existsSync('./key.pem')) {
     httpsOptions = {
@@ -109,15 +106,12 @@ try {
 } catch (e) {
   console.warn('[HTTPS] Erreur lors du chargement du certificat SSL:', e.message);
 }
-
-// HTTPS principal activé uniquement si HTTPS_ENABLED=1 et certificat présent
 if (HTTPS_ENABLED && hasCert) {
   useHttps = true;
   console.log('[HTTPS] HTTPS_ENABLED=1 - démarrage principal en HTTPS.');
 } else {
   console.log('[HTTPS] HTTPS désactivé - démarrage principal en HTTP.');
 }
-
 if (useHttps && FORCE_HTTP) {
   useHttps = false;
   console.log('[HTTPS] FORCE_HTTP=1 détecté - démarrage forcé en HTTP malgré certificat.');
@@ -681,20 +675,6 @@ app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(cookieParser());
 
-// For local packs: prevent browser from forcing HTTPS (disable HSTS) and OAC warning
-app.use((req, res, next) => {
-  // Disable HSTS so the browser stops upgrading HTTP -> HTTPS on 192.168.x.x/localhost
-  res.setHeader('Strict-Transport-Security', 'max-age=0');
-  // Disable Origin-Agent-Cluster to avoid Chrome warning when switching schemes
-  res.setHeader('Origin-Agent-Cluster', '?0');
-  next();
-});
-
-// If running in HTTP/forced HTTP, redirect any HTTPS requests back to HTTP
-// If full-site HTTPS is NOT enabled, keep HTTP as primary. We still accept HTTPS (when cert present)
-// but path-based redirections are handled later to allow the site vitrine over HTTPS while keeping
-// Dashboard Pro en HTTP.
-
 // ========== CONFIGURATION MANAGEMENT ==========
 const subscriptionConfig = require('./config/subscription.config');
 const purchaseConfig = require('./config/purchase.config');
@@ -1083,9 +1063,6 @@ app.use('/site-vitrine', express.static(path.join(__dirname, 'site-vitrine'), {
 app.get('/ping', (req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
-
-// Si on FORCE_HTTP explicitement (packs locaux), rediriger les requêtes HTTPS vers HTTP.
-// En production (Render), on ne redirige pas pour éviter les boucles 301.
 if (FORCE_HTTP && process.env.RENDER !== 'true') {
   app.use((req, res, next) => {
     const proto = (req.headers['x-forwarded-proto'] || (req.socket?.encrypted ? 'https' : 'http')).toString().toLowerCase();
@@ -5839,7 +5816,7 @@ const PORT = process.env.PORT || 3000;
 const REDIRECT_PORT = Number(process.env.HTTP_REDIRECT_PORT || 80);
 let serverStarted = false;
 
-// Pas de redirection globale HTTP->HTTPS: on reste en HTTP principal pour le Dashboard Pro.
+// Pas de redirection globale HTTP->HTTPS (Dashboard Pro reste en HTTP si HTTPS_ENABLED n'est pas activé)
 
 function logServerBanner(initializationFailed = false) {
   if (initializationFailed) {
