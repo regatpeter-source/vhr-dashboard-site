@@ -93,6 +93,7 @@ class VHRAudioStream {
       // Get local microphone
       console.log('[VHRAudio] Requesting microphone access...');
       this.localStream = await navigator.mediaDevices.getUserMedia(this.config.audioConstraints);
+      console.log('[VHRAudio] Microphone granted, tracks:', this.localStream.getTracks().map(t => t.kind + ':' + t.label).join(', '));
       
       // Connect local mic to audio graph for visualization AND local monitoring
       // Chain: micSource → micGain → compressor → analyser → localMonitorGain → destination
@@ -131,6 +132,13 @@ class VHRAudioStream {
       
       return this.sessionId;
     } catch (error) {
+      console.error('[VHRAudio] start() failed:', error);
+      if (error && error.name) {
+        console.error('[VHRAudio] Error name:', error.name);
+      }
+      if (error && error.message) {
+        console.error('[VHRAudio] Error message:', error.message);
+      }
       this._handleError('Failed to start streaming', error);
       throw error;
     }
@@ -419,11 +427,12 @@ class VHRAudioStream {
    */
   async _sendSignal(data) {
     try {
+      const token = this.config.authToken || localStorage.getItem('vhr_auth_token') || '';
       const response = await fetch(this.config.signalingServer + this.config.signalingPath, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + (localStorage.getItem('vhr_auth_token') || '')
+          'Authorization': token ? ('Bearer ' + token) : ''
         },
         body: JSON.stringify(data)
       });
@@ -443,17 +452,24 @@ class VHRAudioStream {
    * Start relaying audio via WebSocket to headset receiver
    * Used to send audio to headset over WebSocket (alternative to WebRTC)
    */
-  async startAudioRelay(targetSerial) {
+  async startAudioRelay(targetSerial, opts = {}) {
     try {
-      this._log('Starting audio relay to ' + targetSerial);
+      const format = opts.format === 'ogg' ? 'ogg' : 'webm';
+      this._log(`Starting audio relay to ${targetSerial} (format=${format})`);
       
       if (!this.localStream) {
         throw new Error('No local audio stream available');
       }
+
+      const webmMime = 'audio/webm;codecs=opus';
+      // Stabilisation: on force WebM/Opus, plus robuste côté Quest et récepteur web
+      const chosenMime = webmMime;
+      const wsFormat = 'webm';
+      this._log('Relay mime type: ' + chosenMime);
       
       // Create MediaRecorder to encode audio
       const mediaRecorder = new MediaRecorder(this.localStream, {
-        mimeType: 'audio/webm;codecs=opus',
+        mimeType: chosenMime,
         audioBitsPerSecond: 128000 // 128 kbps
       });
       
@@ -461,25 +477,36 @@ class VHRAudioStream {
       const relayBase = this.config.relayBase || window.location.origin;
       const relayUrl = new URL(relayBase);
       const wsProtocol = relayUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${wsProtocol}//${relayUrl.host}/api/audio/stream?serial=${encodeURIComponent(targetSerial)}&mode=sender`;
+      const wsUrl = `${wsProtocol}//${relayUrl.host}/api/audio/stream?serial=${encodeURIComponent(targetSerial)}&mode=sender&format=${wsFormat}`;
       
       this._log('Connecting to relay: ' + wsUrl);
       
+      this._log('Connecting relay WebSocket (sender) to ' + wsUrl);
       const relayWs = new WebSocket(wsUrl);
       relayWs.binaryType = 'arraybuffer';
       
       relayWs.onopen = () => {
         this._log('Relay WebSocket connected, starting recording');
-        // Collect smaller chunks to reduce jitter on receiver
-        mediaRecorder.start(40);
+        try {
+          // Moderate timeslice for steady pages
+          mediaRecorder.start(250);
+        } catch (e) {
+          this._log('MediaRecorder start error: ' + e.message);
+          throw e;
+        }
       };
       
       mediaRecorder.ondataavailable = (event) => {
-        if (relayWs.readyState === WebSocket.OPEN && event.data.size > 0) {
-          console.log('[VHR-AudioRelay] Sending chunk:', event.data.size, 'bytes');
+        const size = event.data?.size || 0;
+        if (size < 100) {
+          // Skip too-small fragments that are not decodable
+          return;
+        }
+        if (relayWs.readyState === WebSocket.OPEN) {
+          console.log('[VHR-AudioRelay] Sending chunk:', size, 'bytes');
           relayWs.send(event.data);
         } else {
-          console.warn('[VHR-AudioRelay] Chunk not sent: ws not open or empty');
+          console.warn('[VHR-AudioRelay] Chunk not sent: ws not open');
         }
       };
       
@@ -488,13 +515,13 @@ class VHRAudioStream {
       };
       
       relayWs.onerror = (error) => {
-        this._log('Relay WebSocket error');
-        mediaRecorder.stop();
+        this._log('Relay WebSocket error: ' + (error?.message || '')); 
+        try { mediaRecorder.stop(); } catch {}
       };
       
       relayWs.onclose = () => {
         this._log('Relay WebSocket closed');
-        mediaRecorder.stop();
+        try { mediaRecorder.stop(); } catch {}
       };
       
       // Store reference for cleanup

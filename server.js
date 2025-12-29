@@ -647,9 +647,11 @@ if (process.env.NODE_ENV !== 'production' && process.env.RENDER !== 'true') {
 }
 
 const app = express();
-// Helmet with custom CSP: allow own scripts and the botpress CDN. Do not enable 'unsafe-inline'.
+// Helmet avec CSP custom. HSTS désactivé pour éviter les upgrades HTTPS en LAN.
 app.use(helmet({
+  hsts: false,
   contentSecurityPolicy: {
+    useDefaults: false, // avoid implicit directives like upgrade-insecure-requests
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com', 'https://*.gstatic.com', 'https://cdn.jsdelivr.net'],
@@ -661,11 +663,25 @@ app.use(helmet({
       // Allow loading remote fonts (Google Fonts)
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:', 'https://cdn-icons-png.flaticon.com', 'https://cdn.botpress.cloud'],
-      connectSrc: ["'self'", 'https://api.stripe.com', 'https://messaging.botpress.cloud', 'https://cdn.botpress.cloud'],
+      mediaSrc: ["'self'", 'blob:', 'data:'],
+      connectSrc: [
+        "'self'",
+        'https://api.stripe.com',
+        'https://messaging.botpress.cloud',
+        'https://cdn.botpress.cloud',
+        // Autoriser le WebSocket local/LAN pour l'audio
+        'ws:', 'wss:',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        'http://192.168.1.3:3000',
+        'http://192.168.1.3'
+      ],
       frameSrc: ["'self'", 'https://messaging.botpress.cloud', 'https://checkout.stripe.com', 'https://js.stripe.com'],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
-      formAction: ["'self'"]
+      formAction: ["'self'"],
+      // Disable auto HTTPS upgrade to keep LAN HTTP working
+      upgradeInsecureRequests: null
     }
   },
   crossOriginOpenerPolicy: false,
@@ -1042,6 +1058,12 @@ app.get('/vhr-dashboard-app.html', (req, res) => {
   res.redirect(301, '/vhr-dashboard-pro.html');
 });
 
+// Serve the up-to-date audio receiver from public (avoid legacy root file)
+app.get('/audio-receiver.html', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.sendFile(path.join(__dirname, 'public', 'audio-receiver.html'));
+});
+
 // Test route to verify HTML serving works
 app.get('/test-dashboard', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -1099,7 +1121,7 @@ if (FORCE_HTTP && process.env.RENDER !== 'true') {
 // Expose site-vitrine and top-level HTML files so they can be accessed via http://localhost:PORT/
 app.use('/site-vitrine', express.static(path.join(__dirname, 'site-vitrine')));
 // Serve top-level HTML files that are not in public
-const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact.html', 'account.html', 'START-HERE.html', 'developer-setup.html', 'mentions.html', 'admin-dashboard.html', 'audio-receiver.html'];
+const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact.html', 'account.html', 'START-HERE.html', 'developer-setup.html', 'mentions.html', 'admin-dashboard.html'];
 exposedTopFiles.forEach(f => {
   app.get(`/${f}`, (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -2276,7 +2298,13 @@ app.get('/api/check-auth', (req, res) => {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     // Token is valid
-    res.json({ ok: true, authenticated: true, user: { username: decoded.username, role: decoded.role } });
+    const includeToken = req.query && String(req.query.includeToken || req.query.include_token || '0') === '1';
+    res.json({ 
+      ok: true, 
+      authenticated: true, 
+      user: { username: decoded.username, role: decoded.role },
+      token: includeToken ? token : undefined
+    });
   } catch (e) {
     // Token is invalid or expired
     res.json({ ok: false, authenticated: false, user: null });
@@ -4235,6 +4263,33 @@ function getLanIPv4() {
   return null;
 }
 
+// Try to resolve the best LAN IPv4 for headset redirections (never return localhost)
+function resolveLanIpForClient(req) {
+  // 1) Standard detection via network interfaces
+  const lanIp = getLanIPv4();
+  if (lanIp) return lanIp;
+
+  // 2) Try the bound server address
+  try {
+    const addr = req?.socket?.address?.().address || req?.socket?.localAddress || '';
+    const cleaned = (addr || '').replace('::ffff:', '');
+    if (cleaned && cleaned !== '::' && cleaned !== '::1' && cleaned !== '127.0.0.1') {
+      return cleaned;
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  // 3) Last resort: use host header if it already contains an IP (and is not localhost)
+  const hostHeader = req?.headers?.host || '';
+  const hostOnly = hostHeader.split(':')[0];
+  if (hostOnly && hostOnly !== 'localhost' && hostOnly !== '127.0.0.1') {
+    return hostOnly;
+  }
+
+  return null;
+}
+
 try {
   if (fs.existsSync(NAMES_FILE)) nameMap = JSON.parse(fs.readFileSync(NAMES_FILE, 'utf8') || '{}');
   else fs.writeFileSync(NAMES_FILE, JSON.stringify({}, null, 2));
@@ -4260,27 +4315,9 @@ appServer.timeout = 120000; // 2 minutes
 appServer.keepAliveTimeout = 65000; // 65 seconds
 appServer.headersTimeout = 66000; // Slightly higher than keepAliveTimeout
 
-let listenerServer = appServer;
-
-if (!useHttps && hasCert && FORCE_HTTP && process.env.RENDER !== 'true') {
-  const redirectPort = process.env.PORT || 3000;
-  const httpsRedirectServer = https.createServer(httpsOptions, (req, res) => {
-    const host = req.headers['host'] || `localhost:${redirectPort}`;
-    res.writeHead(301, { "Location": `http://${host}${req.url}` });
-    res.end();
-  });
-
-  listenerServer = net.createServer((socket) => {
-    socket.once('data', (buffer) => {
-      const isTLSHandshake = buffer && buffer[0] === 22; // TLS ClientHello starts with 22
-      const target = isTLSHandshake ? httpsRedirectServer : appServer;
-      target.emit('connection', socket);
-      socket.unshift(buffer);
-    });
-  });
-
-  console.log(`[HTTPS] Fallback actif (FORCE_HTTP=1): connexions TLS redirigées vers HTTP.`);
-}
+// Serveur principal utilisé pour l'écoute
+// En mode FORCE_HTTP, on reste en HTTP pur sans proxy TCP intermédiaire pour éviter les coupures.
+const listenerServer = appServer;
 
 const io = new SocketIOServer(appServer, { cors: { origin: '*' } });
 
@@ -4291,10 +4328,12 @@ let streams = new Map();
 
 const wssMpeg1 = new WebSocket.Server({ noServer: true });
 
-// Audio streaming: Map<serial, { sender: ws, receivers: [ws], buffer: [chunks] }>
+// Audio streaming: Map<serial, { sender: ws, receivers: Set<ws>, buffer: Array<Buffer>, headerChunk?: Buffer }>
+// headerChunk: first initialization segment from MediaRecorder (WebM/Opus) kept to allow late receivers to decode
 const audioStreams = new Map();
 const wssAudio = new WebSocket.Server({ noServer: true });
-const AUDIO_BUFFER_SIZE = 50; // Keep last 50 chunks in buffer
+// Latency control: keep only minimal history (header + last chunk)
+const AUDIO_BUFFER_SIZE = 2; // effectively ~0.5s max
 
 // ---------- ADB Track with single interval fallback ----------
 let adbTrackFallbackInterval = null;  // Prevent multiple intervals
@@ -4599,12 +4638,13 @@ function stopStream(serial) {
 function handleAudioWebSocket(serial, ws, req) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const mode = url.searchParams.get('mode') || 'receiver'; // 'sender' or 'receiver'
+  const format = url.searchParams.get('format') || 'webm'; // webm|ogg (pass-through)
   
-  console.log(`[Audio] ${mode} connected for serial: ${serial}`);
+  console.log(`[Audio] ${mode} connected for serial: ${serial} (format=${format})`);
   
   // Get or create audio stream entry for this serial
   if (!audioStreams.has(serial)) {
-    audioStreams.set(serial, { sender: null, receivers: new Set(), buffer: [] });
+    audioStreams.set(serial, { sender: null, receivers: new Set(), buffer: [], headerChunk: null, format });
   }
   
   const audioEntry = audioStreams.get(serial);
@@ -4612,9 +4652,17 @@ function handleAudioWebSocket(serial, ws, req) {
   if (mode === 'sender') {
     // PC sending audio
     audioEntry.sender = ws;
+    audioEntry.format = format;
+    // Reset buffer + header when a new sender arrives to avoid stale audio
+    audioEntry.buffer = [];
+    audioEntry.headerChunk = null;
     console.log(`[Audio] Sender connected: ${serial}`);
     
     ws.on('message', (data) => {
+      // Keep first chunk as header for late-joining receivers (MediaRecorder WebM init segment)
+      if (!audioEntry.headerChunk) {
+        audioEntry.headerChunk = data;
+      }
       // Add to buffer for late-joining receivers
       audioEntry.buffer.push(data);
       if (audioEntry.buffer.length > AUDIO_BUFFER_SIZE) {
@@ -4659,23 +4707,29 @@ function handleAudioWebSocket(serial, ws, req) {
     });
     
   } else if (mode === 'receiver') {
-    // Headset receiving audio
+    // Headset receiving audio (single active receiver to prevent echo/double playback)
+    if (audioEntry.receivers.size > 0) {
+      console.log(`[Audio] Existing receivers detected (${audioEntry.receivers.size}), closing old ones to avoid echo`);
+      for (const oldWs of Array.from(audioEntry.receivers)) {
+        try { oldWs.close(); } catch (e) {}
+        audioEntry.receivers.delete(oldWs);
+      }
+    }
     audioEntry.receivers.add(ws);
     console.log(`[Audio] Receiver connected: ${serial}, total receivers: ${audioEntry.receivers.size}`);
     console.log(`[Audio] Current sender status: ${audioEntry.sender ? 'CONNECTED' : 'NOT CONNECTED'}`);
     console.log(`[Audio] Sending buffered chunks to new receiver: ${audioEntry.buffer.length} chunks`);
     
-    // Send buffered audio chunks first
-    for (const chunk of audioEntry.buffer) {
-      if (ws.readyState === WebSocket.OPEN) {
-        try {
-          ws.send(chunk);
-        } catch (e) {
-          console.error(`[Audio] Failed to send buffered chunk to receiver:`, e.message);
-          break;
-        }
+    // Send header chunk (init segment) first if available, then a short tail of buffered chunks
+    if (audioEntry.headerChunk && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(audioEntry.headerChunk);
+      } catch (e) {
+        console.error(`[Audio] Failed to send header chunk to receiver:`, e.message);
       }
     }
+
+    // No buffered tail to avoid any backlog; rely on live stream after header
     
     // If sender already connected, notify receiver
     if (audioEntry.sender && audioEntry.sender.readyState === WebSocket.OPEN) {
@@ -4713,7 +4767,9 @@ appServer.on('upgrade', (req, res, head) => {
   // Audio streaming endpoint
   if (req.url.startsWith('/api/audio/stream')) {
     try {
-      const url = new URL(req.url, `http://${req.headers.host}`);
+      // Always parse as HTTP to avoid scheme issues when the client tries ws:// on HTTP
+      const host = req.headers.host || `localhost:${PORT}`;
+      const url = new URL(req.url, `http://${host}`);
       const serial = url.searchParams.get('serial');
       
       if (!serial) {
@@ -5234,7 +5290,7 @@ app.get('/api/favorites', (req, res) => {
 
 // Expose server info (LAN IP) so headset can reach the signaling server
 app.get('/api/server-info', (req, res) => {
-  const lanIp = getLanIPv4();
+  const lanIp = resolveLanIpForClient(req);
   const hostHeader = req.headers.host || '';
   const portMatch = hostHeader.match(/:(\d+)/);
   const port = portMatch ? Number(portMatch[1]) : PORT;
@@ -5328,27 +5384,27 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
 
   try {
     // Correction : forcer l'utilisation de l'IP LAN si serverUrl est localhost ou absent
-    let server = serverUrl;
+    let server = (serverUrl || '').trim();
+    // Corrige une éventuelle faute de frappe (locahost)
+    if (server.includes('locahost')) {
+      server = server.replace(/locahost/gi, 'localhost');
+    }
+
     if (!server || server.includes('localhost') || server.includes('127.0.0.1')) {
-      // Tente de détecter l'IP LAN
-      const os = require('os');
-      let lanIp = null;
-      const ifaces = os.networkInterfaces();
-      for (const name of Object.keys(ifaces)) {
-        for (const iface of ifaces[name]) {
-          if (iface.family === 'IPv4' && !iface.internal) {
-            lanIp = iface.address;
-            break;
-          }
-        }
-        if (lanIp) break;
-      }
+      const lanIp = resolveLanIpForClient(req);
       if (lanIp) {
         server = `http://${lanIp}:3000`;
         console.log(`[open-audio-receiver] Correction: IP LAN détectée pour receiver: ${server}`);
       } else {
-        server = 'http://localhost:3000';
-        console.warn('[open-audio-receiver] Aucune IP LAN détectée, fallback sur localhost!');
+        // Dernier recours : si le host header contient déjà une IP non-loopback, utiliser celle-ci
+        const hostHeader = (req.headers.host || '').split(':')[0];
+        if (hostHeader && hostHeader !== 'localhost' && hostHeader !== '127.0.0.1') {
+          server = `http://${hostHeader}:3000`;
+          console.log(`[open-audio-receiver] Fallback sur host header pour receiver: ${server}`);
+        } else {
+          server = 'http://localhost:3000';
+          console.warn('[open-audio-receiver] Aucune IP LAN détectée, fallback sur localhost!');
+        }
       }
     }
     console.log(`[open-audio-receiver] URL envoyée au Quest: ${server}/audio-receiver.html?serial=${encodeURIComponent(serial)}&autoconnect=true`);
@@ -5432,8 +5488,26 @@ app.post('/api/device/start-voice-app', async (req, res) => {
   }
 
   try {
-    // Build server URL from request if not provided
-    const hostUrl = serverUrl || `http://${req.hostname}:${PORT}`;
+    // Build server URL from request if not provided, always prefer LAN IP (never localhost)
+    const port = PORT || 3000;
+    let hostUrl = (serverUrl || '').trim();
+
+    // Typo guard
+    if (hostUrl.includes('locahost')) {
+      hostUrl = hostUrl.replace(/locahost/gi, 'localhost');
+    }
+
+    // Normalize to LAN IP if missing or pointing to localhost
+    if (!hostUrl || hostUrl.includes('localhost') || hostUrl.includes('127.0.0.1')) {
+      const lanIp = resolveLanIpForClient(req);
+      if (lanIp) {
+        hostUrl = `http://${lanIp}:${port}`;
+        console.log(`[start-voice-app] Replaced localhost with LAN IP: ${hostUrl}`);
+      } else {
+        hostUrl = `http://${req.hostname || 'localhost'}:${port}`;
+        console.warn('[start-voice-app] LAN IP not found, fallback on host header:', hostUrl);
+      }
+    }
     
     console.log(`[start-voice-app] Starting VHR Voice on ${serial} with URL ${hostUrl}`);
     
@@ -5443,6 +5517,8 @@ app.post('/api/device/start-voice-app', async (req, res) => {
       '-n', 'com.vhr.voice/.MainActivity',
       '-e', 'serverUrl', hostUrl,
       '-e', 'serial', serial,
+      '-e', 'adbSerial', serial,
+      '-e', 'cleanSerial', serial.split(':')[0] || serial,
       '--ez', 'autostart', 'true'
     ]);
     

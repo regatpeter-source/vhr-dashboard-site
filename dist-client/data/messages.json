@@ -1,0 +1,44 @@
+[
+  {
+    "id": 2,
+    "name": "Marie Martin",
+    "email": "marie.martin@example.com",
+    "subject": "Question about VHR Dashboard features",
+    "message": "I would like to know more about the remote control features and how they work with VR headsets.",
+    "status": "read",
+    "createdAt": "2025-12-06T10:15:00Z",
+    "response": "Thank you for your message. This is a test reply sent on 2025-12-16 22:48:33. The message reception date and reply date should both be recorded in the system.",
+    "respondedAt": "2025-12-16T21:48:33.569Z",
+    "respondedBy": "vhr"
+  },
+  {
+    "id": 3,
+    "name": "Luc Bertrand",
+    "email": "luc.bertrand@example.com",
+    "subject": "Integration with our VR studio",
+    "message": "We are interested in integrating VHR Dashboard into our professional VR studio. Could you provide more details about enterprise pricing?",
+    "status": "responded",
+    "createdAt": "2025-12-07T18:45:00Z",
+    "response": "bonjour Luc,\n\nnous proposons actuellement une licence définitive au tarif de 499 ttc.\n\n---\n📱 VHR Dashboard Support\nPeter Vhr Dashboard\nYour VR Management Solution\ncontact@vhr-dashboard-site.com",
+    "respondedAt": "2025-12-07T22:20:01.889Z",
+    "respondedBy": "vhr"
+  },
+  {
+    "id": 4,
+    "name": "Test User",
+    "email": "test_1950576574@example.local",
+    "subject": "Test Message - 2025-12-16 22:48:33",
+    "message": "This is a test message to verify the message system is working correctly. Reply date should be recorded.",
+    "status": "unread",
+    "createdAt": "2025-12-16T21:48:33.457Z"
+  },
+  {
+    "id": 5,
+    "name": "Test Contact",
+    "email": "regatpeter@hotmail.fr",
+    "subject": "Test contact vitrine",
+    "message": "Ceci est un test envoy� depuis /api/contact le 2025-12-23T21:39:38",
+    "status": "unread",
+    "createdAt": "2025-12-23T20:39:38.505Z"
+  }
+]

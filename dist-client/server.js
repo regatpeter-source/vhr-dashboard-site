@@ -655,7 +655,16 @@ app.use(helmet({
       // Allow loading remote fonts (Google Fonts)
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:', 'https://cdn-icons-png.flaticon.com', 'https://cdn.botpress.cloud'],
-      connectSrc: ["'self'", 'https://api.stripe.com', 'https://messaging.botpress.cloud', 'https://cdn.botpress.cloud'],
+      connectSrc: [
+        "'self'",
+        'https://api.stripe.com',
+        'https://messaging.botpress.cloud',
+        'https://cdn.botpress.cloud',
+        'ws:', 'wss:',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        'http://192.168.1.3:3000'
+      ],
       frameSrc: ["'self'", 'https://messaging.botpress.cloud', 'https://checkout.stripe.com', 'https://js.stripe.com'],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
@@ -666,31 +675,33 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: false
 }));
-// Set a friendlier referrer policy - allows third-party services like Google Translate
-// to work without CSP warnings
-app.use(helmet.referrerPolicy({ policy: 'no-referrer-when-downgrade' }));
-app.use(cors({ origin: true, credentials: true }));
-// Ensure webhook route receives raw body for Stripe signature verification
-app.use('/webhook', express.raw({ type: 'application/json' }));
-app.use(express.json());
-app.use(cookieParser());
-
-// ========== CONFIGURATION MANAGEMENT ==========
-const subscriptionConfig = require('./config/subscription.config');
-const purchaseConfig = require('./config/purchase.config');
-const demoConfig = require('./config/demo.config');
-const emailService = require('./services/emailService');
-
-// Initialize email service
-emailService.initEmailTransporter();
-
-// Ajouter un champ demoStartDate lors de l'inscription
-function initializeDemoForUser(user) {
-  if (!user.demoStartDate && demoConfig.MODE === 'database') {
-    user.demoStartDate = new Date().toISOString();
-  }
-  return user;
-}
+app.use(helmet({
+  hsts: false,
+  contentSecurityPolicy: {
+    useDefaults: false, // avoid implicit directives like upgrade-insecure-requests
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com', 'https://*.gstatic.com', 'https://cdn.jsdelivr.net'],
+      scriptSrcAttr: ["'unsafe-inline'"],
+      // CSP Level 3: script/style element-specific directives
+      scriptSrcElem: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com', 'https://*.gstatic.com', 'https://cdn.jsdelivr.net'],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://*.gstatic.com', 'https://*.google.com'],
+      styleSrcElem: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://*.gstatic.com', 'https://*.google.com'],
+      // Allow loading remote fonts (Google Fonts)
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+      imgSrc: ["'self'", 'data:', 'https://cdn-icons-png.flaticon.com', 'https://cdn.botpress.cloud'],
+      connectSrc: ["'self'", 'https://api.stripe.com', 'https://messaging.botpress.cloud', 'https://cdn.botpress.cloud'],
+      frameSrc: ["'self'", 'https://messaging.botpress.cloud', 'https://checkout.stripe.com', 'https://js.stripe.com'],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+      // Disable auto HTTPS upgrade to keep LAN HTTP working
+      upgradeInsecureRequests: null
+    }
+  },
+  crossOriginOpenerPolicy: false,
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: false
 
 // Vérifier si la démo est expirée pour un utilisateur
 function isDemoExpired(user) {
@@ -1022,6 +1033,12 @@ app.get('/vhr-dashboard-app.html', (req, res) => {
   res.redirect(301, '/vhr-dashboard-pro.html');
 });
 
+// Serve the up-to-date audio receiver from public (avoid legacy root file)
+app.get('/audio-receiver.html', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.sendFile(path.join(__dirname, 'public', 'audio-receiver.html'));
+});
+
 // Test route to verify HTML serving works
 app.get('/test-dashboard', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -1076,7 +1093,7 @@ if (FORCE_HTTP && process.env.RENDER !== 'true') {
 // Expose site-vitrine and top-level HTML files so they can be accessed via http://localhost:PORT/
 app.use('/site-vitrine', express.static(path.join(__dirname, 'site-vitrine')));
 // Serve top-level HTML files that are not in public
-const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact.html', 'account.html', 'START-HERE.html', 'developer-setup.html', 'mentions.html', 'admin-dashboard.html', 'audio-receiver.html'];
+const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact.html', 'account.html', 'START-HERE.html', 'developer-setup.html', 'mentions.html', 'admin-dashboard.html'];
 exposedTopFiles.forEach(f => {
   app.get(`/${f}`, (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -4212,6 +4229,30 @@ function getLanIPv4() {
   return null;
 }
 
+// Try to resolve the best LAN IPv4 for headset redirections (never return localhost)
+function resolveLanIpForClient(req) {
+  const lanIp = getLanIPv4();
+  if (lanIp) return lanIp;
+
+  try {
+    const addr = req?.socket?.address?.().address || req?.socket?.localAddress || '';
+    const cleaned = (addr || '').replace('::ffff:', '');
+    if (cleaned && cleaned !== '::' && cleaned !== '::1' && cleaned !== '127.0.0.1') {
+      return cleaned;
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  const hostHeader = req?.headers?.host || '';
+  const hostOnly = hostHeader.split(':')[0];
+  if (hostOnly && hostOnly !== 'localhost' && hostOnly !== '127.0.0.1') {
+    return hostOnly;
+  }
+
+  return null;
+}
+
 try {
   if (fs.existsSync(NAMES_FILE)) nameMap = JSON.parse(fs.readFileSync(NAMES_FILE, 'utf8') || '{}');
   else fs.writeFileSync(NAMES_FILE, JSON.stringify({}, null, 2));
@@ -4271,7 +4312,8 @@ const wssMpeg1 = new WebSocket.Server({ noServer: true });
 // Audio streaming: Map<serial, { sender: ws, receivers: [ws], buffer: [chunks] }>
 const audioStreams = new Map();
 const wssAudio = new WebSocket.Server({ noServer: true });
-const AUDIO_BUFFER_SIZE = 50; // Keep last 50 chunks in buffer
+// Latency control: keep only minimal history (header + last chunk)
+const AUDIO_BUFFER_SIZE = 2; // effectively ~0.5s max
 
 // ---------- ADB Track with single interval fallback ----------
 let adbTrackFallbackInterval = null;  // Prevent multiple intervals
@@ -4576,12 +4618,13 @@ function stopStream(serial) {
 function handleAudioWebSocket(serial, ws, req) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const mode = url.searchParams.get('mode') || 'receiver'; // 'sender' or 'receiver'
+  const format = url.searchParams.get('format') || 'webm'; // webm|ogg (pass-through)
   
-  console.log(`[Audio] ${mode} connected for serial: ${serial}`);
+  console.log(`[Audio] ${mode} connected for serial: ${serial} (format=${format})`);
   
   // Get or create audio stream entry for this serial
   if (!audioStreams.has(serial)) {
-    audioStreams.set(serial, { sender: null, receivers: new Set(), buffer: [] });
+    audioStreams.set(serial, { sender: null, receivers: new Set(), buffer: [], headerChunk: null, format });
   }
   
   const audioEntry = audioStreams.get(serial);
@@ -4589,9 +4632,17 @@ function handleAudioWebSocket(serial, ws, req) {
   if (mode === 'sender') {
     // PC sending audio
     audioEntry.sender = ws;
+    audioEntry.format = format;
+    // Reset buffer when a new sender arrives to avoid stale audio
+    audioEntry.buffer = [];
+    audioEntry.headerChunk = null;
     console.log(`[Audio] Sender connected: ${serial}`);
     
     ws.on('message', (data) => {
+      // Keep first chunk as header for late-joining receivers
+      if (!audioEntry.headerChunk) {
+        audioEntry.headerChunk = data;
+      }
       // Add to buffer for late-joining receivers
       audioEntry.buffer.push(data);
       if (audioEntry.buffer.length > AUDIO_BUFFER_SIZE) {
@@ -4636,23 +4687,24 @@ function handleAudioWebSocket(serial, ws, req) {
     });
     
   } else if (mode === 'receiver') {
-    // Headset receiving audio
+    // Headset receiving audio (single active receiver to prevent echo/double playback)
+    if (audioEntry.receivers.size > 0) {
+      console.log(`[Audio] Existing receivers detected (${audioEntry.receivers.size}), closing old ones to avoid echo`);
+      for (const oldWs of Array.from(audioEntry.receivers)) {
+        try { oldWs.close(); } catch (e) {}
+        audioEntry.receivers.delete(oldWs);
+      }
+    }
     audioEntry.receivers.add(ws);
     console.log(`[Audio] Receiver connected: ${serial}, total receivers: ${audioEntry.receivers.size}`);
     console.log(`[Audio] Current sender status: ${audioEntry.sender ? 'CONNECTED' : 'NOT CONNECTED'}`);
     console.log(`[Audio] Sending buffered chunks to new receiver: ${audioEntry.buffer.length} chunks`);
     
-    // Send buffered audio chunks first
-    for (const chunk of audioEntry.buffer) {
-      if (ws.readyState === WebSocket.OPEN) {
-        try {
-          ws.send(chunk);
-        } catch (e) {
-          console.error(`[Audio] Failed to send buffered chunk to receiver:`, e.message);
-          break;
-        }
-      }
+    // Send header chunk first if available, then only the last few buffered audio chunks (reduce latency)
+    if (audioEntry.headerChunk && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(audioEntry.headerChunk); } catch (e) { console.error(`[Audio] Failed to send header chunk to receiver:`, e.message); }
     }
+    // No buffered tail to avoid any backlog; rely on live stream after header
     
     // If sender already connected, notify receiver
     if (audioEntry.sender && audioEntry.sender.readyState === WebSocket.OPEN) {
@@ -4690,7 +4742,9 @@ appServer.on('upgrade', (req, res, head) => {
   // Audio streaming endpoint
   if (req.url.startsWith('/api/audio/stream')) {
     try {
-      const url = new URL(req.url, `http://${req.headers.host}`);
+      // Always parse as HTTP to avoid scheme issues when the client tries ws:// on HTTP
+      const host = req.headers.host || `localhost:${PORT}`;
+      const url = new URL(req.url, `http://${host}`);
       const serial = url.searchParams.get('serial');
       
       if (!serial) {
@@ -5211,7 +5265,7 @@ app.get('/api/favorites', (req, res) => {
 
 // Expose server info (LAN IP) so headset can reach the signaling server
 app.get('/api/server-info', (req, res) => {
-  const lanIp = getLanIPv4();
+  const lanIp = resolveLanIpForClient(req);
   const hostHeader = req.headers.host || '';
   const portMatch = hostHeader.match(/:(\d+)/);
   const port = portMatch ? Number(portMatch[1]) : PORT;
@@ -5305,27 +5359,26 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
 
   try {
     // Correction : forcer l'utilisation de l'IP LAN si serverUrl est localhost ou absent
-    let server = serverUrl;
+    let server = (serverUrl || '').trim();
+    // Corrige une éventuelle faute de frappe (locahost)
+    if (server.includes('locahost')) {
+      server = server.replace(/locahost/gi, 'localhost');
+    }
+
     if (!server || server.includes('localhost') || server.includes('127.0.0.1')) {
-      // Tente de détecter l'IP LAN
-      const os = require('os');
-      let lanIp = null;
-      const ifaces = os.networkInterfaces();
-      for (const name of Object.keys(ifaces)) {
-        for (const iface of ifaces[name]) {
-          if (iface.family === 'IPv4' && !iface.internal) {
-            lanIp = iface.address;
-            break;
-          }
-        }
-        if (lanIp) break;
-      }
+      const lanIp = resolveLanIpForClient(req);
       if (lanIp) {
         server = `http://${lanIp}:3000`;
         console.log(`[open-audio-receiver] Correction: IP LAN détectée pour receiver: ${server}`);
       } else {
-        server = 'http://localhost:3000';
-        console.warn('[open-audio-receiver] Aucune IP LAN détectée, fallback sur localhost!');
+        const hostHeader = (req.headers.host || '').split(':')[0];
+        if (hostHeader && hostHeader !== 'localhost' && hostHeader !== '127.0.0.1') {
+          server = `http://${hostHeader}:3000`;
+          console.log(`[open-audio-receiver] Fallback sur host header pour receiver: ${server}`);
+        } else {
+          server = 'http://localhost:3000';
+          console.warn('[open-audio-receiver] Aucune IP LAN détectée, fallback sur localhost!');
+        }
       }
     }
     console.log(`[open-audio-receiver] URL envoyée au Quest: ${server}/audio-receiver.html?serial=${encodeURIComponent(serial)}&autoconnect=true`);
@@ -5409,8 +5462,26 @@ app.post('/api/device/start-voice-app', async (req, res) => {
   }
 
   try {
-    // Build server URL from request if not provided
-    const hostUrl = serverUrl || `http://${req.hostname}:${PORT}`;
+    // Build server URL from request if not provided, always prefer LAN IP (never localhost)
+    const port = PORT || 3000;
+    let hostUrl = (serverUrl || '').trim();
+
+    // Typo guard
+    if (hostUrl.includes('locahost')) {
+      hostUrl = hostUrl.replace(/locahost/gi, 'localhost');
+    }
+
+    // Normalize to LAN IP if missing or pointing to localhost
+    if (!hostUrl || hostUrl.includes('localhost') || hostUrl.includes('127.0.0.1')) {
+      const lanIp = resolveLanIpForClient(req);
+      if (lanIp) {
+        hostUrl = `http://${lanIp}:${port}`;
+        console.log(`[start-voice-app] Replaced localhost with LAN IP: ${hostUrl}`);
+      } else {
+        hostUrl = `http://${req.hostname || 'localhost'}:${port}`;
+        console.warn('[start-voice-app] LAN IP not found, fallback on host header:', hostUrl);
+      }
+    }
     
     console.log(`[start-voice-app] Starting VHR Voice on ${serial} with URL ${hostUrl}`);
     
@@ -5420,6 +5491,8 @@ app.post('/api/device/start-voice-app', async (req, res) => {
       '-n', 'com.vhr.voice/.MainActivity',
       '-e', 'serverUrl', hostUrl,
       '-e', 'serial', serial,
+      '-e', 'adbSerial', serial,
+      '-e', 'cleanSerial', serial.split(':')[0] || serial,
       '--ez', 'autostart', 'true'
     ]);
     

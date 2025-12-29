@@ -59,6 +59,13 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 Puis réessayez : `.\launch-dashboard.ps1`
 
+### Si vous récupérez le pack ZIP manuellement
+
+1. Téléchargez et **extrayez entièrement** l'archive (ne lancez pas les fichiers depuis l'intérieur du ZIP).
+2. Ouvrez le dossier `client-pack` du pack extrait.
+3. Double-cliquez sur `start-dashboard-pro.bat` (ou exécutez `start-dashboard-pro.ps1`).
+4. Si Windows affiche "chemin introuvable", l'extraction est incomplète ou le fichier est lancé hors du dossier `client-pack` : ré-extrayez puis relancez.
+
 ## 🔄 Processus automatisé
 
 Le script effectue les étapes suivantes automatiquement :

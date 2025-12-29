@@ -98,6 +98,23 @@ function saveAuthToken(token) {
 	return '';
 }
 
+async function syncTokenFromCookie() {
+	// If the user is already authenticated via httpOnly cookie (e.g., after a redirect from HTTPS
+	// to LAN HTTP) but localStorage lacks the JWT, ask the server to echo it once so we can
+	// propagate it via ?token=… on LAN links.
+	const existing = readAuthToken();
+	if (existing) return existing;
+	try {
+		const res = await api('/api/check-auth?includeToken=1');
+		if (res && res.ok && res.authenticated && res.token) {
+			return saveAuthToken(res.token);
+		}
+	} catch (e) {
+		console.warn('[auth] syncTokenFromCookie failed', e);
+	}
+	return '';
+}
+
 function captureTokenFromQuery() {
 	if (!window || !window.location || !window.history) return;
 	const params = new URLSearchParams(window.location.search || '');
@@ -1025,7 +1042,35 @@ window.switchAccountTab = function(tab) {
 let activeAudioStream = null;  // Global audio stream instance
 let activeAudioSerial = null;  // Serial of device receiving audio
 
+console.log('[voice] dashboard-pro.js build stamp: 2025-12-29 18:55');
+
+// Keep panel always compact (no fullscreen overlay)
+function setAudioPanelMinimized() {
+	const panel = document.getElementById('audioStreamPanel');
+	const content = document.getElementById('audioStreamContent');
+	const pill = document.getElementById('audioStreamPill');
+	if (!panel || !content) return;
+	panel.style = 'position:fixed;bottom:12px;right:12px;z-index:120;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;gap:8px;pointer-events:auto;background:transparent;width:auto;height:auto;';
+	content.style.display = 'none';
+	content.style.maxWidth = '420px';
+	content.style.width = '360px';
+	content.style.maxHeight = '80vh';
+	content.style.pointerEvents = 'auto';
+	content.style.margin = '0';
+	if (pill) {
+		pill.style.display = 'inline-flex';
+		pill.innerHTML = `🎤<span style="font-size:11px;">ON</span>`;
+	}
+	panel.dataset.minimized = 'true';
+}
+
+window.toggleAudioPanelSize = function() {
+	// No-op: panel stays compact to avoid covering dashboard
+	return false;
+};
+
 window.sendVoiceToHeadset = async function(serial) {
+	console.log('[voice] sendVoiceToHeadset invoked for serial:', serial);
 	// Close any existing stream first (same or different device)
 	if (activeAudioStream) {
 		console.log('[sendVoiceToHeadset] Closing existing stream before starting new one');
@@ -1045,17 +1090,18 @@ window.sendVoiceToHeadset = async function(serial) {
 
 	panel = document.createElement('div');
 	panel.id = 'audioStreamPanel';
-	panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:2000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
-	panel.onclick = (e) => { if (e.target === panel) window.closeAudioStream(); };
+	panel.dataset.minimized = 'true';
+	panel.style = 'position:fixed;bottom:12px;right:12px;z-index:120;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;gap:8px;pointer-events:auto;background:transparent;width:auto;height:auto;';
+	panel.onclick = null;
 	
 	panel.innerHTML = `
-		<div style='background:#1a1d24;border:3px solid #2ecc71;border-radius:16px;padding:0;max-width:900px;width:95%;max-height:85vh;overflow-y:auto;box-shadow:0 8px 32px #000;color:#fff;'>
+		<div id='audioStreamContent' style='background:#1a1d24;border:3px solid #2ecc71;border-radius:12px;padding:0;max-width:420px;width:360px;max-height:80vh;overflow-y:auto;box-shadow:0 8px 20px #000;color:#fff;'>
 			<!-- Header -->
-			<div style='background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);padding:24px;border-radius:13px 13px 0 0;position:relative;display:flex;justify-content:space-between;align-items:center;'>
+			<div style='background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);padding:16px;border-radius:10px 10px 0 0;position:relative;display:flex;justify-content:space-between;align-items:center;'>
 				<h2 style='margin:0;font-size:24px;color:#fff;display:flex;align-items:center;gap:12px;'>
 					🎤 Streaming Audio WebRTC vers ${deviceName}
 				</h2>
-				<button onclick='window.closeAudioStream()' style='background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;font-weight:bold;'>✕</button>
+				<button onclick='window.closeAudioStream()' style='background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:16px;font-weight:bold;'>✕</button>
 			</div>
 			
 			<!-- Visualizer -->
@@ -1097,18 +1143,57 @@ window.sendVoiceToHeadset = async function(serial) {
 	`;
 	
 	document.body.appendChild(panel);
+
+	// Add a tiny pill button so the stream never covers the dashboard
+	const contentEl = document.getElementById('audioStreamContent');
+	if (contentEl) {
+		const pill = document.createElement('button');
+		pill.id = 'audioStreamPill';
+		pill.setAttribute('aria-label', 'Streaming audio actif');
+		pill.style = 'background:linear-gradient(135deg,#2ecc71 0%,#27ae60 100%);color:#0b0c10;border:none;padding:8px 10px;border-radius:12px;font-weight:bold;font-size:12px;display:inline-flex;align-items:center;justify-content:center;gap:4px;box-shadow:0 4px 12px rgba(0,0,0,0.35);cursor:pointer;min-width:52px;height:48px;';
+		pill.innerHTML = `🎤<span style="font-size:11px;">ON</span>`;
+		pill.onclick = () => {
+			const isHidden = contentEl.style.display === 'none';
+			if (isHidden) {
+				contentEl.style.display = 'block';
+				pill.innerHTML = `🎤<span style="font-size:11px;">ON ▾</span>`;
+			} else {
+				contentEl.style.display = 'none';
+				pill.innerHTML = `🎤<span style="font-size:11px;">ON</span>`;
+			}
+		};
+		panel.insertBefore(pill, contentEl);
+	}
+
+	setAudioPanelMinimized();
 	
 	// Start audio streaming
 	try {
 		// Build headset-accessible server URL (avoid localhost inside headset)
 		const resolvedServerUrl = await resolveAudioServerUrl();
+		const useBackgroundApp = true; // casque app prioritaire
+		// Ensure we have a token for signaling (LAN origin may not share localStorage)
+		let signalingToken = readAuthToken();
+		if (!signalingToken) {
+			signalingToken = await syncTokenFromCookie();
+		}
 
 		activeAudioStream = new window.VHRAudioStream({
 			signalingServer: resolvedServerUrl,
 			signalingPath: '/api/audio/signal',
-			relayBase: resolvedServerUrl
+			relayBase: resolvedServerUrl,
+			authToken: signalingToken || ''
 		});
-		await activeAudioStream.start(serial);
+		console.log('[voice] Starting VHRAudioStream (WebRTC+relay) for', serial);
+		let startOk = false;
+		try {
+			await activeAudioStream.start(serial);
+			startOk = true;
+			console.log('[voice] VHRAudioStream started for', serial);
+		} catch (startErr) {
+			console.error('[voice] Failed to start audio stream (mic/permissions?/WebRTC):', startErr);
+			showToast('⚠️ WebRTC/connexion audio ko, on bascule en relais WS', 'warning');
+		}
 		
 		// Save serial for cleanup later
 		activeAudioSerial = serial;
@@ -1117,63 +1202,70 @@ window.sendVoiceToHeadset = async function(serial) {
 		activeAudioStream.isLocalMonitoring = false;
 		activeAudioStream.setLocalMonitoring(false);
 		
-		// Start audio receiver on headset - try background app first, then browser
+		// Start audio receiver on headset - browser only (no forced Quest open)
 		try {
 			const serverUrl = resolvedServerUrl || window.location.origin;
 			console.log('[voice] Receiver serverUrl:', serverUrl);
-			showToast('📱 Activation du récepteur audio sur le casque...', 'info');
+			showToast('📱 Ouverture du récepteur voix (casque)...', 'info');
 
-					   // Ouvre la page receiver sur le PC (toujours)
-					   const receiverUrl = `${serverUrl}/audio-receiver.html?serial=${encodeURIComponent(serial)}&autoconnect=true`;
-					   // Si on est en production (pas localhost), on redirige dans l'onglet courant
-					   if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-						   window.location.href = receiverUrl;
-					   } else {
-						   // En dev, on ouvre dans un nouvel onglet pour ne pas gêner les tests
-						   window.open(receiverUrl, '_blank');
-					   }
+			// Forcer toujours l'ouverture en localhost pour autoriser le micro sur le PC
+			const displayName = deviceName || serial || 'casque';
+			const path = `/audio-receiver.html?serial=${encodeURIComponent(serial)}&name=${encodeURIComponent(displayName)}&autoconnect=true`;
+			const port = window.location.port || 3000;
+			let storedToken = readAuthToken() || await syncTokenFromCookie();
+			let receiverUrl = `${resolvedServerUrl}${path}`;
+			if (storedToken) receiverUrl += `&token=${encodeURIComponent(storedToken)}`;
+			console.log('[voice] receiverUrl (casque):', receiverUrl);
+			// Pas de bouton ni d'ouverture sur le PC : le récepteur reste uniquement dans le casque
+			window.lastAudioReceiverUrl = receiverUrl;
+			// Ne jamais ouvrir le récepteur web dans le casque (l'app native doit être utilisée)
+			console.log('[voice] Web receiver launch on headset disabled (native app enforced)');
 
-			// Essaie aussi d'ouvrir sur le Quest via ADB (optionnel)
+			// Lancer aussi l'app native VHR Voice sur le casque avec autostart
 			try {
-				const openRes = await api('/api/device/open-audio-receiver', {
+				const startRes = await api('/api/device/start-voice-app', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ serial, serverUrl, useBackgroundApp: true }),
-					timeout: 35000 // align with adb 30s + margin
+					body: JSON.stringify({ serial, serverUrl: resolvedServerUrl })
 				});
-
-				if (openRes && openRes.ok) {
-					if (openRes.method === 'background-app' || openRes.method === 'background-app-activity') {
-						console.log('[sendVoiceToHeadset] Background voice app started');
-						showToast('✅ Audio en arrière-plan activé (jeu non interrompu)', 'success');
-					} else {
-						console.log('[sendVoiceToHeadset] Audio receiver opened in browser:', openRes.url);
-						showToast('✅ Récepteur audio ouvert (navigateur)', 'success');
-					}
-				} else if (openRes && openRes.timeout) {
-					console.warn('[sendVoiceToHeadset] Audio receiver timeout');
-					showToast('⏳ Casque ne répond pas (ADB). Réveillez-le et vérifiez ADB.', 'warning');
+				if (startRes && startRes.ok) {
+					console.log('[voice] Voice app launch request sent');
+					showToast('📱 App VHR Voice lancée sur le casque', 'success');
 				} else {
-					console.warn('[sendVoiceToHeadset] Failed to open audio receiver:', openRes);
-					showToast('⚠️ Installez VHR Voice app pour le mode arrière-plan', 'warning');
+					console.warn('[voice] Voice app launch failed:', startRes?.error);
 				}
-			} catch (openError) {
-				console.warn('[sendVoiceToHeadset] Could not open audio receiver on Quest:', openError);
+			} catch (adbLaunchErr) {
+				console.warn('[voice] ADB launch voice app error:', adbLaunchErr);
 			}
+
+			// Ne plus forcer l'ouverture sur le Quest via ADB pour éviter qu'une page web prenne le focus dans le casque
 		} catch (openError) {
 			console.warn('[sendVoiceToHeadset] Could not open audio receiver:', openError);
 		}
 		
 		// Also start audio relay to headset via WebSocket for simple receivers
+		// Priorité app casque : tente OGG, sinon fallback WebM. Même si WebRTC a échoué, on pousse le relais.
 		try {
-			if (activeAudioStream && typeof activeAudioStream.startAudioRelay === 'function') {
-				await activeAudioStream.startAudioRelay(serial);
-				console.log('[sendVoiceToHeadset] Audio relay started for simple headset receivers');
+			const relayFormat = useBackgroundApp ? 'ogg' : 'webm';
+			if (activeAudioStream && typeof activeAudioStream.startAudioRelay === 'function' && activeAudioStream.localStream) {
+				console.log('[voice] Starting audio relay WS sender for', serial, 'format=', relayFormat, 'startOk=', startOk);
+				await activeAudioStream.startAudioRelay(serial, { format: relayFormat });
+				console.log('[sendVoiceToHeadset] Audio relay started for headset receivers');
 			} else {
-				console.warn('[sendVoiceToHeadset] Audio relay skipped: stream not ready');
+				console.warn('[sendVoiceToHeadset] Audio relay skipped: stream not ready or no mic stream');
 			}
 		} catch (relayError) {
-			console.warn('[sendVoiceToHeadset] Audio relay failed (WebRTC will still work):', relayError);
+			console.warn('[sendVoiceToHeadset] Audio relay failed (attempted', useBackgroundApp ? 'ogg' : 'webm', '):', relayError);
+			// Fallback: retry in webm if ogg failed
+			if (useBackgroundApp && activeAudioStream && typeof activeAudioStream.startAudioRelay === 'function') {
+				try {
+					console.log('[voice] Fallback relay in webm for', serial);
+					await activeAudioStream.startAudioRelay(serial, { format: 'webm' });
+					console.log('[sendVoiceToHeadset] Fallback WebM relay started');
+				} catch (fallbackErr) {
+					console.warn('[sendVoiceToHeadset] Fallback relay failed:', fallbackErr);
+				}
+			}
 		}
 		
 		// Setup voice audio output select handler
@@ -1222,6 +1314,7 @@ window.sendVoiceToHeadset = async function(serial) {
 };
 
 window.toggleAudioStreamPause = function() {
+	setAudioPanelMinimized();
 	if (!activeAudioStream) return;
 	
 	const isPaused = activeAudioStream.isPaused || false;
@@ -1542,6 +1635,57 @@ function formatDate(isoString) {
 	return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+// UI fallback when popup is blocked: show a fixed banner with the receiver URL
+function showVoiceReceiverFallback(url, deviceLabel = 'casque') {
+	let box = document.getElementById('voiceReceiverFallback');
+	if (!box) {
+		box = document.createElement('div');
+		box.id = 'voiceReceiverFallback';
+		box.style.position = 'fixed';
+		box.style.bottom = '12px';
+		box.style.right = '12px';
+		box.style.zIndex = '9999';
+		box.style.padding = '12px 14px';
+		box.style.borderRadius = '10px';
+		box.style.boxShadow = '0 6px 18px rgba(0,0,0,0.18)';
+		box.style.background = 'linear-gradient(135deg, #34495e 0%, #2c3e50 100%)';
+		box.style.color = '#ecf0f1';
+		box.style.fontSize = '14px';
+		box.style.maxWidth = '320px';
+		box.style.lineHeight = '1.5';
+		box.innerHTML = `
+			<div style="font-weight:600;margin-bottom:6px;">🔗 Ouvrir le récepteur voix (${deviceLabel})</div>
+			<a id="voiceReceiverFallbackLink" href="${url}" target="_blank" rel="noopener noreferrer" style="display:block; word-break:break-all; color:#1abc9c; text-decoration:underline; margin-bottom:8px;">${url}</a>
+			<button id="voiceReceiverCopyBtn" style="border:none; background:#1abc9c; color:#0b1d24; padding:8px 10px; border-radius:6px; cursor:pointer; font-weight:600;">Copier le lien</button>
+			<button id="voiceReceiverCloseBtn" style="border:none; background:transparent; color:#bdc3c7; margin-left:8px; cursor:pointer;">Fermer</button>
+		`;
+		document.body.appendChild(box);
+		const copyBtn = document.getElementById('voiceReceiverCopyBtn');
+		const linkEl = document.getElementById('voiceReceiverFallbackLink');
+		const closeBtn = document.getElementById('voiceReceiverCloseBtn');
+		if (copyBtn && linkEl) {
+			copyBtn.onclick = async () => {
+				try {
+					await navigator.clipboard.writeText(linkEl.href);
+					showToast('Lien copié ✔️', 'success');
+				} catch (e) {
+					showToast('Copie impossible, copiez manuellement', 'warning');
+				}
+			};
+		}
+		if (closeBtn) {
+			closeBtn.onclick = () => box.remove();
+		}
+	} else {
+		const linkEl = document.getElementById('voiceReceiverFallbackLink');
+		if (linkEl) {
+			linkEl.href = url;
+			linkEl.textContent = url;
+		}
+		box.style.display = 'block';
+	}
+}
+
 // Incrémenter les stats lors des actions
 function incrementStat(statName) {
 	const stats = JSON.parse(localStorage.getItem('vhr_user_stats_' + currentUser) || '{}');
@@ -1756,17 +1900,41 @@ async function getServerInfo() {
 	return null;
 }
 
-async function buildLanDashboardUrl() {
+async function buildLanUrlForPath(pathname = '/vhr-dashboard-pro.html') {
 	const info = await getServerInfo();
 	const port = (info && info.port) || window.location.port || 3000;
-	const proto = 'http:'; // LAN access requires HTTP to avoid SSL errors on local IPs
+	const proto = 'http:'; // Toujours HTTP pour éviter les erreurs SSL
 	const lanIp = info && info.lanIp ? info.lanIp : '';
+	const manual = getLanOverride(); // peut être un host ou une URL complète
 	const fallbackHost = window.location.hostname || 'localhost';
-	const targetHost = lanIp || fallbackHost;
-	const baseUrl = `${proto}//${targetHost}:${port}/vhr-dashboard-pro.html`;
-	const storedToken = readAuthToken();
-	const url = storedToken ? `${baseUrl}?token=${encodeURIComponent(storedToken)}` : baseUrl;
-	return { url, lanIp };
+
+	let baseOrigin;
+	if (manual) {
+		if (manual.startsWith('http://') || manual.startsWith('https://')) {
+			baseOrigin = manual.replace(/^https:/, 'http:').replace(/\/$/, '');
+		} else {
+			baseOrigin = `${proto}//${manual}:${port}`;
+		}
+	} else if (lanIp) {
+		baseOrigin = `${proto}//${lanIp}:${port}`;
+	} else {
+		baseOrigin = `${proto}//${fallbackHost}:${port}`;
+	}
+
+	let storedToken = readAuthToken();
+	if (!storedToken) {
+		storedToken = await syncTokenFromCookie();
+	}
+	const baseUrl = `${baseOrigin}${pathname}`;
+	let url = baseUrl;
+	if (storedToken) {
+		url += (pathname.includes('?') ? '&' : '?') + `token=${encodeURIComponent(storedToken)}`;
+	}
+	return { url, lanIp: lanIp || manual || fallbackHost };
+}
+
+async function buildLanDashboardUrl() {
+	return buildLanUrlForPath('/vhr-dashboard-pro.html');
 }
 
 function getLanOverride() {
@@ -1782,7 +1950,7 @@ function setLanOverride(ip) {
 }
 
 async function promptLanRedirectForVoice() {
-	const { url: lanUrl, lanIp } = await buildLanDashboardUrl();
+	const { url: lanUrl, lanIp } = await buildLanUrlForPath('/audio-receiver.html');
 	if (lanIp) {
 		try {
 			window.open(lanUrl, '_blank', 'noopener,noreferrer');
@@ -1793,21 +1961,24 @@ async function promptLanRedirectForVoice() {
 	return lanUrl;
 }
 
-async function openVoiceDashboardLanLink() {
+async function openVoiceReceiverForDevice(serial = '', name = '') {
 	try {
-		const { url, lanIp } = await buildLanDashboardUrl();
-		if (lanIp) {
-			showToast('🗺️ IP LAN détectée — ouverture du dashboard', 'info');
-			window.open(url, '_blank', 'noopener,noreferrer');
-			return url;
-		}
-
-		showToast('⚠️ IP LAN introuvable, ouverture du dashboard via l’hôte actuel', 'warning');
-		window.open(url, '_blank', 'noopener,noreferrer');
+		const displayName = name || serial || 'casque';
+		const path = `/audio-receiver.html?serial=${encodeURIComponent(serial || '')}&name=${encodeURIComponent(displayName)}&autoconnect=true`;
+		const port = window.location.port || 3000;
+		let storedToken = readAuthToken() || await syncTokenFromCookie();
+		let url = `http://localhost:${port}${path}`;
+		if (storedToken) url += `&token=${encodeURIComponent(storedToken)}`;
+			showToast(`🗣️ Voix pour ${displayName} (localhost)`, 'info');
+			const opened = window.open(url, '_blank', 'noopener,noreferrer');
+			if (!opened) {
+				console.warn('[voice] Popup bloquée, ouvrir manuellement :', url);
+				showToast(`🔗 Ouvrez manuellement : ${url}`, 'warning');
+			}
 		return url;
 	} catch (e) {
-		console.error('[voice] openVoiceDashboardLanLink failed', e);
-		showToast('❌ Impossible d’ouvrir l’URL de la voix: ' + (e.message || 'erreur inconnue'), 'error');
+		console.error('[voice] openVoiceReceiverForDevice failed', e);
+		showToast('❌ Impossible d’ouvrir la voix: ' + (e.message || 'erreur inconnue'), 'error');
 	}
 }
 
@@ -1824,21 +1995,8 @@ async function resolveAudioServerUrl() {
 		return `${proto}//${info.lanIp}:${info.port || port}`;
 	}
 
-	// 3) Fallback: si pas d'IP, utiliser window.location.origin SAUF si localhost, auquel cas on bloque
-	const host = window.location.hostname;
-	if (host !== 'localhost' && host !== '127.0.0.1') return window.location.origin;
-	// Si on est encore sur localhost, on bloque explicitement
-	const lanUrl = await promptLanRedirectForVoice();
-	const msg = `🚫 <b>Fonction Voix indisponible depuis localhost</b><br><br>
-	Nous venons d'ouvrir (ou tenter d'ouvrir) un nouvel onglet vers:<br>
-	<span style='background:#23272f;padding:6px 14px;border-radius:6px;color:#fff;font-size:17px;display:inline-block;margin:10px 0;'>${lanUrl}</span><br>
-	Utilisez cette adresse sur votre navigateur ou votre casque pour profiter de la Voix.<br><br>
-	<b>Pourquoi ?</b> Le Quest et vos appareils réseau ne peuvent pas accéder à <code>localhost</code>, et les fonctions audio exigent l'IP réelle du PC.<br><br>
-	<span style='color:#95a5a6;'>Astuce : Ajoutez l'adresse IP complète à vos favoris pour la retrouver instantanément.<br>Si vous retombez sur la vitrine, ajoutez <b>/vhr-dashboard-pro.html</b> à la fin.</span>`;
-	const div = document.createElement('div');
-	div.innerHTML = `<div style='position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;'><div style='background:#1a1d24;border:3px solid #e74c3c;border-radius:16px;padding:40px;max-width:500px;width:95%;color:#fff;font-size:17px;text-align:center;box-shadow:0 8px 32px #000;'>${msg}<br><br><button style='margin-top:24px;padding:12px 24px;background:#2ecc71;color:#000;border:none;border-radius:8px;font-weight:bold;font-size:16px;cursor:pointer;' onclick='this.parentNode.parentNode.remove()'>OK</button></div></div>`;
-	document.body.appendChild(div);
-	throw new Error('Dashboard ouvert sur localhost, impossible de lancer la voix sur le Quest.');
+	// 3) Fallback: autoriser aussi depuis localhost en renvoyant l'origine (pour un usage PC local)
+	return window.location.origin;
 }
 
 async function syncRunningAppsFromServer() {
@@ -2098,8 +2256,8 @@ function renderDevicesTable() {
 				<button onclick='showFavoritesDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#e67e22;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin-top:4px;'>⭐ Favoris</button>
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				<button onclick='openVoiceDashboardLanLink()' style='background:#16a085;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;'>🗣️ Voix LAN</button>
-				<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:11px;margin-left:4px;' title='Installer VHR Voice App'>📲</button>
+				<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='background:#16a085;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;'>🗣️ Voix LAN</button>
+				<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:11px;margin-left:4px;' title='Installer l’émetteur voix sur le casque'>📲 Émetteur</button>
 			</td>
 			<td style='padding:12px;text-align:center;'>
 				<button onclick='renameDevice({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>✏️</button>
@@ -2196,8 +2354,8 @@ function renderDevicesCards() {
 				<button onclick='showFavoritesDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#e67e22;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>⭐ Favoris</button>
 			</div>
 			<div style='display:flex;gap:6px;margin-bottom:6px;'>
-				<button onclick='openVoiceDashboardLanLink()' style='flex:1;background:#16a085;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;'>🗣️ Voix LAN</button>
-				<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:10px 12px;border-radius:6px;cursor:pointer;' title='Installer VHR Voice App'>📲</button>
+				<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='flex:1;background:#16a085;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;'>🗣️ Voix LAN</button>
+				<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:10px 12px;border-radius:6px;cursor:pointer;' title='Installer l’émetteur voix sur le casque'>📲 Émetteur</button>
 			</div>
 			${!d.serial.includes(':') ? `
 				<button onclick='connectWifiAuto(${JSON.stringify(d.serial)})' style='width:100%;background:#9b59b6;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>📶 WiFi Auto</button>
@@ -3374,7 +3532,7 @@ function showTrialBanner(daysRemaining) {
 		bgColor = 'linear-gradient(135deg, #2ecc71, #27ae60)'; // Green for active
 		bannerText = `✅ Abonnement actif`;
 	}
-	
+
 	banner.style = `position:fixed;top:56px;left:0;width:100vw;background:${bgColor};color:#fff;padding:10px 20px;text-align:center;z-index:1050;font-weight:bold;box-shadow:0 2px 8px #000;`;
 	banner.innerHTML = `
 		${bannerText}
@@ -3384,7 +3542,7 @@ function showTrialBanner(daysRemaining) {
 	`;
 	document.body.appendChild(banner);
 	document.body.style.paddingTop = '106px'; // 56 navbar + 50 banner
-	
+
 	// Add margin-top to deviceGrid to prevent overlap with headers
 	const deviceGrid = document.getElementById('deviceGrid');
 	if (deviceGrid) {
@@ -3871,6 +4029,9 @@ async function checkJWTAuth() {
 		console.log('[auth] API response:', res);
 		
 		if (res && res.ok && res.authenticated && res.user) {
+			if (res.token) {
+				saveAuthToken(res.token);
+			}
 			// User is authenticated
 			currentUser = res.user.username || res.user.name || res.user.email;
 			localStorage.setItem('vhr_current_user', currentUser);
