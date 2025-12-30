@@ -31,21 +31,9 @@ if (-not (Test-Path $envTarget) -and (Test-Path $envExample)) {
 	Copy-Item $envExample $envTarget -Force | Out-Null
 }
 
-# Ouvrir le navigateur après 2s (job en arrière-plan) avec repli
+# Ouvrir le navigateur après 5s (simplifié, sans jobs)
 $targetUrl = "http://localhost:3000/vhr-dashboard-pro.html"
-try {
-	Start-Job -ScriptBlock {
-		Start-Sleep -Seconds 2
-		$url = "http://localhost:3000/vhr-dashboard-pro.html"
-		Start-Process $url
-	} | Out-Null
-} catch {
-	# Si les jobs sont désactivés, tenter en direct
-	Start-Process "cmd.exe" -ArgumentList '/c','start','""',$targetUrl -WindowStyle Hidden | Out-Null
-}
-
-# Repli immédiat silencieux
-try { Start-Process $targetUrl } catch { Start-Process "cmd.exe" -ArgumentList '/c','start','""',$targetUrl | Out-Null }
+Start-Process powershell -ArgumentList '-NoLogo','-NoProfile','-WindowStyle','Hidden','-Command',"Start-Sleep -Seconds 5; Start-Process '$targetUrl'" | Out-Null
 
 try {
 	Set-Location $root

@@ -34,10 +34,9 @@ if not exist "%ROOT_DIR%\.env" (
 	if exist "%~dp0.env.client-example" copy "%~dp0.env.client-example" "%ROOT_DIR%\.env" >nul
 )
 
-REM Lancer l'ouverture du navigateur après 2s (double fallback PS + start) — correction de guillemets
+REM Lancer l'ouverture du navigateur après 5s (simplifié)
 set "TARGET_URL=http://localhost:3000/vhr-dashboard-pro.html"
-start "" powershell -NoLogo -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; Start-Process \"%TARGET_URL%\"" 1>nul 2>nul
-start "" cmd /c "timeout /t 3 >nul & start "" \"%TARGET_URL%\""" 1>nul 2>nul
+start "" powershell -NoLogo -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 5; Start-Process '%TARGET_URL%'" 1>nul 2>nul
 
 REM Lancer le serveur (console courante) avec affichage des erreurs
 pushd "%ROOT_DIR%" >nul 2>nul
