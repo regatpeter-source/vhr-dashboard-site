@@ -660,6 +660,15 @@ if (process.env.NODE_ENV !== 'production' && process.env.RENDER !== 'true') {
 }
 
 const app = express();
+
+// ---- Parsers & cookies ----
+// Body parsers were missing, causing /api/login (et autres POST) à rester en « pending »
+// faute de req.body parsé. On ajoute JSON + URL-encoded, ainsi que cookie-parser pour
+// l'authentification par cookie vhr_token.
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ extended: true, limit: '20mb' }));
+app.use(cookieParser());
+
 // Helmet with custom CSP: allow own scripts and the botpress CDN. Do not enable 'unsafe-inline'.
 app.use(helmet({
   contentSecurityPolicy: {
@@ -723,6 +732,16 @@ app.use(helmet({
   crossOriginResourcePolicy: false
 
 }));
+
+// ========== DEMO / ESSAI CONFIG ==========
+// Valeurs par défaut (7 jours) si non précisées dans l'environnement
+const DEMO_DAYS = parseInt(process.env.DEMO_DAYS || '7', 10);
+const DEMO_DURATION_MS = DEMO_DAYS * 24 * 60 * 60 * 1000;
+const demoConfig = {
+  DEMO_DAYS,
+  DEMO_DURATION_MS,
+  MODE: process.env.DEMO_MODE || 'file'
+};
 
 // Vérifier si la démo est expirée pour un utilisateur
 function isDemoExpired(user) {
