@@ -1,78 +1,30 @@
 // Launch Dashboard Script
-// Downloads and executes PowerShell launcher
+// Now downloads the full client pack (Dashboard + Voix)
 
-async function launchDashboard() {
+const ZIP_URL_FULL = 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.0-client/vhr-dashboard-pro-client-full.zip';
+
+function launchDashboard() {
     const btn = document.getElementById('launchBtn');
     const successMsg = document.getElementById('successMsg');
-    
-    // Disable button
+
     btn.disabled = true;
     btn.classList.add('loading');
     btn.textContent = '⏳ Téléchargement...';
     successMsg.classList.remove('show');
-    
-    try {
-        // Download the launcher script (.bat). If blocked, fall back to .ps1
-        let blob = null;
-        let filename = 'launch-dashboard.bat';
 
-        const tryDownload = async (url) => {
-            const resp = await fetch(url);
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            return resp.blob();
-        };
+    // Ouvre le téléchargement dans un nouvel onglet pour éviter les blocages navigateur
+    window.open(ZIP_URL_FULL, '_blank');
 
-        try {
-            blob = await tryDownload('/download/launch-script');
-        } catch (e) {
-            console.warn('BAT download blocked, trying PS1 fallback:', e.message);
-            blob = await tryDownload('/download/launch-script-ps1');
-            filename = 'launch-dashboard.ps1';
-        }
+    successMsg.classList.add('show');
+    btn.textContent = '✓ Téléchargement lancé';
 
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-        
-        // Show success message
-        successMsg.classList.add('show');
-        btn.textContent = '✓ Fichier téléchargé!';
-        
-        // Reset button after 3 seconds
-        setTimeout(() => {
-            btn.disabled = false;
-            btn.classList.remove('loading');
-            btn.textContent = '🚀 Lancer le Dashboard';
-        }, 3000);
-        
-    } catch (error) {
-        console.error('Erreur de téléchargement:', error);
-        btn.textContent = '✗ Erreur - Réessayez';
+    setTimeout(() => {
         btn.disabled = false;
         btn.classList.remove('loading');
-        
-        // Show error message
-        const errorDiv = document.createElement('div');
-        errorDiv.style.cssText = 'background: #ffebee; color: #c62828; padding: 15px; border-radius: 5px; margin-top: 20px; text-align: left;';
-        errorDiv.innerHTML = `
-            <strong>Erreur de téléchargement:</strong><br>
-            ${error.message}<br><br>
-            Vérifiez votre connexion Internet et réessayez.
-        `;
-        successMsg.parentNode.insertBefore(errorDiv, successMsg.nextSibling);
-        
-        setTimeout(() => {
-            btn.textContent = '🚀 Lancer le Dashboard';
-        }, 3000);
-    }
+        btn.textContent = '🚀 Télécharger le pack complet';
+    }, 3000);
 }
 
-// Attach event listener when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     const launchBtn = document.getElementById('launchBtn');
     if (launchBtn) {

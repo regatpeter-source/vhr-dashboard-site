@@ -18,18 +18,36 @@ function Test-PortOpen {
 	}
 }
 
+function Invoke-Browser {
+	param([string]$Url)
+	try {
+		Start-Process $Url
+		return
+	} catch {
+		try { Start-Process "cmd.exe" -ArgumentList '/c','start','""',$Url | Out-Null } catch { }
+	}
+}
+
 function Open-Dashboard {
 	param([string]$Url, [int]$DelaySeconds = 3)
-	Start-Job -ArgumentList $Url, $DelaySeconds -ScriptBlock {
-		param($UrlToOpen, $DelaySeconds)
+	try {
+		Start-Job -ArgumentList $Url, $DelaySeconds -ScriptBlock {
+			param($UrlToOpen, $DelaySeconds)
+			Start-Sleep -Seconds $DelaySeconds
+			try { Start-Process $UrlToOpen } catch { Start-Process "cmd.exe" -ArgumentList '/c','start','""',$UrlToOpen | Out-Null }
+		} | Out-Null
+	} catch {
+		# Si les jobs sont bloqués, tenter direct après délai minimal
 		Start-Sleep -Seconds $DelaySeconds
-		Start-Process $UrlToOpen
-	} | Out-Null
+		Invoke-Browser -Url $Url
+	}
+	# Repli immédiat direct (au cas où le job serait bloqué)
+	Invoke-Browser -Url $Url
 }
 
 if (Test-PortOpen -Port $port) {
 	Write-Host 'Serveur déjà actif sur le port ' + $port + '. Ouverture directe du dashboard...'
-	Start-Process $dashboardUrl
+	Invoke-Browser -Url $dashboardUrl
 	exit 0
 }
 

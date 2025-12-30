@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lancer VHR Dashboard - VHR DASHBOARD</title>
+    <link rel="stylesheet" href="/launch-dashboard.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 VHR Dashboard</h1>
+            <p class="subtitle">Lancer en local sur votre ordinateur</p>
+        </header>
+        
+        <div class="info-box">
+            <strong>ℹ️ Informations :</strong>
+            <p>Téléchargez le pack complet (Dashboard + Voix) puis lancez-le en local. Le serveur démarre automatiquement en arrière-plan.</p>
+        </div>
+
+        <div class="info-box">
+            <strong>📦 Après le téléchargement :</strong>
+            <p>
+                1) Extrayez entièrement le ZIP.<br>
+                2) Ouvrez le dossier <code>client-pack</code> extrait.<br>
+                3) Double-cliquez <code>start-dashboard-pro.bat</code> (ou <code>start-dashboard-pro.ps1</code>).<br>
+                4) Le navigateur s'ouvre sur <code>http://localhost:3000/vhr-dashboard-pro.html</code>.
+            </p>
+        </div>
+        
+        <button class="launch-btn" id="launchBtn">
+            🚀 Télécharger le pack complet
+        </button>
+        
+        <div class="success-message" id="successMsg">
+            ✓ Téléchargement lancé ! <br>
+            <small>Extraction puis double-clic sur start-dashboard-pro.bat</small>
+        </div>
+        
+        <div class="authentication-notice">
+            <h3>🔐 Authentification requise</h3>
+            <p>Une fois le dashboard ouvert, <strong>vous devez vous authentifier</strong> pour que la période d'essai de <strong>7 jours</strong> commence.</p>
+            <p>Vous pouvez :</p>
+            <ul>
+                <li><strong>Créer un compte</strong> avec votre email</li>
+                <li><strong>Vous connecter</strong> si vous avez déjà un compte</li>
+            </ul>
+            <p class="auth-conseil">💡 <strong>Conseil :</strong> Gardez votre session ouverte pour que le décompte des 7 jours soit actif.</p>
+        </div>
+        
+        <div class="requirements">
+            <h3>✨ Prérequis :</h3>
+            <ul>
+                <li>Serveur local en cours d'exécution (port 3000)</li>
+                <li>Navigateur web moderne (Chrome, Edge, Firefox)</li>
+                <li>Cookies activés</li>
+            </ul>
+        </div>
+        
+        <footer>
+            <p>Pour les problèmes : <a href="/contact.html">Contactez-nous</a> | <a href="/">Retour au site</a></p>
+        </footer>
+    </div>
+    
+    <script src="/js/launch-dashboard.js"></script>
+</body>
+</html>

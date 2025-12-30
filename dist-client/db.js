@@ -5,6 +5,14 @@ const path = require('path');
 let db = null;
 let enabled = false;
 
+const warn = (msg, ...args) => {
+  if (process.env.VHR_LITE === '1' || process.env.VHR_LITE === 'true') {
+    console.log(msg, ...args);
+  } else {
+    console.warn(msg, ...args);
+  }
+};
+
 function initSqlite(dbFile) {
   try {
     const BetterSqlite3 = require('better-sqlite3');
@@ -60,7 +68,7 @@ function initSqlite(dbFile) {
     enabled = true;
     return true;
   } catch (e) {
-    console.warn('[db] SQLite disabled: better-sqlite3 not installed or error', e && e.message);
+    warn('[db] SQLite disabled: better-sqlite3 not installed or error', e && e.message);
     return false;
   }
 }

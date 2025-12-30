@@ -37,7 +37,7 @@ try {
 	Start-Job -ScriptBlock {
 		Start-Sleep -Seconds 2
 		$url = "http://localhost:3000/vhr-dashboard-pro.html"
-		try { Start-Process $url -WindowStyle Hidden } catch { Start-Process "cmd.exe" -ArgumentList '/c','start','""',$url -WindowStyle Hidden }
+		Start-Process $url
 	} | Out-Null
 } catch {
 	# Si les jobs sont désactivés, tenter en direct
@@ -45,7 +45,7 @@ try {
 }
 
 # Repli immédiat silencieux
-try { Start-Process $targetUrl -WindowStyle Hidden } catch { Start-Process "cmd.exe" -ArgumentList '/c','start','""',$targetUrl -WindowStyle Hidden | Out-Null }
+try { Start-Process $targetUrl } catch { Start-Process "cmd.exe" -ArgumentList '/c','start','""',$targetUrl | Out-Null }
 
 try {
 	Set-Location $root

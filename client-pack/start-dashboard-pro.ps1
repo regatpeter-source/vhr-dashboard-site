@@ -31,21 +31,21 @@ if (-not (Test-Path $envTarget) -and (Test-Path $envExample)) {
 	Copy-Item $envExample $envTarget -Force | Out-Null
 }
 
-# Ouvrir le navigateur après 2s (job en arrière-plan, fenêtre masquée) avec repli
+# Ouvrir le navigateur après 2s (mode simple et fiable)
 $targetUrl = "http://localhost:3000/vhr-dashboard-pro.html"
 try {
 	Start-Job -ScriptBlock {
 		Start-Sleep -Seconds 2
 		$url = "http://localhost:3000/vhr-dashboard-pro.html"
-		try { Start-Process $url -WindowStyle Hidden } catch { Start-Process "cmd.exe" -ArgumentList '/c','start','""',$url -WindowStyle Hidden }
+		Start-Process $url
 	} | Out-Null
 } catch {
-	# Si les jobs sont désactivés, tenter en direct (silencieux)
-	Start-Process "cmd.exe" -ArgumentList '/c','start','""',$targetUrl -WindowStyle Hidden | Out-Null
+	# Repli si les jobs sont désactivés
+	Start-Process "cmd.exe" -ArgumentList '/c','start','""',$targetUrl | Out-Null
 }
 
-# Repli immédiat silencieux (sans nouvelle fenêtre visible)
-try { Start-Process $targetUrl -WindowStyle Hidden } catch { Start-Process "cmd.exe" -ArgumentList '/c','start','""',$targetUrl -WindowStyle Hidden | Out-Null }
+# Repli immédiat direct
+try { Start-Process $targetUrl } catch { Start-Process "cmd.exe" -ArgumentList '/c','start','""',$targetUrl | Out-Null }
 
 try {
 	Set-Location $root

@@ -34,14 +34,12 @@ if not exist "%ROOT_DIR%\.env" (
 	if exist "%~dp0.env.client-example" copy "%~dp0.env.client-example" "%ROOT_DIR%\.env" >nul
 )
 
-REM Lancer l'ouverture du navigateur après 2s (fenêtre masquée) avec repli discret
+REM Lancer l'ouverture du navigateur après 2s (double fallback PS + start) — correction de guillemets
 set "TARGET_URL=http://localhost:3000/vhr-dashboard-pro.html"
-start "" powershell -NoLogo -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; $u='%TARGET_URL%'; try { Start-Process $u -WindowStyle Hidden } catch { Start-Process 'cmd.exe' -ArgumentList '/c','start','""',$u -WindowStyle Hidden }" 1>nul 2>nul
+start "" powershell -NoLogo -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; Start-Process \"%TARGET_URL%\"" 1>nul 2>nul
+start "" cmd /c "timeout /t 3 >nul & start "" \"%TARGET_URL%\""" 1>nul 2>nul
 
-REM Repli immédiat silencieux (sans nouvelle fenêtre)
-cmd /c start "" "%TARGET_URL%" 1>nul 2>nul
-
-REM Lancer le serveur (console courante)
+REM Lancer le serveur (console courante) avec affichage des erreurs
 pushd "%ROOT_DIR%" >nul 2>nul
 if errorlevel 1 (
 	echo [ERREUR] Impossible d'accéder à "%ROOT_DIR%" (vérifiez le chemin et les droits).
@@ -49,7 +47,18 @@ if errorlevel 1 (
 	exit /b 1
 )
 
-node server.js
+echo [INFO] Démarrage du serveur avec node portable (si présent)...
+if exist "%NODE_PORTABLE%\node.exe" (
+	"%NODE_PORTABLE%\node.exe" server.js
+) else (
+	node server.js
+)
+
 set "EXITCODE=%ERRORLEVEL%"
+if not "%EXITCODE%"=="0" (
+	echo [ERREUR] Le serveur s'est arrêté avec le code %EXITCODE%.
+	echo Vérifiez les messages ci-dessus (port occupé, dépendances manquantes, .env...).
+	pause
+)
 popd
 exit /b %EXITCODE%

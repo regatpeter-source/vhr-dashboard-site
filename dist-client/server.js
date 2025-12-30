@@ -69,9 +69,23 @@ const FORCE_HTTP = process.env.FORCE_HTTP === '1';
 const QUIET_MODE = process.env.QUIET_MODE === '1';
 const SUPPRESS_WARNINGS = process.env.SUPPRESS_WARNINGS === '1';
 const HTTPS_ENABLED = process.env.HTTPS_ENABLED === '1';
+const isLiteBundle = process.env.VHR_LITE === '1' || process.env.VHR_LITE === 'true' || !fs.existsSync(path.join(__dirname, 'tts-receiver-app'));
+if (isLiteBundle && !process.env.VHR_LITE) {
+  process.env.VHR_LITE = '1';
+}
 let useHttps = false;
 let httpsOptions = {};
 let hasCert = false;
+
+const warningFilterEnabled = SUPPRESS_WARNINGS || isLiteBundle;
+
+function softWarn(msg, ...args) {
+  if (warningFilterEnabled) {
+    console.log(msg, ...args);
+  } else {
+    console.warn(msg, ...args);
+  }
+}
 
 // Optional quiet mode to silence non-critical logs for local users
 if (QUIET_MODE) {
@@ -83,7 +97,7 @@ if (QUIET_MODE) {
 }
 
 // Optional warning filter: only keep server warnings, hide noisy services (email/stripe/db)
-if (SUPPRESS_WARNINGS) {
+if (warningFilterEnabled) {
   const origWarn = console.warn.bind(console);
   console.warn = (msg, ...args) => {
     const m = String(msg || '');
@@ -92,7 +106,7 @@ if (SUPPRESS_WARNINGS) {
       origWarn(msg, ...args);
     }
   };
-  console.warn('[quiet] SUPPRESS_WARNINGS=1 actif: warnings non-serveur masqués');
+  origWarn('[quiet] Warnings filtrés (SUPPRESS_WARNINGS=1 ou VHR_LITE=1): warnings non-serveur masqués');
 }
 try {
   if (fs.existsSync('./cert.pem') && fs.existsSync('./key.pem')) {
@@ -607,7 +621,12 @@ function ensureLocalProperties() {
   const appDir = path.join(__dirname, 'tts-receiver-app');
   const localPropsPath = path.join(appDir, 'local.properties');
   
-  const androidHome = 'C:\\Android\\SDK';
+  if (isLiteBundle || !fs.existsSync(appDir)) {
+    softWarn('[Setup] (lite) tts-receiver-app absent - skip local.properties');
+    return;
+  }
+
+  const androidHome = 'C\\Android\\SDK';
   
   // Créer le contenu du fichier
   const content = `sdk.dir=${androidHome}\nndk.dir=C:\\Android\\NDK\nandroid.useAndroidX=true\n`;
@@ -617,7 +636,7 @@ function ensureLocalProperties() {
     fs.writeFileSync(localPropsPath, content, 'utf8');
     console.log('[Setup] ✓ local.properties créé');
   } catch (e) {
-    console.error('[Setup] ⚠️ Impossible de créer local.properties:', e.message);
+    softWarn('[Setup] ⚠️ Impossible de créer local.properties:', e.message);
   }
 }
 
@@ -703,6 +722,8 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: false
 
+}));
+
 // Vérifier si la démo est expirée pour un utilisateur
 function isDemoExpired(user) {
   if (!user || !user.demoStartDate || user.subscriptionStatus === 'active') {
@@ -765,8 +786,8 @@ if (emailUser && emailPass) {
     }
   });
 } else {
-  console.warn('[email] SMTP credentials not configured - contact notifications disabled');
-  console.warn('[email] Configure: BREVO_SMTP_USER/EMAIL_USER and BREVO_SMTP_PASS/EMAIL_PASS');
+  softWarn('[email] SMTP credentials not configured - contact notifications disabled');
+  softWarn('[email] Configure: BREVO_SMTP_USER/EMAIL_USER and BREVO_SMTP_PASS/EMAIL_PASS');
 }
 
 // ========== LICENSE SYSTEM ==========
@@ -840,8 +861,8 @@ async function sendContactMessageToAdmin(msg) {
 
   // Use resolved credentials (supports BREVO_SMTP_* or EMAIL_*)
   if (!emailUser || !emailPass) {
-    console.error('[email] SMTP credentials not configured, cannot send contact notification');
-    console.error('[email] Configure: BREVO_SMTP_USER/BREVO_SMTP_PASS (or EMAIL_USER/EMAIL_PASS)');
+    softWarn('[email] SMTP credentials not configured, cannot send contact notification');
+    softWarn('[email] Configure: BREVO_SMTP_USER/BREVO_SMTP_PASS (or EMAIL_USER/EMAIL_PASS)');
     return false;
   }
 
@@ -914,7 +935,7 @@ async function sendReplyToContact(originalMessage, replyText, repliedBy) {
   }
 
   if (!emailUser || !emailPass) {
-    console.error('[email] ✗ SMTP credentials not configured, cannot send reply');
+    softWarn('[email] ✗ SMTP credentials not configured, cannot send reply');
     return false;
   }
 
@@ -1293,7 +1314,7 @@ function cleanEnvValue(v) { if (!v) return v; return v.replace(/^['"]|['"]$/g, '
 const stripeKeyRaw = process.env.STRIPE_SECRET_KEY || 'sk_test_votre_cle_secrete';
 const stripeKey = cleanEnvValue(stripeKeyRaw);
 if (!stripeKey || stripeKey === 'sk_test_votre_cle_secrete') {
-  console.warn('[Stripe] STRIPE_SECRET_KEY not set or using placeholder. Set STRIPE_SECRET_KEY=sk_test_xxx in your environment.');
+  softWarn('[Stripe] STRIPE_SECRET_KEY not set or using placeholder. Set STRIPE_SECRET_KEY=sk_test_xxx in your environment.');
 } else if (stripeKey.startsWith('pk_')) {
   console.error('[Stripe] STRIPE_SECRET_KEY appears to be a publishable key (pk_). Server-side requires a secret key (sk_test_...). Aborting server start.');
   throw new Error('Stripe secret key required: STRIPE_SECRET_KEY must be an sk_ key.');
@@ -1303,7 +1324,7 @@ const stripe = require('stripe')(stripeKey);
 // Verify the Stripe secret key early at startup (fail fast on invalid / publishable key)
 async function verifyStripeKeyAtStartup() {
   if (!stripeKey || stripeKey === 'sk_test_votre_cle_secrete') {
-    console.warn('[Stripe] STRIPE_SECRET_KEY not configured; server will still run but Stripe features will fail. Set STRIPE_SECRET_KEY to a valid sk_test_ key.');
+    softWarn('[Stripe] STRIPE_SECRET_KEY not configured; server will still run but Stripe features will fail. Set STRIPE_SECRET_KEY to a valid sk_test_ key.');
     return;
   }
   if (stripeKey.startsWith('pk_')) {
