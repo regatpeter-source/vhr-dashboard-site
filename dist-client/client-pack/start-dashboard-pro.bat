@@ -23,8 +23,15 @@ if not exist "%SERVER_JS%" (
 	echo   racine\server.js
 	echo   racine\node-portable\node.exe
 	echo   racine\client-pack\start-dashboard-pro.bat
+	echo Si vous voyez ce message, re-extrayez le ZIP en conservant l'arborescence.
+	echo Le serveur ne peut pas demarrer tant que la structure n'est pas correcte.
 	pause
 	exit /b 1
+)
+
+if "%ROOT_DIR%"=="%~dp0." (
+    echo [INFO] Structure aplatie detectee : server.js trouve dans le dossier courant.
+    echo Il est recommande d'extraire le ZIP en gardant client-pack, server.js et node-portable au meme niveau.
 )
 
 REM Utiliser automatiquement le Node portable inclus (../node-portable)
