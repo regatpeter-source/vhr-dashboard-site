@@ -1,8 +1,8 @@
 // Launch Dashboard Script
 // Now downloads the full client pack (Dashboard + Voix)
 
-// Servez le pack complet depuis votre serveur pour éviter les 404 GitHub
-const ZIP_URL_FULL = '/download/client-full';
+// Pointe directement vers l’asset GitHub Release (pack complet)
+const ZIP_URL_FULL = 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.0-client/vhr-dashboard-pro-client-full.zip';
 
 function launchDashboard() {
     const btn = document.getElementById('launchBtn');
