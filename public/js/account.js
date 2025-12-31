@@ -121,12 +121,17 @@
     loginMessage.textContent = 'Création du compte...';
     const res = await api('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: p1, email }) });
     if (res && res.ok) { 
-      loginMessage.textContent = 'Compte créé ✓ Redirection vers le dashboard...'; 
+      loginMessage.textContent = 'Compte créé ✓ Vous êtes connecté(e).'; 
       await loadMe(); 
-      // Redirect to dashboard after 1.5 seconds
+      // Pour les admins éventuels, rediriger vers l’admin; sinon rester dans l’espace compte sécurisé
+      const role = (res.user && res.user.role) || res.role || res.userRole || 'user';
       setTimeout(() => {
-        window.location.href = '/admin-dashboard.html';
-      }, 1500);
+        if (role === 'admin') {
+          window.location.href = '/admin-dashboard.html';
+        } else {
+          window.location.href = '/account.html?action=welcome';
+        }
+      }, 1200);
     }
     else { loginMessage.textContent = 'Erreur: ' + (res && res.error ? res.error : 'Erreur inconnue'); }
   });

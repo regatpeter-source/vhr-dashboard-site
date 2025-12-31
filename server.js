@@ -1120,8 +1120,36 @@ if (FORCE_HTTP && process.env.RENDER !== 'true') {
 }
 // Expose site-vitrine and top-level HTML files so they can be accessed via http://localhost:PORT/
 app.use('/site-vitrine', express.static(path.join(__dirname, 'site-vitrine')));
-// Serve top-level HTML files that are not in public
-const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact.html', 'account.html', 'START-HERE.html', 'developer-setup.html', 'mentions.html', 'admin-dashboard.html'];
+
+// Serve the admin dashboard only to authenticated admins
+app.get('/admin-dashboard.html', authMiddleware, async (req, res) => {
+  try {
+    let user = null;
+    if (USE_POSTGRES) {
+      user = await db.getUserByUsername(req.user.username);
+    } else {
+      reloadUsers();
+      user = getUserByUsername(req.user.username);
+    }
+
+    if (!user || user.role !== 'admin') {
+      // For browsers, redirect to account page with a hint; for API clients, return 403 JSON
+      if (req.accepts('html')) {
+        return res.redirect(302, '/account.html?action=admin_required');
+      }
+      return res.status(403).json({ ok: false, error: 'Admin access required' });
+    }
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.sendFile(path.join(__dirname, 'admin-dashboard.html'));
+  } catch (e) {
+    console.error('[route] /admin-dashboard.html error:', e);
+    return res.status(500).send('Erreur serveur');
+  }
+});
+
+// Serve top-level HTML files that are not in public (excluding admin dashboard which is protected above)
+const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact.html', 'account.html', 'START-HERE.html', 'developer-setup.html', 'mentions.html'];
 exposedTopFiles.forEach(f => {
   app.get(`/${f}`, (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
