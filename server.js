@@ -1189,6 +1189,33 @@ app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
   }
 });
 
+// Route pour le pack complet (Dashboard + Voix) - SANS RESTRICTION
+// Permet d'éviter les 404 GitHub en servant le ZIP directement depuis le serveur
+app.get('/download/client-full', (req, res) => {
+  const candidates = [
+    path.join(__dirname, 'vhr-dashboard-pro-client-full-updated.zip'),
+    path.join(__dirname, 'vhr-dashboard-pro-client-full.zip'),
+    path.join(__dirname, 'vhr-dashboard-pro-client-full-restore.zip')
+  ];
+
+  const existing = candidates.find(fs.existsSync);
+  if (!existing) {
+    return res.status(404).json({ ok: false, error: 'Client pack not found on server' });
+  }
+
+  try {
+    const stats = fs.statSync(existing);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Length', stats.size);
+    res.setHeader('Content-Disposition', 'attachment; filename="vhr-dashboard-pro-client-full.zip"');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.sendFile(existing);
+  } catch (e) {
+    console.error('[download/client-full] error:', e);
+    return res.status(500).json({ ok: false, error: 'Server error while serving client pack' });
+  }
+});
+
 // Download VHR Voice APK for Quest background audio
 app.get('/download/vhr-voice-apk', (req, res) => {
   const apkPath = path.join(__dirname, 'public', 'downloads', 'vhr-voice.apk');
