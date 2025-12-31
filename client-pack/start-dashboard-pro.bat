@@ -5,20 +5,24 @@ set QUIET_MODE=1
 set NODE_ENV=production
 set SUPPRESS_WARNINGS=1
 
-REM Déterminer le dossier racine (un niveau au-dessus de client-pack)
+REM Déterminer le dossier racine (normalement un niveau au-dessus de client-pack)
 set "ROOT_DIR=%~dp0.."
 set "SERVER_JS=%ROOT_DIR%\server.js"
 
-if not exist "%ROOT_DIR%" (
-	echo [ERREUR] Dossier racine introuvable : "%ROOT_DIR%"
-	echo Assurez-vous d'avoir **extrait tout le ZIP** et lancez ce fichier depuis le dossier client-pack.
-	pause
-	exit /b 1
+REM Fallback si l'utilisateur a tout aplati et lancé depuis un autre dossier
+if not exist "%SERVER_JS%" (
+    set "ROOT_DIR=%~dp0."
+    set "SERVER_JS=%ROOT_DIR%\server.js"
 )
 
 if not exist "%SERVER_JS%" (
-	echo [ERREUR] Fichier server.js introuvable dans "%ROOT_DIR%"
-	echo L'extraction semble incomplète. Gardez la structure originale puis relancez start-dashboard-pro depuis client-pack.
+	echo [ERREUR] Fichier server.js introuvable.
+	echo Extraction ou structure incorrecte.
+	echo Attendu : server.js et node-portable au MEME niveau que client-pack.
+	echo Exemple :
+	echo   racine\server.js
+	echo   racine\node-portable\node.exe
+	echo   racine\client-pack\start-dashboard-pro.bat
 	pause
 	exit /b 1
 )
