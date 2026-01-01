@@ -1193,6 +1193,8 @@ app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
 // Permet d'éviter les 404 GitHub en servant le ZIP directement depuis le serveur
 app.get('/download/client-full', (req, res) => {
   const candidates = [
+    path.join(__dirname, 'vhr-dashboard-pro-client-full-updated-new3-node-adb.zip'),
+    path.join(__dirname, 'vhr-dashboard-pro-client-full-updated-new3.zip'),
     path.join(__dirname, 'vhr-dashboard-pro-client-full-updated-new.zip'),
     path.join(__dirname, 'vhr-dashboard-pro-client-full-updated.zip'),
     path.join(__dirname, 'vhr-dashboard-pro-client-full.zip'),

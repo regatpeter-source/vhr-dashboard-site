@@ -69,23 +69,10 @@ const FORCE_HTTP = process.env.FORCE_HTTP === '1';
 const QUIET_MODE = process.env.QUIET_MODE === '1';
 const SUPPRESS_WARNINGS = process.env.SUPPRESS_WARNINGS === '1';
 const HTTPS_ENABLED = process.env.HTTPS_ENABLED === '1';
-const isLiteBundle = process.env.VHR_LITE === '1' || process.env.VHR_LITE === 'true' || !fs.existsSync(path.join(__dirname, 'tts-receiver-app'));
-if (isLiteBundle && !process.env.VHR_LITE) {
-  process.env.VHR_LITE = '1';
-}
+
 let useHttps = false;
 let httpsOptions = {};
 let hasCert = false;
-
-const warningFilterEnabled = SUPPRESS_WARNINGS || isLiteBundle;
-
-function softWarn(msg, ...args) {
-  if (warningFilterEnabled) {
-    console.log(msg, ...args);
-  } else {
-    console.warn(msg, ...args);
-  }
-}
 
 // Optional quiet mode to silence non-critical logs for local users
 if (QUIET_MODE) {
@@ -97,7 +84,7 @@ if (QUIET_MODE) {
 }
 
 // Optional warning filter: only keep server warnings, hide noisy services (email/stripe/db)
-if (warningFilterEnabled) {
+if (SUPPRESS_WARNINGS) {
   const origWarn = console.warn.bind(console);
   console.warn = (msg, ...args) => {
     const m = String(msg || '');
@@ -106,8 +93,10 @@ if (warningFilterEnabled) {
       origWarn(msg, ...args);
     }
   };
-  origWarn('[quiet] Warnings filtrés (SUPPRESS_WARNINGS=1 ou VHR_LITE=1): warnings non-serveur masqués');
+  console.warn('[quiet] SUPPRESS_WARNINGS=1 actif: warnings non-serveur masqués');
 }
+
+// HTTPS opt-in: only enabled if HTTPS_ENABLED=1 and certs are present
 try {
   if (fs.existsSync('./cert.pem') && fs.existsSync('./key.pem')) {
     httpsOptions = {
@@ -120,12 +109,15 @@ try {
 } catch (e) {
   console.warn('[HTTPS] Erreur lors du chargement du certificat SSL:', e.message);
 }
+
+// HTTPS principal activé uniquement si HTTPS_ENABLED=1 et certificat présent
 if (HTTPS_ENABLED && hasCert) {
   useHttps = true;
   console.log('[HTTPS] HTTPS_ENABLED=1 - démarrage principal en HTTPS.');
 } else {
   console.log('[HTTPS] HTTPS désactivé - démarrage principal en HTTP.');
 }
+
 if (useHttps && FORCE_HTTP) {
   useHttps = false;
   console.log('[HTTPS] FORCE_HTTP=1 détecté - démarrage forcé en HTTP malgré certificat.');
@@ -621,12 +613,7 @@ function ensureLocalProperties() {
   const appDir = path.join(__dirname, 'tts-receiver-app');
   const localPropsPath = path.join(appDir, 'local.properties');
   
-  if (isLiteBundle || !fs.existsSync(appDir)) {
-    softWarn('[Setup] (lite) tts-receiver-app absent - skip local.properties');
-    return;
-  }
-
-  const androidHome = 'C\\Android\\SDK';
+  const androidHome = 'C:\\Android\\SDK';
   
   // Créer le contenu du fichier
   const content = `sdk.dir=${androidHome}\nndk.dir=C:\\Android\\NDK\nandroid.useAndroidX=true\n`;
@@ -636,7 +623,7 @@ function ensureLocalProperties() {
     fs.writeFileSync(localPropsPath, content, 'utf8');
     console.log('[Setup] ✓ local.properties créé');
   } catch (e) {
-    softWarn('[Setup] ⚠️ Impossible de créer local.properties:', e.message);
+    console.error('[Setup] ⚠️ Impossible de créer local.properties:', e.message);
   }
 }
 
@@ -660,49 +647,7 @@ if (process.env.NODE_ENV !== 'production' && process.env.RENDER !== 'true') {
 }
 
 const app = express();
-
-// ---- Parsers & cookies ----
-// Body parsers were missing, causing /api/login (et autres POST) à rester en « pending »
-// faute de req.body parsé. On ajoute JSON + URL-encoded, ainsi que cookie-parser pour
-// l'authentification par cookie vhr_token.
-app.use(express.json({ limit: '20mb' }));
-app.use(express.urlencoded({ extended: true, limit: '20mb' }));
-app.use(cookieParser());
-
-// Helmet with custom CSP: allow own scripts and the botpress CDN. Do not enable 'unsafe-inline'.
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com', 'https://*.gstatic.com', 'https://cdn.jsdelivr.net'],
-      scriptSrcAttr: ["'unsafe-inline'"],
-      // CSP Level 3: script/style element-specific directives
-      scriptSrcElem: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com', 'https://*.gstatic.com', 'https://cdn.jsdelivr.net'],
-      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://*.gstatic.com', 'https://*.google.com'],
-      styleSrcElem: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://*.gstatic.com', 'https://*.google.com'],
-      // Allow loading remote fonts (Google Fonts)
-      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-      imgSrc: ["'self'", 'data:', 'https://cdn-icons-png.flaticon.com', 'https://cdn.botpress.cloud'],
-      connectSrc: [
-        "'self'",
-        'https://api.stripe.com',
-        'https://messaging.botpress.cloud',
-        'https://cdn.botpress.cloud',
-        'ws:', 'wss:',
-        'http://localhost:3000',
-        'http://127.0.0.1:3000',
-        'http://192.168.1.3:3000'
-      ],
-      frameSrc: ["'self'", 'https://messaging.botpress.cloud', 'https://checkout.stripe.com', 'https://js.stripe.com'],
-      objectSrc: ["'none'"],
-      baseUri: ["'self'"],
-      formAction: ["'self'"]
-    }
-  },
-  crossOriginOpenerPolicy: false,
-  crossOriginEmbedderPolicy: false,
-  crossOriginResourcePolicy: false
-}));
+// Helmet avec CSP custom. HSTS désactivé pour éviter les upgrades HTTPS en LAN.
 app.use(helmet({
   hsts: false,
   contentSecurityPolicy: {
@@ -718,7 +663,19 @@ app.use(helmet({
       // Allow loading remote fonts (Google Fonts)
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:', 'https://cdn-icons-png.flaticon.com', 'https://cdn.botpress.cloud'],
-      connectSrc: ["'self'", 'https://api.stripe.com', 'https://messaging.botpress.cloud', 'https://cdn.botpress.cloud'],
+      mediaSrc: ["'self'", 'blob:', 'data:'],
+      connectSrc: [
+        "'self'",
+        'https://api.stripe.com',
+        'https://messaging.botpress.cloud',
+        'https://cdn.botpress.cloud',
+        // Autoriser le WebSocket local/LAN pour l'audio
+        'ws:', 'wss:',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        'http://192.168.1.3:3000',
+        'http://192.168.1.3'
+      ],
       frameSrc: ["'self'", 'https://messaging.botpress.cloud', 'https://checkout.stripe.com', 'https://js.stripe.com'],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
@@ -730,18 +687,46 @@ app.use(helmet({
   crossOriginOpenerPolicy: false,
   crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: false
-
 }));
+// Set a friendlier referrer policy - allows third-party services like Google Translate
+// to work without CSP warnings
+app.use(helmet.referrerPolicy({ policy: 'no-referrer-when-downgrade' }));
+app.use(cors({ origin: true, credentials: true }));
+// Ensure webhook route receives raw body for Stripe signature verification
+app.use('/webhook', express.raw({ type: 'application/json' }));
+app.use(express.json());
+app.use(cookieParser());
 
-// ========== DEMO / ESSAI CONFIG ==========
-// Valeurs par défaut (7 jours) si non précisées dans l'environnement
-const DEMO_DAYS = parseInt(process.env.DEMO_DAYS || '7', 10);
-const DEMO_DURATION_MS = DEMO_DAYS * 24 * 60 * 60 * 1000;
-const demoConfig = {
-  DEMO_DAYS,
-  DEMO_DURATION_MS,
-  MODE: process.env.DEMO_MODE || 'file'
-};
+// For local packs: prevent browser from forcing HTTPS (disable HSTS) and OAC warning
+app.use((req, res, next) => {
+  // Disable HSTS so the browser stops upgrading HTTP -> HTTPS on 192.168.x.x/localhost
+  res.setHeader('Strict-Transport-Security', 'max-age=0');
+  // Disable Origin-Agent-Cluster to avoid Chrome warning when switching schemes
+  res.setHeader('Origin-Agent-Cluster', '?0');
+  next();
+});
+
+// If running in HTTP/forced HTTP, redirect any HTTPS requests back to HTTP
+// If full-site HTTPS is NOT enabled, keep HTTP as primary. We still accept HTTPS (when cert present)
+// but path-based redirections are handled later to allow the site vitrine over HTTPS while keeping
+// Dashboard Pro en HTTP.
+
+// ========== CONFIGURATION MANAGEMENT ==========
+const subscriptionConfig = require('./config/subscription.config');
+const purchaseConfig = require('./config/purchase.config');
+const demoConfig = require('./config/demo.config');
+const emailService = require('./services/emailService');
+
+// Initialize email service
+emailService.initEmailTransporter();
+
+// Ajouter un champ demoStartDate lors de l'inscription
+function initializeDemoForUser(user) {
+  if (!user.demoStartDate && demoConfig.MODE === 'database') {
+    user.demoStartDate = new Date().toISOString();
+  }
+  return user;
+}
 
 // Vérifier si la démo est expirée pour un utilisateur
 function isDemoExpired(user) {
@@ -805,8 +790,8 @@ if (emailUser && emailPass) {
     }
   });
 } else {
-  softWarn('[email] SMTP credentials not configured - contact notifications disabled');
-  softWarn('[email] Configure: BREVO_SMTP_USER/EMAIL_USER and BREVO_SMTP_PASS/EMAIL_PASS');
+  console.warn('[email] SMTP credentials not configured - contact notifications disabled');
+  console.warn('[email] Configure: BREVO_SMTP_USER/EMAIL_USER and BREVO_SMTP_PASS/EMAIL_PASS');
 }
 
 // ========== LICENSE SYSTEM ==========
@@ -880,8 +865,8 @@ async function sendContactMessageToAdmin(msg) {
 
   // Use resolved credentials (supports BREVO_SMTP_* or EMAIL_*)
   if (!emailUser || !emailPass) {
-    softWarn('[email] SMTP credentials not configured, cannot send contact notification');
-    softWarn('[email] Configure: BREVO_SMTP_USER/BREVO_SMTP_PASS (or EMAIL_USER/EMAIL_PASS)');
+    console.error('[email] SMTP credentials not configured, cannot send contact notification');
+    console.error('[email] Configure: BREVO_SMTP_USER/BREVO_SMTP_PASS (or EMAIL_USER/EMAIL_PASS)');
     return false;
   }
 
@@ -954,7 +939,7 @@ async function sendReplyToContact(originalMessage, replyText, repliedBy) {
   }
 
   if (!emailUser || !emailPass) {
-    softWarn('[email] ✗ SMTP credentials not configured, cannot send reply');
+    console.error('[email] ✗ SMTP credentials not configured, cannot send reply');
     return false;
   }
 
@@ -1120,6 +1105,9 @@ app.use('/site-vitrine', express.static(path.join(__dirname, 'site-vitrine'), {
 app.get('/ping', (req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
+
+// Si on FORCE_HTTP explicitement (packs locaux), rediriger les requêtes HTTPS vers HTTP.
+// En production (Render), on ne redirige pas pour éviter les boucles 301.
 if (FORCE_HTTP && process.env.RENDER !== 'true') {
   app.use((req, res, next) => {
     const proto = (req.headers['x-forwarded-proto'] || (req.socket?.encrypted ? 'https' : 'http')).toString().toLowerCase();
@@ -1132,8 +1120,36 @@ if (FORCE_HTTP && process.env.RENDER !== 'true') {
 }
 // Expose site-vitrine and top-level HTML files so they can be accessed via http://localhost:PORT/
 app.use('/site-vitrine', express.static(path.join(__dirname, 'site-vitrine')));
-// Serve top-level HTML files that are not in public
-const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact.html', 'account.html', 'START-HERE.html', 'developer-setup.html', 'mentions.html', 'admin-dashboard.html'];
+
+// Serve the admin dashboard only to authenticated admins
+app.get('/admin-dashboard.html', authMiddleware, async (req, res) => {
+  try {
+    let user = null;
+    if (USE_POSTGRES) {
+      user = await db.getUserByUsername(req.user.username);
+    } else {
+      reloadUsers();
+      user = getUserByUsername(req.user.username);
+    }
+
+    if (!user || user.role !== 'admin') {
+      // For browsers, redirect to account page with a hint; for API clients, return 403 JSON
+      if (req.accepts('html')) {
+        return res.redirect(302, '/account.html?action=admin_required');
+      }
+      return res.status(403).json({ ok: false, error: 'Admin access required' });
+    }
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.sendFile(path.join(__dirname, 'admin-dashboard.html'));
+  } catch (e) {
+    console.error('[route] /admin-dashboard.html error:', e);
+    return res.status(500).send('Erreur serveur');
+  }
+});
+
+// Serve top-level HTML files that are not in public (excluding admin dashboard which is protected above)
+const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact.html', 'account.html', 'START-HERE.html', 'developer-setup.html', 'mentions.html'];
 exposedTopFiles.forEach(f => {
   app.get(`/${f}`, (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -1170,6 +1186,36 @@ app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
   } catch (e) {
     console.error('[download] error:', e);
     return res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+// Route pour le pack complet (Dashboard + Voix) - SANS RESTRICTION
+// Permet d'éviter les 404 GitHub en servant le ZIP directement depuis le serveur
+app.get('/download/client-full', (req, res) => {
+  const candidates = [
+    path.join(__dirname, 'vhr-dashboard-pro-client-full-updated-new3-node-adb.zip'),
+    path.join(__dirname, 'vhr-dashboard-pro-client-full-updated-new3.zip'),
+    path.join(__dirname, 'vhr-dashboard-pro-client-full-updated-new.zip'),
+    path.join(__dirname, 'vhr-dashboard-pro-client-full-updated.zip'),
+    path.join(__dirname, 'vhr-dashboard-pro-client-full.zip'),
+    path.join(__dirname, 'vhr-dashboard-pro-client-full-restore.zip')
+  ];
+
+  const existing = candidates.find(fs.existsSync);
+  if (!existing) {
+    return res.status(404).json({ ok: false, error: 'Client pack not found on server' });
+  }
+
+  try {
+    const stats = fs.statSync(existing);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Length', stats.size);
+    res.setHeader('Content-Disposition', 'attachment; filename="vhr-dashboard-pro-client-full.zip"');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.sendFile(existing);
+  } catch (e) {
+    console.error('[download/client-full] error:', e);
+    return res.status(500).json({ ok: false, error: 'Server error while serving client pack' });
   }
 });
 
@@ -1333,7 +1379,7 @@ function cleanEnvValue(v) { if (!v) return v; return v.replace(/^['"]|['"]$/g, '
 const stripeKeyRaw = process.env.STRIPE_SECRET_KEY || 'sk_test_votre_cle_secrete';
 const stripeKey = cleanEnvValue(stripeKeyRaw);
 if (!stripeKey || stripeKey === 'sk_test_votre_cle_secrete') {
-  softWarn('[Stripe] STRIPE_SECRET_KEY not set or using placeholder. Set STRIPE_SECRET_KEY=sk_test_xxx in your environment.');
+  console.warn('[Stripe] STRIPE_SECRET_KEY not set or using placeholder. Set STRIPE_SECRET_KEY=sk_test_xxx in your environment.');
 } else if (stripeKey.startsWith('pk_')) {
   console.error('[Stripe] STRIPE_SECRET_KEY appears to be a publishable key (pk_). Server-side requires a secret key (sk_test_...). Aborting server start.');
   throw new Error('Stripe secret key required: STRIPE_SECRET_KEY must be an sk_ key.');
@@ -1343,7 +1389,7 @@ const stripe = require('stripe')(stripeKey);
 // Verify the Stripe secret key early at startup (fail fast on invalid / publishable key)
 async function verifyStripeKeyAtStartup() {
   if (!stripeKey || stripeKey === 'sk_test_votre_cle_secrete') {
-    softWarn('[Stripe] STRIPE_SECRET_KEY not configured; server will still run but Stripe features will fail. Set STRIPE_SECRET_KEY to a valid sk_test_ key.');
+    console.warn('[Stripe] STRIPE_SECRET_KEY not configured; server will still run but Stripe features will fail. Set STRIPE_SECRET_KEY to a valid sk_test_ key.');
     return;
   }
   if (stripeKey.startsWith('pk_')) {
@@ -2310,7 +2356,13 @@ app.get('/api/check-auth', (req, res) => {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     // Token is valid
-    res.json({ ok: true, authenticated: true, user: { username: decoded.username, role: decoded.role } });
+    const includeToken = req.query && String(req.query.includeToken || req.query.include_token || '0') === '1';
+    res.json({ 
+      ok: true, 
+      authenticated: true, 
+      user: { username: decoded.username, role: decoded.role },
+      token: includeToken ? token : undefined
+    });
   } catch (e) {
     // Token is invalid or expired
     res.json({ ok: false, authenticated: false, user: null });
@@ -4271,9 +4323,11 @@ function getLanIPv4() {
 
 // Try to resolve the best LAN IPv4 for headset redirections (never return localhost)
 function resolveLanIpForClient(req) {
+  // 1) Standard detection via network interfaces
   const lanIp = getLanIPv4();
   if (lanIp) return lanIp;
 
+  // 2) Try the bound server address
   try {
     const addr = req?.socket?.address?.().address || req?.socket?.localAddress || '';
     const cleaned = (addr || '').replace('::ffff:', '');
@@ -4284,6 +4338,7 @@ function resolveLanIpForClient(req) {
     // ignore
   }
 
+  // 3) Last resort: use host header if it already contains an IP (and is not localhost)
   const hostHeader = req?.headers?.host || '';
   const hostOnly = hostHeader.split(':')[0];
   if (hostOnly && hostOnly !== 'localhost' && hostOnly !== '127.0.0.1') {
@@ -4318,27 +4373,9 @@ appServer.timeout = 120000; // 2 minutes
 appServer.keepAliveTimeout = 65000; // 65 seconds
 appServer.headersTimeout = 66000; // Slightly higher than keepAliveTimeout
 
-let listenerServer = appServer;
-
-if (!useHttps && hasCert && FORCE_HTTP && process.env.RENDER !== 'true') {
-  const redirectPort = process.env.PORT || 3000;
-  const httpsRedirectServer = https.createServer(httpsOptions, (req, res) => {
-    const host = req.headers['host'] || `localhost:${redirectPort}`;
-    res.writeHead(301, { "Location": `http://${host}${req.url}` });
-    res.end();
-  });
-
-  listenerServer = net.createServer((socket) => {
-    socket.once('data', (buffer) => {
-      const isTLSHandshake = buffer && buffer[0] === 22; // TLS ClientHello starts with 22
-      const target = isTLSHandshake ? httpsRedirectServer : appServer;
-      target.emit('connection', socket);
-      socket.unshift(buffer);
-    });
-  });
-
-  console.log(`[HTTPS] Fallback actif (FORCE_HTTP=1): connexions TLS redirigées vers HTTP.`);
-}
+// Serveur principal utilisé pour l'écoute
+// En mode FORCE_HTTP, on reste en HTTP pur sans proxy TCP intermédiaire pour éviter les coupures.
+const listenerServer = appServer;
 
 const io = new SocketIOServer(appServer, { cors: { origin: '*' } });
 
@@ -4349,7 +4386,8 @@ let streams = new Map();
 
 const wssMpeg1 = new WebSocket.Server({ noServer: true });
 
-// Audio streaming: Map<serial, { sender: ws, receivers: [ws], buffer: [chunks] }>
+// Audio streaming: Map<serial, { sender: ws, receivers: Set<ws>, buffer: Array<Buffer>, headerChunk?: Buffer }>
+// headerChunk: first initialization segment from MediaRecorder (WebM/Opus) kept to allow late receivers to decode
 const audioStreams = new Map();
 const wssAudio = new WebSocket.Server({ noServer: true });
 // Latency control: keep only minimal history (header + last chunk)
@@ -4673,13 +4711,13 @@ function handleAudioWebSocket(serial, ws, req) {
     // PC sending audio
     audioEntry.sender = ws;
     audioEntry.format = format;
-    // Reset buffer when a new sender arrives to avoid stale audio
+    // Reset buffer + header when a new sender arrives to avoid stale audio
     audioEntry.buffer = [];
     audioEntry.headerChunk = null;
     console.log(`[Audio] Sender connected: ${serial}`);
     
     ws.on('message', (data) => {
-      // Keep first chunk as header for late-joining receivers
+      // Keep first chunk as header for late-joining receivers (MediaRecorder WebM init segment)
       if (!audioEntry.headerChunk) {
         audioEntry.headerChunk = data;
       }
@@ -4740,10 +4778,15 @@ function handleAudioWebSocket(serial, ws, req) {
     console.log(`[Audio] Current sender status: ${audioEntry.sender ? 'CONNECTED' : 'NOT CONNECTED'}`);
     console.log(`[Audio] Sending buffered chunks to new receiver: ${audioEntry.buffer.length} chunks`);
     
-    // Send header chunk first if available, then only the last few buffered audio chunks (reduce latency)
+    // Send header chunk (init segment) first if available, then a short tail of buffered chunks
     if (audioEntry.headerChunk && ws.readyState === WebSocket.OPEN) {
-      try { ws.send(audioEntry.headerChunk); } catch (e) { console.error(`[Audio] Failed to send header chunk to receiver:`, e.message); }
+      try {
+        ws.send(audioEntry.headerChunk);
+      } catch (e) {
+        console.error(`[Audio] Failed to send header chunk to receiver:`, e.message);
+      }
     }
+
     // No buffered tail to avoid any backlog; rely on live stream after header
     
     // If sender already connected, notify receiver
@@ -5411,6 +5454,7 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
         server = `http://${lanIp}:3000`;
         console.log(`[open-audio-receiver] Correction: IP LAN détectée pour receiver: ${server}`);
       } else {
+        // Dernier recours : si le host header contient déjà une IP non-loopback, utiliser celle-ci
         const hostHeader = (req.headers.host || '').split(':')[0];
         if (hostHeader && hostHeader !== 'localhost' && hostHeader !== '127.0.0.1') {
           server = `http://${hostHeader}:3000`;
@@ -5929,7 +5973,7 @@ const PORT = process.env.PORT || 3000;
 const REDIRECT_PORT = Number(process.env.HTTP_REDIRECT_PORT || 80);
 let serverStarted = false;
 
-// Pas de redirection globale HTTP->HTTPS (Dashboard Pro reste en HTTP si HTTPS_ENABLED n'est pas activé)
+// Pas de redirection globale HTTP->HTTPS: on reste en HTTP principal pour le Dashboard Pro.
 
 function logServerBanner(initializationFailed = false) {
   if (initializationFailed) {
