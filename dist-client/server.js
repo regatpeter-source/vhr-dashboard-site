@@ -95,8 +95,6 @@ if (SUPPRESS_WARNINGS) {
   };
   console.warn('[quiet] SUPPRESS_WARNINGS=1 actif: warnings non-serveur masqués');
 }
-    sendAccountConfirmationEmail(newUser)
-      .catch(e => console.error('[email] confirmation error:', e && e.message));
 
 // HTTPS opt-in: only enabled if HTTPS_ENABLED=1 and certs are present
 try {
@@ -107,9 +105,6 @@ try {
     };
     hasCert = true;
     console.log('[HTTPS] Certificat SSL détecté.');
-    sendAccountConfirmationEmail(newUser)
-      .catch(e => console.error('[email] confirmation error:', e && e.message));
-
 } catch (e) {
   console.warn('[HTTPS] Erreur lors du chargement du certificat SSL:', e.message);
 }

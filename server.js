@@ -55,10 +55,6 @@ const os = require('os');
     // No process found on port or command failed - this is fine
     if (!e.message.includes('ENOENT') && !e.status) {
       // Silent: port is free
-
-        // Envoyer l'email de confirmation de compte (best-effort)
-        sendAccountConfirmationEmail(newUser)
-          .catch(e => console.error('[email] confirmation error:', e && e.message));
     }
   }
   
@@ -67,9 +63,6 @@ const os = require('os');
 
 // PostgreSQL database module
 
-    // Envoyer l'email de confirmation de compte (best-effort)
-    sendAccountConfirmationEmail(newUser)
-      .catch(e => console.error('[email] confirmation error:', e && e.message));
 const db = process.env.DATABASE_URL ? require('./db-postgres') : null;
 const USE_POSTGRES = !!process.env.DATABASE_URL;
 // ========== HTTPS SUPPORT (PRODUCTION) ==========
