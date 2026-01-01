@@ -55,6 +55,10 @@ const os = require('os');
     // No process found on port or command failed - this is fine
     if (!e.message.includes('ENOENT') && !e.status) {
       // Silent: port is free
+
+        // Envoyer l'email de confirmation de compte (best-effort)
+        sendAccountConfirmationEmail(newUser)
+          .catch(e => console.error('[email] confirmation error:', e && e.message));
     }
   }
   
@@ -62,6 +66,10 @@ const os = require('os');
 })();
 
 // PostgreSQL database module
+
+    // Envoyer l'email de confirmation de compte (best-effort)
+    sendAccountConfirmationEmail(newUser)
+      .catch(e => console.error('[email] confirmation error:', e && e.message));
 const db = process.env.DATABASE_URL ? require('./db-postgres') : null;
 const USE_POSTGRES = !!process.env.DATABASE_URL;
 // ========== HTTPS SUPPORT (PRODUCTION) ==========
@@ -1044,6 +1052,56 @@ async function sendLicenseEmail(email, licenseKey, username) {
   }
 }
 
+// Send account confirmation / welcome email on signup
+async function sendAccountConfirmationEmail(user) {
+  if (!user || !user.email) {
+    console.warn('[email] No recipient email for confirmation');
+    return false;
+  }
+
+  if (!emailUser || !emailPass) {
+    console.warn('[email] SMTP not configured, skip confirmation email');
+    return false;
+  }
+
+  if (!emailTransporter) {
+    console.error('[email] emailTransporter not initialized');
+    return false;
+  }
+
+  const mailOptions = {
+    from: process.env.EMAIL_FROM || emailUser || 'noreply@vhr-dashboard-site.com',
+    to: user.email,
+    subject: '🎉 Bienvenue sur VHR Dashboard',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; padding: 24px; background: #0d0f14; color: #ecf0f1; border-radius: 12px;">
+        <h1 style="color: #2ecc71; text-align: center;">Bienvenue, ${user.username || 'cher utilisateur'} !</h1>
+        <p style="line-height: 1.6;">Merci d'avoir créé votre compte VHR Dashboard. Votre accès est actif et vous disposez d'une période d'essai.</p>
+        <div style="background:#1a1d24;padding:16px;border-radius:10px;margin:20px 0;">
+          <p style="margin:0 0 8px 0;">📧 Email: <strong>${user.email}</strong></p>
+          <p style="margin:0;">👤 Identifiant: <strong>${user.username || 'votre compte'}</strong></p>
+        </div>
+        <p style="line-height: 1.6;">Vous pouvez à tout moment gérer votre abonnement ou passer en offre complète depuis votre espace.</p>
+        <p style="text-align:center;margin-top:24px;">
+          <a href="https://www.vhr-dashboard-site.com/launch-dashboard.html" style="background:#2ecc71;color:#0d0f14;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:bold;">Ouvrir le dashboard</a>
+        </p>
+        <p style="color:#95a5a6;font-size:12px;margin-top:30px;text-align:center;">
+          Si vous n'êtes pas à l'origine de cette création de compte, ignorez cet email ou contactez le support.
+        </p>
+      </div>
+    `
+  };
+
+  try {
+    const info = await emailTransporter.sendMail(mailOptions);
+    console.log('[email] ✓ Confirmation envoyée à', user.email, 'messageId:', info && info.messageId);
+    return true;
+  } catch (e) {
+    console.error('[email] ✗ Échec envoi confirmation:', e && e.message);
+    return false;
+  }
+}
+
 // ========== EXPLICIT ROUTES (must come BEFORE express.static middleware) ==========
 
 // Serve launch-dashboard.html for 1-click launcher
@@ -1799,6 +1857,51 @@ function persistUser(user) {
   }
 }
 
+// Ensure a subscription record exists for a given user (free/trial by default)
+function ensureUserSubscription(user, options = {}) {
+  const now = new Date().toISOString();
+  const base = {
+    userId: user.id || null,
+    username: user.username,
+    email: user.email || null,
+    stripeSubscriptionId: options.stripeSubscriptionId || null,
+    stripePriceId: options.stripePriceId || null,
+    status: options.status || 'trial',
+    planName: options.planName || 'signup',
+    startDate: options.startDate || now,
+    endDate: options.endDate || null,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  // Persist in SQLite if enabled
+  if (dbEnabled) {
+    try {
+      require('./db').addSubscription(base);
+    } catch (e) {
+      console.error('[subscriptions] sqlite add error:', e && e.message);
+    }
+  }
+
+  // JSON/in-memory fallback
+  const existingIdx = subscriptions.findIndex(s => s.username === user.username);
+  if (existingIdx >= 0) {
+    const existingId = subscriptions[existingIdx].id || subscriptionIdCounter++;
+    subscriptions[existingIdx] = { ...subscriptions[existingIdx], ...base, id: existingId };
+  } else {
+    const newId = subscriptionIdCounter++;
+    subscriptions.push({ id: newId, ...base });
+  }
+
+  try {
+    saveSubscriptions();
+  } catch (e) {
+    console.error('[subscriptions] save error:', e && e.message);
+  }
+
+  return true;
+}
+
 function removeUserByUsername(username) {
   if (dbEnabled) {
       const user = getUserByUsername(username);
@@ -1942,6 +2045,12 @@ app.post('/api/dashboard/register', async (req, res) => {
     
     persistUser(newUser);
     console.log('[api/dashboard/register] user created:', username);
+
+    // Créer une entrée d'abonnement par défaut (trial, sans paiement)
+    ensureUserSubscription(newUser, {
+      planName: 'dashboard-signup',
+      status: 'trial'
+    });
     
     const token = jwt.sign({ username: newUser.username, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
     
@@ -2554,6 +2663,16 @@ app.post('/api/auth/register', async (req, res) => {
     persistUser(newUser);
     
     console.log('[api/auth/register] user registered successfully:', username);
+
+    // Créer immédiatement une fiche d'abonnement "trial" (sans paiement)
+    ensureUserSubscription(newUser, {
+      planName: 'signup-free',
+      status: 'trial'
+    });
+
+    // Envoyer l'email de confirmation de compte (best-effort)
+    sendAccountConfirmationEmail(newUser)
+      .catch(e => console.error('[email] confirmation error:', e && e.message));
     
     // Create JWT token for automatic login
     const token = jwt.sign({ username: newUser.username, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
@@ -3872,7 +3991,8 @@ app.get('/api/admin/users', authMiddleware, (req, res) => {
 app.get('/api/admin/subscriptions', authMiddleware, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
   try {
-    res.json({ ok: true, subscriptions });
+    const subs = dbEnabled ? require('./db').getAllSubscriptions() : subscriptions;
+    res.json({ ok: true, subscriptions: subs });
   } catch (e) {
     console.error('[api] admin/subscriptions:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -3883,8 +4003,8 @@ app.get('/api/admin/subscriptions', authMiddleware, (req, res) => {
 app.get('/api/admin/subscriptions/active', authMiddleware, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
   try {
-    const subscriptions = dbEnabled ? require('./db').getActiveSubscriptions() : [];
-    res.json({ ok: true, subscriptions });
+    const subs = dbEnabled ? require('./db').getActiveSubscriptions() : subscriptions.filter(s => s.status === 'active');
+    res.json({ ok: true, subscriptions: subs });
   } catch (e) {
     console.error('[api] admin/subscriptions/active:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -4042,8 +4162,9 @@ app.delete('/api/admin/messages/:id', authMiddleware, async (req, res) => {
 app.get('/api/admin/stats', authMiddleware, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
   try {
+    const subs = dbEnabled ? require('./db').getAllSubscriptions() : subscriptions;
     const totalUsers = users.length;
-    const activeSubscriptions = subscriptions.filter(s => s.status === 'active').length;
+    const activeSubscriptions = subs.filter(s => s.status === 'active').length;
     const unreadMessages = messages.filter(m => m.status === 'unread').length;
     
     res.json({ ok: true, stats: { totalUsers, activeSubscriptions, unreadMessages } });
@@ -6335,6 +6456,12 @@ app.post('/api/register', async (req, res) => {
     } else {
       persistUser(newUser);
     }
+
+    // Créer une entrée d'abonnement "trial" par défaut pour suivi admin
+    ensureUserSubscription(newUser, {
+      planName: 'account-signup',
+      status: 'trial'
+    });
     // create token and set cookie
     const token = jwt.sign({ username: newUser.username, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
     res.cookie('vhr_token', token, buildAuthCookieOptions(req));

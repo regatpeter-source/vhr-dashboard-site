@@ -750,6 +750,8 @@ function showAccountPanel() {
 	`;
 	
 	document.body.appendChild(panel);
+	setAudioPanelMinimized(true);
+	setAudioPanelMinimized(true);
 }
 
 function getUserStats() {
@@ -1065,8 +1067,7 @@ function setAudioPanelMinimized() {
 }
 
 window.toggleAudioPanelSize = function() {
-	// No-op: panel stays compact to avoid covering dashboard
-	return false;
+	return false; // always compact
 };
 
 window.sendVoiceToHeadset = async function(serial) {
@@ -1202,7 +1203,7 @@ window.sendVoiceToHeadset = async function(serial) {
 		activeAudioStream.isLocalMonitoring = false;
 		activeAudioStream.setLocalMonitoring(false);
 		
-		// Start audio receiver on headset - browser only (no forced Quest open)
+		// Start audio receiver on headset - browser only (pas d'ouverture forcée sur le Quest)
 		try {
 			const serverUrl = resolvedServerUrl || window.location.origin;
 			console.log('[voice] Receiver serverUrl:', serverUrl);
@@ -1238,7 +1239,7 @@ window.sendVoiceToHeadset = async function(serial) {
 				console.warn('[voice] ADB launch voice app error:', adbLaunchErr);
 			}
 
-			// Ne plus forcer l'ouverture sur le Quest via ADB pour éviter qu'une page web prenne le focus dans le casque
+			// Ne pas forcer l'ouverture via ADB pour éviter qu'une page prenne le focus dans le casque
 		} catch (openError) {
 			console.warn('[sendVoiceToHeadset] Could not open audio receiver:', openError);
 		}
@@ -1314,7 +1315,6 @@ window.sendVoiceToHeadset = async function(serial) {
 };
 
 window.toggleAudioStreamPause = function() {
-	setAudioPanelMinimized();
 	if (!activeAudioStream) return;
 	
 	const isPaused = activeAudioStream.isPaused || false;
@@ -1526,6 +1526,14 @@ window.createDesktopShortcut = async function() {
 };
 
 window.openBillingPortal = async function() {
+	const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
+	const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
+
+	if (!OFFICIAL_HOSTS.includes(window.location.hostname)) {
+		window.open(BILLING_URL, '_blank');
+		return;
+	}
+
 	showToast('⏳ Ouverture du portail Stripe...', 'info');
 	try {
 		const res = await api('/api/billing/portal', {
@@ -1561,6 +1569,15 @@ window.confirmCancelSubscription = function() {
 };
 
 window.cancelSubscription = async function() {
+	const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
+	const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
+
+	if (!OFFICIAL_HOSTS.includes(window.location.hostname)) {
+		window.open(BILLING_URL, '_blank');
+		closeModal();
+		return;
+	}
+
 	showToast('⏳ Annulation en cours...', 'info');
 	const res = await api('/api/subscriptions/cancel', {
 		method: 'POST',
@@ -1966,7 +1983,7 @@ async function openVoiceReceiverForDevice(serial = '', name = '') {
 		const displayName = name || serial || 'casque';
 		const path = `/audio-receiver.html?serial=${encodeURIComponent(serial || '')}&name=${encodeURIComponent(displayName)}&autoconnect=true`;
 		const port = window.location.port || 3000;
-		let storedToken = readAuthToken() || await syncTokenFromCookie();
+			let storedToken = readAuthToken() || await syncTokenFromCookie();
 		let url = `http://localhost:${port}${path}`;
 		if (storedToken) url += `&token=${encodeURIComponent(storedToken)}`;
 			showToast(`🗣️ Voix pour ${displayName} (localhost)`, 'info');
@@ -1974,6 +1991,7 @@ async function openVoiceReceiverForDevice(serial = '', name = '') {
 			if (!opened) {
 				console.warn('[voice] Popup bloquée, ouvrir manuellement :', url);
 				showToast(`🔗 Ouvrez manuellement : ${url}`, 'warning');
+				showVoiceReceiverFallback(url, displayName);
 			}
 		return url;
 	} catch (e) {
@@ -3532,7 +3550,7 @@ function showTrialBanner(daysRemaining) {
 		bgColor = 'linear-gradient(135deg, #2ecc71, #27ae60)'; // Green for active
 		bannerText = `✅ Abonnement actif`;
 	}
-
+	
 	banner.style = `position:fixed;top:56px;left:0;width:100vw;background:${bgColor};color:#fff;padding:10px 20px;text-align:center;z-index:1050;font-weight:bold;box-shadow:0 2px 8px #000;`;
 	banner.innerHTML = `
 		${bannerText}
@@ -3542,7 +3560,7 @@ function showTrialBanner(daysRemaining) {
 	`;
 	document.body.appendChild(banner);
 	document.body.style.paddingTop = '106px'; // 56 navbar + 50 banner
-
+	
 	// Add margin-top to deviceGrid to prevent overlap with headers
 	const deviceGrid = document.getElementById('deviceGrid');
 	if (deviceGrid) {

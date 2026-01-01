@@ -1526,6 +1526,15 @@ window.createDesktopShortcut = async function() {
 };
 
 window.openBillingPortal = async function() {
+	const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
+	const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
+
+	// Si on n'est pas sur le domaine officiel, on redirige vers la page billing vitrine (clé live déjà configurée)
+	if (!OFFICIAL_HOSTS.includes(window.location.hostname)) {
+		window.open(BILLING_URL, '_blank');
+		return;
+	}
+
 	showToast('⏳ Ouverture du portail Stripe...', 'info');
 	try {
 		const res = await api('/api/billing/portal', {
@@ -1561,6 +1570,16 @@ window.confirmCancelSubscription = function() {
 };
 
 window.cancelSubscription = async function() {
+	const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
+	const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
+
+	// Hors domaine officiel : renvoyer vers la page billing vitrine
+	if (!OFFICIAL_HOSTS.includes(window.location.hostname)) {
+		window.open(BILLING_URL, '_blank');
+		closeModal();
+		return;
+	}
+
 	showToast('⏳ Annulation en cours...', 'info');
 	const res = await api('/api/subscriptions/cancel', {
 		method: 'POST',
