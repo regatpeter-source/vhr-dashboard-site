@@ -1,5 +1,17 @@
 /* Minimal client code to create a Stripe Checkout session via server endpoint /create-checkout-session */
 (function() {
+  const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
+  const PRICING_URL = 'https://www.vhr-dashboard-site.com/pricing.html';
+
+  function shouldRedirectExternally() {
+    return !OFFICIAL_HOSTS.includes(window.location.hostname);
+  }
+
+  function redirectToExternalPricing(mode) {
+    const plan = mode === 'subscription' ? 'subscription' : 'payment';
+    const url = `${PRICING_URL}?plan=${encodeURIComponent(plan)}#checkout`;
+    window.location.href = url;
+  }
   // Show registration modal before proceeding to Stripe
   function showRegistrationModal(priceId, mode, button) {
     const modal = document.createElement('div');
@@ -139,6 +151,13 @@
     const priceId = this.dataset.priceId || this.getAttribute('data-price-id');
     const mode = this.dataset.mode || this.getAttribute('data-mode') || 'payment';
     if (!priceId) return console.warn('[pricing-stripe] priceId not found on element', this);
+
+    // Option 2: si on est en dehors du domaine vitrine, rediriger vers la page pricing officielle (clé live déjà configurée là-bas)
+    if (shouldRedirectExternally()) {
+      console.log('[pricing-stripe] Redirecting to external pricing page (official domain)');
+      redirectToExternalPricing(mode);
+      return;
+    }
     
     // Show registration modal before proceeding to Stripe
     showRegistrationModal(priceId, mode, this);
