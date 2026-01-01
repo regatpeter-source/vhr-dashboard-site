@@ -1,5 +1,11 @@
 // Account page client script (moved from inline to comply with CSP)
 (function(){
+  const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
+  const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
+
+  function isOfficialHost() {
+    return OFFICIAL_HOSTS.includes(window.location.hostname);
+  }
   // Toggle password visibility
   document.addEventListener('DOMContentLoaded', () => {
     const toggleButtons = document.querySelectorAll('.togglePassword');
@@ -161,6 +167,17 @@
   // Billing section
   async function loadBilling(){
     try {
+      // Si hors domaine officiel, proposer un lien vers la page billing officielle plutôt que d'appeler l'API locale
+      if (!isOfficialHost()) {
+        const box = document.getElementById('billingBox');
+        box.innerHTML = `
+          <h3>💳 Factures & Paiements</h3>
+          <p>Pour consulter vos factures et gérer vos moyens de paiement, rendez-vous sur la page sécurisée :</p>
+          <p><a class="cta" href="${BILLING_URL}" target="_blank" rel="noopener">Gérer ma facturation</a></p>
+        `;
+        return;
+      }
+
       const r = await api('/api/billing/invoices');
       const invoices = (r && r.invoices) || [];
       const box = document.getElementById('billingBox');
@@ -186,8 +203,28 @@
         });
         html += '</ul>';
       }
+
+      // Ajouter un bouton vers le portail de facturation (Stripe Customer Portal)
+      html += `<p><button id="billingPortalBtn" class="cta-secondary">Gérer paiements / moyens de paiement</button></p>`;
       
       box.innerHTML = html;
+
+      const portalBtn = document.getElementById('billingPortalBtn');
+      if (portalBtn) {
+        portalBtn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          portalBtn.disabled = true;
+          portalBtn.textContent = 'Ouverture du portail...';
+          const res = await api('/api/billing/portal', { method: 'POST' });
+          portalBtn.disabled = false;
+          portalBtn.textContent = 'Gérer paiements / moyens de paiement';
+          if (res && res.ok && res.url) {
+            window.open(res.url, '_blank');
+          } else {
+            alert('Erreur lors de l\'ouverture du portail de facturation');
+          }
+        });
+      }
     } catch(e) {
       console.error('[Billing] Error loading invoices:', e);
       const box = document.getElementById('billingBox');
@@ -198,6 +235,15 @@
   // Load subscription info
   async function loadSubscription() {
     try {
+      // Si hors domaine officiel, rediriger l'utilisateur vers la page billing du site vitrine
+      if (!isOfficialHost()) {
+        document.getElementById('subscriptionContent').innerHTML = `
+          <p>Pour gérer votre abonnement, annuler ou mettre à jour vos moyens de paiement, utilisez la page sécurisée :</n>
+          <p><a class="cta" href="${BILLING_URL}" target="_blank" rel="noopener">Gérer mon abonnement</a></p>
+        `;
+        return;
+      }
+
       const res = await api('/api/subscriptions/my-subscription');
       if (!res || !res.ok) {
         document.getElementById('subscriptionContent').innerHTML = '<p>Pas d\'abonnement actif actuellement.</p>';
