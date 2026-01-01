@@ -25,7 +25,7 @@ Disallow: /api/internal/
 Crawl-delay: 1
 
 # Sitemap location
-Sitemap: https://vhr-dashboard-site.onrender.com/sitemap.xml
+Sitemap: https://www.vhr-dashboard-site.com/sitemap.xml
 
 # Google specific
 User-agent: Googlebot

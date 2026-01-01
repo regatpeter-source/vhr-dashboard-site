@@ -3,13 +3,13 @@
         xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
   <!-- Main Pages -->
   <url>
-    <loc>https://vhr-dashboard-site.onrender.com/</loc>
+    <loc>https://www.vhr-dashboard-site.com/</loc>
     <lastmod>2025-12-15</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://vhr-dashboard-site.onrender.com/index.html</loc>
+    <loc>https://www.vhr-dashboard-site.com/index.html</loc>
     <lastmod>2025-12-15</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.95</priority>
@@ -17,19 +17,19 @@
   
   <!-- Product Pages -->
   <url>
-    <loc>https://vhr-dashboard-site.onrender.com/features.html</loc>
+    <loc>https://www.vhr-dashboard-site.com/features.html</loc>
     <lastmod>2025-12-15</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://vhr-dashboard-site.onrender.com/pricing.html</loc>
+    <loc>https://www.vhr-dashboard-site.com/pricing.html</loc>
     <lastmod>2025-12-15</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.85</priority>
   </url>
   <url>
-    <loc>https://vhr-dashboard-site.onrender.com/vhr-dashboard-pro.html</loc>
+    <loc>https://www.vhr-dashboard-site.com/vhr-dashboard-pro.html</loc>
     <lastmod>2025-12-15</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
@@ -37,19 +37,19 @@
   
   <!-- Content Pages -->
   <url>
-    <loc>https://vhr-dashboard-site.onrender.com/guide-gestion-casques-vr.html</loc>
+    <loc>https://www.vhr-dashboard-site.com/guide-gestion-casques-vr.html</loc>
     <lastmod>2025-12-16</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.85</priority>
   </url>
   <url>
-    <loc>https://vhr-dashboard-site.onrender.com/case-studies.html</loc>
+    <loc>https://www.vhr-dashboard-site.com/case-studies.html</loc>
     <lastmod>2025-12-15</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://vhr-dashboard-site.onrender.com/faq.html</loc>
+    <loc>https://www.vhr-dashboard-site.com/faq.html</loc>
     <lastmod>2025-12-15</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.75</priority>
@@ -57,19 +57,19 @@
   
   <!-- Support Pages -->
   <url>
-    <loc>https://vhr-dashboard-site.onrender.com/contact.html</loc>
+    <loc>https://www.vhr-dashboard-site.com/contact.html</loc>
     <lastmod>2025-12-15</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://vhr-dashboard-site.onrender.com/mentions.html</loc>
+    <loc>https://www.vhr-dashboard-site.com/mentions.html</loc>
     <lastmod>2025-12-15</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.5</priority>
   </url>
   <url>
-    <loc>https://vhr-dashboard-site.onrender.com/developer-setup.html</loc>
+    <loc>https://www.vhr-dashboard-site.com/developer-setup.html</loc>
     <lastmod>2025-12-15</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
