@@ -1682,6 +1682,72 @@ let subscriptions = [];
 let messageIdCounter = 1;
 let subscriptionIdCounter = 1;
 
+// --- Auto-confirm Stripe subscriptions (avoid missing emails or statuses) ---
+const SUBSCRIPTION_RECONCILE_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
+let subscriptionReconcileTimer = null;
+
+async function reconcilePendingSubscriptions() {
+  if (!stripe) return;
+  // Best-effort: check users with a Stripe subscriptionId and ensure status + email confirmation
+  for (const user of users) {
+    if (!user || !user.subscriptionId) continue;
+
+    let subscription;
+    try {
+      subscription = await stripe.subscriptions.retrieve(user.subscriptionId);
+    } catch (e) {
+      console.warn('[subscription] Unable to retrieve subscription', user.subscriptionId, e && e.message);
+      continue;
+    }
+
+    const status = subscription?.status || user.subscriptionStatus || 'unknown';
+    if (status !== user.subscriptionStatus) {
+      user.subscriptionStatus = status;
+    }
+
+    // Send confirmation email once when active and not already sent
+    const alreadySent = !!user.subscriptionConfirmationSentAt;
+    if (status === 'active' && !alreadySent && user.email) {
+      try {
+        const priceCents = subscription?.items?.data?.[0]?.price?.unit_amount;
+        const price = priceCents ? (priceCents / 100).toFixed(2) : '—';
+        const planName = subscription?.plan?.nickname
+          || subscription?.items?.data?.[0]?.price?.nickname
+          || 'Abonnement Professionnel';
+        const billingPeriod = subscription?.plan?.interval || 'month';
+
+        const emailResult = await emailService.sendSubscriptionSuccessEmail(user, {
+          planName,
+          billingPeriod,
+          price,
+          subscriptionId: subscription.id,
+          userName: user.username
+        });
+
+        if (!emailResult || emailResult.success !== false) {
+          user.subscriptionConfirmationSentAt = new Date().toISOString();
+          console.log('[subscription] Confirmation email sent (reconcile) to', user.email);
+        } else {
+          console.error('[subscription] Confirmation email failed (reconcile):', emailResult.error);
+        }
+      } catch (e) {
+        console.error('[subscription] Error sending confirmation (reconcile):', e && e.message);
+      }
+    }
+  }
+
+  saveUsers();
+}
+
+function startSubscriptionReconciler() {
+  if (subscriptionReconcileTimer) clearInterval(subscriptionReconcileTimer);
+  // initial delayed run to avoid hitting Stripe immediately on boot
+  setTimeout(() => reconcilePendingSubscriptions().catch(() => {}), 10 * 1000);
+  subscriptionReconcileTimer = setInterval(() => {
+    reconcilePendingSubscriptions().catch(err => console.error('[subscription] reconcile loop error:', err && err.message));
+  }, SUBSCRIPTION_RECONCILE_INTERVAL_MS);
+}
+
 function loadMessages() {
   try {
     ensureDataDir();
@@ -1771,6 +1837,9 @@ async function initializeApp() {
     ensureDefaultUsers();
     console.log('[server] Users loaded at startup: ' + users.length);
   }
+
+  // Kick off periodic reconciliation to auto-confirm subscriptions and send any missing emails
+  startSubscriptionReconciler();
 }
 
 // Ensure default users exist (important for Render where filesystem is ephemeral)
