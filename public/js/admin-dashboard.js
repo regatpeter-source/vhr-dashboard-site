@@ -1,4 +1,7 @@
-const API_BASE = '/api';
+const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
+const API_BASE = OFFICIAL_HOSTS.includes(window.location.hostname)
+  ? '/api'
+  : 'https://www.vhr-dashboard-site.com/api';
 let currentUser = null;
 
 // Helper to make authenticated fetch requests with cookies
