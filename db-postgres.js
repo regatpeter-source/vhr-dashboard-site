@@ -263,7 +263,9 @@ async function deleteMessage(id) {
 // ===== Users =====
 async function getUsers() {
   try {
-    const result = await pool.query('SELECT id, username, email, role FROM users ORDER BY createdat DESC');
+    const result = await pool.query(
+      'SELECT id, username, email, role, createdat, updatedat, subscriptionstatus, subscriptionid, stripecustomerid FROM users ORDER BY createdat DESC'
+    );
     return result.rows || [];
   } catch (err) {
     console.error('[DB] Error getting users:', err && err.message ? err.message : err);
