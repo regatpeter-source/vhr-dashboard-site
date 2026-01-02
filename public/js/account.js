@@ -2,6 +2,8 @@
 (function(){
   const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
   const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
+  // Si la page est servie depuis un domaine différent (ex: github.io), pointer l'API vers le domaine officiel
+  const API_BASE = OFFICIAL_HOSTS.includes(window.location.hostname) ? '' : 'https://www.vhr-dashboard-site.com';
 
   function isOfficialHost() {
     return OFFICIAL_HOSTS.includes(window.location.hostname);
@@ -30,12 +32,13 @@
   async function api(path, opts = {}) {
     opts = Object.assign({ credentials: 'include' }, opts);
     try { 
-      const res = await fetch(path, opts); 
+      const url = API_BASE + path;
+      const res = await fetch(url, opts); 
       if (!res.ok) {
-        console.warn(`[API ${path}] Response status: ${res.status}`);
+        console.warn(`[API ${url}] Response status: ${res.status}`);
       }
       const data = await res.json();
-      console.log(`[API ${path}] Response:`, data);
+      console.log(`[API ${url}] Response:`, data);
       return data;
     } catch(e){ 
       console.error(`[API ${path}] Error:`, e);
