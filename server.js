@@ -1446,25 +1446,25 @@ app.use(['/api/adb', '/api/adb/*', '/api/stream', '/api/stream/*', '/api/apps', 
 // --- Stripe Checkout ---
 // Trim quotes and whitespace if an operator copy/pasted the key with surrounding quotes
 function cleanEnvValue(v) { if (!v) return v; return v.replace(/^['"]|['"]$/g, '').trim(); }
-const stripeKeyRaw = process.env.STRIPE_SECRET_KEY || 'sk_test_votre_cle_secrete';
+const stripeKeyRaw = process.env.STRIPE_SECRET_KEY || '';
 const stripeKey = cleanEnvValue(stripeKeyRaw);
-if (!stripeKey || stripeKey === 'sk_test_votre_cle_secrete') {
-  console.warn('[Stripe] STRIPE_SECRET_KEY not set or using placeholder. Set STRIPE_SECRET_KEY=sk_test_xxx in your environment.');
+if (!stripeKey) {
+  console.warn('[Stripe] STRIPE_SECRET_KEY not set. Set STRIPE_SECRET_KEY to your secret key (sk_live_...).');
 } else if (stripeKey.startsWith('pk_')) {
-  console.error('[Stripe] STRIPE_SECRET_KEY appears to be a publishable key (pk_). Server-side requires a secret key (sk_test_...). Aborting server start.');
+  console.error('[Stripe] STRIPE_SECRET_KEY appears to be a publishable key (pk_). Server-side requires a secret key (sk_live_...). Aborting server start.');
   throw new Error('Stripe secret key required: STRIPE_SECRET_KEY must be an sk_ key.');
 }
 const stripe = require('stripe')(stripeKey);
 
 // Verify the Stripe secret key early at startup (fail fast on invalid / publishable key)
 async function verifyStripeKeyAtStartup() {
-  if (!stripeKey || stripeKey === 'sk_test_votre_cle_secrete') {
-    console.warn('[Stripe] STRIPE_SECRET_KEY not configured; server will still run but Stripe features will fail. Set STRIPE_SECRET_KEY to a valid sk_test_ key.');
+  if (!stripeKey) {
+    console.warn('[Stripe] STRIPE_SECRET_KEY not configured; server will still run but Stripe features will fail. Set STRIPE_SECRET_KEY to a valid sk_live_ key.');
     return;
   }
   if (stripeKey.startsWith('pk_')) {
-    console.error('[Stripe] Provided STRIPE_SECRET_KEY appears to be a publishable key (pk_). Use a secret key (sk_test_...). Aborting.');
-    throw new Error('Invalid STRIPE_SECRET_KEY: publishable key provided. Use a secret key (sk_test_...).');
+    console.error('[Stripe] Provided STRIPE_SECRET_KEY appears to be a publishable key (pk_). Use a secret key (sk_live_...). Aborting.');
+    throw new Error('Invalid STRIPE_SECRET_KEY: publishable key provided. Use a secret key (sk_live_...).');
   }
   try {
     // quick call to confirm key is valid
@@ -1504,7 +1504,7 @@ app.post('/create-checkout-session', async (req, res) => {
     } catch (pErr) {
       console.error('[Stripe] price retrieve error:', { priceId, err: pErr && pErr.message, raw: pErr && pErr.raw });
       // Provide helpful guidance if price not found or using wrong key
-      const suggestion = 'Ensure the price exists in your Stripe dashboard (Test mode) and that the server is using a valid secret API key (sk_test_...).';
+      const suggestion = 'Ensure the price exists in your Stripe dashboard and that the server is using a valid secret API key (sk_live_...).';
       const msg = (pErr && pErr.code === 'resource_missing') || (pErr && pErr.statusCode === 404)
         ? `Price not found: ${priceId}. ${suggestion}`
         : `Price retrieval failed: ${pErr && pErr.message}. ${suggestion}`;
@@ -6496,6 +6496,16 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
     } else if (type.startsWith('customer.subscription')) {
       user.subscriptionStatus = obj.status || obj?.plan?.status || obj?.status || 'unknown';
       user.subscriptionId = obj.id;
+
+      // Upsert subscription record for admin dashboard
+      ensureUserSubscription(user, {
+        stripeSubscriptionId: obj.id,
+        stripePriceId: obj?.items?.data?.[0]?.price?.id || null,
+        status: obj.status || 'unknown',
+        planName: obj?.items?.data?.[0]?.price?.nickname || obj?.items?.data?.[0]?.plan?.nickname || 'Abonnement',
+        startDate: obj.current_period_start ? new Date(obj.current_period_start * 1000).toISOString() : undefined,
+        endDate: obj.current_period_end ? new Date(obj.current_period_end * 1000).toISOString() : undefined
+      });
     } else if (type === 'checkout.session.completed') {
       // session completed often delivers: session.customer
       if (obj.customer) user.stripeCustomerId = obj.customer;
@@ -6553,6 +6563,15 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
           // Mark subscription as active
           user.subscriptionStatus = 'active';
           user.subscriptionPurchasedAt = new Date().toISOString();
+
+          // Upsert subscription record for admin dashboard visibility
+          ensureUserSubscription(user, {
+            stripeSubscriptionId: obj.subscription || null,
+            stripePriceId: obj?.display_items?.[0]?.price?.id || obj?.line_items?.data?.[0]?.price?.id || null,
+            status: 'active',
+            planName: obj.metadata?.purchaseName || 'Abonnement Professionnel',
+            startDate: new Date().toISOString()
+          });
           
           try {
             const subscriptionData = {

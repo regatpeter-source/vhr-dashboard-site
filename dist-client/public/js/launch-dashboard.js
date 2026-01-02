@@ -1,8 +1,8 @@
 // Launch Dashboard Script
 // Now downloads the full client pack (Dashboard + Voix)
 
-// Lien direct vers le release GitHub du pack client (node + adb inclus)
-const ZIP_URL_FULL = 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.0-client/vhr-dashboard-pro-client-full-updated-new3-node-adb.zip';
+// Lien direct vers le release GitHub du pack client
+const ZIP_URL_FULL = 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.0-client/vhr-dashboard-pro-client-full-updated-new3.zip';
 
 function launchDashboard() {
     const btn = document.getElementById('launchBtn');
