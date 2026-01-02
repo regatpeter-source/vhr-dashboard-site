@@ -1526,9 +1526,8 @@ window.createDesktopShortcut = async function() {
 };
 
 window.openBillingPortal = async function() {
-	const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
 	// Redirection systématique vers la page billing vitrine (pas d'appel API local)
-	window.open(BILLING_URL, '_blank');
+	goToOfficialBillingPage();
 	return;
 };
 
@@ -1549,8 +1548,7 @@ window.confirmCancelSubscription = function() {
 };
 
 window.cancelSubscription = async function() {
-	const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
-	window.open(BILLING_URL, '_blank');
+	goToOfficialBillingPage();
 	closeModal();
 	return;
 };
@@ -3454,8 +3452,17 @@ socket.on('stream-event', (evt) => {
 // ========== LICENSE CHECK & UNLOCK SYSTEM ========== 
 const BILLING_PAGE_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
 
+function goToOfficialBillingPage() {
+	try {
+		window.location.href = BILLING_PAGE_URL;
+	} catch (e) {
+		// fallback new tab if navigation blocked
+		window.open(BILLING_PAGE_URL, '_blank');
+	}
+}
+
 window.openOfficialBillingPage = function() {
-	window.open(BILLING_PAGE_URL, '_blank');
+	goToOfficialBillingPage();
 	const modal = document.getElementById('unlockModal');
 	if (modal) modal.remove();
 };
