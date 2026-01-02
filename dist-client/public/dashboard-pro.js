@@ -3975,6 +3975,14 @@ window.loginUser = async function() {
 };
 
 window.registerUser = async function() {
+	const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
+	const ACCOUNT_URL = 'https://www.vhr-dashboard-site.com/account.html?action=register';
+
+	if (!OFFICIAL_HOSTS.includes(window.location.hostname)) {
+		window.open(ACCOUNT_URL, '_blank');
+		return;
+	}
+
 	const username = document.getElementById('registerUsername').value.trim();
 	const email = document.getElementById('registerEmail').value.trim();
 	const password = document.getElementById('registerPassword').value;
