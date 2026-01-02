@@ -1019,65 +1019,9 @@ function getSettingsContent() {
 	`;
 }
 
-window.switchAccountTab = function(tab) {
-	const tabs = document.querySelectorAll('.account-tab');
-	tabs.forEach(t => {
-		t.style.color = '#95a5a6';
-		t.style.borderBottom = '3px solid transparent';
-	});
-	
-	const activeTab = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
-	if (activeTab) {
-		activeTab.style.color = '#fff';
-		activeTab.style.borderBottom = '3px solid #2ecc71';
-	}
-	
-	const content = document.getElementById('accountContent');
-	const stats = getUserStats();
-	
-	if (tab === 'profile') content.innerHTML = getProfileContent(stats, userRoles[currentUser] || 'user');
-	else if (tab === 'stats') content.innerHTML = getStatsContent(stats);
-	else if (tab === 'settings') content.innerHTML = getSettingsContent();
+window.subscribePro = function() {
+	openOfficialBillingPage();
 };
-
-// ========== AUDIO STREAMING (WebRTC) ==========
-let activeAudioStream = null;  // Global audio stream instance
-let activeAudioSerial = null;  // Serial of device receiving audio
-
-console.log('[voice] dashboard-pro.js build stamp: 2025-12-29 18:55');
-
-// Keep panel always compact (no fullscreen overlay)
-function setAudioPanelMinimized() {
-	const panel = document.getElementById('audioStreamPanel');
-	const content = document.getElementById('audioStreamContent');
-	const pill = document.getElementById('audioStreamPill');
-	if (!panel || !content) return;
-	panel.style = 'position:fixed;bottom:12px;right:12px;z-index:120;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;gap:8px;pointer-events:auto;background:transparent;width:auto;height:auto;';
-	content.style.display = 'none';
-	content.style.maxWidth = '420px';
-	content.style.width = '360px';
-	content.style.maxHeight = '80vh';
-	content.style.pointerEvents = 'auto';
-	content.style.margin = '0';
-	if (pill) {
-		pill.style.display = 'inline-flex';
-		pill.innerHTML = `🎤<span style="font-size:11px;">ON</span>`;
-	}
-	panel.dataset.minimized = 'true';
-}
-
-window.toggleAudioPanelSize = function() {
-	return false; // always compact
-};
-
-window.sendVoiceToHeadset = async function(serial) {
-	console.log('[voice] sendVoiceToHeadset invoked for serial:', serial);
-	// Close any existing stream first (same or different device)
-	if (activeAudioStream) {
-		console.log('[sendVoiceToHeadset] Closing existing stream before starting new one');
-		await window.closeAudioStream(true); // true = silent close
-	}
-
 	const device = devices.find(d => d.serial === serial);
 	const deviceName = device ? device.name : 'Casque';
 	
@@ -1526,30 +1470,10 @@ window.createDesktopShortcut = async function() {
 };
 
 window.openBillingPortal = async function() {
-	const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
 	const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
-
-	if (!OFFICIAL_HOSTS.includes(window.location.hostname)) {
-		window.open(BILLING_URL, '_blank');
-		return;
-	}
-
-	showToast('⏳ Ouverture du portail Stripe...', 'info');
-	try {
-		const res = await api('/api/billing/portal', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' }
-		});
-		if (res.ok && res.url) {
-			closeModal();
-			window.location.href = res.url;
-		} else {
-			showToast('❌ Erreur: ' + (res.error || 'Impossible d\'ouvrir le portail Stripe'), 'error');
-		}
-	} catch (e) {
-		console.error('[billing/portal error]', e);
-		showToast('❌ Erreur lors de la connexion à Stripe: ' + e.message, 'error');
-	}
+	// Redirection systématique vers la page billing vitrine (pas d'appel API local)
+	window.open(BILLING_URL, '_blank');
+	return;
 };
 
 window.confirmCancelSubscription = function() {
@@ -1569,29 +1493,10 @@ window.confirmCancelSubscription = function() {
 };
 
 window.cancelSubscription = async function() {
-	const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
 	const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
-
-	if (!OFFICIAL_HOSTS.includes(window.location.hostname)) {
-		window.open(BILLING_URL, '_blank');
-		closeModal();
-		return;
-	}
-
-	showToast('⏳ Annulation en cours...', 'info');
-	const res = await api('/api/subscriptions/cancel', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' }
-	});
-	if (res.ok) {
-		showToast('✅ Abonnement annulé avec succès', 'success');
-		closeModal();
-		setTimeout(() => {
-			window.location.href = '/account.html';
-		}, 2000);
-	} else {
-		showToast('❌ Erreur: ' + (res.error || 'Annulation échouée'), 'error');
-	}
+	window.open(BILLING_URL, '_blank');
+	closeModal();
+	return;
 };
 
 window.exportUserData = function() {
@@ -1615,65 +1520,9 @@ window.exportUserData = function() {
 	showToast('📥 Données exportées !', 'success');
 };
 
-window.confirmDeleteAccount = function() {
-	if (confirm(`⚠️ ATTENTION !\n\nÊtes-vous sûr de vouloir supprimer votre compte "${currentUser}" ?\n\nCette action est IRRÉVERSIBLE !\n\nToutes vos données, statistiques et préférences seront définitivement supprimées.`)) {
-		if (confirm('Dernière confirmation : Supprimer définitivement le compte ?')) {
-			// Supprimer toutes les données utilisateur
-			localStorage.removeItem('vhr_user_stats_' + currentUser);
-			localStorage.removeItem('vhr_user_prefs_' + currentUser);
-			removeUser(currentUser);
-			
-			closeAccountPanel();
-			showToast('🗑️ Compte supprimé', 'error');
-			
-			// Redémarrer avec un nouveau utilisateur
-			setTimeout(() => {
-				const name = prompt('Nouveau nom d\'utilisateur ?');
-				if (name && name.trim()) setUser(name.trim());
-				else setUser('Invité');
-			}, 1000);
-		}
-	}
+window.purchasePro = function() {
+	openOfficialBillingPage();
 };
-
-function formatDate(isoString) {
-	const date = new Date(isoString);
-	const now = new Date();
-	const diffMs = now - date;
-	const diffMins = Math.floor(diffMs / 60000);
-	const diffHours = Math.floor(diffMs / 3600000);
-	const diffDays = Math.floor(diffMs / 86400000);
-	
-	if (diffMins < 1) return 'À l\'instant';
-	if (diffMins < 60) return `Il y a ${diffMins} min`;
-	if (diffHours < 24) return `Il y a ${diffHours}h`;
-	if (diffDays < 7) return `Il y a ${diffDays} jours`;
-	
-	return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-// UI fallback when popup is blocked: show a fixed banner with the receiver URL
-function showVoiceReceiverFallback(url, deviceLabel = 'casque') {
-	let box = document.getElementById('voiceReceiverFallback');
-	if (!box) {
-		box = document.createElement('div');
-		box.id = 'voiceReceiverFallback';
-		box.style.position = 'fixed';
-		box.style.bottom = '12px';
-		box.style.right = '12px';
-		box.style.zIndex = '9999';
-		box.style.padding = '12px 14px';
-		box.style.borderRadius = '10px';
-		box.style.boxShadow = '0 6px 18px rgba(0,0,0,0.18)';
-		box.style.background = 'linear-gradient(135deg, #34495e 0%, #2c3e50 100%)';
-		box.style.color = '#ecf0f1';
-		box.style.fontSize = '14px';
-		box.style.maxWidth = '320px';
-		box.style.lineHeight = '1.5';
-		box.innerHTML = `
-			<div style="font-weight:600;margin-bottom:6px;">🔗 Ouvrir le récepteur voix (${deviceLabel})</div>
-			<a id="voiceReceiverFallbackLink" href="${url}" target="_blank" rel="noopener noreferrer" style="display:block; word-break:break-all; color:#1abc9c; text-decoration:underline; margin-bottom:8px;">${url}</a>
-			<button id="voiceReceiverCopyBtn" style="border:none; background:#1abc9c; color:#0b1d24; padding:8px 10px; border-radius:6px; cursor:pointer; font-weight:600;">Copier le lien</button>
 			<button id="voiceReceiverCloseBtn" style="border:none; background:transparent; color:#bdc3c7; margin-left:8px; cursor:pointer;">Fermer</button>
 		`;
 		document.body.appendChild(box);
@@ -3491,6 +3340,14 @@ socket.on('stream-event', (evt) => {
 });
 
 // ========== LICENSE CHECK & UNLOCK SYSTEM ========== 
+const BILLING_PAGE_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
+
+window.openOfficialBillingPage = function() {
+	window.open(BILLING_PAGE_URL, '_blank');
+	const modal = document.getElementById('unlockModal');
+	if (modal) modal.remove();
+};
+
 async function checkLicense() {
 	try {
 		// Check demo/trial status with Stripe subscription verification
@@ -3554,7 +3411,7 @@ function showTrialBanner(daysRemaining) {
 	banner.style = `position:fixed;top:56px;left:0;width:100vw;background:${bgColor};color:#fff;padding:10px 20px;text-align:center;z-index:1050;font-weight:bold;box-shadow:0 2px 8px #000;`;
 	banner.innerHTML = `
 		${bannerText}
-		${daysRemaining > 0 ? `<button onclick="showUnlockModal()" style="margin-left:20px;background:#2ecc71;color:#000;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
+		${daysRemaining > 0 ? `<button onclick="openOfficialBillingPage()" style="margin-left:20px;background:#2ecc71;color:#000;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			🚀 Débloquer maintenant
 		</button>` : ''}
 	`;
@@ -3602,7 +3459,7 @@ window.showUnlockModal = function(status = licenseStatus) {
 					<li>✅ Support prioritaire</li>
 					<li>✅ Annulation à tout moment</li>
 				</ul>
-				<button onclick="subscribePro()" style="width:100%;background:#3498db;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
+				<button onclick="openOfficialBillingPage()" style="width:100%;background:#3498db;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
 					📱 S'abonner maintenant
 				</button>
 			</div>
@@ -3619,7 +3476,7 @@ window.showUnlockModal = function(status = licenseStatus) {
 					<li>✅ Clé de licence par email</li>
 					<li>✅ Fonctionne hors ligne</li>
 				</ul>
-				<button onclick="purchasePro()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
+				<button onclick="openOfficialBillingPage()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
 					🎁 Acheter maintenant
 				</button>
 			</div>

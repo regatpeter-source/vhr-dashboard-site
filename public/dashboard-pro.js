@@ -1526,31 +1526,10 @@ window.createDesktopShortcut = async function() {
 };
 
 window.openBillingPortal = async function() {
-	const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
 	const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
-
-	// Si on n'est pas sur le domaine officiel, on redirige vers la page billing vitrine (clé live déjà configurée)
-	if (!OFFICIAL_HOSTS.includes(window.location.hostname)) {
-		window.open(BILLING_URL, '_blank');
-		return;
-	}
-
-	showToast('⏳ Ouverture du portail Stripe...', 'info');
-	try {
-		const res = await api('/api/billing/portal', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' }
-		});
-		if (res.ok && res.url) {
-			closeModal();
-			window.location.href = res.url;
-		} else {
-			showToast('❌ Erreur: ' + (res.error || 'Impossible d\'ouvrir le portail Stripe'), 'error');
-		}
-	} catch (e) {
-		console.error('[billing/portal error]', e);
-		showToast('❌ Erreur lors de la connexion à Stripe: ' + e.message, 'error');
-	}
+	// Redirection systématique vers la page billing vitrine (pas d'appel API local)
+	window.open(BILLING_URL, '_blank');
+	return;
 };
 
 window.confirmCancelSubscription = function() {
@@ -1570,30 +1549,10 @@ window.confirmCancelSubscription = function() {
 };
 
 window.cancelSubscription = async function() {
-	const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
 	const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
-
-	// Hors domaine officiel : renvoyer vers la page billing vitrine
-	if (!OFFICIAL_HOSTS.includes(window.location.hostname)) {
-		window.open(BILLING_URL, '_blank');
-		closeModal();
-		return;
-	}
-
-	showToast('⏳ Annulation en cours...', 'info');
-	const res = await api('/api/subscriptions/cancel', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' }
-	});
-	if (res.ok) {
-		showToast('✅ Abonnement annulé avec succès', 'success');
-		closeModal();
-		setTimeout(() => {
-			window.location.href = '/account.html';
-		}, 2000);
-	} else {
-		showToast('❌ Erreur: ' + (res.error || 'Annulation échouée'), 'error');
-	}
+	window.open(BILLING_URL, '_blank');
+	closeModal();
+	return;
 };
 
 window.exportUserData = function() {
@@ -3493,6 +3452,14 @@ socket.on('stream-event', (evt) => {
 });
 
 // ========== LICENSE CHECK & UNLOCK SYSTEM ========== 
+const BILLING_PAGE_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
+
+window.openOfficialBillingPage = function() {
+	window.open(BILLING_PAGE_URL, '_blank');
+	const modal = document.getElementById('unlockModal');
+	if (modal) modal.remove();
+};
+
 async function checkLicense() {
 	try {
 		// Check demo/trial status with Stripe subscription verification
@@ -3556,7 +3523,7 @@ function showTrialBanner(daysRemaining) {
 	banner.style = `position:fixed;top:56px;left:0;width:100vw;background:${bgColor};color:#fff;padding:10px 20px;text-align:center;z-index:1050;font-weight:bold;box-shadow:0 2px 8px #000;`;
 	banner.innerHTML = `
 		${bannerText}
-		${daysRemaining > 0 ? `<button onclick="showUnlockModal()" style="margin-left:20px;background:#2ecc71;color:#000;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
+		${daysRemaining > 0 ? `<button onclick="openOfficialBillingPage()" style="margin-left:20px;background:#2ecc71;color:#000;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			🚀 Débloquer maintenant
 		</button>` : ''}
 	`;
@@ -3604,7 +3571,7 @@ window.showUnlockModal = function(status = licenseStatus) {
 					<li>✅ Support prioritaire</li>
 					<li>✅ Annulation à tout moment</li>
 				</ul>
-				<button onclick="subscribePro()" style="width:100%;background:#3498db;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
+				<button onclick="openOfficialBillingPage()" style="width:100%;background:#3498db;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
 					📱 S'abonner maintenant
 				</button>
 			</div>
@@ -3621,7 +3588,7 @@ window.showUnlockModal = function(status = licenseStatus) {
 					<li>✅ Clé de licence par email</li>
 					<li>✅ Fonctionne hors ligne</li>
 				</ul>
-				<button onclick="purchasePro()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
+				<button onclick="openOfficialBillingPage()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
 					🎁 Acheter maintenant
 				</button>
 			</div>
@@ -3648,124 +3615,12 @@ window.closeUnlockModal = function() {
 	if (modal) modal.remove();
 };
 
-window.subscribePro = async function() {
-	// Vérifier que l'utilisateur est connecté
-	if (!currentUser || currentUser === 'Invité') {
-		showToast('⚠️ Vous devez créer un compte pour vous abonner', 'error');
-		setTimeout(() => {
-			window.location.href = '/account.html?action=register';
-		}, 2000);
-		return;
-	}
-	
-	// Check if user is authenticated with JWT (has valid token)
-	try {
-		const meRes = await api('/api/me');
-		if (!meRes || !meRes.ok) {
-			showToast('⚠️ Vous devez vous connecter à votre compte', 'error');
-			setTimeout(() => {
-				window.location.href = '/account.html?action=login';
-			}, 2000);
-			return;
-		}
-	} catch (e) {
-		console.error('[subscribe] auth check failed:', e);
-		showToast('⚠️ Erreur d\'authentification - veuillez vous reconnecter', 'error');
-		setTimeout(() => {
-			window.location.href = '/account.html?action=login';
-		}, 2000);
-		return;
-	}
-	
-	showToast('🔄 Création de la session de paiement...', 'info');
-	
-	try {
-		// Create Stripe Checkout session for subscription
-		const res = await api('/api/subscriptions/create-checkout', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ planId: 'STANDARD' })
-		});
-		
-		console.log('[subscribe] API response:', res);
-		
-		if (res && res.url) {
-			// Session créée avec succès, rediriger vers Stripe Checkout
-			window.location.href = res.url;
-		} else if (res && res.error) {
-			showToast('❌ Erreur: ' + res.error, 'error');
-			if (res.error.includes('authentication')) {
-				setTimeout(() => {
-					window.location.href = '/account.html?action=login';
-				}, 2000);
-			}
-		} else {
-			showToast('❌ Erreur: Session non créée', 'error');
-		}
-	} catch (e) {
-		console.error('[subscribe] error:', e);
-		showToast('❌ Erreur lors de la création de la session', 'error');
-	}
+window.subscribePro = function() {
+	openOfficialBillingPage();
 };
 
-window.purchasePro = async function() {
-	// Vérifier que l'utilisateur est connecté
-	if (!currentUser || currentUser === 'Invité') {
-		showToast('⚠️ Vous devez créer un compte pour acheter la licence', 'error');
-		setTimeout(() => {
-			window.location.href = '/account.html?action=register';
-		}, 2000);
-		return;
-	}
-	
-	// Check if user is authenticated with JWT (has valid token)
-	try {
-		const meRes = await api('/api/me');
-		if (!meRes || !meRes.ok) {
-			showToast('⚠️ Vous devez vous connecter à votre compte', 'error');
-			setTimeout(() => {
-				window.location.href = '/account.html?action=login';
-			}, 2000);
-			return;
-		}
-	} catch (e) {
-		console.error('[purchase] auth check failed:', e);
-		showToast('⚠️ Erreur d\'authentification - veuillez vous reconnecter', 'error');
-		setTimeout(() => {
-			window.location.href = '/account.html?action=login';
-		}, 2000);
-		return;
-	}
-	
-	showToast('🔄 Création de la session de paiement...', 'info');
-	
-	try {
-		// Create Stripe Checkout session for one-time purchase
-		const res = await api('/api/purchases/create-checkout', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ purchaseId: 'PERPETUAL' })
-		});
-		
-		console.log('[purchase] API response:', res);
-		
-		if (res && res.url) {
-			// Session créée avec succès, rediriger vers Stripe Checkout
-			window.location.href = res.url;
-		} else if (res && res.error) {
-			showToast('❌ Erreur: ' + res.error, 'error');
-			if (res.error.includes('authentication')) {
-				setTimeout(() => {
-					window.location.href = '/account.html?action=login';
-				}, 2000);
-			}
-		} else {
-			showToast('❌ Erreur: Session non créée', 'error');
-		}
-	} catch (e) {
-		console.error('[purchase] error:', e);
-		showToast('❌ Erreur lors de la création de la session', 'error');
-	}
+window.purchasePro = function() {
+	openOfficialBillingPage();
 };
 
 window.activateLicense = async function() {

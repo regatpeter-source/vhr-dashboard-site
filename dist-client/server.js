@@ -64,6 +64,25 @@ const os = require('os');
 // PostgreSQL database module
 const db = process.env.DATABASE_URL ? require('./db-postgres') : null;
 const USE_POSTGRES = !!process.env.DATABASE_URL;
+// Admin allowlist (only these usernames are allowed to access admin endpoints)
+const ADMIN_ALLOWLIST = (process.env.ADMIN_ALLOWLIST || 'vhr')
+  .split(',')
+  .map(u => u.trim().toLowerCase())
+  .filter(Boolean);
+const ADMIN_INIT_SECRET = process.env.ADMIN_INIT_SECRET || null;
+
+function isAllowedAdminUser(user) {
+  const username = (typeof user === 'string' ? user : (user && user.username) || '').toLowerCase();
+  return !!username && ADMIN_ALLOWLIST.includes(username);
+}
+
+function ensureAllowedAdmin(req, res) {
+  if (!req.user || req.user.role !== 'admin' || !isAllowedAdminUser(req.user)) {
+    if (res) res.status(403).json({ ok: false, error: 'Accès admin restreint' });
+    return false;
+  }
+  return true;
+}
 // ========== HTTPS SUPPORT (PRODUCTION) ==========
 const FORCE_HTTP = process.env.FORCE_HTTP === '1';
 const QUIET_MODE = process.env.QUIET_MODE === '1';
@@ -1628,6 +1647,32 @@ function loadUsers() {
 
 let users = loadUsers();
 
+// In PostgreSQL mode, hydrate in-memory cache from DB for quick lookups
+if (USE_POSTGRES && db && db.getUsers) {
+  (async () => {
+    try {
+      const dbUsers = await db.getUsers();
+      if (Array.isArray(dbUsers)) {
+        users = dbUsers.map(u => ({
+          id: u.id || `user_${u.username}`,
+          username: u.username,
+          passwordHash: u.passwordhash || u.passwordHash || null,
+          email: u.email || null,
+          role: u.role || 'user',
+          stripeCustomerId: u.stripecustomerid || u.stripeCustomerId || null,
+          subscriptionStatus: u.subscriptionstatus || u.subscriptionStatus || null,
+          subscriptionId: u.subscriptionid || u.subscriptionId || null,
+          createdAt: u.createdat || u.createdAt || null,
+          updatedAt: u.updatedat || u.updatedAt || null
+        }));
+        console.log(`[users] Hydrated ${users.length} user(s) from PostgreSQL`);
+      }
+    } catch (e) {
+      console.error('[users] Failed to hydrate users from PostgreSQL:', e && e.message ? e.message : e);
+    }
+  })();
+}
+
 // --- Messages & Subscriptions (in-memory storage with JSON persistence) ---
 const MESSAGES_FILE = path.join(__dirname, 'data', 'messages.json');
 const SUBSCRIPTIONS_FILE = path.join(__dirname, 'data', 'subscriptions.json');
@@ -1793,7 +1838,24 @@ try {
 
 function reloadUsers() {
   // Reload users from file (useful when users.json is modified externally)
-  if (!dbEnabled) {
+  if (USE_POSTGRES && db && db.getUsers) {
+    db.getUsers().then(dbUsers => {
+      if (Array.isArray(dbUsers)) {
+        users = dbUsers.map(u => ({
+          id: u.id || `user_${u.username}`,
+          username: u.username,
+          passwordHash: u.passwordhash || u.passwordHash || null,
+          email: u.email || null,
+          role: u.role || 'user',
+          stripeCustomerId: u.stripecustomerid || u.stripeCustomerId || null,
+          subscriptionStatus: u.subscriptionstatus || u.subscriptionStatus || null,
+          subscriptionId: u.subscriptionid || u.subscriptionId || null,
+          createdAt: u.createdat || u.createdAt || null,
+          updatedAt: u.updatedat || u.updatedAt || null
+        }));
+      }
+    }).catch(e => console.error('[users] reload from Postgres failed:', e && e.message));
+  } else if (!dbEnabled) {
     users = loadUsers();
   } else {
     users = require('./db').getAllUsers();
@@ -1823,6 +1885,10 @@ function getUserByEmail(email) {
 
 function persistUser(user) {
   if (USE_POSTGRES) {
+    // Keep in-memory cache in sync to avoid duplicate creation within same runtime
+    const idx = users.findIndex(u => u.username === user.username);
+    if (idx >= 0) users[idx] = user; else users.push(user);
+
     // Save async to PostgreSQL (fire and forget to avoid blocking)
     db.createUser(user.id || `user_${user.username}`, user.username, user.passwordHash, user.email, user.role)
       .catch(err => console.error('[db] persistUser error:', err && err.message ? err.message : err));
@@ -2275,6 +2341,14 @@ app.get('/api/sessions/active', authMiddleware, (req, res) => {
 // Initialize default admin users (maintenance endpoint - for production fix)
 app.post('/api/admin/init-users', async (req, res) => {
   console.log('[api/admin/init-users] Initializing default users...');
+  // Protected by secret to avoid unauthorized admin creation in production
+  if (!ADMIN_INIT_SECRET) {
+    return res.status(403).json({ ok: false, error: 'ADMIN_INIT_SECRET non configuré' });
+  }
+  const providedSecret = req.headers['x-admin-init-secret'] || req.query.secret || req.body?.secret;
+  if (providedSecret !== ADMIN_INIT_SECRET) {
+    return res.status(403).json({ ok: false, error: 'Secret invalide' });
+  }
   try {
     if (USE_POSTGRES && db && db.pool) {
       // Get a direct connection from pool to run initialization
@@ -2364,8 +2438,9 @@ app.post('/api/admin/init-users', async (req, res) => {
   }
 });
 
-// Diagnostic endpoint to check database and user status
-app.get('/api/admin/diagnose', async (req, res) => {
+// Diagnostic endpoint to check database and user status (admin only)
+app.get('/api/admin/diagnose', authMiddleware, async (req, res) => {
+  if (!ensureAllowedAdmin(req, res)) return;
   console.log('[api/admin/diagnose] Running diagnosis...');
   const diagnosis = {
     timestamp: new Date().toISOString(),
@@ -2579,13 +2654,25 @@ app.post('/api/auth/login', async (req, res) => {
   console.log('[api/auth/login] attempting login for email:', email);
   
   // Find user by email
-  const user = getUserByEmail(email);
+  let user = null;
+  if (USE_POSTGRES && db) {
+    try {
+      const resUser = await db.pool.query('SELECT * FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [email]);
+      if (resUser.rows && resUser.rows[0]) user = resUser.rows[0];
+    } catch (e) {
+      console.error('[api/auth/login] Postgres email lookup failed:', e && e.message);
+    }
+  }
+  if (!user) {
+    user = getUserByEmail(email);
+  }
+
   if (!user) {
     console.log('[api/auth/login] user not found by email');
     return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
   }
   
-  const valid = await bcrypt.compare(password, user.passwordHash);
+  const valid = await bcrypt.compare(password, user.passwordhash || user.passwordHash);
   if (!valid) {
     console.log('[api/auth/login] password mismatch for:', user.username);
     return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
@@ -2622,14 +2709,28 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Le mot de passe doit contenir au moins 6 caractères' });
   }
   
-  // Check if username already exists
-  if (getUserByUsername(username)) {
-    return res.status(400).json({ ok: false, error: 'Le nom d\'utilisateur existe déjà' });
-  }
-  
-  // Check if email already exists
-  if (getUserByEmail(email)) {
-    return res.status(400).json({ ok: false, error: 'Cet email est déjà utilisé' });
+  // Check duplicates (PostgreSQL vs fallback storage)
+  try {
+    if (USE_POSTGRES && db) {
+      const existingUser = await db.getUserByUsername(username);
+      if (existingUser) {
+        return res.status(400).json({ ok: false, error: 'Le nom d\'utilisateur existe déjà' });
+      }
+      const emailCheck = await db.pool.query('SELECT 1 FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [email]);
+      if (emailCheck.rowCount > 0) {
+        return res.status(400).json({ ok: false, error: 'Cet email est déjà utilisé' });
+      }
+    } else {
+      if (getUserByUsername(username)) {
+        return res.status(400).json({ ok: false, error: 'Le nom d\'utilisateur existe déjà' });
+      }
+      if (getUserByEmail(email)) {
+        return res.status(400).json({ ok: false, error: 'Cet email est déjà utilisé' });
+      }
+    }
+  } catch (dupErr) {
+    console.error('[api/auth/register] duplicate check failed:', dupErr && dupErr.message);
+    return res.status(500).json({ ok: false, error: 'Erreur vérification unicité' });
   }
   
   console.log('[api/auth/register] registering new user:', username, email);
@@ -2640,6 +2741,7 @@ app.post('/api/auth/register', async (req, res) => {
     
     // Create new user with trial period starting now
     const newUser = {
+      id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       username,
       email,
       passwordHash,
@@ -2691,11 +2793,8 @@ app.post('/api/auth/register', async (req, res) => {
 app.post('/api/admin/grant-subscription', authMiddleware, async (req, res) => {
   const { targetUsername } = req.body;
   
-  // Verify requester is admin
-  const adminUser = getUserByUsername(req.user.username);
-  if (!adminUser || adminUser.role !== 'admin') {
-    return res.status(403).json({ ok: false, error: 'Admin access required' });
-  }
+  // Verify requester is allowlisted admin
+  if (!ensureAllowedAdmin(req, res)) return;
   
   if (!targetUsername) {
     return res.status(400).json({ ok: false, error: 'targetUsername required' });
@@ -2744,11 +2843,8 @@ app.post('/api/admin/grant-subscription', authMiddleware, async (req, res) => {
 app.post('/api/admin/revoke-subscription', authMiddleware, async (req, res) => {
   const { targetUsername } = req.body;
   
-  // Verify requester is admin
-  const adminUser = getUserByUsername(req.user.username);
-  if (!adminUser || adminUser.role !== 'admin') {
-    return res.status(403).json({ ok: false, error: 'Admin access required' });
-  }
+  // Verify requester is allowlisted admin
+  if (!ensureAllowedAdmin(req, res)) return;
   
   if (!targetUsername) {
     return res.status(400).json({ ok: false, error: 'targetUsername required' });
@@ -3960,14 +4056,14 @@ app.delete('/api/users/self', authMiddleware, async (req, res) => {
 
 // --- Exemple de route admin only ---
 app.get('/api/admin', authMiddleware, (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  if (!ensureAllowedAdmin(req, res)) return;
   res.json({ ok: true, message: 'Bienvenue admin !' });
 });
 
 // --- Admin Routes for Dashboard ---
 // Get all users
 app.get('/api/admin/users', authMiddleware, (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  if (!ensureAllowedAdmin(req, res)) return;
   try {
     res.json({ ok: true, users });
   } catch (e) {
@@ -3978,7 +4074,7 @@ app.get('/api/admin/users', authMiddleware, (req, res) => {
 
 // Get all subscriptions
 app.get('/api/admin/subscriptions', authMiddleware, (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  if (!ensureAllowedAdmin(req, res)) return;
   try {
     const subs = dbEnabled ? require('./db').getAllSubscriptions() : subscriptions;
     res.json({ ok: true, subscriptions: subs });
@@ -3990,7 +4086,7 @@ app.get('/api/admin/subscriptions', authMiddleware, (req, res) => {
 
 // Get active subscriptions only
 app.get('/api/admin/subscriptions/active', authMiddleware, (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  if (!ensureAllowedAdmin(req, res)) return;
   try {
     const subs = dbEnabled ? require('./db').getActiveSubscriptions() : subscriptions.filter(s => s.status === 'active');
     res.json({ ok: true, subscriptions: subs });
@@ -4015,10 +4111,7 @@ app.get('/api/test/messages', (req, res) => {
 app.get('/api/admin/messages', authMiddleware, async (req, res) => {
   console.log('[api/admin/messages] Called');
   console.log('[api/admin/messages] User role:', req.user?.role);
-  if (req.user.role !== 'admin') {
-    console.log('[api/admin/messages] Access denied');
-    return res.status(403).json({ ok: false, error: 'Accès refusé' });
-  }
+  if (!ensureAllowedAdmin(req, res)) return;
   try {
     let messageList;
     
@@ -4037,7 +4130,7 @@ app.get('/api/admin/messages', authMiddleware, async (req, res) => {
 
 // Get unread messages only
 app.get('/api/admin/messages/unread', authMiddleware, (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  if (!ensureAllowedAdmin(req, res)) return;
   try {
     const unread = messages.filter(m => m.status === 'unread');
     res.json({ ok: true, messages: unread });
@@ -4049,7 +4142,7 @@ app.get('/api/admin/messages/unread', authMiddleware, (req, res) => {
 
 // Mark message as read and optionally respond
 app.patch('/api/admin/messages/:id', authMiddleware, async (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  if (!ensureAllowedAdmin(req, res)) return;
   try {
     console.log('[api] PATCH /api/admin/messages/:id - messageId:', req.params.id);
     console.log('[api] Request body:', JSON.stringify(req.body, null, 2));
@@ -4121,7 +4214,7 @@ app.patch('/api/admin/messages/:id', authMiddleware, async (req, res) => {
 
 // Delete a message
 app.delete('/api/admin/messages/:id', authMiddleware, async (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  if (!ensureAllowedAdmin(req, res)) return;
   try {
     const messageId = parseInt(req.params.id);
     
@@ -4149,7 +4242,7 @@ app.delete('/api/admin/messages/:id', authMiddleware, async (req, res) => {
 
 // Get dashboard stats
 app.get('/api/admin/stats', authMiddleware, (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ ok: false, error: 'Accès refusé' });
+  if (!ensureAllowedAdmin(req, res)) return;
   try {
     const subs = dbEnabled ? require('./db').getAllSubscriptions() : subscriptions;
     const totalUsers = users.length;
@@ -5745,10 +5838,7 @@ app.post('/api/device/stop-audio-receiver', async (req, res) => {
 // Force cleanup all processes (admin only)
 app.post('/api/admin/cleanup-processes', authMiddleware, async (req, res) => {
   try {
-    const user = users.find(u => u.username === req.user.username);
-    if (!user || user.role !== 'admin') {
-      return res.status(403).json({ ok: false, error: 'Admin access required' });
-    }
+    if (!ensureAllowedAdmin(req, res)) return;
     
     console.log('[Admin] Force cleanup requested');
     
@@ -5803,10 +5893,7 @@ app.post('/api/admin/cleanup-processes', authMiddleware, async (req, res) => {
 // Get server status (admin only)
 app.get('/api/admin/server-status', authMiddleware, async (req, res) => {
   try {
-    const user = users.find(u => u.username === req.user.username);
-    if (!user || user.role !== 'admin') {
-      return res.status(403).json({ ok: false, error: 'Admin access required' });
-    }
+    if (!ensureAllowedAdmin(req, res)) return;
     
     res.json({
       ok: true,
@@ -6427,8 +6514,18 @@ app.post('/api/register', async (req, res) => {
   const { username, password, email } = req.body || {};
   if (!username || !password) return res.status(400).json({ ok: false, error: 'username and password required' });
   try {
-    // unique username
-    if (getUserByUsername(username)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
+    // unique username/email (PostgreSQL vs fallback storage)
+    if (USE_POSTGRES && db) {
+      const existingUser = await db.getUserByUsername(username);
+      if (existingUser) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
+      if (email) {
+        const emailCheck = await db.pool.query('SELECT 1 FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [email]);
+        if (emailCheck.rowCount > 0) return res.status(400).json({ ok: false, error: 'Cet email est déjà utilisé' });
+      }
+    } else {
+      if (getUserByUsername(username)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
+      if (email && getUserByEmail(email)) return res.status(400).json({ ok: false, error: 'Cet email est déjà utilisé' });
+    }
     const passwordHash = await bcrypt.hash(password, 10);
     const newUser = { 
       id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
