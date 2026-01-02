@@ -6548,6 +6548,13 @@ app.post('/api/register', async (req, res) => {
       planName: 'account-signup',
       status: 'trial'
     });
+
+    // Envoyer l'email de confirmation de compte (best-effort)
+    try {
+      await sendAccountConfirmationEmail(newUser);
+    } catch (mailErr) {
+      console.error('[api/register] confirmation email error:', mailErr && mailErr.message ? mailErr.message : mailErr);
+    }
     // create token and set cookie
     const token = jwt.sign({ username: newUser.username, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
     res.cookie('vhr_token', token, buildAuthCookieOptions(req));
