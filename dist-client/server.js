@@ -6361,7 +6361,9 @@ async function ensureStripeCustomerForUser(user) {
 // Create a Portal session for the current user
 app.post('/api/billing/portal', authMiddleware, async (req, res) => {
   try {
-    const user = getUserByUsername(req.user.username);
+    const user = USE_POSTGRES && db
+      ? await db.getUserByUsername(req.user.username)
+      : getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
     const customerId = await ensureStripeCustomerForUser(user);
     const origin = req.headers.origin || `http://localhost:${process.env.PORT || 3000}`;
