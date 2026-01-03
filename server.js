@@ -3466,42 +3466,55 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
       }
     }
 
-    // Si pas d'abonnement local mais l'utilisateur a un stripeCustomerId, chercher via Stripe API
-    if (!subscription && user.stripeCustomerId && process.env.STRIPE_SECRET_KEY) {
+    // Toujours vérifier Stripe s'il existe un customerId, pour récupérer l'état réel même si local est absent ou périmé
+    if (user.stripeCustomerId && process.env.STRIPE_SECRET_KEY) {
       try {
         const stripeSubs = await stripe.subscriptions.list({
           customer: user.stripeCustomerId,
-          status: 'active',
-          limit: 1
+          status: 'all',
+          limit: 5
         });
-        
-        if (stripeSubs.data && stripeSubs.data.length > 0) {
-          const stripeSub = stripeSubs.data[0];
-          console.log('[subscriptions] found active Stripe subscription for', user.username, 'id:', stripeSub.id);
-          
-          // Synchroniser avec la base locale
-          const item = stripeSub.items.data[0];
-          const priceId = item.price.id;
-          
+
+        const activeLikeStatuses = new Set(['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired']);
+        const stripeSub = (stripeSubs.data || []).find(s => activeLikeStatuses.has(s.status));
+
+        if (stripeSub) {
+          console.log('[subscriptions] found Stripe subscription for', user.username, 'id:', stripeSub.id, 'status:', stripeSub.status);
+
+          const item = stripeSub.items?.data?.[0];
+          const priceId = item?.price?.id;
           for (const [key, plan] of Object.entries(subscriptionConfig.PLANS)) {
             if (plan.stripePriceId === priceId) {
               currentPlan = { ...plan, id: key };
               break;
             }
           }
-          
+
+          // Mettre à jour l'utilisateur et le cache local
+          user.subscriptionStatus = stripeSub.status;
+          user.subscriptionId = stripeSub.id;
+          persistUser(user);
+          ensureUserSubscription(user, {
+            stripeSubscriptionId: stripeSub.id,
+            stripePriceId: priceId || null,
+            status: stripeSub.status,
+            planName: currentPlan?.name || null,
+            startDate: stripeSub.current_period_start ? new Date(stripeSub.current_period_start * 1000).toISOString() : undefined,
+            endDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000).toISOString() : undefined
+          });
+
           return res.json({
             ok: true,
             subscription: {
-              isActive: stripeSub.status === 'active',
+              isActive: activeLikeStatuses.has(stripeSub.status),
               status: stripeSub.status,
               currentPlan: currentPlan,
               subscriptionId: stripeSub.id,
-              startDate: new Date(stripeSub.current_period_start * 1000),
-              endDate: new Date(stripeSub.current_period_end * 1000),
-              nextBillingDate: new Date(stripeSub.current_period_end * 1000),
+              startDate: stripeSub.current_period_start ? new Date(stripeSub.current_period_start * 1000) : null,
+              endDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000) : null,
+              nextBillingDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000) : null,
               cancelledAt: stripeSub.canceled_at ? new Date(stripeSub.canceled_at * 1000) : null,
-              daysUntilRenewal: Math.ceil((new Date(stripeSub.current_period_end * 1000) - new Date()) / (24 * 60 * 60 * 1000))
+              daysUntilRenewal: stripeSub.current_period_end ? Math.ceil((new Date(stripeSub.current_period_end * 1000) - new Date()) / (24 * 60 * 60 * 1000)) : null
             }
           });
         }
