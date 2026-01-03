@@ -4172,10 +4172,52 @@ app.get('/api/admin/users', authMiddleware, (req, res) => {
 });
 
 // Get all subscriptions
-app.get('/api/admin/subscriptions', authMiddleware, (req, res) => {
+app.get('/api/admin/subscriptions', authMiddleware, async (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;
   try {
-    const subs = dbEnabled ? require('./db').getAllSubscriptions() : subscriptions;
+    let subs = [];
+
+    if (USE_POSTGRES && db && db.getAllSubscriptions) {
+      try {
+        const pgSubs = await db.getAllSubscriptions();
+        subs = (pgSubs || []).map(row => ({
+          id: row.id || row.subscriptionid || row.stripesubscriptionid || null,
+          username: row.username || null,
+          email: row.email || null,
+          planName: row.planname || row.planName || null,
+          status: String(row.status || 'unknown').toLowerCase(),
+          startDate: row.startdate || row.startDate || row.createdat || row.createdAt || null,
+          endDate: row.enddate || row.endDate || null,
+          stripeSubscriptionId: row.stripesubscriptionid || row.subscriptionid || null,
+          stripePriceId: row.stripepriceid || row.stripePriceId || null,
+          createdAt: row.createdat || row.createdAt || null
+        }));
+
+        if ((!subs || subs.length === 0) && Array.isArray(users)) {
+          subs = users
+            .filter(u => u.subscriptionStatus)
+            .map(u => ({
+              id: u.subscriptionId || `sub_user_${u.username}`,
+              username: u.username,
+              email: u.email || null,
+              planName: null,
+              status: u.subscriptionStatus || 'active',
+              startDate: u.updatedAt || u.createdAt || null,
+              endDate: null,
+              stripeSubscriptionId: u.subscriptionId || null,
+              stripePriceId: null,
+              createdAt: u.createdAt || null
+            }));
+        }
+      } catch (pgErr) {
+        console.error('[api] admin/subscriptions postgres error:', pgErr && pgErr.message ? pgErr.message : pgErr);
+      }
+    } else if (dbEnabled) {
+      subs = require('./db').getAllSubscriptions();
+    } else {
+      subs = subscriptions;
+    }
+
     res.json({ ok: true, subscriptions: subs });
   } catch (e) {
     console.error('[api] admin/subscriptions:', e);
@@ -4184,11 +4226,54 @@ app.get('/api/admin/subscriptions', authMiddleware, (req, res) => {
 });
 
 // Get active subscriptions only
-app.get('/api/admin/subscriptions/active', authMiddleware, (req, res) => {
+app.get('/api/admin/subscriptions/active', authMiddleware, async (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;
   try {
-    const subs = dbEnabled ? require('./db').getActiveSubscriptions() : subscriptions.filter(s => s.status === 'active');
-    res.json({ ok: true, subscriptions: subs });
+    let subs = [];
+
+    if (USE_POSTGRES && db && db.getAllSubscriptions) {
+      try {
+        const pgSubs = await db.getAllSubscriptions();
+        subs = (pgSubs || []).map(row => ({
+          id: row.id || row.subscriptionid || row.stripesubscriptionid || null,
+          username: row.username || null,
+          email: row.email || null,
+          planName: row.planname || row.planName || null,
+          status: String(row.status || 'unknown').toLowerCase(),
+          startDate: row.startdate || row.startDate || row.createdat || row.createdAt || null,
+          endDate: row.enddate || row.endDate || null,
+          stripeSubscriptionId: row.stripesubscriptionid || row.subscriptionid || null,
+          stripePriceId: row.stripepriceid || row.stripePriceId || null,
+          createdAt: row.createdat || row.createdAt || null
+        }));
+
+        if ((!subs || subs.length === 0) && Array.isArray(users)) {
+          subs = users
+            .filter(u => u.subscriptionStatus)
+            .map(u => ({
+              id: u.subscriptionId || `sub_user_${u.username}`,
+              username: u.username,
+              email: u.email || null,
+              planName: null,
+              status: u.subscriptionStatus || 'active',
+              startDate: u.updatedAt || u.createdAt || null,
+              endDate: null,
+              stripeSubscriptionId: u.subscriptionId || null,
+              stripePriceId: null,
+              createdAt: u.createdAt || null
+            }));
+        }
+      } catch (pgErr) {
+        console.error('[api] admin/subscriptions/active postgres error:', pgErr && pgErr.message ? pgErr.message : pgErr);
+      }
+    } else if (dbEnabled) {
+      subs = require('./db').getActiveSubscriptions();
+    } else {
+      subs = subscriptions.filter(s => s.status === 'active');
+    }
+
+    const activeSubs = (subs || []).filter(s => String(s.status || '').toLowerCase() === 'active');
+    res.json({ ok: true, subscriptions: activeSubs });
   } catch (e) {
     console.error('[api] admin/subscriptions/active:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -4340,14 +4425,50 @@ app.delete('/api/admin/messages/:id', authMiddleware, async (req, res) => {
 });
 
 // Get dashboard stats
-app.get('/api/admin/stats', authMiddleware, (req, res) => {
+app.get('/api/admin/stats', authMiddleware, async (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;
   try {
-    const subs = dbEnabled ? require('./db').getAllSubscriptions() : subscriptions;
-    const totalUsers = users.length;
-    const activeSubscriptions = subs.filter(s => s.status === 'active').length;
-    const unreadMessages = messages.filter(m => m.status === 'unread').length;
-    
+    let subs = [];
+    let totalUsers = users.length;
+    let unreadMessages = messages.filter(m => m.status === 'unread').length;
+
+    if (USE_POSTGRES && db) {
+      try {
+        const [pgSubs, pgUsers, pgMessages] = await Promise.all([
+          db.getAllSubscriptions?.(),
+          db.getUsers?.(),
+          db.getMessages?.()
+        ]);
+
+        if (Array.isArray(pgSubs)) subs = pgSubs;
+        if (Array.isArray(pgUsers) && pgUsers.length) totalUsers = pgUsers.length;
+        if (Array.isArray(pgMessages)) {
+          unreadMessages = pgMessages.filter(m => String(m.status || '').toLowerCase() === 'unread').length;
+        }
+      } catch (pgErr) {
+        console.error('[api] admin/stats postgres error:', pgErr && pgErr.message ? pgErr.message : pgErr);
+      }
+    } else if (dbEnabled) {
+      subs = require('./db').getAllSubscriptions();
+      try {
+        const sqliteUsers = require('./db').getAllUsers?.();
+        if (Array.isArray(sqliteUsers) && sqliteUsers.length) {
+          totalUsers = sqliteUsers.length;
+        }
+      } catch (sqliteErr) {
+        console.error('[api] admin/stats sqlite users error:', sqliteErr && sqliteErr.message ? sqliteErr.message : sqliteErr);
+      }
+    } else {
+      subs = subscriptions;
+    }
+
+    let activeSubscriptions = (subs || []).filter(s => String(s.status || '').toLowerCase() === 'active').length;
+
+    if (USE_POSTGRES && activeSubscriptions === 0 && Array.isArray(users)) {
+      const activeFromUsers = users.filter(u => String(u.subscriptionStatus || '').toLowerCase() === 'active').length;
+      if (activeFromUsers > 0) activeSubscriptions = activeFromUsers;
+    }
+
     res.json({ ok: true, stats: { totalUsers, activeSubscriptions, unreadMessages } });
   } catch (e) {
     console.error('[api] admin/stats:', e);
