@@ -298,7 +298,7 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
       <h2 style="color: #3498db; margin-top: 30px;">🚀 Accès Instantané</h2>
       <p>Votre accès est activé. Voici comment lancer le Dashboard Pro (sans installation, tout est déjà inclus : Node portable, ADB, dépendances) :</p>
       <ol style="padding-left: 18px; color: #333; line-height: 1.5;">
-        <li>Téléchargez <strong>start-dashboard-pro.zip</strong> depuis votre espace client ou depuis le lien fourni après achat.</li>
+        <li>Téléchargez <strong>vhr-dashboard-pro-client-full-updated-new3.zip</strong> depuis votre espace client ou depuis le lien fourni après achat.</li>
         <li>Décompressez l’archive dans un dossier de votre choix (ex. <code>C:\\VHR</code>).</li>
         <li>Dans le dossier extrait, double-cliquez sur <strong>Start Dashboard Pro</strong> (ou <code>start-dashboard-pro.bat</code>).</li>
         <li>Patientez le démarrage (Node portable + ADB se lancent automatiquement), puis ouvrez l’URL indiquée dans la console si elle ne s’ouvre pas automatiquement.</li>
