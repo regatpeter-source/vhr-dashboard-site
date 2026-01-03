@@ -3450,8 +3450,10 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
 
     // D'abord chercher dans le stockage local
     const subscription = subscriptions.find(s => s.userId === user.id || s.username === user.username);
-    const normalizedStatus = String(subscription?.status || user.subscriptionStatus || '').toLowerCase();
-    const isActive = ['active', 'trialing', 'past_due'].includes(normalizedStatus);
+    const normalizedStatus = String(subscription?.status || user.subscriptionStatus || '').trim().toLowerCase();
+    const subscriptionId = subscription?.stripeSubscriptionId || user.subscriptionId || null;
+    const isActive = ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired'].includes(normalizedStatus)
+      || (!!subscriptionId && normalizedStatus === '');
     
     // Trouver le plan correspondant
     let currentPlan = null;
@@ -3512,9 +3514,9 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
       ok: true,
       subscription: {
         isActive,
-        status: normalizedStatus || 'inactive',
+        status: normalizedStatus || (subscriptionId ? 'active' : 'inactive'),
         currentPlan: currentPlan,
-        subscriptionId: subscription?.stripeSubscriptionId || user.subscriptionId || null,
+        subscriptionId: subscriptionId,
         startDate: subscription?.startDate || user.lastInvoicePaidAt || user.createdAt || null,
         endDate: subscription?.endDate || null,
         nextBillingDate: subscription?.endDate || null,
