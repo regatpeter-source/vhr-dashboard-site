@@ -1957,9 +1957,22 @@ function persistUser(user) {
     // Keep in-memory cache in sync to avoid duplicate creation within same runtime
     const idx = users.findIndex(u => u.username === user.username);
     if (idx >= 0) users[idx] = user; else users.push(user);
+    const updatePayload = {};
+    if (user.passwordHash) updatePayload.passwordhash = user.passwordHash;
+    if (user.email !== undefined) updatePayload.email = user.email;
+    if (user.role) updatePayload.role = user.role;
+    if (user.stripeCustomerId) updatePayload.stripecustomerid = user.stripeCustomerId;
+    if (user.subscriptionStatus) updatePayload.subscriptionstatus = user.subscriptionStatus;
+    if (user.subscriptionId) updatePayload.subscriptionid = user.subscriptionId;
 
     // Save async to PostgreSQL (fire and forget to avoid blocking)
-    db.createUser(user.id || `user_${user.username}`, user.username, user.passwordHash, user.email, user.role)
+    db.getUserByUsername(user.username)
+      .then(existing => {
+        if (existing && existing.id) {
+          return db.updateUser(existing.id, updatePayload);
+        }
+        return db.createUser(user.id || `user_${user.username}`, user.username, user.passwordHash, user.email, user.role);
+      })
       .catch(err => console.error('[db] persistUser error:', err && err.message ? err.message : err));
     return true;
   } else if (dbEnabled) {
@@ -3419,7 +3432,20 @@ app.get('/api/subscriptions/plans', (req, res) => {
 // Get current user's subscription status
 app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) => {
   try {
-    const user = getUserByUsername(req.user.username);
+    let user = null;
+    if (USE_POSTGRES && db) {
+      user = await db.getUserByUsername(req.user.username);
+      if (user) {
+        user.stripeCustomerId = user.stripeCustomerId || user.stripecustomerid || null;
+        user.subscriptionStatus = user.subscriptionStatus || user.subscriptionstatus || null;
+        user.subscriptionId = user.subscriptionId || user.subscriptionid || null;
+        const idx = users.findIndex(u => u.username === user.username);
+        if (idx >= 0) users[idx] = user; else users.push(user);
+      }
+    } else {
+      user = getUserByUsername(req.user.username);
+    }
+
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
 
     // D'abord chercher dans le stockage local
@@ -6382,7 +6408,18 @@ app.post('/api/billing/portal', authMiddleware, async (req, res) => {
 // List invoices for current authenticated user
 app.get('/api/billing/invoices', authMiddleware, async (req, res) => {
   try {
-    const user = getUserByUsername(req.user.username);
+    let user = null;
+    if (USE_POSTGRES && db) {
+      user = await db.getUserByUsername(req.user.username);
+      if (user) {
+        user.stripeCustomerId = user.stripeCustomerId || user.stripecustomerid || null;
+        const idx = users.findIndex(u => u.username === user.username);
+        if (idx >= 0) users[idx] = user; else users.push(user);
+      }
+    } else {
+      user = getUserByUsername(req.user.username);
+    }
+
     if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
     if (!user.stripeCustomerId) return res.json({ ok: true, invoices: [] });
     const invoices = await stripe.invoices.list({ customer: user.stripeCustomerId, limit: 30 });
@@ -6396,7 +6433,18 @@ app.get('/api/billing/invoices', authMiddleware, async (req, res) => {
 // List subscriptions for current authenticated user
 app.get('/api/billing/subscriptions', authMiddleware, async (req, res) => {
   try {
-    const user = getUserByUsername(req.user.username);
+    let user = null;
+    if (USE_POSTGRES && db) {
+      user = await db.getUserByUsername(req.user.username);
+      if (user) {
+        user.stripeCustomerId = user.stripeCustomerId || user.stripecustomerid || null;
+        const idx = users.findIndex(u => u.username === user.username);
+        if (idx >= 0) users[idx] = user; else users.push(user);
+      }
+    } else {
+      user = getUserByUsername(req.user.username);
+    }
+
     if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
     if (!user.stripeCustomerId) return res.json({ ok: true, subscriptions: [] });
     const subs = await stripe.subscriptions.list({ customer: user.stripeCustomerId, limit: 30 });
@@ -6633,6 +6681,8 @@ app.post('/api/register', async (req, res) => {
     // persist to database
     if (USE_POSTGRES) {
       await db.createUser(newUser.id, newUser.username, newUser.passwordHash, newUser.email, newUser.role);
+      const idx = users.findIndex(u => u.username === newUser.username);
+      if (idx >= 0) users[idx] = newUser; else users.push(newUser);
     } else {
       persistUser(newUser);
     }
