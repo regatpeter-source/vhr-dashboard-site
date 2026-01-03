@@ -4284,19 +4284,35 @@ app.get('/api/admin/subscriptions', authMiddleware, async (req, res) => {
     // 1) Stripe as source of truth when available
     if (stripe) {
       try {
-        const list = await stripe.subscriptions.list({ status: 'all', limit: 100 });
-        subs = (list?.data || []).map(row => ({
-          id: row.id,
-          username: row.metadata?.username || null,
-          email: row.customer_email || row.metadata?.email || null,
-          planName: row.items?.data?.[0]?.price?.nickname || null,
-          status: String(row.status || 'unknown').toLowerCase(),
-          startDate: row.current_period_start ? new Date(row.current_period_start * 1000).toISOString() : null,
-          endDate: row.current_period_end ? new Date(row.current_period_end * 1000).toISOString() : null,
-          stripeSubscriptionId: row.id,
-          stripePriceId: row.items?.data?.[0]?.price?.id || null,
-          createdAt: row.created ? new Date(row.created * 1000).toISOString() : null
-        }));
+        // Expand customer to avoid extra round-trips and get email/name
+        const list = await stripe.subscriptions.list({ status: 'all', limit: 100, expand: ['data.customer'] });
+        subs = (list?.data || []).map(row => {
+          const price = row.items?.data?.[0]?.price;
+          const customer = row.customer && typeof row.customer === 'object' ? row.customer : null;
+          const email = row.customer_email || row.metadata?.email || customer?.email || customer?.metadata?.email || null;
+
+          // Try to recover username: metadata first, then customer metadata, then match local users by email
+          let username = row.metadata?.username || customer?.metadata?.username || null;
+          if (!username && email && Array.isArray(users)) {
+            const match = users.find(u => String(u.email || '').toLowerCase() === String(email).toLowerCase());
+            if (match) username = match.username;
+          }
+
+          const planName = price?.nickname || price?.id || row.plan?.nickname || null;
+
+          return {
+            id: row.id,
+            username,
+            email,
+            planName,
+            status: String(row.status || 'unknown').toLowerCase(),
+            startDate: row.current_period_start ? new Date(row.current_period_start * 1000).toISOString() : null,
+            endDate: row.current_period_end ? new Date(row.current_period_end * 1000).toISOString() : null,
+            stripeSubscriptionId: row.id,
+            stripePriceId: price?.id || null,
+            createdAt: row.created ? new Date(row.created * 1000).toISOString() : null
+          };
+        });
       } catch (stripeErr) {
         console.error('[api] admin/subscriptions stripe error:', stripeErr && stripeErr.message ? stripeErr.message : stripeErr);
       }
