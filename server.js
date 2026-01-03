@@ -3568,39 +3568,21 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
       }
     }
 
-    // Fallback: if nothing was found (no subscriptionId and inactive), surface a minimal active placeholder so UI shows something
+    // Fallback: si aucun abonnement réel n'est trouvé, ne pas activer artificiellement l'utilisateur
     if (!subscriptionId && !isActive) {
-      const placeholderStart = user.createdAt || new Date().toISOString();
-      // par défaut, 30 jours après le début
-      const placeholderEndDate = new Date(placeholderStart);
-      placeholderEndDate.setDate(placeholderEndDate.getDate() + 30);
-      const placeholderEnd = placeholderEndDate.toISOString();
-      const daysLeft = Math.max(0, Math.ceil((placeholderEndDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
-      const placeholderPlan = currentPlan || { name: 'Abonnement actif', id: 'fallback' };
-
-      // Marquer l'utilisateur comme abonné pour les vues admin/stats
-      user.subscriptionStatus = 'active';
-      user.subscriptionId = user.subscriptionId || `sub_placeholder_${user.username}`;
-      persistUser(user);
-
-      ensureUserSubscription(user, {
-        status: 'active',
-        planName: placeholderPlan.name,
-        startDate: placeholderStart,
-        endDate: placeholderEnd
-      });
       return res.json({
         ok: true,
         subscription: {
-          isActive: true,
-          status: 'active',
-          currentPlan: placeholderPlan,
+          isActive: false,
+          status: normalizedStatus || 'inactive',
+          currentPlan: currentPlan,
           subscriptionId: null,
-          startDate: placeholderStart,
-          endDate: placeholderEnd,
-          nextBillingDate: placeholderEnd,
+          startDate: null,
+          endDate: null,
+          nextBillingDate: null,
           cancelledAt: null,
-          daysUntilRenewal: daysLeft
+          daysUntilRenewal: null,
+          trialEligible: true
         }
       });
     }
