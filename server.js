@@ -3466,6 +3466,31 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
       }
     }
 
+    // Si pas de stripeCustomerId, tenter de le retrouver via l'email ou le username
+    if (!user.stripeCustomerId && process.env.STRIPE_SECRET_KEY) {
+      try {
+        if (user.email) {
+          const found = await stripe.customers.list({ email: user.email, limit: 5 });
+          const customer = (found.data || []).find(c => c.email && c.email.toLowerCase() === user.email.toLowerCase());
+          if (customer) {
+            user.stripeCustomerId = customer.id;
+            persistUser(user);
+          }
+        }
+        // Fallback: search by metadata.username if not found by email
+        if (!user.stripeCustomerId) {
+          const found = await stripe.customers.list({ limit: 20 });
+          const customer = (found.data || []).find(c => c.metadata && c.metadata.username && c.metadata.username.toLowerCase() === user.username.toLowerCase());
+          if (customer) {
+            user.stripeCustomerId = customer.id;
+            persistUser(user);
+          }
+        }
+      } catch (custErr) {
+        console.error('[subscriptions] lookup customer error:', custErr && custErr.message ? custErr.message : custErr);
+      }
+    }
+
     // Toujours vérifier Stripe s'il existe un customerId, pour récupérer l'état réel même si local est absent ou périmé
     if (user.stripeCustomerId && process.env.STRIPE_SECRET_KEY) {
       try {
