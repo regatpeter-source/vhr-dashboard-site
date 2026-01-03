@@ -3551,7 +3551,11 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
     // Fallback: if nothing was found (no subscriptionId and inactive), surface a minimal active placeholder so UI shows something
     if (!subscriptionId && !isActive) {
       const placeholderStart = user.createdAt || new Date().toISOString();
-      const placeholderEnd = null;
+      // par défaut, 30 jours après le début
+      const placeholderEndDate = new Date(placeholderStart);
+      placeholderEndDate.setDate(placeholderEndDate.getDate() + 30);
+      const placeholderEnd = placeholderEndDate.toISOString();
+      const daysLeft = Math.max(0, Math.ceil((placeholderEndDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
       const placeholderPlan = currentPlan || { name: 'Abonnement actif', id: 'fallback' };
       ensureUserSubscription(user, {
         status: 'active',
@@ -3570,7 +3574,7 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
           endDate: placeholderEnd,
           nextBillingDate: placeholderEnd,
           cancelledAt: null,
-          daysUntilRenewal: null
+          daysUntilRenewal: daysLeft
         }
       });
     }
