@@ -3993,6 +3993,8 @@ app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) 
     const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
 
+    const customerId = await ensureStripeCustomerForUser(user);
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [
@@ -4002,7 +4004,8 @@ app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) 
         },
       ],
       mode: 'subscription',
-      customer_email: user.email,
+      customer: customerId,
+      customer_email: undefined, // force the known customer to avoid name drift from cardholder input
       success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/vhr-dashboard-pro.html?subscription=success`,
       cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/vhr-dashboard-pro.html?subscription=canceled`,
       metadata: {
@@ -4033,6 +4036,8 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
     const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
 
+    const customerId = await ensureStripeCustomerForUser(user);
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [
@@ -4042,7 +4047,8 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
         },
       ],
       mode: 'payment', // Mode one-time payment
-      customer_email: user.email,
+      customer: customerId,
+      customer_email: undefined, // force existing customer to avoid cardholder name override
       success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/account.html?purchase=success`,
       cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/pricing.html?purchase=canceled`,
       metadata: {
@@ -6678,6 +6684,19 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
     } else if (type === 'checkout.session.completed') {
       // session completed often delivers: session.customer
       if (obj.customer) user.stripeCustomerId = obj.customer;
+
+      // Keep the Stripe customer name/email aligned with the app user (prevents cardholder name drift)
+      if (obj.customer && stripe && user) {
+        try {
+          await stripe.customers.update(obj.customer, {
+            name: user.username || undefined,
+            email: user.email || undefined,
+            metadata: { ...(user.username ? { username: user.username } : {}) }
+          });
+        } catch (custErr) {
+          console.error('[webhook] Failed to sync customer name/email:', custErr && custErr.message ? custErr.message : custErr);
+        }
+      }
       
       // Envoyer un email de confirmation pour un achat/abonnement
       if (obj.mode === 'payment') {
