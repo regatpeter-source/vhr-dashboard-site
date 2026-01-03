@@ -48,9 +48,9 @@ module.exports = {
     SMTP_USER: process.env.BREVO_SMTP_USER || process.env.SMTP_USER || '',
     SMTP_PASS: process.env.BREVO_SMTP_PASS || process.env.SMTP_PASS || '',
     ENABLED: process.env.EMAIL_ENABLED === 'true' || false,
-    DOWNLOAD_URL: process.env.DOWNLOAD_URL || 'http://localhost:3000/downloads/vhr-dashboard-demo.zip',
+    DOWNLOAD_URL: process.env.DOWNLOAD_URL || 'https://download.vhr-dashboard-site.com/vhr-dashboard-pro.zip',
     SUPPORT_EMAIL: process.env.SUPPORT_EMAIL || 'support@vhr-dashboard-site.com',
-    DOCUMENTATION_URL: process.env.DOCUMENTATION_URL || 'https://docs.vhr-dashboard-site.com'
+    DOCUMENTATION_URL: process.env.DOCUMENTATION_URL || 'https://vhr-dashboard-site.com/'
   },
 
   // Templates d'email pour les notifications

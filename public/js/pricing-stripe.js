@@ -1,6 +1,6 @@
 /* Minimal client code to create a Stripe Checkout session via server endpoint /create-checkout-session */
 (function() {
-  const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
+  const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
   const PRICING_URL = 'https://www.vhr-dashboard-site.com/pricing.html';
 
   function shouldRedirectExternally() {

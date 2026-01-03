@@ -4,4 +4,4 @@ Disallow: /downloads/
 Disallow: /data/
 Disallow: /temp*
 
-Sitemap: https://vhr-dashboard-site.onrender.com/sitemap.xml
+Sitemap: https://www.vhr-dashboard-site.com/sitemap.xml

@@ -3839,7 +3839,7 @@ window.loginUser = async function() {
 };
 
 window.registerUser = async function() {
-	const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
+	const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
 	const ACCOUNT_URL = 'https://www.vhr-dashboard-site.com/account.html?action=register';
 
 	if (!OFFICIAL_HOSTS.includes(window.location.hostname)) {

@@ -21,15 +21,15 @@
 - Click: **Webhooks** (left sidebar)
 
 ### ☐ Step 3: Find Your Webhook
-- Look for: `https://vhr-dashboard-site.onrender.com`
+- Look for: `https://www.vhr-dashboard-site.com`
 - Status: Shows ❌ Failed or red X
 - Click: **Three dots (⋯)** button
 - Select: **Edit endpoint**
 
 ### ☐ Step 4: Update the URL
-**Replace the URL:**
-- From: `https://vhr-dashboard-site.onrender.com`
-- To: `https://vhr-dashboard-site.onrender.com/webhook`
+-**Replace the URL:**
+- From: `https://www.vhr-dashboard-site.com`
+- To: `https://www.vhr-dashboard-site.com/webhook`
 - (Simply add `/webhook` to the end)
 
 ### ☐ Step 5: Save
@@ -64,7 +64,7 @@
 
 ### URL Still Shows as Failed
 - [ ] Verify you added `/webhook` to the end
-- [ ] Check for typos: `vhr-dashboard-site.onrender.com` (exact spelling)
+- [ ] Check for typos: `www.vhr-dashboard-site.com` (exact spelling)
 - [ ] No spaces before/after URL
 - [ ] Click Update again
 - [ ] Refresh page (F5) if needed
@@ -75,7 +75,7 @@
 - [ ] Click your avatar → Settings → Developers → Webhooks
 
 ### Webhook Still Shows 404 in Logs
-- [ ] Test the URL directly: `https://vhr-dashboard-site.onrender.com/webhook`
+- [ ] Test the URL directly: `https://www.vhr-dashboard-site.com/webhook`
 - [ ] Should get: 400 Bad Request (not 404)
 - [ ] If 404: Server might not be running on Render
 
@@ -92,7 +92,7 @@
 ### Webhook Configuration
 - **Secret**: Stored in `.env` file ✅
 - **Verification**: Uses Stripe signature validation ✅
-- **Server**: Running on Render.com ✅
+- **Server**: Running on production domain ✅
 
 ### What Happens After Fix
 1. ✅ Stripe sends webhook to correct URL (with `/webhook`)
@@ -146,7 +146,7 @@ After this time, Stripe will stop retrying webhook events. Recovery becomes much
 | Endpoint implementation | ✅ Processing events correctly |
 | Stripe dashboard URL | ❌ NEEDS IMMEDIATE FIX |
 
-**Fix required**: Update Stripe webhook URL from `https://vhr-dashboard-site.onrender.com` to `https://vhr-dashboard-site.onrender.com/webhook`
+**Fix required**: Update Stripe webhook URL from `https://www.vhr-dashboard-site.com` to `https://www.vhr-dashboard-site.com/webhook`
 
 **Time required**: 5 minutes  
 **Impact**: Restores payment processing for all subscriptions  

@@ -1,6 +1,6 @@
 // Account page client script (moved from inline to comply with CSP)
 (function(){
-  const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
+  const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
   const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
   // Si la page est servie depuis un domaine différent (ex: github.io), pointer l'API vers le domaine officiel
   const API_BASE = OFFICIAL_HOSTS.includes(window.location.hostname) ? '' : 'https://www.vhr-dashboard-site.com';

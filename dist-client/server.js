@@ -2291,7 +2291,7 @@ app.post('/api/create-desktop-shortcut', authMiddleware, async (req, res) => {
   Set fso = CreateObject("Scripting.FileSystemObject")
 
   projectDir = "${projectDir.replace(/\\/g, '\\\\')}"
-  remoteUrl = "https://vhr-dashboard-site.onrender.com/vhr-dashboard-pro.html"
+  remoteUrl = "https://www.vhr-dashboard-site.com/vhr-dashboard-pro.html"
 
   localIp = GetLocalIPv4()
   If localIp = "" Then
@@ -3106,13 +3106,13 @@ app.post('/api/download/vhr-app', authMiddleware, async (req, res) => {
     let filePath, fileName, contentType;
     
     if (type === 'apk') {
-      // Serve the pre-built ZIP (contains APK)
-      filePath = path.join(__dirname, 'dist', 'demo', 'vhr-dashboard-demo.zip');
+      // Serve the packaged ZIP (contains APK) - configurable for production
+      filePath = process.env.DOWNLOAD_FILE_PATH || path.join(__dirname, 'dist', 'demo', 'vhr-dashboard-demo.zip');
       if (!fs.existsSync(filePath)) {
         return res.status(404).json({
           ok: false,
           error: 'APK file not found',
-          message: 'L\'APK n\'est pas encore disponible. Veuillez réessayer dans quelques minutes.'
+          message: 'Le binaire n\'est pas disponible sur le serveur. Vérifiez DOWNLOAD_FILE_PATH ou placez le fichier ZIP attendu.'
         });
       }
       fileName = 'vhr-dashboard.apk';
