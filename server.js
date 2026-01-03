@@ -3448,6 +3448,26 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
 
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
 
+    // Licence à vie : si un utilisateur possède une licence perpétuelle, retourner immédiatement un statut actif
+    if ((user.licenseType && user.licenseType.toLowerCase() === 'perpetual') || user.licenseKey) {
+      const start = user.licenseGeneratedAt || user.createdAt || new Date().toISOString();
+      const plan = { name: 'Licence à vie', id: 'lifetime' };
+      return res.json({
+        ok: true,
+        subscription: {
+          isActive: true,
+          status: 'active',
+          currentPlan: plan,
+          subscriptionId: user.licenseKey || null,
+          startDate: start,
+          endDate: null,
+          nextBillingDate: null,
+          cancelledAt: null,
+          daysUntilRenewal: null
+        }
+      });
+    }
+
     // D'abord chercher dans le stockage local
     const subscription = subscriptions.find(s => s.userId === user.id || s.username === user.username);
     const normalizedStatus = String(subscription?.status || user.subscriptionStatus || '').trim().toLowerCase();
