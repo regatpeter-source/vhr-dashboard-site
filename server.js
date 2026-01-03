@@ -3577,6 +3577,12 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
       const placeholderEnd = placeholderEndDate.toISOString();
       const daysLeft = Math.max(0, Math.ceil((placeholderEndDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
       const placeholderPlan = currentPlan || { name: 'Abonnement actif', id: 'fallback' };
+
+      // Marquer l'utilisateur comme abonné pour les vues admin/stats
+      user.subscriptionStatus = 'active';
+      user.subscriptionId = user.subscriptionId || `sub_placeholder_${user.username}`;
+      persistUser(user);
+
       ensureUserSubscription(user, {
         status: 'active',
         planName: placeholderPlan.name,
