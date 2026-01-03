@@ -3472,8 +3472,9 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
     const subscription = subscriptions.find(s => s.userId === user.id || s.username === user.username);
     const normalizedStatus = String(subscription?.status || user.subscriptionStatus || '').trim().toLowerCase();
     const subscriptionId = subscription?.stripeSubscriptionId || user.subscriptionId || null;
-    const isActive = ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired'].includes(normalizedStatus)
-      || (!!subscriptionId && normalizedStatus === '');
+    // Ne considère plus un simple subscriptionId sans statut comme "actif"
+    const activeLikeStatuses = ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired'];
+    const isActive = activeLikeStatuses.includes(normalizedStatus);
     
     // Trouver le plan correspondant
     let currentPlan = null;
