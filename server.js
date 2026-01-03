@@ -4281,7 +4281,29 @@ app.get('/api/admin/subscriptions', authMiddleware, async (req, res) => {
   try {
     let subs = [];
 
-    if (USE_POSTGRES && db && db.getAllSubscriptions) {
+    // 1) Stripe as source of truth when available
+    if (stripe) {
+      try {
+        const list = await stripe.subscriptions.list({ status: 'all', limit: 100 });
+        subs = (list?.data || []).map(row => ({
+          id: row.id,
+          username: row.metadata?.username || null,
+          email: row.customer_email || row.metadata?.email || null,
+          planName: row.items?.data?.[0]?.price?.nickname || null,
+          status: String(row.status || 'unknown').toLowerCase(),
+          startDate: row.current_period_start ? new Date(row.current_period_start * 1000).toISOString() : null,
+          endDate: row.current_period_end ? new Date(row.current_period_end * 1000).toISOString() : null,
+          stripeSubscriptionId: row.id,
+          stripePriceId: row.items?.data?.[0]?.price?.id || null,
+          createdAt: row.created ? new Date(row.created * 1000).toISOString() : null
+        }));
+      } catch (stripeErr) {
+        console.error('[api] admin/subscriptions stripe error:', stripeErr && stripeErr.message ? stripeErr.message : stripeErr);
+      }
+    }
+
+    // 2) Database fallback
+    if ((!subs || subs.length === 0) && USE_POSTGRES && db && db.getAllSubscriptions) {
       try {
         const pgSubs = await db.getAllSubscriptions();
         subs = (pgSubs || []).map(row => ({
@@ -4296,30 +4318,35 @@ app.get('/api/admin/subscriptions', authMiddleware, async (req, res) => {
           stripePriceId: row.stripepriceid || row.stripePriceId || null,
           createdAt: row.createdat || row.createdAt || null
         }));
-
-        if ((!subs || subs.length === 0) && Array.isArray(users)) {
-          subs = users
-            .filter(u => u.subscriptionStatus)
-            .map(u => ({
-              id: u.subscriptionId || `sub_user_${u.username}`,
-              username: u.username,
-              email: u.email || null,
-              planName: null,
-              status: u.subscriptionStatus || 'active',
-              startDate: u.updatedAt || u.createdAt || null,
-              endDate: null,
-              stripeSubscriptionId: u.subscriptionId || null,
-              stripePriceId: null,
-              createdAt: u.createdAt || null
-            }));
-        }
       } catch (pgErr) {
         console.error('[api] admin/subscriptions postgres error:', pgErr && pgErr.message ? pgErr.message : pgErr);
       }
-    } else if (dbEnabled) {
+    }
+
+    // 3) SQLite/JSON fallbacks
+    if ((!subs || subs.length === 0) && dbEnabled) {
       subs = require('./db').getAllSubscriptions();
-    } else {
+    }
+    if (!subs || subs.length === 0) {
       subs = subscriptions;
+    }
+
+    // 4) Fallback to user placeholders so admin sees placeholders as well
+    if ((!subs || subs.length === 0) && Array.isArray(users)) {
+      subs = users
+        .filter(u => u.subscriptionStatus)
+        .map(u => ({
+          id: u.subscriptionId || `sub_user_${u.username}`,
+          username: u.username,
+          email: u.email || null,
+          planName: null,
+          status: u.subscriptionStatus || 'active',
+          startDate: u.updatedAt || u.createdAt || null,
+          endDate: null,
+          stripeSubscriptionId: u.subscriptionId || null,
+          stripePriceId: null,
+          createdAt: u.createdAt || null
+        }));
     }
 
     res.json({ ok: true, subscriptions: subs });
@@ -4535,6 +4562,7 @@ app.get('/api/admin/stats', authMiddleware, async (req, res) => {
     let subs = [];
     let totalUsers = users.length;
     let unreadMessages = messages.filter(m => m.status === 'unread').length;
+    let stripeActive = null;
 
     if (USE_POSTGRES && db) {
       try {
@@ -4566,9 +4594,23 @@ app.get('/api/admin/stats', authMiddleware, async (req, res) => {
       subs = subscriptions;
     }
 
+    // Stripe authoritative count when available
+    if (stripe) {
+      try {
+        const stripeSubs = await stripe.subscriptions.list({ status: 'all', limit: 100 });
+        if (Array.isArray(stripeSubs?.data)) {
+          stripeActive = stripeSubs.data.filter(s => ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired'].includes(s.status)).length;
+        }
+      } catch (stripeErr) {
+        console.error('[api] admin/stats stripe error:', stripeErr && stripeErr.message ? stripeErr.message : stripeErr);
+      }
+    }
+
     let activeSubscriptions = (subs || []).filter(s => String(s.status || '').toLowerCase() === 'active').length;
 
-    if (USE_POSTGRES && activeSubscriptions === 0 && Array.isArray(users)) {
+    if (stripeActive !== null && stripeActive !== undefined) {
+      activeSubscriptions = stripeActive;
+    } else if (USE_POSTGRES && activeSubscriptions === 0 && Array.isArray(users)) {
       const activeFromUsers = users.filter(u => String(u.subscriptionStatus || '').toLowerCase() === 'active').length;
       if (activeFromUsers > 0) activeSubscriptions = activeFromUsers;
     }
