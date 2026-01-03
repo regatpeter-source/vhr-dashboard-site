@@ -253,17 +253,23 @@
         return;
       }
       
-      const sub = res.subscription;
-      if (!sub.isActive) {
+      const sub = res.subscription || {};
+
+      const normalizedStatus = String(sub.status || '').trim().toLowerCase();
+      const hasId = !!sub.subscriptionId;
+      const statusOk = ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired'].includes(normalizedStatus);
+      const isActive = sub.isActive || statusOk || hasId;
+
+      if (!isActive) {
         document.getElementById('subscriptionContent').innerHTML = '<p>Pas d\'abonnement actif actuellement.</p>';
         return;
       }
       
-      const planName = sub.currentPlan ? sub.currentPlan.name : 'Plan inconnu';
+      const planName = sub.currentPlan ? sub.currentPlan.name : 'Abonnement actif';
       const startDate = sub.startDate ? new Date(sub.startDate).toLocaleDateString('fr-FR') : 'N/A';
       const endDate = sub.endDate ? new Date(sub.endDate).toLocaleDateString('fr-FR') : 'N/A';
-      const daysLeft = sub.daysUntilRenewal || 0;
-      const statusColor = daysLeft > 14 ? '#4CAF50' : daysLeft > 0 ? '#ff9800' : '#d32f2f';
+      const daysLeft = sub.daysUntilRenewal != null ? sub.daysUntilRenewal : 0;
+      const statusColor = daysLeft > 14 ? '#4CAF50' : daysLeft > 0 ? '#ff9800' : '#4CAF50';
       
       let html = `
         <div style="background: white; padding: 12px; border-radius: 4px; margin-bottom: 12px;">
