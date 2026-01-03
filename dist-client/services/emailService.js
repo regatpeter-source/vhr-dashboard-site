@@ -3,8 +3,6 @@
  * Gère l'envoi des emails de confirmation de paiement et notifications
  */
 
-const os = require('os');
-
 let nodemailer = null;
 try {
   nodemailer = require('nodemailer');
@@ -20,24 +18,23 @@ const sanitizeBaseUrl = (url) => {
   return url.replace(/\/$/, '');
 };
 
-function detectLanBaseUrl() {
-  if (process.env.LAN_BASE_URL) return process.env.LAN_BASE_URL;
-  if (process.env.FRONTEND_URL) return process.env.FRONTEND_URL;
+function resolvePublicBaseUrl() {
+  const candidate = sanitizeBaseUrl(
+    process.env.PUBLIC_BASE_URL ||
+    process.env.FRONTEND_URL ||
+    process.env.LAN_BASE_URL ||
+    (purchaseConfig.EMAIL && purchaseConfig.EMAIL.PUBLIC_BASE_URL)
+  );
 
-  const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    for (const net of interfaces[name] || []) {
-      if (!net || net.family !== 'IPv4' || net.internal) continue;
-      if (!net.address || net.address.startsWith('169.254')) continue;
-      return `http://${net.address}:3000`;
-    }
-  }
-  return 'http://localhost:3000';
+  if (candidate) return candidate;
+
+  // Filet de sécurité : domaine public par défaut pour éviter les IP LAN
+  return 'https://www.vhr-dashboard-site.com';
 }
 
-const LAN_BASE_URL = sanitizeBaseUrl(detectLanBaseUrl());
-const DASHBOARD_PRO_URL = `${LAN_BASE_URL}/vhr-dashboard-pro.html`;
-const ACCOUNT_URL = `${LAN_BASE_URL}/account.html`;
+const BASE_URL = resolvePublicBaseUrl();
+const DASHBOARD_PRO_URL = `${BASE_URL}/vhr-dashboard-pro.html`;
+const ACCOUNT_URL = `${BASE_URL}/account.html`;
 
 // Créer le transporteur de mail
 let transporter = null;
