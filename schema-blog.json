@@ -10,7 +10,7 @@
         "@type": "Organization",
         "name": "VHR DASHBOARD"
       },
-      "image": "https://vhr-dashboard-site.onrender.com/images/blog-vr-management.jpg",
+      "image": "https://www.vhr-dashboard-site.com/images/blog-vr-management.jpg",
       "description": "Découvrez les meilleures pratiques pour gérer efficacement une flotte importante de casques VR Meta Quest ou HTC Vive.",
       "articleBody": "Guide complet sur la gestion de 50+ casques VR...",
       "wordCount": 2000,
@@ -25,7 +25,7 @@
         "@type": "Organization",
         "name": "VHR DASHBOARD"
       },
-      "image": "https://vhr-dashboard-site.onrender.com/images/blog-vr-training.jpg",
+      "image": "https://www.vhr-dashboard-site.com/images/blog-vr-training.jpg",
       "description": "Comment des entreprises utilisent la VR pour former leurs collaborateurs plus rapidement.",
       "articleBody": "5 cas de succès de formations VR en entreprise...",
       "wordCount": 1500,
@@ -40,7 +40,7 @@
         "@type": "Organization",
         "name": "VHR DASHBOARD"
       },
-      "image": "https://vhr-dashboard-site.onrender.com/images/blog-vr-security.jpg",
+      "image": "https://www.vhr-dashboard-site.com/images/blog-vr-security.jpg",
       "description": "Comprendre les obligations RGPD pour les données collectées lors des formations VR.",
       "articleBody": "Guide RGPD pour formations VR...",
       "wordCount": 2500,
@@ -55,7 +55,7 @@
         "@type": "Organization",
         "name": "VHR DASHBOARD"
       },
-      "image": "https://vhr-dashboard-site.onrender.com/images/blog-vr-roi.jpg",
+      "image": "https://www.vhr-dashboard-site.com/images/blog-vr-roi.jpg",
       "description": "Calcul du retour sur investissement des formations en réalité virtuelle.",
       "articleBody": "Comment calculer le ROI de formations VR...",
       "wordCount": 1800,
@@ -70,7 +70,7 @@
         "@type": "Organization",
         "name": "VHR DASHBOARD"
       },
-      "image": "https://vhr-dashboard-site.onrender.com/images/blog-vr-trends.jpg",
+      "image": "https://www.vhr-dashboard-site.com/images/blog-vr-trends.jpg",
       "description": "Les tendances principales de la VR en 2025.",
       "articleBody": "Tendances VR 2025...",
       "wordCount": 2200,
@@ -85,7 +85,7 @@
         "@type": "Organization",
         "name": "VHR DASHBOARD"
       },
-      "image": "https://vhr-dashboard-site.onrender.com/images/blog-vr-streaming.jpg",
+      "image": "https://www.vhr-dashboard-site.com/images/blog-vr-streaming.jpg",
       "description": "Guide technique complet du streaming VR.",
       "articleBody": "Guide technique streaming VR...",
       "wordCount": 3000,
@@ -98,7 +98,7 @@
       "publisher": {
         "@type": "Organization",
         "name": "VHR DASHBOARD",
-        "logo": "https://vhr-dashboard-site.onrender.com/logo.png"
+        "logo": "https://www.vhr-dashboard-site.com/logo.png"
       },
       "mainEntity": [
         {

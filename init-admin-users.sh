@@ -2,7 +2,7 @@
 # Initialize default admin users on production
 
 # Configuration
-DOMAIN="${1:-https://vhr-dashboard-site.onrender.com}"
+DOMAIN="${1:-https://www.vhr-dashboard-site.com}"
 
 echo "🔧 Initializing default admin users on: $DOMAIN"
 echo ""

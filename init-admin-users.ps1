@@ -1,6 +1,6 @@
 # Initialize default admin users on production
 param(
-    [string]$Domain = "https://vhr-dashboard-site.onrender.com"
+    [string]$Domain = "https://www.vhr-dashboard-site.com"
 )
 
 Write-Host "Initializing default admin users on: $Domain" -ForegroundColor Green

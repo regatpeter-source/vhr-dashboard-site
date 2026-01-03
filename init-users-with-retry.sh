@@ -3,7 +3,7 @@
 
 set -e
 
-DOMAIN="${1:-https://vhr-dashboard-site.onrender.com}"
+DOMAIN="${1:-https://www.vhr-dashboard-site.com}"
 MAX_RETRIES=3
 RETRY_DELAY=5
 

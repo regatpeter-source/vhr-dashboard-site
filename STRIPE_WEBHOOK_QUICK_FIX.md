@@ -13,12 +13,12 @@
 
 Your Stripe webhook URL is configured as:
 ```
-https://vhr-dashboard-site.onrender.com
+https://www.vhr-dashboard-site.com
 ```
 
 But it should be:
 ```
-https://vhr-dashboard-site.onrender.com/webhook
+https://www.vhr-dashboard-site.com/webhook
 ```
 
 **Missing: `/webhook` path** ← This causes 404 errors!
@@ -36,7 +36,7 @@ https://vhr-dashboard-site.onrender.com/webhook
 - Click **Webhooks** (left sidebar under "Developers")
 
 ### 3️⃣ Find Your Endpoint
-- Look for URL: `https://vhr-dashboard-site.onrender.com` 
+- Look for URL: `https://www.vhr-dashboard-site.com` 
 - It will show **❌ Failed** status (red)
 - Click the **three dots (⋯)** button next to it
 
@@ -44,11 +44,11 @@ https://vhr-dashboard-site.onrender.com/webhook
 - Click **Edit endpoint** or **Edit**
 - Change the URL field from:
   ```
-  https://vhr-dashboard-site.onrender.com
+  https://www.vhr-dashboard-site.com
   ```
   to:
   ```
-  https://vhr-dashboard-site.onrender.com/webhook
+  https://www.vhr-dashboard-site.com/webhook
   ```
 - Click **Update endpoint** or **Save**
 
@@ -84,7 +84,7 @@ After making the change, Stripe will show:
 
 **Before Fix** ❌
 ```
-Endpoint: https://vhr-dashboard-site.onrender.com
+Endpoint: https://www.vhr-dashboard-site.com
 Status: Failed (404)
 Last error: HTTP 404 Not Found
 Attempts: 29 failures
@@ -92,7 +92,7 @@ Attempts: 29 failures
 
 **After Fix** ✅
 ```
-Endpoint: https://vhr-dashboard-site.onrender.com/webhook
+Endpoint: https://www.vhr-dashboard-site.com/webhook
 Status: Active (200)
 Last event: Successfully delivered
 Attempts: 0 failures, processing normally
@@ -103,7 +103,7 @@ Attempts: 0 failures, processing normally
 ## Screenshots (What You'll See)
 
 1. **Webhooks Page** - You'll see a list of endpoints
-2. **Your Failed Endpoint** - Shows `...onrender.com` with ❌ Failed badge
+2. **Your Failed Endpoint** - Shows old domain with ❌ Failed badge
 3. **Click Three Dots** - Menu appears with "Edit endpoint" option
 4. **Edit URL** - Remove the endpoint URL and add `/webhook` to the end
 5. **Click Update** - Save the change
@@ -115,11 +115,11 @@ Attempts: 0 failures, processing normally
 
 When the webhook endpoint was first configured in Stripe, the URL was incomplete:
 
-- ❌ **Incomplete**: `https://vhr-dashboard-site.onrender.com` 
+- ❌ **Incomplete**: `https://www.vhr-dashboard-site.com` 
   - Stripe sends to the root path `/`
   - Server returns 404 because `/` is the website homepage
 
-- ✅ **Complete**: `https://vhr-dashboard-site.onrender.com/webhook`
+- ✅ **Complete**: `https://www.vhr-dashboard-site.com/webhook`
   - Stripe sends to the specific `/webhook` path
   - Server receives and processes the payment event
   - Returns 200 OK
@@ -148,7 +148,7 @@ The fix is simple: **just add `/webhook` to the end of the URL**.
    - Click "Webhooks" on the left
 
 2. **Can't find your endpoint?**
-   - Look for any endpoint starting with `https://vhr-dashboard-site.onrender.com`
+  - Look for any endpoint starting with `https://www.vhr-dashboard-site.com`
    - May show as "Failed" or with a red X
    - Click the three dots and select "Edit endpoint"
 
@@ -165,7 +165,7 @@ The technical summary is available in: `STRIPE_WEBHOOK_FIX_URGENT.md`
 
 **Key Points:**
 - ✅ The webhook code in the server is correct
-- ✅ The server is running on Render
+- ✅ The server is running on production domain
 - ❌ The Stripe dashboard has wrong URL
 - ✅ Simple 5-minute fix
 - ✅ Automatic recovery after fix

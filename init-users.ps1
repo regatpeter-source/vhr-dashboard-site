@@ -1,4 +1,4 @@
-param([string]$Domain = "https://vhr-dashboard-site.onrender.com")
+param([string]$Domain = "https://www.vhr-dashboard-site.com")
 
 Write-Host "Testing admin init endpoint..." -ForegroundColor Cyan
 

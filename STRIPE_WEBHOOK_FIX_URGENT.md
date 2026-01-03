@@ -36,8 +36,8 @@ Stripe dashboard has the webhook URL configured **INCORRECTLY**:
 
 | What | Value | Status |
 |------|-------|--------|
-| Current URL in Stripe | `https://vhr-dashboard-site.onrender.com` | ❌ Returns 404 |
-| Required URL | `https://vhr-dashboard-site.onrender.com/webhook` | ✅ Returns 200 |
+| Current URL in Stripe | `https://www.vhr-dashboard-site.com` | ❌ Returns 404 |
+| Required URL | `https://www.vhr-dashboard-site.com/webhook` | ✅ Returns 200 |
 | **Problem** | **Missing `/webhook` path** | **THIS CAUSES 404** |
 
 ---
@@ -51,12 +51,12 @@ Stripe dashboard has the webhook URL configured **INCORRECTLY**:
 4. Click: **Webhooks** (left sidebar)
 
 ### Step 2: Edit the Webhook Endpoint
-1. Look for endpoint: `https://vhr-dashboard-site.onrender.com` (will show 404 status)
+1. Look for endpoint: `https://www.vhr-dashboard-site.com` (will show 404 status)
 2. Click the **three dots** (⋯) next to it
 3. Click: **Edit endpoint**
 4. In the **Endpoint URL** field, change:
-   - **FROM**: `https://vhr-dashboard-site.onrender.com`
-   - **TO**: `https://vhr-dashboard-site.onrender.com/webhook`
+  - **FROM**: `https://www.vhr-dashboard-site.com`
+  - **TO**: `https://www.vhr-dashboard-site.com/webhook`
 5. Click: **Update endpoint** (or **Save**)
 
 ### Step 3: Verify the Fix
@@ -186,11 +186,11 @@ After updating the webhook URL, verify:
 
 **If webhook still not working after fix:**
 1. Check Stripe webhook secret is correct: `whsec_gTxHKBzns9Oyjyka0fwaiHq5zwUfanFv`
-2. Verify server is running and reachable: `https://vhr-dashboard-site.onrender.com`
+2. Verify server is running and reachable: `https://www.vhr-dashboard-site.com`
 3. Check server logs for errors: `npm logs` or Render.com dashboard
 4. Test endpoint manually (optional):
    ```bash
-   curl https://vhr-dashboard-site.onrender.com/webhook
+  curl https://www.vhr-dashboard-site.com/webhook
    # Should return: 400 Bad Request (because no signature, but proves endpoint exists)
    ```
 
@@ -202,8 +202,8 @@ After updating the webhook URL, verify:
 
 **What:** Update Stripe webhook URL  
 **Where:** https://dashboard.stripe.com → Developers → Webhooks  
-**From:** `https://vhr-dashboard-site.onrender.com`  
-**To:** `https://vhr-dashboard-site.onrender.com/webhook`  
+**From:** `https://www.vhr-dashboard-site.com`  
+**To:** `https://www.vhr-dashboard-site.com/webhook`  
 **Time Required:** 5 minutes  
 **Deadline:** TODAY at 21:16:24 UTC  
 **Impact:** Restores payment processing for all subscriptions  

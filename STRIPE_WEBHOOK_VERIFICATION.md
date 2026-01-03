@@ -29,9 +29,6 @@
 ### Find Your Webhook Endpoint
 
 You should see a list of endpoints. Find the one with:
-- **URL**: `https://vhr-dashboard-site.onrender.com`
-- **Status**: ❌ Failed (shown in red)
-- **Error**: Shows 404 errors or similar
 
 ### Edit the Endpoint
 
@@ -44,12 +41,12 @@ You should see a list of endpoints. Find the one with:
 
 **Current (Wrong):**
 ```
-https://vhr-dashboard-site.onrender.com
+ **URL**: `https://www.vhr-dashboard-site.com`
 ```
 
 **Change to (Correct):**
 ```
-https://vhr-dashboard-site.onrender.com/webhook
+ https://www.vhr-dashboard-site.com
 ```
 
 **Simply add `/webhook` to the end**
@@ -57,32 +54,18 @@ https://vhr-dashboard-site.onrender.com/webhook
 ### Save the Change
 
 Click the button that says:
-- **Update endpoint**, OR
-- **Save**, OR
-- **Done**
 
 (Depending on your Stripe UI version)
 
----
 
 ## What You Should See After
 
 ### Immediate (Within seconds):
-- ✅ Green checkmark appears
-- ✅ Status shows "Active" (green)
-- ✅ No error messages
 
 ### In the Webhook Logs (click to view):
-- ✅ Shows "Last event delivered successfully"
-- ✅ Status code: 200 (success)
-- ✅ Retries showing success instead of 404
 
 ### Next (Within 5-30 minutes):
-- ✅ Stripe dashboard shows "19 events delivered" or similar
-- ✅ No more failed attempts
-- ✅ Webhook logs show incoming events
 
----
 
 ## Technical Verification
 
@@ -94,16 +77,10 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
   // 1. Verifies Stripe signature using STRIPE_WEBHOOK_SECRET
   const event = stripe.webhooks.constructEvent(req.body, sig, stripeWebhookSecret);
   
-  // 2. Processes checkout.session.completed event
-  if (type === 'checkout.session.completed') {
-    // - Creates user from checkout metadata
-    // - Sets subscription status to 'active'
     // - Generates license key
     // - Stores in users.json
     // - Sends confirmation email
   }
-  
-  // 3. Returns 200 OK (success)
   res.json({ received: true });
 });
 ```
@@ -120,7 +97,6 @@ STRIPE_WEBHOOK_SECRET=whsec_gTxHKBzns9Oyjyka0fwaiHq5zwUfanFv
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET_DEV || null;
 ```
 
-✅ **Used to verify authenticity:**
 ```javascript
 stripe.webhooks.constructEvent(req.body, sig, stripeWebhookSecret)
 ```
@@ -132,7 +108,6 @@ stripe.webhooks.constructEvent(req.body, sig, stripeWebhookSecret)
 **Your Application is Deployed On:** Render.com  
 **Domain**: vhr-dashboard-site.onrender.com  
 **Webhook Path**: /webhook  
-**Full Webhook URL**: https://vhr-dashboard-site.onrender.com/webhook  
 
 ✅ **Configuration in `render.yaml`:**
 ```yaml
