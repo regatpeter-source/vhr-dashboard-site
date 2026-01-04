@@ -3929,29 +3929,26 @@ async function checkJWTAuth() {
 			console.log('[auth] ✓ JWT valid for user:', currentUser);
 			return true;
 		} else {
-			// No valid JWT - show auth modal
-			console.log('[auth] ❌ No valid JWT - authenticated =', res?.authenticated);
-			console.log('[auth] Showing auth modal...');
-			
-			// Hide the loading overlay immediately
+			// No valid JWT - redirect to account page for login (simple UX for LAN users)
+			console.log('[auth] ❌ No valid JWT - redirecting to account.html');
 			const overlay = document.getElementById('authOverlay');
 			if (overlay) {
 				overlay.style.display = 'none';
 			}
-			
-			// Show auth modal
-			showAuthModal('login');
+			// Preserve intended page
+			const target = encodeURIComponent('/vhr-dashboard-pro.html');
+			window.location.href = `/account.html?redirect=${target}`;
 			return false;
 		}
 	} catch (e) {
 		console.error('[auth] JWT check error:', e);
-		console.log('[auth] ❌ Showing login modal due to exception');
-		
-		// Hide the loading overlay immediately
+		console.log('[auth] ❌ Redirecting to account.html due to exception');
 		const overlay = document.getElementById('authOverlay');
 		if (overlay) {
 			overlay.style.display = 'none';
 		}
+		const target = encodeURIComponent('/vhr-dashboard-pro.html');
+		window.location.href = `/account.html?redirect=${target}`;
 		
 		showAuthModal('login');
 		return false;

@@ -2,10 +2,11 @@
 (function(){
   const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
   const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
-  // Si la page est servie depuis un domaine différent (ex: github.io), pointer l'API vers le domaine officiel
-  const API_BASE = OFFICIAL_HOSTS.includes(window.location.hostname) ? '' : 'https://www.vhr-dashboard-site.com';
+  // Toujours utiliser la même origine pour respecter la CSP (self) en local/LAN
+  const API_BASE = '';
 
   function isOfficialHost() {
+    // Gardé pour la logique de facturation; n'affecte plus le routage API
     return OFFICIAL_HOSTS.includes(window.location.hostname);
   }
   // Toggle password visibility
@@ -47,6 +48,15 @@
   }
 
   const loginForm = document.getElementById('loginForm');
+  const redirectParam = (() => {
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      const redir = params.get('redirect');
+      // Accept only same-origin relative paths
+      if (redir && redir.startsWith('/')) return redir;
+    } catch (e) {}
+    return null;
+  })();
   const loggedInBox = document.getElementById('loggedInBox');
   const loggedOutBox = document.getElementById('loggedOutBox');
   const loginMessage = document.getElementById('loginMessage');
@@ -107,6 +117,11 @@
         loginMessage.textContent = 'Connexion réussie ✓'; 
         await new Promise(r => setTimeout(r, 500));
         await loadMe(); 
+        // Rediriger vers la cible si fournie (ex: retour vers le dashboard)
+        if (redirectParam) {
+          window.location.href = redirectParam;
+          return;
+        }
       } else { 
         const errorMsg = res && res.error ? res.error : 'Erreur inconnue';
         console.error('[LOGIN] Error:', errorMsg);

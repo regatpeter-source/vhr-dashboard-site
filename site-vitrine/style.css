@@ -39,6 +39,22 @@ nav {
   box-shadow: 0 2px 8px #0002;
 }
 
+.logo {
+  display: inline-flex;
+  align-items: center;
+  height: 48px;
+  padding-left: 66px;
+  background: url('assets/logo-vd.svg') no-repeat left center / 54px auto;
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  font-size: 1.05em;
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.28));
+  white-space: nowrap;
+  user-select: none;
+}
+
 nav ul {
   list-style: none;
   display: flex;
@@ -204,6 +220,11 @@ nav ul li a.cta-nav:hover {
     flex-direction: column;
     align-items: center;
     gap: 18px;
+  }
+  .logo {
+    padding-left: 58px;
+    background-size: 46px auto;
+    font-size: 1em;
   }
   .feature,
   .download-block,
