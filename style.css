@@ -123,7 +123,7 @@ nav ul li a.cta-nav:hover {
 
 .showcase-container {
   display: grid;
-  grid-template-columns: 1fr 1.2fr;
+  grid-template-columns: 1fr 1.5fr;
   gap: 48px;
   align-items: center;
   max-width: 1200px;
@@ -173,6 +173,17 @@ nav ul li a.cta-nav:hover {
   display: flex;
   justify-content: center;
   text-align: center;
+}
+
+.dashboard-hero-img {
+  display: block;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  border-radius: 18px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.20);
+  border: 1px solid #d9e3f5;
+  background: linear-gradient(135deg, #0b1220 0%, #0f172a 60%, #111827 100%);
 }
 
 .dashboard-mock {
