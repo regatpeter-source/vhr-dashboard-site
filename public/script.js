@@ -8,19 +8,7 @@ links.forEach(link => {
   });
 });
 
-// Formulaire de contact (simulation)
-const form = document.getElementById('contactForm');
-if (form) {
-  form.addEventListener('submit', function(e) {
-    e.preventDefault();
-    const status = document.getElementById('formStatus');
-    status.textContent = 'Envoi en cours...';
-    setTimeout(() => {
-      status.textContent = 'Merci, votre message a bien été envoyé !';
-      form.reset();
-    }, 1200);
-  });
-}
+// Formulaire de contact: la logique complète est dans /js/contact-form.js (pour éviter les doubles handlers)
 
 // Utilitaire pour lire un cookie
 function getCookie(name) {
