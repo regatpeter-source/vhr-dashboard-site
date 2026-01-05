@@ -1019,9 +1019,65 @@ function getSettingsContent() {
 	`;
 }
 
-window.subscribePro = function() {
-	openOfficialBillingPage();
+window.switchAccountTab = function(tab) {
+	const tabs = document.querySelectorAll('.account-tab');
+	tabs.forEach(t => {
+		t.style.color = '#95a5a6';
+		t.style.borderBottom = '3px solid transparent';
+	});
+	
+	const activeTab = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
+	if (activeTab) {
+		activeTab.style.color = '#fff';
+		activeTab.style.borderBottom = '3px solid #2ecc71';
+	}
+	
+	const content = document.getElementById('accountContent');
+	const stats = getUserStats();
+	
+	if (tab === 'profile') content.innerHTML = getProfileContent(stats, userRoles[currentUser] || 'user');
+	else if (tab === 'stats') content.innerHTML = getStatsContent(stats);
+	else if (tab === 'settings') content.innerHTML = getSettingsContent();
 };
+
+// ========== AUDIO STREAMING (WebRTC) ==========
+let activeAudioStream = null;  // Global audio stream instance
+let activeAudioSerial = null;  // Serial of device receiving audio
+
+console.log('[voice] dashboard-pro.js build stamp: 2025-12-29 18:55');
+
+// Keep panel always compact (no fullscreen overlay)
+function setAudioPanelMinimized() {
+	const panel = document.getElementById('audioStreamPanel');
+	const content = document.getElementById('audioStreamContent');
+	const pill = document.getElementById('audioStreamPill');
+	if (!panel || !content) return;
+	panel.style = 'position:fixed;bottom:12px;right:12px;z-index:120;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;gap:8px;pointer-events:auto;background:transparent;width:auto;height:auto;';
+	content.style.display = 'none';
+	content.style.maxWidth = '420px';
+	content.style.width = '360px';
+	content.style.maxHeight = '80vh';
+	content.style.pointerEvents = 'auto';
+	content.style.margin = '0';
+	if (pill) {
+		pill.style.display = 'inline-flex';
+		pill.innerHTML = `🎤<span style="font-size:11px;">ON</span>`;
+	}
+	panel.dataset.minimized = 'true';
+}
+
+window.toggleAudioPanelSize = function() {
+	return false; // always compact
+};
+
+window.sendVoiceToHeadset = async function(serial) {
+	console.log('[voice] sendVoiceToHeadset invoked for serial:', serial);
+	// Close any existing stream first (same or different device)
+	if (activeAudioStream) {
+		console.log('[sendVoiceToHeadset] Closing existing stream before starting new one');
+		await window.closeAudioStream(true); // true = silent close
+	}
+
 	const device = devices.find(d => d.serial === serial);
 	const deviceName = device ? device.name : 'Casque';
 	
@@ -1518,9 +1574,65 @@ window.exportUserData = function() {
 	showToast('📥 Données exportées !', 'success');
 };
 
-window.purchasePro = function() {
-	openOfficialBillingPage();
+window.confirmDeleteAccount = function() {
+	if (confirm(`⚠️ ATTENTION !\n\nÊtes-vous sûr de vouloir supprimer votre compte "${currentUser}" ?\n\nCette action est IRRÉVERSIBLE !\n\nToutes vos données, statistiques et préférences seront définitivement supprimées.`)) {
+		if (confirm('Dernière confirmation : Supprimer définitivement le compte ?')) {
+			// Supprimer toutes les données utilisateur
+			localStorage.removeItem('vhr_user_stats_' + currentUser);
+			localStorage.removeItem('vhr_user_prefs_' + currentUser);
+			removeUser(currentUser);
+			
+			closeAccountPanel();
+			showToast('🗑️ Compte supprimé', 'error');
+			
+			// Redémarrer avec un nouveau utilisateur
+			setTimeout(() => {
+				const name = prompt('Nouveau nom d\'utilisateur ?');
+				if (name && name.trim()) setUser(name.trim());
+				else setUser('Invité');
+			}, 1000);
+		}
+	}
 };
+
+function formatDate(isoString) {
+	const date = new Date(isoString);
+	const now = new Date();
+	const diffMs = now - date;
+	const diffMins = Math.floor(diffMs / 60000);
+	const diffHours = Math.floor(diffMs / 3600000);
+	const diffDays = Math.floor(diffMs / 86400000);
+	
+	if (diffMins < 1) return 'À l\'instant';
+	if (diffMins < 60) return `Il y a ${diffMins} min`;
+	if (diffHours < 24) return `Il y a ${diffHours}h`;
+	if (diffDays < 7) return `Il y a ${diffDays} jours`;
+	
+	return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+// UI fallback when popup is blocked: show a fixed banner with the receiver URL
+function showVoiceReceiverFallback(url, deviceLabel = 'casque') {
+	let box = document.getElementById('voiceReceiverFallback');
+	if (!box) {
+		box = document.createElement('div');
+		box.id = 'voiceReceiverFallback';
+		box.style.position = 'fixed';
+		box.style.bottom = '12px';
+		box.style.right = '12px';
+		box.style.zIndex = '9999';
+		box.style.padding = '12px 14px';
+		box.style.borderRadius = '10px';
+		box.style.boxShadow = '0 6px 18px rgba(0,0,0,0.18)';
+		box.style.background = 'linear-gradient(135deg, #34495e 0%, #2c3e50 100%)';
+		box.style.color = '#ecf0f1';
+		box.style.fontSize = '14px';
+		box.style.maxWidth = '320px';
+		box.style.lineHeight = '1.5';
+		box.innerHTML = `
+			<div style="font-weight:600;margin-bottom:6px;">🔗 Ouvrir le récepteur voix (${deviceLabel})</div>
+			<a id="voiceReceiverFallbackLink" href="${url}" target="_blank" rel="noopener noreferrer" style="display:block; word-break:break-all; color:#1abc9c; text-decoration:underline; margin-bottom:8px;">${url}</a>
+			<button id="voiceReceiverCopyBtn" style="border:none; background:#1abc9c; color:#0b1d24; padding:8px 10px; border-radius:6px; cursor:pointer; font-weight:600;">Copier le lien</button>
 			<button id="voiceReceiverCloseBtn" style="border:none; background:transparent; color:#bdc3c7; margin-left:8px; cursor:pointer;">Fermer</button>
 		`;
 		document.body.appendChild(box);
@@ -3510,124 +3622,12 @@ window.closeUnlockModal = function() {
 	if (modal) modal.remove();
 };
 
-window.subscribePro = async function() {
-	// Vérifier que l'utilisateur est connecté
-	if (!currentUser || currentUser === 'Invité') {
-		showToast('⚠️ Vous devez créer un compte pour vous abonner', 'error');
-		setTimeout(() => {
-			window.location.href = '/account.html?action=register';
-		}, 2000);
-		return;
-	}
-	
-	// Check if user is authenticated with JWT (has valid token)
-	try {
-		const meRes = await api('/api/me');
-		if (!meRes || !meRes.ok) {
-			showToast('⚠️ Vous devez vous connecter à votre compte', 'error');
-			setTimeout(() => {
-				window.location.href = '/account.html?action=login';
-			}, 2000);
-			return;
-		}
-	} catch (e) {
-		console.error('[subscribe] auth check failed:', e);
-		showToast('⚠️ Erreur d\'authentification - veuillez vous reconnecter', 'error');
-		setTimeout(() => {
-			window.location.href = '/account.html?action=login';
-		}, 2000);
-		return;
-	}
-	
-	showToast('🔄 Création de la session de paiement...', 'info');
-	
-	try {
-		// Create Stripe Checkout session for subscription
-		const res = await api('/api/subscriptions/create-checkout', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ planId: 'STANDARD' })
-		});
-		
-		console.log('[subscribe] API response:', res);
-		
-		if (res && res.url) {
-			// Session créée avec succès, rediriger vers Stripe Checkout
-			window.location.href = res.url;
-		} else if (res && res.error) {
-			showToast('❌ Erreur: ' + res.error, 'error');
-			if (res.error.includes('authentication')) {
-				setTimeout(() => {
-					window.location.href = '/account.html?action=login';
-				}, 2000);
-			}
-		} else {
-			showToast('❌ Erreur: Session non créée', 'error');
-		}
-	} catch (e) {
-		console.error('[subscribe] error:', e);
-		showToast('❌ Erreur lors de la création de la session', 'error');
-	}
+window.subscribePro = function() {
+	openOfficialBillingPage();
 };
 
-window.purchasePro = async function() {
-	// Vérifier que l'utilisateur est connecté
-	if (!currentUser || currentUser === 'Invité') {
-		showToast('⚠️ Vous devez créer un compte pour acheter la licence', 'error');
-		setTimeout(() => {
-			window.location.href = '/account.html?action=register';
-		}, 2000);
-		return;
-	}
-	
-	// Check if user is authenticated with JWT (has valid token)
-	try {
-		const meRes = await api('/api/me');
-		if (!meRes || !meRes.ok) {
-			showToast('⚠️ Vous devez vous connecter à votre compte', 'error');
-			setTimeout(() => {
-				window.location.href = '/account.html?action=login';
-			}, 2000);
-			return;
-		}
-	} catch (e) {
-		console.error('[purchase] auth check failed:', e);
-		showToast('⚠️ Erreur d\'authentification - veuillez vous reconnecter', 'error');
-		setTimeout(() => {
-			window.location.href = '/account.html?action=login';
-		}, 2000);
-		return;
-	}
-	
-	showToast('🔄 Création de la session de paiement...', 'info');
-	
-	try {
-		// Create Stripe Checkout session for one-time purchase
-		const res = await api('/api/purchases/create-checkout', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ purchaseId: 'PERPETUAL' })
-		});
-		
-		console.log('[purchase] API response:', res);
-		
-		if (res && res.url) {
-			// Session créée avec succès, rediriger vers Stripe Checkout
-			window.location.href = res.url;
-		} else if (res && res.error) {
-			showToast('❌ Erreur: ' + res.error, 'error');
-			if (res.error.includes('authentication')) {
-				setTimeout(() => {
-					window.location.href = '/account.html?action=login';
-				}, 2000);
-			}
-		} else {
-			showToast('❌ Erreur: Session non créée', 'error');
-		}
-	} catch (e) {
-		console.error('[purchase] error:', e);
-		showToast('❌ Erreur lors de la création de la session', 'error');
-	}
+window.purchasePro = function() {
+	openOfficialBillingPage();
 };
 
 window.activateLicense = async function() {
@@ -3842,6 +3842,7 @@ window.registerUser = async function() {
 	const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
 	const ACCOUNT_URL = 'https://www.vhr-dashboard-site.com/account.html?action=register';
 
+	// Hors domaine officiel : on redirige vers la page compte du site vitrine
 	if (!OFFICIAL_HOSTS.includes(window.location.hostname)) {
 		window.open(ACCOUNT_URL, '_blank');
 		return;
@@ -3928,29 +3929,26 @@ async function checkJWTAuth() {
 			console.log('[auth] ✓ JWT valid for user:', currentUser);
 			return true;
 		} else {
-			// No valid JWT - show auth modal
-			console.log('[auth] ❌ No valid JWT - authenticated =', res?.authenticated);
-			console.log('[auth] Showing auth modal...');
-			
-			// Hide the loading overlay immediately
+			// No valid JWT - redirect to account page for login (simple UX for LAN users)
+			console.log('[auth] ❌ No valid JWT - redirecting to account.html');
 			const overlay = document.getElementById('authOverlay');
 			if (overlay) {
 				overlay.style.display = 'none';
 			}
-			
-			// Show auth modal
-			showAuthModal('login');
+			// Preserve intended page
+			const target = encodeURIComponent('/vhr-dashboard-pro.html');
+			window.location.href = `/account.html?redirect=${target}`;
 			return false;
 		}
 	} catch (e) {
 		console.error('[auth] JWT check error:', e);
-		console.log('[auth] ❌ Showing login modal due to exception');
-		
-		// Hide the loading overlay immediately
+		console.log('[auth] ❌ Redirecting to account.html due to exception');
 		const overlay = document.getElementById('authOverlay');
 		if (overlay) {
 			overlay.style.display = 'none';
 		}
+		const target = encodeURIComponent('/vhr-dashboard-pro.html');
+		window.location.href = `/account.html?redirect=${target}`;
 		
 		showAuthModal('login');
 		return false;

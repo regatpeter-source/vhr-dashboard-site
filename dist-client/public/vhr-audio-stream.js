@@ -462,7 +462,7 @@ class VHRAudioStream {
       }
 
       const webmMime = 'audio/webm;codecs=opus';
-      // Stabilisation: force WebM/Opus pour compatibilité Quest/Web
+      // Stabilisation: on force WebM/Opus, plus robuste côté Quest et récepteur web
       const chosenMime = webmMime;
       const wsFormat = 'webm';
       this._log('Relay mime type: ' + chosenMime);

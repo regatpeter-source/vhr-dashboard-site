@@ -195,7 +195,7 @@ async function sendPurchaseSuccessEmail(user, purchaseData) {
     `;
 
     const mailOptions = {
-      from: purchaseConfig.EMAIL.FROM,
+      from: purchaseConfig.EMAIL.FROM_CONTACT || purchaseConfig.EMAIL.FROM,
       to: user.email,
       subject: template.subject || '✅ Votre licence VHR Dashboard est activée',
       html: htmlContent
@@ -346,7 +346,7 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
     `;
 
     const mailOptions = {
-      from: purchaseConfig.EMAIL.FROM,
+      from: purchaseConfig.EMAIL.FROM_CONTACT || purchaseConfig.EMAIL.FROM,
       to: user.email,
       subject: template.subject || '✅ Votre abonnement VHR Dashboard est actif',
       html: htmlContent

@@ -20,6 +20,19 @@ New-Item -ItemType Directory -Path $staging | Out-Null
 
 # 1) Copier les sources nécessaires
 $include = @(
+  # Fichiers racine requis par les routes explicites (exposedTopFiles + admin + launch)
+  "index.html",
+  "pricing.html",
+  "features.html",
+  "contact.html",
+  "account.html",
+  "developer-setup.html",
+  "mentions.html",
+  "launch-dashboard.html",
+  "admin-dashboard.html",
+  "START-HERE.html",
+
+  # Backend / assets
   "server.js",
   "public",
   "config",
@@ -36,7 +49,11 @@ $include = @(
 )
 
 foreach ($item in $include) {
-  Copy-Item $item -Destination $staging -Recurse -Force
+  if (Test-Path $item) {
+    Copy-Item $item -Destination $staging -Recurse -Force
+  } else {
+    Write-Warning "[pack] Element manquant, ignoré: $item"
+  }
 }
 
 # 1b) Créer un local.properties placeholder dans tts-receiver-app si absent

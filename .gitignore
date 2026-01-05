@@ -6,6 +6,7 @@ yarn-debug.log*
 yarn-error.log*
 .DS_Store
 dist/
+tmp-pack/
 coverage/
 *.local
 /.vscode/
@@ -21,3 +22,24 @@ data/*
 *.bak
 public/.vscode/
 tmp_*
+# Build/pack artifacts
+/vhr-dashboard-pro-client-full-updated-new3.zip
+/vhr-dashboard-pro-client-full-updated-new3-node-adb.zip
+/vhr-dashboard-pro-client-full-updated-new3-node-adb/
+/vhr-dashboard-pro-client-full-updated-new3-node-adb/platform-tools/
+/vhr-dashboard-pro-client-full-updated-new3-node-adb/node-portable/
+/vhr-dashboard-pro-client-full-updated-new3-node-adb/client-pack/logs/
+/dist-client/node-portable/
+/dist-client/platform-tools/
+
+# Local helper files
+replace-passwords.txt
+
+# Android TTS receiver local/gradle outputs
+/vhr-dashboard-pro-client-full-updated-new3-node-adb/tts-receiver-app/.gradle/
+/vhr-dashboard-pro-client-full-updated-new3-node-adb/tts-receiver-app/build/
+/vhr-dashboard-pro-client-full-updated-new3-node-adb/tts-receiver-app/gradle/
+/vhr-dashboard-pro-client-full-updated-new3-node-adb/tts-receiver-app/gradlew
+/vhr-dashboard-pro-client-full-updated-new3-node-adb/tts-receiver-app/gradlew.bat
+/vhr-dashboard-pro-client-full-updated-new3-node-adb/tts-receiver-app/local.properties
+/vhr-dashboard-pro-client-full-updated-new3-node-adb/tts-receiver-app/compile*.log

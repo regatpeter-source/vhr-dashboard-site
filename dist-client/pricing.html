@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Tarifs VHR DASHBOARD: location mensuelle ou achat définitif pour logiciel de gestion casques VR. Démo gratuite 7 jours, sans carte bancaire." />
+  <meta name="keywords" content="prix VR, tarif logiciel VR, location casque VR, licence VR, SaaS VR, logiciel gestion VR pas cher">
+  <meta name="robots" content="index, follow">
+  <title>Tarifs – VHR DASHBOARD | Gestion VR à distance</title>
+  <meta property="og:title" content="Tarifs VHR DASHBOARD - Solutions de gestion VR">
+  <meta property="og:description" content="Abonnements flexibles et prix compétitifs pour gérer vos casques VR. Essai gratuit 7 jours.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="canonical" href="https://www.vhr-dashboard-site.com/pricing.html">
+</head>
+<body>
+  <header>
+    <nav>
+      <div class="logo">VHR DASHBOARD</div>
+      <ul>
+        <li><a href="index.html">Accueil</a></li>
+        <li><a href="features.html">Fonctionnalités</a></li>
+        <li><a href="pricing.html" class="active">Tarifs</a></li>
+        <li><a href="contact.html">Contact</a></li>
+        <li><a href="account.html">Mon compte</a></li>
+      </ul>
+    </nav>
+    <div class="hero hero-small">
+      <h1>Tarifs & Abonnement</h1>
+      <p class="centered">Choisissez la formule adaptée à vos besoins : location mensuelle ou achat définitif.</p>
+    </div>
+  </header>
+  <main>
+    <section class="pricing-section">
+      <div class="pricing-cards">
+        <div class="pricing-card best">
+          <h2>Location mensuelle</h2>
+          <div class="price">29€<span>/mois</span></div>
+          <ul>
+            <li>Toutes les fonctionnalités incluses</li>
+            <li>Mises à jour & support</li>
+            <li>Sans engagement, résiliable à tout moment</li>
+          </ul>
+            <button class="cta" id="stripe-sub-btn" data-price-id="price_1SWhBW7g8FcyfmlJZ5rJGh6N" data-mode="subscription" aria-label="Payer l'abonnement mensuel en ligne">Payer l'abonnement</button>
+        </div>
+        <div class="pricing-card">
+          <h2>Achat définitif</h2>
+          <div class="price">499€<span>HT</span></div>
+          <ul>
+            <li>Licence perpétuelle</li>
+            <li>Mises à jour 1 an incluses</li>
+            <li>Support prioritaire 1 an</li>
+          </ul>
+            <button class="cta-secondary" id="stripe-onetime-btn" data-price-id="price_1SWhPb7g8FcyfmlJzlquRicj" data-mode="payment" aria-label="Acheter la licence définitive en ligne">Acheter la licence</button>
+        </div>
+      </div>
+      <div class="payment-note">
+        <p class="centered"><b>Paiement sécurisé</b> par carte bancaire (Stripe) ou PayPal. Facture fournie. <br>Pour un devis personnalisé ou une offre entreprise, <a href="contact.html">contactez-nous</a>.</p>
+      </div>
+    </section>
+    <section class="faq-section">
+      <h2 class="centered">FAQ</h2>
+      <div class="faq-item centered"><b class="centered">Comment fonctionne la location ?</b><br>Vous payez chaque mois, sans engagement. Vous pouvez arrêter à tout moment.</div>
+      <div class="faq-item centered"><b class="centered">Peut-on migrer de la location à l'achat ?</b><br>Oui, le montant d'un mois de location est déduit du prix d'achat si vous basculez.</div>
+    </section>
+  </main>
+  <footer>
+    <div class="footer-content">
+      <span>&copy; 2025 VHR DASHBOARD. Tous droits réservés.</span>
+      <span><a href="contact.html">Contact</a> | <a href="mentions.html">Mentions légales</a></span>
+    </div>
+  </footer>
+  <script src="/script.js"></script>
+  <!-- Chatbot IA (Botpress Webchat) configuration loaded from external file to comply with CSP -->
+  <script src="/js/botpress-config.js"></script>
+    <!-- Stripe Checkout - Paiement en ligne -->
+    <script src="https://js.stripe.com/v3/"></script>
+      <script src="/js/pricing-stripe.js"></script>
+  <script src="https://cdn.botpress.cloud/webchat/v1/inject.js"></script>
+</body>
+</html>

@@ -1419,7 +1419,23 @@ app.get('/developer-setup.html', (req, res) => {
 });
 
 // Optional catch-all for known client-side routes or health probes that may access non-existent paths
-app.get('/favicon.ico', (req, res) => res.sendFile(path.join(__dirname, 'site-vitrine', 'favicon.ico')));
+app.get('/favicon.ico', (req, res) => {
+  const candidates = [
+    path.join(__dirname, 'site-vitrine', 'favicon.ico'),
+    path.join(__dirname, 'public', 'favicon.ico'),
+    path.join(__dirname, 'favicon.ico')
+  ];
+
+  const existing = candidates.find(fs.existsSync);
+
+  if (existing) {
+    res.type('image/x-icon');
+    return res.sendFile(existing);
+  }
+
+  console.warn('[favicon] Aucun favicon trouvé. Chemins testés:', candidates);
+  return res.status(204).end();
+});
 
 // Ensure HTML responses have charset set to UTF-8 so browsers render accents correctly
 app.use((req, res, next) => {
@@ -1642,7 +1658,7 @@ function loadUsers() {
   }
   // Default fallback: admin user
   console.log('[users] using default fallback admin user');
-  return [{ id: 'admin', username: 'vhr', passwordHash: '$2b$10$5InOhGotmFQIIrtvxofxEe.wUpY8ATto9CrVnTHutbVVjWZMiQ1h2', role: 'admin', email: 'admin@example.local', stripeCustomerId: null }];
+  return [{ id: 'admin', username: 'vhr', passwordHash: '$2b$10$9pY5QEUol9cD525SEyFibeS/mIzkVhQQJBRm9TESMKGlKgqUWeZLG', role: 'admin', email: 'admin@example.local', stripeCustomerId: null }];
 }
 
 let users = loadUsers();
@@ -1852,7 +1868,7 @@ function ensureDefaultUsers() {
     console.log('[users] adding default admin user');
     users.push({
       username: 'vhr',
-      passwordHash: '$2b$10$5InOhGotmFQIIrtvxofxEe.wUpY8ATto9CrVnTHutbVVjWZMiQ1h2', // password: [REDACTED]
+      passwordHash: '$2b$10$9pY5QEUol9cD525SEyFibeS/mIzkVhQQJBRm9TESMKGlKgqUWeZLG', // admin password set via deployment/init scripts
       role: 'admin',
       email: 'admin@example.local',
       stripeCustomerId: null,

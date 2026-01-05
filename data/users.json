@@ -1,7 +1,7 @@
 [
   {
     "username": "vhr",
-    "passwordHash": "$2b$10$5InOhGotmFQIIrtvxofxEe.wUpY8ATto9CrVnTHutbVVjWZMiQ1h2",
+    "passwordHash": "$2b$10$9pY5QEUol9cD525SEyFibeS/mIzkVhQQJBRm9TESMKGlKgqUWeZLG",
     "role": "admin",
     "email": "admin@example.local",
     "stripeCustomerId": null,
@@ -25,13 +25,12 @@
     "username": "samsam44410",
     "passwordHash": "$2b$10$vL0AmczB9SJk5tjtoMDwCeaGLLsVgQwmPhIW4f1..ftKk3j/GBBV.",
     "role": "user",
-    "email": "",
+    "email": null,
     "stripeCustomerId": null,
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
     "subscriptionStatus": null,
-    "subscriptionId": null,
-    "demoStartDate": "2026-01-04T17:14:00.000Z"
+    "subscriptionId": null
   },
   {
     "username": "testuser_payment",

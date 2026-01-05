@@ -4,6 +4,30 @@
   const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
   // Toujours utiliser la même origine pour respecter la CSP (self) en local/LAN
   const API_BASE = '';
+  const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
+
+  function getStoredToken() {
+    try {
+      return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function saveAuthToken(token) {
+    try {
+      if (token && token.trim()) {
+        localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token.trim());
+        return token.trim();
+      }
+      localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    } catch (e) {}
+    return '';
+  }
+
+  function clearAuthToken() {
+    saveAuthToken('');
+  }
 
   function isOfficialHost() {
     // Gardé pour la logique de facturation; n'affecte plus le routage API
@@ -32,6 +56,10 @@
 
   async function api(path, opts = {}) {
     opts = Object.assign({ credentials: 'include' }, opts);
+    const storedToken = getStoredToken();
+    if (storedToken) {
+      opts.headers = Object.assign({}, opts.headers || {}, { Authorization: 'Bearer ' + storedToken });
+    }
     try { 
       const url = API_BASE + path;
       const res = await fetch(url, opts); 
@@ -63,6 +91,28 @@
   const accountName = document.getElementById('accountName');
   const accountRole = document.getElementById('accountRole');
   const logoutBtn = document.getElementById('logoutBtn');
+  let hasRedirected = false;
+
+  function safeRedirect(target) {
+    if (hasRedirected) return;
+    // Éviter les boucles si déjà sur la page cible
+    if (target && window.location.pathname !== target) {
+      hasRedirected = true;
+      window.location.href = target;
+    }
+  }
+
+  async function redirectIfAuthenticated() {
+    if (!redirectParam || hasRedirected) return;
+    try {
+      const res = await api('/api/check-auth');
+      if (res && res.ok && res.authenticated) {
+        safeRedirect(redirectParam);
+      }
+    } catch (e) {
+      console.warn('[redirect] check-auth failed, staying on account page');
+    }
+  }
 
   function setToken(t) { /* no-op: httpOnly cookie is used */ }
   function getToken() { return null; }
@@ -74,6 +124,10 @@
       showLoggedIn(res.user);
       loadSubscription();
       loadBilling();
+      // Si l'utilisateur est déjà connecté et qu'une redirection est demandée, l'appliquer immédiatement
+      if (redirectParam) {
+        safeRedirect(redirectParam);
+      }
     } catch (e) { showLoggedOut(); }
   }
 
@@ -87,6 +141,7 @@
     document.getElementById('profileEmail').value = user.email || '';
   }
   function showLoggedOut() {
+    clearAuthToken();
     loggedOutBox.style.display = 'block';
     loggedInBox.style.display = 'none';
   }
@@ -114,12 +169,17 @@
       console.log('[LOGIN] Response:', res);
       
       if (res && res.ok) { 
+        if (res.token) saveAuthToken(res.token);
         loginMessage.textContent = 'Connexion réussie ✓'; 
         await new Promise(r => setTimeout(r, 500));
+        // Redirection immédiate si demandée, même avant le rafraîchissement du profil
+        if (redirectParam) {
+          safeRedirect(redirectParam);
+        }
         await loadMe(); 
         // Rediriger vers la cible si fournie (ex: retour vers le dashboard)
         if (redirectParam) {
-          window.location.href = redirectParam;
+          safeRedirect(redirectParam);
           return;
         }
       } else { 
@@ -145,6 +205,7 @@
     loginMessage.textContent = 'Création du compte...';
     const res = await api('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: p1, email }) });
     if (res && res.ok) { 
+      if (res.token) saveAuthToken(res.token);
       loginMessage.textContent = 'Compte créé ✓ Vous êtes connecté(e).'; 
       await loadMe(); 
       // Pour les admins éventuels, rediriger vers l’admin; sinon rester dans l’espace compte sécurisé
@@ -163,7 +224,7 @@
   if (logoutBtn) logoutBtn.addEventListener('click', async () => { setToken(null); await api('/api/logout', { method: 'POST' }); showLoggedOut(); });
 
   // Profile update
-  const profileForm = document.getElementById('profileForm');
+  if (logoutBtn) logoutBtn.addEventListener('click', async () => { clearAuthToken(); setToken(null); await api('/api/logout', { method: 'POST' }); showLoggedOut(); });
   const passwordForm = document.getElementById('passwordForm');
   if (profileForm) profileForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -394,6 +455,8 @@
 
   // Load user information on start
   document.addEventListener('DOMContentLoaded', () => {
+    // Vérifier d'abord si une session valide existe déjà pour appliquer la redirection sans attendre
+    redirectIfAuthenticated();
     loadMe();
     
     // Show message based on action parameter

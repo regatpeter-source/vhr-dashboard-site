@@ -62,6 +62,7 @@ const os = require('os');
 })();
 
 // PostgreSQL database module
+
 const db = process.env.DATABASE_URL ? require('./db-postgres') : null;
 const USE_POSTGRES = !!process.env.DATABASE_URL;
 // Admin allowlist (only these usernames are allowed to access admin endpoints)
@@ -124,6 +125,7 @@ try {
     };
     hasCert = true;
     console.log('[HTTPS] Certificat SSL détecté.');
+  }
 } catch (e) {
   console.warn('[HTTPS] Erreur lors du chargement du certificat SSL:', e.message);
 }
@@ -393,8 +395,6 @@ async function installJava() {
         })
         .on('error', reject);
     });
-        sendAccountConfirmationEmail(newUser)
-          .catch(e => console.error('[email] confirmation error:', e && e.message));
 
     fs.unlinkSync(javaZip);
     process.env.JAVA_HOME = jdkPath;
@@ -1642,7 +1642,7 @@ function loadUsers() {
   }
   // Default fallback: admin user
   console.log('[users] using default fallback admin user');
-  return [{ id: 'admin', username: 'vhr', passwordHash: '$2b$10$SUXGbqHTbVmphiRiqGJYuO01oTslpJpL2.x0i1fZc2uQL9V3wCEVy', role: 'admin', email: 'admin@example.local', stripeCustomerId: null }];
+  return [{ id: 'admin', username: 'vhr', passwordHash: '$2b$10$9pY5QEUol9cD525SEyFibeS/mIzkVhQQJBRm9TESMKGlKgqUWeZLG', role: 'admin', email: 'admin@example.local', stripeCustomerId: null }];
 }
 
 let users = loadUsers();
@@ -1852,7 +1852,7 @@ function ensureDefaultUsers() {
     console.log('[users] adding default admin user');
     users.push({
       username: 'vhr',
-      passwordHash: '$2b$10$SUXGbqHTbVmphiRiqGJYuO01oTslpJpL2.x0i1fZc2uQL9V3wCEVy', // password: [REDACTED]
+      passwordHash: '$2b$10$9pY5QEUol9cD525SEyFibeS/mIzkVhQQJBRm9TESMKGlKgqUWeZLG', // admin password set via deployment/init scripts
       role: 'admin',
       email: 'admin@example.local',
       stripeCustomerId: null,
@@ -1957,9 +1957,22 @@ function persistUser(user) {
     // Keep in-memory cache in sync to avoid duplicate creation within same runtime
     const idx = users.findIndex(u => u.username === user.username);
     if (idx >= 0) users[idx] = user; else users.push(user);
+    const updatePayload = {};
+    if (user.passwordHash) updatePayload.passwordhash = user.passwordHash;
+    if (user.email !== undefined) updatePayload.email = user.email;
+    if (user.role) updatePayload.role = user.role;
+    if (user.stripeCustomerId) updatePayload.stripecustomerid = user.stripeCustomerId;
+    if (user.subscriptionStatus) updatePayload.subscriptionstatus = user.subscriptionStatus;
+    if (user.subscriptionId) updatePayload.subscriptionid = user.subscriptionId;
 
     // Save async to PostgreSQL (fire and forget to avoid blocking)
-    db.createUser(user.id || `user_${user.username}`, user.username, user.passwordHash, user.email, user.role)
+    db.getUserByUsername(user.username)
+      .then(existing => {
+        if (existing && existing.id) {
+          return db.updateUser(existing.id, updatePayload);
+        }
+        return db.createUser(user.id || `user_${user.username}`, user.username, user.passwordHash, user.email, user.role);
+      })
       .catch(err => console.error('[db] persistUser error:', err && err.message ? err.message : err));
     return true;
   } else if (dbEnabled) {
@@ -2825,14 +2838,18 @@ app.post('/api/auth/register', async (req, res) => {
     
     // Persist user (to file or DB)
     persistUser(newUser);
+    
+    console.log('[api/auth/register] user registered successfully:', username);
 
     // Créer immédiatement une fiche d'abonnement "trial" (sans paiement)
     ensureUserSubscription(newUser, {
       planName: 'signup-free',
       status: 'trial'
     });
-    
-    console.log('[api/auth/register] user registered successfully:', username);
+
+    // Envoyer l'email de confirmation de compte (best-effort)
+    sendAccountConfirmationEmail(newUser)
+      .catch(e => console.error('[email] confirmation error:', e && e.message));
     
     // Create JWT token for automatic login
     const token = jwt.sign({ username: newUser.username, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
@@ -3415,12 +3432,49 @@ app.get('/api/subscriptions/plans', (req, res) => {
 // Get current user's subscription status
 app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) => {
   try {
-    const user = getUserByUsername(req.user.username);
+    let user = null;
+    if (USE_POSTGRES && db) {
+      user = await db.getUserByUsername(req.user.username);
+      if (user) {
+        user.stripeCustomerId = user.stripeCustomerId || user.stripecustomerid || null;
+        user.subscriptionStatus = user.subscriptionStatus || user.subscriptionstatus || null;
+        user.subscriptionId = user.subscriptionId || user.subscriptionid || null;
+        const idx = users.findIndex(u => u.username === user.username);
+        if (idx >= 0) users[idx] = user; else users.push(user);
+      }
+    } else {
+      user = getUserByUsername(req.user.username);
+    }
+
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+
+    // Licence à vie : si un utilisateur possède une licence perpétuelle, retourner immédiatement un statut actif
+    if ((user.licenseType && user.licenseType.toLowerCase() === 'perpetual') || user.licenseKey) {
+      const start = user.licenseGeneratedAt || user.createdAt || new Date().toISOString();
+      const plan = { name: 'Licence à vie', id: 'lifetime' };
+      return res.json({
+        ok: true,
+        subscription: {
+          isActive: true,
+          status: 'active',
+          currentPlan: plan,
+          subscriptionId: user.licenseKey || null,
+          startDate: start,
+          endDate: null,
+          nextBillingDate: null,
+          cancelledAt: null,
+          daysUntilRenewal: null
+        }
+      });
+    }
 
     // D'abord chercher dans le stockage local
     const subscription = subscriptions.find(s => s.userId === user.id || s.username === user.username);
-    const isActive = user.subscriptionStatus === 'active';
+    const normalizedStatus = String(subscription?.status || user.subscriptionStatus || '').trim().toLowerCase();
+    const subscriptionId = subscription?.stripeSubscriptionId || user.subscriptionId || null;
+    // Ne considère plus un simple subscriptionId sans statut comme "actif"
+    const activeLikeStatuses = ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired'];
+    const isActive = activeLikeStatuses.includes(normalizedStatus);
     
     // Trouver le plan correspondant
     let currentPlan = null;
@@ -3433,42 +3487,80 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
       }
     }
 
-    // Si pas d'abonnement local mais l'utilisateur a un stripeCustomerId, chercher via Stripe API
-    if (!subscription && user.stripeCustomerId && process.env.STRIPE_SECRET_KEY) {
+    // Si pas de stripeCustomerId, tenter de le retrouver via l'email ou le username
+    if (!user.stripeCustomerId && process.env.STRIPE_SECRET_KEY) {
+      try {
+        if (user.email) {
+          const found = await stripe.customers.list({ email: user.email, limit: 5 });
+          const customer = (found.data || []).find(c => c.email && c.email.toLowerCase() === user.email.toLowerCase());
+          if (customer) {
+            user.stripeCustomerId = customer.id;
+            persistUser(user);
+          }
+        }
+        // Fallback: search by metadata.username if not found by email
+        if (!user.stripeCustomerId) {
+          const found = await stripe.customers.list({ limit: 20 });
+          const customer = (found.data || []).find(c => c.metadata && c.metadata.username && c.metadata.username.toLowerCase() === user.username.toLowerCase());
+          if (customer) {
+            user.stripeCustomerId = customer.id;
+            persistUser(user);
+          }
+        }
+      } catch (custErr) {
+        console.error('[subscriptions] lookup customer error:', custErr && custErr.message ? custErr.message : custErr);
+      }
+    }
+
+    // Toujours vérifier Stripe s'il existe un customerId, pour récupérer l'état réel même si local est absent ou périmé
+    if (user.stripeCustomerId && process.env.STRIPE_SECRET_KEY) {
       try {
         const stripeSubs = await stripe.subscriptions.list({
           customer: user.stripeCustomerId,
-          status: 'active',
-          limit: 1
+          status: 'all',
+          limit: 5
         });
-        
-        if (stripeSubs.data && stripeSubs.data.length > 0) {
-          const stripeSub = stripeSubs.data[0];
-          console.log('[subscriptions] found active Stripe subscription for', user.username, 'id:', stripeSub.id);
-          
-          // Synchroniser avec la base locale
-          const item = stripeSub.items.data[0];
-          const priceId = item.price.id;
-          
+
+        const activeLikeStatuses = new Set(['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired']);
+        const stripeSub = (stripeSubs.data || []).find(s => activeLikeStatuses.has(s.status));
+
+        if (stripeSub) {
+          console.log('[subscriptions] found Stripe subscription for', user.username, 'id:', stripeSub.id, 'status:', stripeSub.status);
+
+          const item = stripeSub.items?.data?.[0];
+          const priceId = item?.price?.id;
           for (const [key, plan] of Object.entries(subscriptionConfig.PLANS)) {
             if (plan.stripePriceId === priceId) {
               currentPlan = { ...plan, id: key };
               break;
             }
           }
-          
+
+          // Mettre à jour l'utilisateur et le cache local
+          user.subscriptionStatus = stripeSub.status;
+          user.subscriptionId = stripeSub.id;
+          persistUser(user);
+          ensureUserSubscription(user, {
+            stripeSubscriptionId: stripeSub.id,
+            stripePriceId: priceId || null,
+            status: stripeSub.status,
+            planName: currentPlan?.name || null,
+            startDate: stripeSub.current_period_start ? new Date(stripeSub.current_period_start * 1000).toISOString() : undefined,
+            endDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000).toISOString() : undefined
+          });
+
           return res.json({
             ok: true,
             subscription: {
-              isActive: stripeSub.status === 'active',
+              isActive: activeLikeStatuses.has(stripeSub.status),
               status: stripeSub.status,
               currentPlan: currentPlan,
               subscriptionId: stripeSub.id,
-              startDate: new Date(stripeSub.current_period_start * 1000),
-              endDate: new Date(stripeSub.current_period_end * 1000),
-              nextBillingDate: new Date(stripeSub.current_period_end * 1000),
+              startDate: stripeSub.current_period_start ? new Date(stripeSub.current_period_start * 1000) : null,
+              endDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000) : null,
+              nextBillingDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000) : null,
               cancelledAt: stripeSub.canceled_at ? new Date(stripeSub.canceled_at * 1000) : null,
-              daysUntilRenewal: Math.ceil((new Date(stripeSub.current_period_end * 1000) - new Date()) / (24 * 60 * 60 * 1000))
+              daysUntilRenewal: stripeSub.current_period_end ? Math.ceil((new Date(stripeSub.current_period_end * 1000) - new Date()) / (24 * 60 * 60 * 1000)) : null
             }
           });
         }
@@ -3477,14 +3569,33 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
       }
     }
 
+    // Fallback: si aucun abonnement réel n'est trouvé, ne pas activer artificiellement l'utilisateur
+    if (!subscriptionId && !isActive) {
+      return res.json({
+        ok: true,
+        subscription: {
+          isActive: false,
+          status: normalizedStatus || 'inactive',
+          currentPlan: currentPlan,
+          subscriptionId: null,
+          startDate: null,
+          endDate: null,
+          nextBillingDate: null,
+          cancelledAt: null,
+          daysUntilRenewal: null,
+          trialEligible: true
+        }
+      });
+    }
+
     res.json({
       ok: true,
       subscription: {
-        isActive: isActive,
-        status: user.subscriptionStatus || 'inactive',
+        isActive,
+        status: normalizedStatus || (subscriptionId ? 'active' : 'inactive'),
         currentPlan: currentPlan,
-        subscriptionId: user.subscriptionId || null,
-        startDate: subscription?.startDate || null,
+        subscriptionId: subscriptionId,
+        startDate: subscription?.startDate || user.lastInvoicePaidAt || user.createdAt || null,
         endDate: subscription?.endDate || null,
         nextBillingDate: subscription?.endDate || null,
         cancelledAt: subscription?.cancelledAt || null,
@@ -3963,6 +4074,8 @@ app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) 
     const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
 
+    const customerId = await ensureStripeCustomerForUser(user);
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [
@@ -3972,7 +4085,8 @@ app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) 
         },
       ],
       mode: 'subscription',
-      customer_email: user.email,
+      customer: customerId,
+      customer_email: undefined, // force the known customer to avoid name drift from cardholder input
       success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/vhr-dashboard-pro.html?subscription=success`,
       cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/vhr-dashboard-pro.html?subscription=canceled`,
       metadata: {
@@ -4003,6 +4117,8 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
     const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
 
+    const customerId = await ensureStripeCustomerForUser(user);
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [
@@ -4012,7 +4128,8 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
         },
       ],
       mode: 'payment', // Mode one-time payment
-      customer_email: user.email,
+      customer: customerId,
+      customer_email: undefined, // force existing customer to avoid cardholder name override
       success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/account.html?purchase=success`,
       cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/pricing.html?purchase=canceled`,
       metadata: {
@@ -4142,10 +4259,95 @@ app.get('/api/admin/users', authMiddleware, (req, res) => {
 });
 
 // Get all subscriptions
-app.get('/api/admin/subscriptions', authMiddleware, (req, res) => {
+app.get('/api/admin/subscriptions', authMiddleware, async (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;
   try {
-    const subs = dbEnabled ? require('./db').getAllSubscriptions() : subscriptions;
+    let subs = [];
+
+    // 1) Stripe as source of truth when available
+    if (stripe) {
+      try {
+        // Expand customer to avoid extra round-trips and get email/name
+        const list = await stripe.subscriptions.list({ status: 'all', limit: 100, expand: ['data.customer'] });
+        subs = (list?.data || []).map(row => {
+          const price = row.items?.data?.[0]?.price;
+          const customer = row.customer && typeof row.customer === 'object' ? row.customer : null;
+          const email = row.customer_email || row.metadata?.email || customer?.email || customer?.metadata?.email || null;
+
+          // Try to recover username: metadata first, then customer metadata, then match local users by email
+          let username = row.metadata?.username || customer?.metadata?.username || null;
+          if (!username && email && Array.isArray(users)) {
+            const match = users.find(u => String(u.email || '').toLowerCase() === String(email).toLowerCase());
+            if (match) username = match.username;
+          }
+
+          const planName = price?.nickname || price?.id || row.plan?.nickname || null;
+
+          return {
+            id: row.id,
+            username,
+            email,
+            planName,
+            status: String(row.status || 'unknown').toLowerCase(),
+            startDate: row.current_period_start ? new Date(row.current_period_start * 1000).toISOString() : null,
+            endDate: row.current_period_end ? new Date(row.current_period_end * 1000).toISOString() : null,
+            stripeSubscriptionId: row.id,
+            stripePriceId: price?.id || null,
+            createdAt: row.created ? new Date(row.created * 1000).toISOString() : null
+          };
+        });
+      } catch (stripeErr) {
+        console.error('[api] admin/subscriptions stripe error:', stripeErr && stripeErr.message ? stripeErr.message : stripeErr);
+      }
+    }
+
+    // 2) Database fallback
+    if ((!subs || subs.length === 0) && USE_POSTGRES && db && db.getAllSubscriptions) {
+      try {
+        const pgSubs = await db.getAllSubscriptions();
+        subs = (pgSubs || []).map(row => ({
+          id: row.id || row.subscriptionid || row.stripesubscriptionid || null,
+          username: row.username || null,
+          email: row.email || null,
+          planName: row.planname || row.planName || null,
+          status: String(row.status || 'unknown').toLowerCase(),
+          startDate: row.startdate || row.startDate || row.createdat || row.createdAt || null,
+          endDate: row.enddate || row.endDate || null,
+          stripeSubscriptionId: row.stripesubscriptionid || row.subscriptionid || null,
+          stripePriceId: row.stripepriceid || row.stripePriceId || null,
+          createdAt: row.createdat || row.createdAt || null
+        }));
+      } catch (pgErr) {
+        console.error('[api] admin/subscriptions postgres error:', pgErr && pgErr.message ? pgErr.message : pgErr);
+      }
+    }
+
+    // 3) SQLite/JSON fallbacks
+    if ((!subs || subs.length === 0) && dbEnabled) {
+      subs = require('./db').getAllSubscriptions();
+    }
+    if (!subs || subs.length === 0) {
+      subs = subscriptions;
+    }
+
+    // 4) Fallback to user placeholders so admin sees placeholders as well
+    if ((!subs || subs.length === 0) && Array.isArray(users)) {
+      subs = users
+        .filter(u => u.subscriptionStatus)
+        .map(u => ({
+          id: u.subscriptionId || `sub_user_${u.username}`,
+          username: u.username,
+          email: u.email || null,
+          planName: null,
+          status: u.subscriptionStatus || 'active',
+          startDate: u.updatedAt || u.createdAt || null,
+          endDate: null,
+          stripeSubscriptionId: u.subscriptionId || null,
+          stripePriceId: null,
+          createdAt: u.createdAt || null
+        }));
+    }
+
     res.json({ ok: true, subscriptions: subs });
   } catch (e) {
     console.error('[api] admin/subscriptions:', e);
@@ -4154,11 +4356,54 @@ app.get('/api/admin/subscriptions', authMiddleware, (req, res) => {
 });
 
 // Get active subscriptions only
-app.get('/api/admin/subscriptions/active', authMiddleware, (req, res) => {
+app.get('/api/admin/subscriptions/active', authMiddleware, async (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;
   try {
-    const subs = dbEnabled ? require('./db').getActiveSubscriptions() : subscriptions.filter(s => s.status === 'active');
-    res.json({ ok: true, subscriptions: subs });
+    let subs = [];
+
+    if (USE_POSTGRES && db && db.getAllSubscriptions) {
+      try {
+        const pgSubs = await db.getAllSubscriptions();
+        subs = (pgSubs || []).map(row => ({
+          id: row.id || row.subscriptionid || row.stripesubscriptionid || null,
+          username: row.username || null,
+          email: row.email || null,
+          planName: row.planname || row.planName || null,
+          status: String(row.status || 'unknown').toLowerCase(),
+          startDate: row.startdate || row.startDate || row.createdat || row.createdAt || null,
+          endDate: row.enddate || row.endDate || null,
+          stripeSubscriptionId: row.stripesubscriptionid || row.subscriptionid || null,
+          stripePriceId: row.stripepriceid || row.stripePriceId || null,
+          createdAt: row.createdat || row.createdAt || null
+        }));
+
+        if ((!subs || subs.length === 0) && Array.isArray(users)) {
+          subs = users
+            .filter(u => u.subscriptionStatus)
+            .map(u => ({
+              id: u.subscriptionId || `sub_user_${u.username}`,
+              username: u.username,
+              email: u.email || null,
+              planName: null,
+              status: u.subscriptionStatus || 'active',
+              startDate: u.updatedAt || u.createdAt || null,
+              endDate: null,
+              stripeSubscriptionId: u.subscriptionId || null,
+              stripePriceId: null,
+              createdAt: u.createdAt || null
+            }));
+        }
+      } catch (pgErr) {
+        console.error('[api] admin/subscriptions/active postgres error:', pgErr && pgErr.message ? pgErr.message : pgErr);
+      }
+    } else if (dbEnabled) {
+      subs = require('./db').getActiveSubscriptions();
+    } else {
+      subs = subscriptions.filter(s => s.status === 'active');
+    }
+
+    const activeSubs = (subs || []).filter(s => String(s.status || '').toLowerCase() === 'active');
+    res.json({ ok: true, subscriptions: activeSubs });
   } catch (e) {
     console.error('[api] admin/subscriptions/active:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -4310,14 +4555,65 @@ app.delete('/api/admin/messages/:id', authMiddleware, async (req, res) => {
 });
 
 // Get dashboard stats
-app.get('/api/admin/stats', authMiddleware, (req, res) => {
+app.get('/api/admin/stats', authMiddleware, async (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;
   try {
-    const subs = dbEnabled ? require('./db').getAllSubscriptions() : subscriptions;
-    const totalUsers = users.length;
-    const activeSubscriptions = subs.filter(s => s.status === 'active').length;
-    const unreadMessages = messages.filter(m => m.status === 'unread').length;
-    
+    let subs = [];
+    let totalUsers = users.length;
+    let unreadMessages = messages.filter(m => m.status === 'unread').length;
+    let stripeActive = null;
+
+    if (USE_POSTGRES && db) {
+      try {
+        const [pgSubs, pgUsers, pgMessages] = await Promise.all([
+          db.getAllSubscriptions?.(),
+          db.getUsers?.(),
+          db.getMessages?.()
+        ]);
+
+        if (Array.isArray(pgSubs)) subs = pgSubs;
+        if (Array.isArray(pgUsers) && pgUsers.length) totalUsers = pgUsers.length;
+        if (Array.isArray(pgMessages)) {
+          unreadMessages = pgMessages.filter(m => String(m.status || '').toLowerCase() === 'unread').length;
+        }
+      } catch (pgErr) {
+        console.error('[api] admin/stats postgres error:', pgErr && pgErr.message ? pgErr.message : pgErr);
+      }
+    } else if (dbEnabled) {
+      subs = require('./db').getAllSubscriptions();
+      try {
+        const sqliteUsers = require('./db').getAllUsers?.();
+        if (Array.isArray(sqliteUsers) && sqliteUsers.length) {
+          totalUsers = sqliteUsers.length;
+        }
+      } catch (sqliteErr) {
+        console.error('[api] admin/stats sqlite users error:', sqliteErr && sqliteErr.message ? sqliteErr.message : sqliteErr);
+      }
+    } else {
+      subs = subscriptions;
+    }
+
+    // Stripe authoritative count when available
+    if (stripe) {
+      try {
+        const stripeSubs = await stripe.subscriptions.list({ status: 'all', limit: 100 });
+        if (Array.isArray(stripeSubs?.data)) {
+          stripeActive = stripeSubs.data.filter(s => ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired'].includes(s.status)).length;
+        }
+      } catch (stripeErr) {
+        console.error('[api] admin/stats stripe error:', stripeErr && stripeErr.message ? stripeErr.message : stripeErr);
+      }
+    }
+
+    let activeSubscriptions = (subs || []).filter(s => String(s.status || '').toLowerCase() === 'active').length;
+
+    if (stripeActive !== null && stripeActive !== undefined) {
+      activeSubscriptions = stripeActive;
+    } else if (USE_POSTGRES && activeSubscriptions === 0 && Array.isArray(users)) {
+      const activeFromUsers = users.filter(u => String(u.subscriptionStatus || '').toLowerCase() === 'active').length;
+      if (activeFromUsers > 0) activeSubscriptions = activeFromUsers;
+    }
+
     res.json({ ok: true, stats: { totalUsers, activeSubscriptions, unreadMessages } });
   } catch (e) {
     console.error('[api] admin/stats:', e);
@@ -6378,7 +6674,18 @@ app.post('/api/billing/portal', authMiddleware, async (req, res) => {
 // List invoices for current authenticated user
 app.get('/api/billing/invoices', authMiddleware, async (req, res) => {
   try {
-    const user = getUserByUsername(req.user.username);
+    let user = null;
+    if (USE_POSTGRES && db) {
+      user = await db.getUserByUsername(req.user.username);
+      if (user) {
+        user.stripeCustomerId = user.stripeCustomerId || user.stripecustomerid || null;
+        const idx = users.findIndex(u => u.username === user.username);
+        if (idx >= 0) users[idx] = user; else users.push(user);
+      }
+    } else {
+      user = getUserByUsername(req.user.username);
+    }
+
     if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
     if (!user.stripeCustomerId) return res.json({ ok: true, invoices: [] });
     const invoices = await stripe.invoices.list({ customer: user.stripeCustomerId, limit: 30 });
@@ -6392,7 +6699,18 @@ app.get('/api/billing/invoices', authMiddleware, async (req, res) => {
 // List subscriptions for current authenticated user
 app.get('/api/billing/subscriptions', authMiddleware, async (req, res) => {
   try {
-    const user = getUserByUsername(req.user.username);
+    let user = null;
+    if (USE_POSTGRES && db) {
+      user = await db.getUserByUsername(req.user.username);
+      if (user) {
+        user.stripeCustomerId = user.stripeCustomerId || user.stripecustomerid || null;
+        const idx = users.findIndex(u => u.username === user.username);
+        if (idx >= 0) users[idx] = user; else users.push(user);
+      }
+    } else {
+      user = getUserByUsername(req.user.username);
+    }
+
     if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
     if (!user.stripeCustomerId) return res.json({ ok: true, subscriptions: [] });
     const subs = await stripe.subscriptions.list({ customer: user.stripeCustomerId, limit: 30 });
@@ -6505,6 +6823,19 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
     } else if (type === 'checkout.session.completed') {
       // session completed often delivers: session.customer
       if (obj.customer) user.stripeCustomerId = obj.customer;
+
+      // Keep the Stripe customer name/email aligned with the app user (prevents cardholder name drift)
+      if (obj.customer && stripe && user) {
+        try {
+          await stripe.customers.update(obj.customer, {
+            name: user.username || undefined,
+            email: user.email || undefined,
+            metadata: { ...(user.username ? { username: user.username } : {}) }
+          });
+        } catch (custErr) {
+          console.error('[webhook] Failed to sync customer name/email:', custErr && custErr.message ? custErr.message : custErr);
+        }
+      }
       
       // Envoyer un email de confirmation pour un achat/abonnement
       if (obj.mode === 'payment') {
@@ -6629,6 +6960,8 @@ app.post('/api/register', async (req, res) => {
     // persist to database
     if (USE_POSTGRES) {
       await db.createUser(newUser.id, newUser.username, newUser.passwordHash, newUser.email, newUser.role);
+      const idx = users.findIndex(u => u.username === newUser.username);
+      if (idx >= 0) users[idx] = newUser; else users.push(newUser);
     } else {
       persistUser(newUser);
     }

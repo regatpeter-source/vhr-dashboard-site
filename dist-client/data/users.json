@@ -1,20 +1,31 @@
 [
   {
     "username": "vhr",
-    "passwordHash": "$2b$10$SUXGbqHTbVmphiRiqGJYuO01oTslpJpL2.x0i1fZc2uQL9V3wCEVy",
+    "passwordHash": "$2b$10$9pY5QEUol9cD525SEyFibeS/mIzkVhQQJBRm9TESMKGlKgqUWeZLG",
     "role": "admin",
     "email": "admin@example.local",
-    "stripeCustomerId": "cus_TcKYOM74wACDDH",
+    "stripeCustomerId": null,
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
-    "subscriptionStatus": "active",
-    "subscriptionId": "sub_admin_perpetual"
+    "subscriptionStatus": null,
+    "subscriptionId": null
   },
   {
     "username": "VhrDashboard",
     "passwordHash": "$2b$10$XtU3hKSETcFgyx9w.KfL5unRFQ7H2Q26vBKXXjQ05Kz47mZbvrdQS",
     "role": "user",
     "email": "regatpeter@hotmail.fr",
+    "stripeCustomerId": null,
+    "latestInvoiceId": null,
+    "lastInvoicePaidAt": null,
+    "subscriptionStatus": null,
+    "subscriptionId": null
+  },
+  {
+    "username": "samsam44410",
+    "passwordHash": "$2b$10$vL0AmczB9SJk5tjtoMDwCeaGLLsVgQwmPhIW4f1..ftKk3j/GBBV.",
+    "role": "user",
+    "email": null,
     "stripeCustomerId": null,
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,

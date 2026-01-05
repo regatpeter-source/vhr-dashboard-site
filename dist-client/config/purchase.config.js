@@ -43,6 +43,10 @@ module.exports = {
   // Configuration des emails
   EMAIL: {
     FROM: process.env.EMAIL_FROM || 'noreply@vhr-dashboard-site.com',
+    // Expéditeur prioritaire pour les emails liés aux abonnements / souscriptions
+    FROM_CONTACT: process.env.EMAIL_FROM_CONTACT || 'contact@vhr-dashboard-site.com',
+    // URL publique utilisée dans les emails (liens dashboard / factures)
+    PUBLIC_BASE_URL: process.env.PUBLIC_BASE_URL || process.env.FRONTEND_URL || 'https://www.vhr-dashboard-site.com',
     SMTP_HOST: process.env.BREVO_SMTP_HOST || process.env.SMTP_HOST || 'smtp-relay.brevo.com',
     SMTP_PORT: process.env.BREVO_SMTP_PORT || process.env.SMTP_PORT || 587,
     SMTP_USER: process.env.BREVO_SMTP_USER || process.env.SMTP_USER || '',

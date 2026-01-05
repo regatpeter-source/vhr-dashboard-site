@@ -2,9 +2,11 @@
 (function(){
   const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
   const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
-  const API_BASE = OFFICIAL_HOSTS.includes(window.location.hostname) ? '' : 'https://www.vhr-dashboard-site.com';
+  // Toujours utiliser la même origine pour respecter la CSP (self) en local/LAN
+  const API_BASE = '';
 
   function isOfficialHost() {
+    // Gardé pour la logique de facturation; n'affecte plus le routage API
     return OFFICIAL_HOSTS.includes(window.location.hostname);
   }
   // Toggle password visibility
@@ -46,12 +48,43 @@
   }
 
   const loginForm = document.getElementById('loginForm');
+  const redirectParam = (() => {
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      const redir = params.get('redirect');
+      // Accept only same-origin relative paths
+      if (redir && redir.startsWith('/')) return redir;
+    } catch (e) {}
+    return null;
+  })();
   const loggedInBox = document.getElementById('loggedInBox');
   const loggedOutBox = document.getElementById('loggedOutBox');
   const loginMessage = document.getElementById('loginMessage');
   const accountName = document.getElementById('accountName');
   const accountRole = document.getElementById('accountRole');
   const logoutBtn = document.getElementById('logoutBtn');
+  let hasRedirected = false;
+
+  function safeRedirect(target) {
+    if (hasRedirected) return;
+    // Éviter les boucles si déjà sur la page cible
+    if (target && window.location.pathname !== target) {
+      hasRedirected = true;
+      window.location.href = target;
+    }
+  }
+
+  async function redirectIfAuthenticated() {
+    if (!redirectParam || hasRedirected) return;
+    try {
+      const res = await api('/api/check-auth');
+      if (res && res.ok && res.authenticated) {
+        safeRedirect(redirectParam);
+      }
+    } catch (e) {
+      console.warn('[redirect] check-auth failed, staying on account page');
+    }
+  }
 
   function setToken(t) { /* no-op: httpOnly cookie is used */ }
   function getToken() { return null; }
@@ -63,6 +96,10 @@
       showLoggedIn(res.user);
       loadSubscription();
       loadBilling();
+      // Si l'utilisateur est déjà connecté et qu'une redirection est demandée, l'appliquer immédiatement
+      if (redirectParam) {
+        safeRedirect(redirectParam);
+      }
     } catch (e) { showLoggedOut(); }
   }
 
@@ -105,7 +142,16 @@
       if (res && res.ok) { 
         loginMessage.textContent = 'Connexion réussie ✓'; 
         await new Promise(r => setTimeout(r, 500));
+        // Redirection immédiate si demandée, même avant le rafraîchissement du profil
+        if (redirectParam) {
+          safeRedirect(redirectParam);
+        }
         await loadMe(); 
+        // Rediriger vers la cible si fournie (ex: retour vers le dashboard)
+        if (redirectParam) {
+          safeRedirect(redirectParam);
+          return;
+        }
       } else { 
         const errorMsg = res && res.error ? res.error : 'Erreur inconnue';
         console.error('[LOGIN] Error:', errorMsg);
@@ -252,17 +298,23 @@
         return;
       }
       
-      const sub = res.subscription;
-      if (!sub.isActive) {
+      const sub = res.subscription || {};
+
+      const normalizedStatus = String(sub.status || '').trim().toLowerCase();
+      const hasId = !!sub.subscriptionId;
+      const statusOk = ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired'].includes(normalizedStatus);
+      const isActive = sub.isActive || statusOk || hasId;
+
+      if (!isActive) {
         document.getElementById('subscriptionContent').innerHTML = '<p>Pas d\'abonnement actif actuellement.</p>';
         return;
       }
       
-      const planName = sub.currentPlan ? sub.currentPlan.name : 'Plan inconnu';
+      const planName = sub.currentPlan ? sub.currentPlan.name : 'Abonnement actif';
       const startDate = sub.startDate ? new Date(sub.startDate).toLocaleDateString('fr-FR') : 'N/A';
       const endDate = sub.endDate ? new Date(sub.endDate).toLocaleDateString('fr-FR') : 'N/A';
-      const daysLeft = sub.daysUntilRenewal || 0;
-      const statusColor = daysLeft > 14 ? '#4CAF50' : daysLeft > 0 ? '#ff9800' : '#d32f2f';
+      const daysLeft = sub.daysUntilRenewal != null ? sub.daysUntilRenewal : 0;
+      const statusColor = daysLeft > 14 ? '#4CAF50' : daysLeft > 0 ? '#ff9800' : '#4CAF50';
       
       let html = `
         <div style="background: white; padding: 12px; border-radius: 4px; margin-bottom: 12px;">
@@ -372,6 +424,8 @@
 
   // Load user information on start
   document.addEventListener('DOMContentLoaded', () => {
+    // Vérifier d'abord si une session valide existe déjà pour appliquer la redirection sans attendre
+    redirectIfAuthenticated();
     loadMe();
     
     // Show message based on action parameter
