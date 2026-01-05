@@ -20,7 +20,7 @@
     banner.style.borderRadius = '10px';
     banner.style.marginBottom = '14px';
     banner.style.boxShadow = '0 2px 6px rgba(0,0,0,0.08)';
-    banner.innerHTML = `💌 Une question, une démo ou un devis&nbsp;? <strong>Écrivez-nous</strong> — nous répondons vite !<br><a href="${buildMailtoLink('Demande VHR Dashboard','Bonjour, je souhaite en savoir plus sur VHR Dashboard.')}" style="color:#1b5e20;text-decoration:underline;">${SUPPORT_EMAIL}</a>`;
+    banner.innerHTML = `💌 Une question sur le Dashboard Pro ou tout autre sujet&nbsp;? <strong>Écrivez-nous</strong> — nous répondons vite !<br><a href="${buildMailtoLink('Question VHR Dashboard Pro','Bonjour, j\'ai une question concernant VHR Dashboard Pro.')}" style="color:#1b5e20;text-decoration:underline;">${SUPPORT_EMAIL}</a>`;
     form.parentElement?.insertBefore(banner, form);
   }
 
