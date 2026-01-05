@@ -466,6 +466,9 @@
     } else if (action === 'subscription_required') {
       const msg = document.getElementById('loginMessage');
       msg.innerHTML = '<div style="background: #e8f5e9; border: 1px solid #4CAF50; color: #1b5e20; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>🔒 Créez un compte pour gérer vos abonnements</strong><br>Connexion sécurisée requise pour accéder à votre espace client.</div>';
+    } else if (action === 'launch_required') {
+      const msg = document.getElementById('loginMessage');
+      msg.innerHTML = '<div style="background: #fff8e1; border: 1px solid #fbc02d; color: #7c4a00; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>🚀 Créez votre compte avant de lancer le dashboard</strong><br>Inscrivez-vous ou connectez-vous ici, puis vous serez redirigé automatiquement vers le lancement.</div>';
     }
   });
 
