@@ -33,7 +33,14 @@ app.use(helmet({
       // Allow loading remote fonts (Google Fonts)
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:', 'https://cdn-icons-png.flaticon.com', 'https://cdn.botpress.cloud'],
-      connectSrc: ["'self'", 'https://api.stripe.com', 'https://messaging.botpress.cloud', 'https://cdn.botpress.cloud'],
+      connectSrc: [
+        "'self'",
+        'https://api.stripe.com',
+        'https://messaging.botpress.cloud',
+        'https://cdn.botpress.cloud',
+        'https://www.vhr-dashboard-site.com',
+        'https://vhr-dashboard-site.com'
+      ],
       frameSrc: ["'self'", 'https://messaging.botpress.cloud', 'https://checkout.stripe.com', 'https://js.stripe.com'],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
