@@ -3,7 +3,6 @@
   const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
   const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
   const PROD_API = 'https://www.vhr-dashboard-site.com';
-  const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
   const isProdHost = OFFICIAL_HOSTS.includes(location.hostname);
   // Si on n'est pas sur le domaine officiel (ex: localhost ou IP LAN), on cible directement l'API prod pour reconnaître les comptes créés en ligne
   const API_BASE = isProdHost ? '' : PROD_API;
