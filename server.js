@@ -689,6 +689,8 @@ app.use(helmet({
         'https://api.stripe.com',
         'https://messaging.botpress.cloud',
         'https://cdn.botpress.cloud',
+        'https://www.vhr-dashboard-site.com',
+        'https://vhr-dashboard-site.com',
         // Autoriser le WebSocket local/LAN pour l'audio
         'ws:', 'wss:',
         'http://localhost:3000',
@@ -1120,6 +1122,12 @@ async function sendAccountConfirmationEmail(user) {
 app.get('/launch-dashboard.html', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.sendFile(path.join(__dirname, 'launch-dashboard.html'));
+});
+
+// Alias /dashboard-pro.html -> serve vhr-dashboard-pro.html (main dashboard)
+app.get(['/dashboard-pro.html', '/dashboard-pro'], (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.sendFile(path.join(__dirname, 'public', 'vhr-dashboard-pro.html'));
 });
 
 // Redirect vhr-dashboard-app.html to vhr-dashboard-pro.html
@@ -6340,12 +6348,24 @@ app.post('/api/stream/audio-output', async (req, res) => {
 // ---------- Collaborative Sessions Storage ----------
 const collaborativeSessions = new Map(); // sessionCode -> { host, hostSocket, users: [{username, socketId}], createdAt }
 
+function normalizeSessionCode(rawCode) {
+  if (!rawCode) return '';
+  return String(rawCode)
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/[^A-Za-z0-9]/g, '')
+    .toUpperCase();
+}
+
 function generateSessionCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
+  do {
+    code = '';
+    for (let i = 0; i < 6; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+  } while (collaborativeSessions.has(code));
   return code;
 }
 
@@ -6360,7 +6380,7 @@ io.on('connection', socket => {
   
   // Create a new collaborative session
   socket.on('create-session', (data) => {
-    const { username } = data;
+    const username = data && data.username ? String(data.username) : 'Utilisateur';
     const sessionCode = generateSessionCode();
     
     collaborativeSessions.set(sessionCode, {
@@ -6381,7 +6401,14 @@ io.on('connection', socket => {
   
   // Join an existing session
   socket.on('join-session', (data) => {
-    const { sessionCode, username } = data;
+    const username = data && data.username ? String(data.username) : undefined;
+    const sessionCode = normalizeSessionCode(data && data.sessionCode);
+    
+    if (!sessionCode || sessionCode.length !== 6) {
+      socket.emit('session-error', { error: 'Code de session invalide.' });
+      return;
+    }
+    
     const session = collaborativeSessions.get(sessionCode);
     
     if (!session) {
@@ -6548,6 +6575,7 @@ io.on('connection', socket => {
 })();
 
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.BIND_HOST || process.env.HOST || '0.0.0.0';
 const REDIRECT_PORT = Number(process.env.HTTP_REDIRECT_PORT || 80);
 let serverStarted = false;
 
@@ -6583,11 +6611,12 @@ function logServerBanner(initializationFailed = false) {
 
 function startPrimaryServer(initializationFailed = false) {
   if (serverStarted) return;
-  listenerServer.listen(PORT, () => {
+  listenerServer.listen(PORT, HOST, () => {
+    const hostLabel = HOST === '0.0.0.0' ? '0.0.0.0 (toutes interfaces)' : HOST;
     if (useHttps) {
-      console.log(`[Server] ✓ Running in HTTPS mode on https://localhost:${PORT}`);
+      console.log(`[Server] ✓ Running in HTTPS mode on https://${hostLabel}:${PORT}`);
     } else {
-      console.log(`[Server] ✓ Running on http://localhost:${PORT}`);
+      console.log(`[Server] ✓ Running on http://${hostLabel}:${PORT}`);
     }
     logServerBanner(initializationFailed);
   });

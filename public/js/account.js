@@ -2,8 +2,9 @@
 (function(){
   const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
   const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
-  // Toujours utiliser la même origine pour respecter la CSP (self) en local/LAN
-  const API_BASE = '';
+  const PROD_API = 'https://www.vhr-dashboard-site.com';
+  // En local (localhost/127.0.0.1), on cible directement l'API prod pour reconnaître les comptes créés en ligne
+  const API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? PROD_API : '';
   const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
 
   function getStoredToken() {
