@@ -587,8 +587,7 @@ window.createSession = function() {
 };
 
 window.joinSession = function() {
-	let code = document.getElementById('joinSessionCode')?.value || '';
-	code = code.trim().replace(/\s+/g, '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+	const code = document.getElementById('joinSessionCode')?.value.trim().toUpperCase();
 	if (!code || code.length !== 6) {
 		showToast('❌ Entrez un code de session valide (6 caractères)', 'error');
 		return;
@@ -1690,6 +1689,36 @@ if (!currentUser) {
 }
 
 // ========== API & DATA ========== 
+const urlParams = new URLSearchParams(window.location.search || '');
+
+// Persiste le choix si un paramètre d'URL est fourni
+if (urlParams.get('auth') === 'prod' || urlParams.get('prod-auth') === '1') {
+	try { localStorage.setItem('forceProdAuth', '1'); localStorage.removeItem('forceLocalAuth'); } catch (e) {}
+}
+if (urlParams.get('auth') === 'local' || urlParams.get('local-auth') === '1') {
+	try { localStorage.setItem('forceLocalAuth', '1'); localStorage.removeItem('forceProdAuth'); } catch (e) {}
+}
+if (urlParams.get('mock-auth') === '1' || urlParams.get('mock') === '1') {
+	try { localStorage.setItem('useMockAuth', '1'); } catch (e) {}
+}
+
+const FORCE_PROD_AUTH = (() => {
+	if (urlParams.get('auth') === 'prod' || urlParams.get('prod-auth') === '1') return true;
+	try { return localStorage.getItem('forceProdAuth') === '1'; } catch (e) { return true; } // défaut: prod
+})();
+const FORCE_LOCAL_AUTH = (() => {
+	if (urlParams.get('auth') === 'local' || urlParams.get('local-auth') === '1') return true;
+	try { return localStorage.getItem('forceLocalAuth') === '1'; } catch (e) { return false; }
+})();
+const USE_MOCK_AUTH = (() => {
+	if (urlParams.get('mock-auth') === '1' || urlParams.get('mock') === '1') return true;
+	try { return localStorage.getItem('useMockAuth') === '1'; } catch (e) { return false; }
+})();
+
+// Par défaut on pointe vers l'API HTTPS de prod, sauf si override local/mock explicite.
+const AUTH_API_BASE = (FORCE_LOCAL_AUTH || USE_MOCK_AUTH) ? '' : 'https://www.vhr-dashboard-site.com';
+// Secret partagé pour synchroniser les comptes prod vers le backend local (HTTP)
+const SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
 const API_BASE = '/api';
 const socket = io({
 	reconnection: true,
@@ -3475,7 +3504,9 @@ async function checkLicense() {
 		
 		if (!res || !res.ok) {
 			console.error('[license] demo status check failed');
-			return true; // Allow on error
+			// Bloquer l'accès par défaut si la vérification échoue (éviter l'accès sans abo)
+			showUnlockModal({ expired: true, accessBlocked: true, subscriptionStatus: 'unknown' });
+			return false;
 		}
 		
 		const demoStatus = res.demo;
@@ -3790,24 +3821,91 @@ window.loginUser = async function() {
 	
 	try {
 		let res, data;
-		// Essayer login par username d'abord (route /api/login)
-		res = await fetch('/api/login', {
+		// 1) Auth prod par username
+		res = await fetch(`${AUTH_API_BASE}/api/login`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			credentials: 'include',
 			body: JSON.stringify({ username: identifier, password })
 		});
 		data = await res.json();
-		
+
+		// 2) Fallback prod par email
 		if (!(res.ok && data.ok)) {
-			// Fallback: login par email (route /api/auth/login)
-			res = await fetch('/api/auth/login', {
+			res = await fetch(`${AUTH_API_BASE}/api/auth/login`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				credentials: 'include',
 				body: JSON.stringify({ email: identifier, password })
 			});
 			data = await res.json();
+		}
+
+		// 3) Si prod OK, synchroniser vers backend local + cookie local
+		if (res.ok && data.ok) {
+			const syncedUsername = data.user?.username || data.user?.name || identifier;
+			const syncedEmail = data.user?.email || identifier;
+			try {
+				await fetch('/api/admin/sync-user', {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						'x-sync-secret': SYNC_USERS_SECRET
+					},
+					body: JSON.stringify({ username: syncedUsername, email: syncedEmail, role: 'user', password })
+				});
+			} catch (syncErr) {
+				console.warn('[loginUser] sync-user failed', syncErr);
+			}
+
+			// Obtenir un token local pour les requêtes HTTP/localhost
+			try {
+				const localRes = await fetch('/api/login', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					credentials: 'include',
+					body: JSON.stringify({ username: syncedUsername, password })
+				});
+				const localData = await localRes.json();
+				if (localRes.ok && localData.ok && localData.token) {
+					data.token = localData.token;
+				}
+			} catch (localLoginErr) {
+				console.warn('[loginUser] local login after sync failed', localLoginErr);
+			}
+		}
+
+		// 4) Fallback local si prod échoue
+		if (!(res.ok && data.ok)) {
+			try {
+				// Créer/synchroniser l'utilisateur en local avec le secret partagé
+				await fetch('/api/admin/sync-user', {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						'x-sync-secret': SYNC_USERS_SECRET
+					},
+					body: JSON.stringify({ username: identifier, email: identifier, role: 'user', password })
+				});
+			} catch (syncErr) {
+				console.warn('[loginUser] sync-user after prod failure failed', syncErr);
+			}
+
+			try {
+				const localRes = await fetch('/api/login', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					credentials: 'include',
+					body: JSON.stringify({ username: identifier, password })
+				});
+				const localData = await localRes.json();
+				if (localRes.ok && localData.ok) {
+					res = localRes;
+					data = localData;
+				}
+			} catch (localErr) {
+				console.warn('[loginUser] local login fallback failed', localErr);
+			}
 		}
 		
 		if (res.ok && data.ok) {
@@ -3840,11 +3938,11 @@ window.loginUser = async function() {
 };
 
 window.registerUser = async function() {
-	const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
+	const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com', 'dev.mydashboard.dev'];
 	const ACCOUNT_URL = 'https://www.vhr-dashboard-site.com/account.html?action=register';
 
-	// Hors domaine officiel : on redirige vers la page compte du site vitrine
-	if (!OFFICIAL_HOSTS.includes(window.location.hostname)) {
+	// Hors domaine officiel : on redirige vers la page compte du site vitrine (sauf mocks)
+	if (!USE_MOCK_AUTH && !OFFICIAL_HOSTS.includes(window.location.hostname)) {
 		window.open(ACCOUNT_URL, '_blank');
 		return;
 	}
@@ -3866,7 +3964,7 @@ window.registerUser = async function() {
 	showToast('📝 Création de compte...', 'info');
 	
 	try {
-		const res = await fetch('/api/auth/register', {
+		const res = await fetch(`${AUTH_API_BASE}/api/auth/register`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			credentials: 'include', // Important: send cookies
@@ -3930,26 +4028,29 @@ async function checkJWTAuth() {
 			console.log('[auth] ✓ JWT valid for user:', currentUser);
 			return true;
 		} else {
-			// No valid JWT - redirect to account page for login (simple UX for LAN users)
-			console.log('[auth] ❌ No valid JWT - redirecting to account.html');
+			// No valid JWT - show auth modal
+			console.log('[auth] ❌ No valid JWT - authenticated =', res?.authenticated);
+			console.log('[auth] Showing auth modal...');
+			
+			// Hide the loading overlay immediately
 			const overlay = document.getElementById('authOverlay');
 			if (overlay) {
 				overlay.style.display = 'none';
 			}
-			// Preserve intended page
-			const target = encodeURIComponent('/vhr-dashboard-pro.html');
-			window.location.href = `/account.html?redirect=${target}`;
+			
+			// Show auth modal
+			showAuthModal('login');
 			return false;
 		}
 	} catch (e) {
 		console.error('[auth] JWT check error:', e);
-		console.log('[auth] ❌ Redirecting to account.html due to exception');
+		console.log('[auth] ❌ Showing login modal due to exception');
+		
+		// Hide the loading overlay immediately
 		const overlay = document.getElementById('authOverlay');
 		if (overlay) {
 			overlay.style.display = 'none';
 		}
-		const target = encodeURIComponent('/vhr-dashboard-pro.html');
-		window.location.href = `/account.html?redirect=${target}`;
 		
 		showAuthModal('login');
 		return false;
