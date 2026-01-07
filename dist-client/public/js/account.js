@@ -3,6 +3,7 @@
   const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
   const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
   const PROD_API = 'https://www.vhr-dashboard-site.com';
+  const SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
   // Forcer l'API vers la prod pour que les comptes créés en ligne soient reconnus, même si la page est servie en localhost/LAN.
   const API_BASE = PROD_API;
 
@@ -10,6 +11,22 @@
     // Gardé pour la logique de facturation; n'affecte plus le routage API
     return OFFICIAL_HOSTS.includes(window.location.hostname);
   }
+    // --- Token bootstrap via querystring (to support redirection depuis le site https) ---
+    const params = new URLSearchParams(window.location.search || '');
+    const qsToken = params.get('token') || params.get('vhr_token');
+    if (qsToken) {
+      saveAuthToken(qsToken);
+      // Nettoyer l'URL pour éviter de laisser le token dans l'historique
+      try {
+        params.delete('token');
+        params.delete('vhr_token');
+        const newQuery = params.toString();
+        const cleanUrl = window.location.pathname + (newQuery ? '?' + newQuery : '') + window.location.hash;
+        window.history.replaceState({}, document.title, cleanUrl);
+      } catch (e) {
+        console.warn('[account] Impossible de nettoyer le token dans l’URL', e);
+      }
+    }
   // Toggle password visibility
   document.addEventListener('DOMContentLoaded', () => {
     const toggleButtons = document.querySelectorAll('.togglePassword');
@@ -70,8 +87,22 @@
     if (hasRedirected) return;
     // Éviter les boucles si déjà sur la page cible
     if (target && window.location.pathname !== target) {
+      // Injecter le token dans l'URL de redirection si disponible pour le transfert vers localhost/LAN
+      const token = getStoredToken();
+      let url = target;
+      if (token) {
+        try {
+          const u = new URL(target, window.location.origin);
+          if (!u.searchParams.get('token') && !u.searchParams.get('vhr_token')) {
+            u.searchParams.set('token', token);
+          }
+          url = u.pathname + (u.search ? u.search : '') + (u.hash || '');
+        } catch (e) {
+          console.warn('[redirect] Impossible d’attacher le token au redirect', e);
+        }
+      }
       hasRedirected = true;
-      window.location.href = target;
+      window.location.href = url;
     }
   }
 
@@ -177,6 +208,16 @@
     const res = await api('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: p1, email }) });
     if (res && res.ok) { 
       loginMessage.textContent = 'Compte créé ✓ Vous êtes connecté(e).'; 
+      try {
+        fetch(API_BASE + '/api/admin/sync-user', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-sync-secret': SYNC_USERS_SECRET
+          },
+          body: JSON.stringify({ username, email, role: 'user', password: p1 })
+        }).catch(()=>{});
+      } catch (err) { console.warn('[signup] sync-user failed', err); }
       await loadMe(); 
       // Pour les admins éventuels, rediriger vers l’admin; sinon rester dans l’espace compte sécurisé
       const role = (res.user && res.user.role) || res.role || res.userRole || 'user';

@@ -2,10 +2,9 @@
 (function(){
   const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
   const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
-  const PROD_API = 'https://www.vhr-dashboard-site.com';
+  // Forcer l'API vers la prod pour que les comptes créés en ligne soient reconnus, même si la page est servie en localhost/LAN.
+  const API_BASE = 'https://www.vhr-dashboard-site.com';
   const SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
-    // Forcer l'API vers la prod pour que les comptes créés en ligne soient reconnus, même si la page est servie en localhost/LAN.
-    const API_BASE = PROD_API;
   const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
 
   // --- Token bootstrap via querystring (to support redirection depuis le site https) ---
@@ -240,7 +239,7 @@
     if (res && res.ok) { 
       if (res.token) saveAuthToken(res.token);
       loginMessage.textContent = 'Compte créé ✓ Vous êtes connecté(e).'; 
-      // Sync vers backend Dashboard PRO (PostgreSQL) pour usage LAN/HTTP
+      // Sync vers backend Dashboard PRO (PostgreSQL)
       try {
         fetch(API_BASE + '/api/admin/sync-user', {
           method: 'POST',
@@ -510,9 +509,6 @@
     } else if (action === 'subscription_required') {
       const msg = document.getElementById('loginMessage');
       msg.innerHTML = '<div style="background: #e8f5e9; border: 1px solid #4CAF50; color: #1b5e20; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>🔒 Créez un compte pour gérer vos abonnements</strong><br>Connexion sécurisée requise pour accéder à votre espace client.</div>';
-    } else if (action === 'launch_required') {
-      const msg = document.getElementById('loginMessage');
-      msg.innerHTML = '<div style="background: #fff8e1; border: 1px solid #fbc02d; color: #7c4a00; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>🚀 Créez votre compte avant de lancer le dashboard</strong><br>Inscrivez-vous ou connectez-vous ici, puis vous serez redirigé automatiquement vers le lancement.</div>';
     }
   });
 

@@ -71,6 +71,7 @@ const ADMIN_ALLOWLIST = (process.env.ADMIN_ALLOWLIST || 'vhr')
   .map(u => u.trim().toLowerCase())
   .filter(Boolean);
 const ADMIN_INIT_SECRET = process.env.ADMIN_INIT_SECRET || null;
+const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || null;
 
 function isAllowedAdminUser(user) {
   const username = (typeof user === 'string' ? user : (user && user.username) || '').toLowerCase();
@@ -2535,6 +2536,83 @@ app.post('/api/admin/init-users', async (req, res) => {
   } catch (error) {
     console.error('[api/admin/init-users] Unexpected error:', error && error.message ? error.message : error);
     res.status(500).json({ ok: false, error: error && error.message ? error.message : 'Initialization failed' });
+  }
+});
+
+// --- Synchronisation des comptes depuis le site vitrine (HTTPS) vers le backend Dashboard (PostgreSQL/JSON) ---
+// Usage: POST /api/admin/sync-user avec en-tête x-sync-secret ou body.secret = SYNC_USERS_SECRET
+// Payload attendu: { username, email, role, passwordHash?, password?, stripeCustomerId?, subscriptionStatus? }
+app.post('/api/admin/sync-user', async (req, res) => {
+  if (!SYNC_USERS_SECRET) {
+    return res.status(403).json({ ok: false, error: 'SYNC_USERS_SECRET non configuré' });
+  }
+  const providedSecret = req.headers['x-sync-secret'] || req.body?.secret || req.query?.secret;
+  if (providedSecret !== SYNC_USERS_SECRET) {
+    return res.status(403).json({ ok: false, error: 'Secret invalide' });
+  }
+
+  const { username, email, role = 'user', password, passwordHash, stripeCustomerId, subscriptionStatus } = req.body || {};
+  if (!username) {
+    return res.status(400).json({ ok: false, error: 'username requis' });
+  }
+
+  try {
+    let finalHash = passwordHash || null;
+    if (!finalHash && password) {
+      finalHash = await bcrypt.hash(password, 10);
+    }
+    if (!finalHash) {
+      return res.status(400).json({ ok: false, error: 'password ou passwordHash requis' });
+    }
+
+    // --- PostgreSQL branch
+    if (USE_POSTGRES && db) {
+      const existing = await db.getUserByUsername(username);
+      if (existing && existing.id) {
+        await db.updateUser(existing.id, {
+          passwordhash: finalHash,
+          email: email || existing.email,
+          role: role || existing.role,
+          stripecustomerid: stripeCustomerId || existing.stripecustomerid || existing.stripeCustomerId || null,
+          subscriptionstatus: subscriptionStatus || existing.subscriptionstatus || existing.subscriptionStatus || null
+        });
+        return res.json({ ok: true, action: 'updated', mode: 'postgres' });
+      }
+
+      const newId = `user_${username}`;
+      await db.createUser(newId, username, finalHash, email || null, role || 'user');
+      // Note: subscription fields can be updated later if provided
+      return res.json({ ok: true, action: 'created', mode: 'postgres' });
+    }
+
+    // --- JSON / SQLite fallback
+    reloadUsers();
+    let user = getUserByUsername(username);
+    if (user) {
+      user.passwordHash = finalHash;
+      if (email !== undefined) user.email = email;
+      if (role) user.role = role;
+      if (stripeCustomerId !== undefined) user.stripeCustomerId = stripeCustomerId;
+      if (subscriptionStatus !== undefined) user.subscriptionStatus = subscriptionStatus;
+    } else {
+      user = {
+        id: `user_${username}`,
+        username,
+        passwordHash: finalHash,
+        email: email || null,
+        role: role || 'user',
+        stripeCustomerId: stripeCustomerId || null,
+        subscriptionStatus: subscriptionStatus || null,
+        createdAt: new Date().toISOString(),
+        demoStartDate: demoConfig.MODE === 'database' ? new Date().toISOString() : null
+      };
+    }
+
+    persistUser(user);
+    return res.json({ ok: true, action: user ? 'updated' : 'created', mode: 'json' });
+  } catch (e) {
+    console.error('[api/admin/sync-user] error:', e && e.message ? e.message : e);
+    return res.status(500).json({ ok: false, error: e.message || 'Server error' });
   }
 });
 
