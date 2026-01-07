@@ -110,7 +110,12 @@
   const accountName = document.getElementById('accountName');
   const accountRole = document.getElementById('accountRole');
   const logoutBtn = document.getElementById('logoutBtn');
+  const emailVerificationAlert = document.getElementById('emailVerificationAlert');
+  const resendVerificationFromBanner = document.getElementById('resendVerificationFromBanner');
+  const verificationBannerMessage = document.getElementById('verificationBannerMessage');
+  let pendingVerificationEmail = '';
   let hasRedirected = false;
+  let currentUser = null;
 
   function safeRedirect(target) {
     if (hasRedirected) return;
@@ -133,6 +138,74 @@
       hasRedirected = true;
       window.location.href = url;
     }
+  }
+
+  function renderVerificationPrompt(emailHint) {
+    const guessedEmail = (emailHint || pendingVerificationEmail || document.getElementById('signupEmail')?.value || '').trim();
+    pendingVerificationEmail = guessedEmail;
+    if (!loginMessage) return;
+
+    loginMessage.innerHTML = `
+      <div style="background:#fff4e5;border-left:4px solid #f5a524;padding:12px;border-radius:6px;">
+        <strong>Confirmez votre email${guessedEmail ? ' : ' + guessedEmail : ''}</strong>
+        <p style="margin:6px 0 8px;">Vérifiez votre boîte de réception et cliquez sur le lien de validation.</p>
+        <button id="resendVerificationBtn" class="cta-secondary">Renvoyer l'email</button>
+      </div>`;
+
+    const resendBtn = document.getElementById('resendVerificationBtn');
+    if (resendBtn) {
+      resendBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await resendVerification(undefined, loginMessage);
+      });
+    }
+  }
+
+  async function resendVerification(emailOverride, messageTarget) {
+    let targetEmail = (emailOverride || pendingVerificationEmail || document.getElementById('signupEmail')?.value || document.getElementById('profileEmail')?.value || '').trim();
+    if (!targetEmail) {
+      targetEmail = prompt('Indiquez votre email d\'inscription pour renvoyer la vérification :') || '';
+      targetEmail = targetEmail.trim();
+    }
+    if (!targetEmail) {
+      if (messageTarget) messageTarget.textContent = 'Email requis pour renvoyer la vérification';
+      return;
+    }
+
+    pendingVerificationEmail = targetEmail;
+    const res = await api('/api/auth/resend-verification', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: targetEmail })
+    });
+
+    const ok = res && res.ok;
+    const msg = ok
+      ? `Email de vérification renvoyé à ${targetEmail}`
+      : `Erreur: ${(res && res.error) || 'Impossible d\'envoyer l\'email'}`;
+    if (messageTarget) messageTarget.textContent = msg;
+    if (verificationBannerMessage) verificationBannerMessage.textContent = msg;
+    loginMessage.textContent = msg;
+    return res;
+  }
+
+  function toggleEmailVerificationBanner(user) {
+    if (!emailVerificationAlert) return;
+    const verified = user && (user.emailVerified === true || user.emailVerified === 1);
+    if (!user || verified) {
+      emailVerificationAlert.style.display = 'none';
+      if (verificationBannerMessage) verificationBannerMessage.textContent = '';
+      return;
+    }
+    pendingVerificationEmail = user.email || pendingVerificationEmail;
+    emailVerificationAlert.style.display = 'block';
+  }
+
+  if (resendVerificationFromBanner) {
+    resendVerificationFromBanner.addEventListener('click', async (e) => {
+      e.preventDefault();
+      await resendVerification(currentUser?.email || pendingVerificationEmail || undefined, verificationBannerMessage);
+    });
   }
 
   async function redirectIfAuthenticated() {
@@ -165,6 +238,8 @@
   }
 
   function showLoggedIn(user) {
+    currentUser = user || null;
+    pendingVerificationEmail = (user && user.email) || pendingVerificationEmail;
     loggedOutBox.style.display = 'none';
     loggedInBox.style.display = 'block';
     accountName.textContent = user.username || '(inconnu)';
@@ -172,8 +247,11 @@
     // populate forms
     document.getElementById('profileUsername').value = user.username || '';
     document.getElementById('profileEmail').value = user.email || '';
+    toggleEmailVerificationBanner(user);
   }
   function showLoggedOut() {
+    currentUser = null;
+    pendingVerificationEmail = '';
     clearAuthToken();
     loggedOutBox.style.display = 'block';
     loggedInBox.style.display = 'none';
@@ -216,9 +294,13 @@
           return;
         }
       } else { 
-        const errorMsg = res && res.error ? res.error : 'Erreur inconnue';
-        console.error('[LOGIN] Error:', errorMsg);
-        loginMessage.textContent = 'Erreur: ' + errorMsg; 
+        if (res && res.code === 'email_not_verified') {
+          renderVerificationPrompt(res.email);
+        } else {
+          const errorMsg = res && res.error ? res.error : 'Erreur inconnue';
+          console.error('[LOGIN] Error:', errorMsg);
+          loginMessage.textContent = 'Erreur: ' + errorMsg; 
+        }
       }
     } catch (err) {
       console.error('[LOGIN] Exception:', err);
@@ -239,6 +321,11 @@
     const res = await api('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: p1, email }) });
     if (res && res.ok) { 
       if (res.token) saveAuthToken(res.token);
+      if (res.verificationRequired && !res.autoLogin) {
+        pendingVerificationEmail = email;
+        renderVerificationPrompt(email);
+        return;
+      }
       loginMessage.textContent = 'Compte créé ✓ Vous êtes connecté(e).'; 
       // Sync vers backend Dashboard PRO (PostgreSQL) pour usage LAN/HTTP
       try {

@@ -46,6 +46,12 @@
         <h2>Bienvenue, <span id="accountName"></span></h2>
         <p>Rôle: <span id="accountRole"></span></p>
         <p>Vous êtes connecté·e. Ici vous pourrez afficher vos abonnements, factures et paramètres.</p>
+        <div id="emailVerificationAlert" style="display:none; margin: 16px 0; padding: 14px; background: #fff4e5; border-left: 4px solid #f5a524; border-radius: 6px;">
+          <strong>📧 Email non vérifié.</strong>
+          <p style="margin:8px 0 0 0;">Merci de confirmer votre adresse pour sécuriser votre compte.</p>
+          <button id="resendVerificationFromBanner" class="cta-secondary" style="margin-top:10px;">Renvoyer l'email de vérification</button>
+          <div id="verificationBannerMessage" style="margin-top:8px;font-size:13px;color:#555;"></div>
+        </div>
         
         <section id="subscriptionBox" style="margin: 24px 0; padding: 16px; background: #f0f7ff; border-left: 4px solid #2196F3; border-radius: 4px;">
           <h3>📦 Mes abonnements</h3>

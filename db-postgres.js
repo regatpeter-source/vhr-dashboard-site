@@ -62,6 +62,11 @@ async function initDatabase() {
           lastinvoicepaidat TIMESTAMPTZ,
           subscriptionstatus VARCHAR(50),
           subscriptionid VARCHAR(255),
+          emailverified BOOLEAN DEFAULT FALSE,
+          emailverificationtoken TEXT,
+          emailverificationexpiresat TIMESTAMPTZ,
+          emailverificationsentat TIMESTAMPTZ,
+          emailverifiedat TIMESTAMPTZ,
           createdat TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
           updatedat TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         )
@@ -73,7 +78,12 @@ async function initDatabase() {
         { name: 'latestinvoiceid', type: 'VARCHAR(255)' },
         { name: 'lastinvoicepaidat', type: 'TIMESTAMPTZ' },
         { name: 'subscriptionstatus', type: 'VARCHAR(50)' },
-        { name: 'subscriptionid', type: 'VARCHAR(255)' }
+          { name: 'subscriptionid', type: 'VARCHAR(255)' },
+          { name: 'emailverified', type: 'BOOLEAN DEFAULT FALSE' },
+          { name: 'emailverificationtoken', type: 'TEXT' },
+          { name: 'emailverificationexpiresat', type: 'TIMESTAMPTZ' },
+          { name: 'emailverificationsentat', type: 'TIMESTAMPTZ' },
+          { name: 'emailverifiedat', type: 'TIMESTAMPTZ' }
       ];
 
       for (const col of columnChecks) {
@@ -91,6 +101,13 @@ async function initDatabase() {
           }
         }
       }
+
+      // Legacy accounts: mark as verified if status is NULL (avoids bloquer les anciens comptes)
+      try {
+        await client.query(`UPDATE users SET emailverified = TRUE WHERE emailverified IS NULL`);
+      } catch (legacyErr) {
+        console.log('[DB] Could not backfill emailverified flag:', legacyErr && legacyErr.message);
+      }
       // Subscriptions (currently not heavily used from Postgres in server.js, but keep schema for completeness)
       await client.query(`
         CREATE TABLE IF NOT EXISTS subscriptions (
@@ -103,6 +120,11 @@ async function initDatabase() {
           expiresat TIMESTAMPTZ,
           updatedat TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         )
+          emailverified BOOLEAN DEFAULT FALSE,
+          emailverificationtoken TEXT,
+          emailverificationexpiresat TIMESTAMPTZ,
+          emailverificationsentat TIMESTAMPTZ,
+          emailverifiedat TIMESTAMPTZ,
       `);
       console.log('[DB] [32m[1m✓[0m Subscriptions table ready');
 
@@ -114,7 +136,6 @@ async function initDatabase() {
       console.error('[DB] Initialization error:', err && err.message ? err.message : err);
       // Allow retry on next call if init failed.
       initPromise = null;
-      throw err;  // Re-throw to reject the promise so errors are caught upstream
     } finally {
       client.release();
     }
@@ -171,13 +192,14 @@ async function ensureDefaultUsers(client) {
   const hasAdmin = await client.query('SELECT 1 FROM users WHERE username = $1 LIMIT 1', ['vhr']);
   if (hasAdmin.rowCount === 0) {
     await client.query(
-      'INSERT INTO users (id, username, passwordhash, email, role) VALUES ($1, $2, $3, $4, $5)',
+      'INSERT INTO users (id, username, passwordhash, email, role, emailverified) VALUES ($1, $2, $3, $4, $5, $6)',
       [
         'admin_vhr',
         'vhr',
         '$2b$10$ov9F32cIWWXhvNumETtB1urvsdD5Y4Wl6wXlSHoCy.f4f03kRGcf2',
         'admin@example.local',
-        'admin'
+        'admin',
+        true
       ]
     );
     console.log('[DB] [32m[1m✓[0m Admin user created');
@@ -186,13 +208,14 @@ async function ensureDefaultUsers(client) {
   const hasDemo = await client.query('SELECT 1 FROM users WHERE username = $1 LIMIT 1', ['VhrDashboard']);
   if (hasDemo.rowCount === 0) {
     await client.query(
-      'INSERT INTO users (id, username, passwordhash, email, role) VALUES ($1, $2, $3, $4, $5)',
+      'INSERT INTO users (id, username, passwordhash, email, role, emailverified) VALUES ($1, $2, $3, $4, $5, $6)',
       [
         'user_demo',
         'VhrDashboard',
         '$2b$10$XtU3hKSETcFgyx9w.KfL5unRFQ7H2Q26vBKXXjQ05Kz47mZbvrdQS',
         'regatpeter@hotmail.fr',
-        'user'
+        'user',
+        true
       ]
     );
     console.log('[DB] [32m[1m✓[0m Demo user created');
@@ -264,7 +287,7 @@ async function deleteMessage(id) {
 async function getUsers() {
   try {
     const result = await pool.query(
-      'SELECT id, username, email, role, createdat, updatedat, subscriptionstatus, subscriptionid, stripecustomerid FROM users ORDER BY createdat DESC'
+      'SELECT id, username, email, role, createdat, updatedat, subscriptionstatus, subscriptionid, stripecustomerid, emailverified, emailverificationtoken, emailverificationexpiresat, emailverificationsentat, emailverifiedat FROM users ORDER BY createdat DESC'
     );
     return result.rows || [];
   } catch (err) {
@@ -306,7 +329,12 @@ async function getUserByUsername(username) {
            subscriptionstatus,
            subscriptionid,
            createdat,
-           updatedat
+           updatedat,
+           emailverified,
+           emailverificationtoken,
+           emailverificationexpiresat,
+           emailverificationsentat,
+           emailverifiedat
          FROM users
          WHERE username = $1
          LIMIT 1`,
@@ -337,6 +365,16 @@ async function getUserByUsername(username) {
       subscriptionStatus: optionalFields.subscriptionstatus || null,
       subscriptionid: optionalFields.subscriptionid || null,
       subscriptionId: optionalFields.subscriptionid || null,
+      emailverified: optionalFields.emailverified ?? null,
+      emailVerified: optionalFields.emailverified ?? null,
+      emailverificationtoken: optionalFields.emailverificationtoken || null,
+      emailVerificationToken: optionalFields.emailverificationtoken || null,
+      emailverificationexpiresat: optionalFields.emailverificationexpiresat || null,
+      emailVerificationExpiresAt: optionalFields.emailverificationexpiresat || null,
+      emailverificationsentat: optionalFields.emailverificationsentat || null,
+      emailVerificationSentAt: optionalFields.emailverificationsentat || null,
+      emailverifiedat: optionalFields.emailverifiedat || null,
+      emailVerifiedAt: optionalFields.emailverifiedat || null,
       createdat: optionalFields.createdat || null,
       createdAt: optionalFields.createdat || null,
       updatedat: optionalFields.updatedat || null,
@@ -373,7 +411,12 @@ async function updateUser(id, updates) {
       'latestinvoiceid',
       'lastinvoicepaidat',
       'subscriptionstatus',
-      'subscriptionid'
+      'subscriptionid',
+      'emailverified',
+      'emailverificationtoken',
+      'emailverificationexpiresat',
+      'emailverificationsentat',
+      'emailverifiedat'
     ]);
 
     const fields = [];

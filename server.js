@@ -138,12 +138,38 @@ if (HTTPS_ENABLED && hasCert) {
 } else {
   console.log('[HTTPS] HTTPS désactivé - démarrage principal en HTTP.');
 }
+// ========== ADB BINARY DISCOVERY & AUTO-PATH ==========
+const PROJECT_ROOT = __dirname;
+const PLATFORM_TOOLS_DIR = path.join(PROJECT_ROOT, 'platform-tools');
+const ADB_FILENAME = process.platform === 'win32' ? 'adb.exe' : 'adb';
+const BUNDLED_ADB_PATH = path.join(PLATFORM_TOOLS_DIR, ADB_FILENAME);
+const HAS_BUNDLED_ADB = fs.existsSync(BUNDLED_ADB_PATH);
+const ADB_BIN = HAS_BUNDLED_ADB ? BUNDLED_ADB_PATH : ADB_FILENAME;
 
-if (useHttps && FORCE_HTTP) {
-  useHttps = false;
-  console.log('[HTTPS] FORCE_HTTP=1 détecté - démarrage forcé en HTTP malgré certificat.');
+if (HAS_BUNDLED_ADB) {
+  const adbDir = path.dirname(BUNDLED_ADB_PATH);
+  const currentPath = (process.env.PATH || '').split(path.delimiter);
+  if (!currentPath.includes(adbDir)) {
+    process.env.PATH = `${adbDir}${path.delimiter}${process.env.PATH || ''}`;
+  }
+  console.log(`[ADB] Binaire embarqué détecté: ${ADB_BIN}. Ajouté en priorité au PATH.`);
+} else {
+  console.log('[ADB] Aucun binaire ADB embarqué détecté, utilisation du adb présent dans le PATH système.');
 }
-console.log(`[DB] Mode: ${USE_POSTGRES ? 'PostgreSQL' : 'JSON Files (Development)'}`);
+
+function startBundledAdbServer() {
+  if (process.env.NO_ADB === '1') {
+    console.log('[ADB] NO_ADB=1: démarrage automatique ADB ignoré.');
+    return;
+  }
+  try {
+    const adbStartCmd = `"${ADB_BIN}" start-server`;
+    execSync(adbStartCmd, { stdio: 'ignore', timeout: 5000 });
+    console.log('[ADB] adb start-server lancé automatiquement au démarrage.');
+  } catch (e) {
+    console.warn('[ADB] Impossible de lancer adb start-server automatiquement:', e.message);
+  }
+}
 
 // ========== PROCESS TRACKING & CLEANUP ==========
 // Track all spawned processes for proper cleanup
@@ -800,6 +826,17 @@ const emailTransporter = nodemailer.createTransport({
   debug: true    // Show debug info
 });
 
+// Email verification settings
+const REQUIRE_EMAIL_VERIFICATION = (process.env.REQUIRE_EMAIL_VERIFICATION || '1') === '1';
+const AUTO_LOGIN_UNVERIFIED = process.env.AUTO_LOGIN_UNVERIFIED === '1';
+const EMAIL_VERIFICATION_TTL_HOURS_RAW = parseInt(process.env.EMAIL_VERIFICATION_TTL_HOURS || '48', 10);
+const EMAIL_VERIFICATION_TTL_HOURS = Number.isFinite(EMAIL_VERIFICATION_TTL_HOURS_RAW) ? EMAIL_VERIFICATION_TTL_HOURS_RAW : 48;
+const EMAIL_VERIFICATION_BASE_URL = (process.env.EMAIL_VERIFICATION_BASE_URL
+  || process.env.PUBLIC_BASE_URL
+  || process.env.FRONTEND_URL
+  || process.env.SITE_URL
+  || '').replace(/\/$/, '');
+
 // Verify email configuration at startup
 if (emailUser && emailPass) {
   emailTransporter.verify((err, success) => {
@@ -1068,38 +1105,70 @@ async function sendLicenseEmail(email, licenseKey, username) {
 }
 
 // Send account confirmation / welcome email on signup
-async function sendAccountConfirmationEmail(user) {
-  if (!user || !user.email) {
+async function sendAccountConfirmationEmail(user, options = {}) {
+  const normalizedUser = normalizeUserRecord(user);
+
+  if (!normalizedUser || !normalizedUser.email) {
     console.warn('[email] No recipient email for confirmation');
-    return false;
+    return { success: false, error: 'no_recipient' };
   }
 
   if (!emailUser || !emailPass) {
     console.warn('[email] SMTP not configured, skip confirmation email');
-    return false;
+    return { success: false, error: 'smtp_not_configured' };
   }
 
   if (!emailTransporter) {
     console.error('[email] emailTransporter not initialized');
-    return false;
+    return { success: false, error: 'transporter_not_initialized' };
   }
+
+  const needsVerification = !isEmailVerified(normalizedUser);
+  let verificationLink = null;
+
+  if (needsVerification) {
+    const tokenInfo = issueEmailVerificationToken(normalizedUser, { forceNew: true });
+    if (!tokenInfo || !tokenInfo.token) {
+      console.warn('[email] Unable to generate verification token');
+    } else {
+      const base = getVerificationBaseUrl(options.req);
+      const cleanBase = (base || '').replace(/\/$/, '');
+      verificationLink = `${cleanBase || 'https://www.vhr-dashboard-site.com'}/api/auth/verify-email?token=${tokenInfo.token}`;
+    }
+  }
+
+  const subject = needsVerification
+    ? '🔐 Confirmez votre adresse email'
+    : '🎉 Bienvenue sur VHR Dashboard';
+
+  const actionButton = needsVerification && verificationLink
+    ? `<p style="text-align:center;margin-top:24px;">
+        <a href="${verificationLink}" style="background:#2ecc71;color:#0d0f14;padding:14px 20px;border-radius:10px;text-decoration:none;font-weight:bold;display:inline-block;">Confirmer mon email</a>
+      </p>`
+    : `<p style="text-align:center;margin-top:24px;">
+        <a href="https://www.vhr-dashboard-site.com/launch-dashboard.html" style="background:#2ecc71;color:#0d0f14;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:bold;">Ouvrir le dashboard</a>
+      </p>`;
+
+  const verificationReminder = needsVerification ? `
+    <p style="background:#1a1d24;padding:14px;border-radius:10px;margin:18px 0;">🚨 Pour sécuriser votre compte, merci de confirmer votre adresse email dans les ${EMAIL_VERIFICATION_TTL_HOURS}h.</p>
+    ${verificationLink ? `<p style="font-size:12px;color:#95a5a6;">Lien direct : <a href="${verificationLink}" style="color:#3498db;">${verificationLink}</a></p>` : ''}
+  ` : '';
 
   const mailOptions = {
     from: process.env.EMAIL_FROM || emailUser || 'noreply@vhr-dashboard-site.com',
-    to: user.email,
-    subject: '🎉 Bienvenue sur VHR Dashboard',
+    to: normalizedUser.email,
+    subject,
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; padding: 24px; background: #0d0f14; color: #ecf0f1; border-radius: 12px;">
-        <h1 style="color: #2ecc71; text-align: center;">Bienvenue, ${user.username || 'cher utilisateur'} !</h1>
-        <p style="line-height: 1.6;">Merci d'avoir créé votre compte VHR Dashboard. Votre accès est actif et vous disposez d'une période d'essai.</p>
+        <h1 style="color: #2ecc71; text-align: center;">${needsVerification ? 'Vérifiez votre email' : 'Bienvenue, ' + (normalizedUser.username || 'cher utilisateur') + ' !'}</h1>
+        <p style="line-height: 1.6;">Merci d'avoir créé votre compte VHR Dashboard.</p>
         <div style="background:#1a1d24;padding:16px;border-radius:10px;margin:20px 0;">
-          <p style="margin:0 0 8px 0;">📧 Email: <strong>${user.email}</strong></p>
-          <p style="margin:0;">👤 Identifiant: <strong>${user.username || 'votre compte'}</strong></p>
+          <p style="margin:0 0 8px 0;">📧 Email: <strong>${normalizedUser.email}</strong></p>
+          <p style="margin:0;">👤 Identifiant: <strong>${normalizedUser.username || 'votre compte'}</strong></p>
         </div>
+        ${verificationReminder}
         <p style="line-height: 1.6;">Vous pouvez à tout moment gérer votre abonnement ou passer en offre complète depuis votre espace.</p>
-        <p style="text-align:center;margin-top:24px;">
-          <a href="https://www.vhr-dashboard-site.com/launch-dashboard.html" style="background:#2ecc71;color:#0d0f14;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:bold;">Ouvrir le dashboard</a>
-        </p>
+        ${actionButton}
         <p style="color:#95a5a6;font-size:12px;margin-top:30px;text-align:center;">
           Si vous n'êtes pas à l'origine de cette création de compte, ignorez cet email ou contactez le support.
         </p>
@@ -1109,11 +1178,11 @@ async function sendAccountConfirmationEmail(user) {
 
   try {
     const info = await emailTransporter.sendMail(mailOptions);
-    console.log('[email] ✓ Confirmation envoyée à', user.email, 'messageId:', info && info.messageId);
-    return true;
+    console.log('[email] ✓ Confirmation envoyée à', normalizedUser.email, 'messageId:', info && info.messageId);
+    return { success: true, verificationLink };
   } catch (e) {
     console.error('[email] ✗ Échec envoi confirmation:', e && e.message);
-    return false;
+    return { success: false, error: e && e.message, verificationLink };
   }
 }
 
@@ -1585,6 +1654,21 @@ function ensureDataDir() {
   try { fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true }); } catch (e) { }
 }
 
+function normalizeUserRecord(user) {
+  if (!user) return null;
+  const normalized = { ...user };
+
+  // Normalize verification fields with legacy compatibility
+  const verifiedFlag = normalized.emailVerified ?? normalized.emailverified;
+  normalized.emailVerified = verifiedFlag !== undefined ? !!verifiedFlag : true; // legacy users are trusted
+  normalized.emailVerificationToken = normalized.emailVerificationToken || normalized.emailverificationtoken || null;
+  normalized.emailVerificationExpiresAt = normalized.emailVerificationExpiresAt || normalized.emailverificationexpiresat || null;
+  normalized.emailVerificationSentAt = normalized.emailVerificationSentAt || normalized.emailverificationsentat || null;
+  normalized.emailVerifiedAt = normalized.emailVerifiedAt || normalized.emailverifiedat || (normalized.emailVerified ? normalized.emailVerifiedAt || new Date().toISOString() : null);
+
+  return normalized;
+}
+
 function saveUsers() {
   try {
     ensureDataDir();
@@ -1598,7 +1682,12 @@ function saveUsers() {
       latestInvoiceId: u.latestInvoiceId || null,
       lastInvoicePaidAt: u.lastInvoicePaidAt || null,
       subscriptionStatus: u.subscriptionStatus || null,
-      subscriptionId: u.subscriptionId || null
+      subscriptionId: u.subscriptionId || null,
+      emailVerified: u.emailVerified ?? true,
+      emailVerificationToken: u.emailVerificationToken || null,
+      emailVerificationExpiresAt: u.emailVerificationExpiresAt || null,
+      emailVerificationSentAt: u.emailVerificationSentAt || null,
+      emailVerifiedAt: u.emailVerifiedAt || null
     }));
     fs.writeFileSync(USERS_FILE, JSON.stringify(toSave, null, 2), 'utf8');
     return true;
@@ -1651,11 +1740,12 @@ function loadUsers() {
       
       // Ajouter un ID aux utilisateurs qui n'en ont pas
       userList = userList.map(user => {
-        if (!user.id) {
-          user.id = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-          console.log(`[users] Generated ID for user ${user.username}: ${user.id}`);
+        const normalized = normalizeUserRecord(user);
+        if (!normalized.id) {
+          normalized.id = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          console.log(`[users] Generated ID for user ${normalized.username}: ${normalized.id}`);
         }
-        return user;
+        return normalized;
       });
       
       return userList;
@@ -1667,7 +1757,7 @@ function loadUsers() {
   }
   // Default fallback: admin user
   console.log('[users] using default fallback admin user');
-  return [{ id: 'admin', username: 'vhr', passwordHash: '$2b$10$9pY5QEUol9cD525SEyFibeS/mIzkVhQQJBRm9TESMKGlKgqUWeZLG', role: 'admin', email: 'admin@example.local', stripeCustomerId: null }];
+  return [normalizeUserRecord({ id: 'admin', username: 'vhr', passwordHash: '$2b$10$9pY5QEUol9cD525SEyFibeS/mIzkVhQQJBRm9TESMKGlKgqUWeZLG', role: 'admin', email: 'admin@example.local', stripeCustomerId: null })];
 }
 
 let users = loadUsers();
@@ -1678,7 +1768,7 @@ if (USE_POSTGRES && db && db.getUsers) {
     try {
       const dbUsers = await db.getUsers();
       if (Array.isArray(dbUsers)) {
-        users = dbUsers.map(u => ({
+        users = dbUsers.map(u => normalizeUserRecord({
           id: u.id || `user_${u.username}`,
           username: u.username,
           passwordHash: u.passwordhash || u.passwordHash || null,
@@ -1688,7 +1778,12 @@ if (USE_POSTGRES && db && db.getUsers) {
           subscriptionStatus: u.subscriptionstatus || u.subscriptionStatus || null,
           subscriptionId: u.subscriptionid || u.subscriptionId || null,
           createdAt: u.createdat || u.createdAt || null,
-          updatedAt: u.updatedat || u.updatedAt || null
+          updatedAt: u.updatedat || u.updatedAt || null,
+          emailVerified: u.emailverified ?? u.emailVerified,
+          emailVerificationToken: u.emailverificationtoken || u.emailVerificationToken || null,
+          emailVerificationExpiresAt: u.emailverificationexpiresat || u.emailVerificationExpiresAt || null,
+          emailVerificationSentAt: u.emailverificationsentat || u.emailVerificationSentAt || null,
+          emailVerifiedAt: u.emailverifiedat || u.emailVerifiedAt || null
         }));
         console.log(`[users] Hydrated ${users.length} user(s) from PostgreSQL`);
       }
@@ -1935,7 +2030,7 @@ function reloadUsers() {
   if (USE_POSTGRES && db && db.getUsers) {
     db.getUsers().then(dbUsers => {
       if (Array.isArray(dbUsers)) {
-        users = dbUsers.map(u => ({
+        users = dbUsers.map(u => normalizeUserRecord({
           id: u.id || `user_${u.username}`,
           username: u.username,
           passwordHash: u.passwordhash || u.passwordHash || null,
@@ -1945,23 +2040,29 @@ function reloadUsers() {
           subscriptionStatus: u.subscriptionstatus || u.subscriptionStatus || null,
           subscriptionId: u.subscriptionid || u.subscriptionId || null,
           createdAt: u.createdat || u.createdAt || null,
-          updatedAt: u.updatedat || u.updatedAt || null
+          updatedAt: u.updatedat || u.updatedAt || null,
+          emailVerified: u.emailverified ?? u.emailVerified,
+          emailVerificationToken: u.emailverificationtoken || u.emailVerificationToken || null,
+          emailVerificationExpiresAt: u.emailverificationexpiresat || u.emailVerificationExpiresAt || null,
+          emailVerificationSentAt: u.emailverificationsentat || u.emailVerificationSentAt || null,
+          emailVerifiedAt: u.emailverifiedat || u.emailVerifiedAt || null
         }));
       }
     }).catch(e => console.error('[users] reload from Postgres failed:', e && e.message));
   } else if (!dbEnabled) {
-    users = loadUsers();
+    users = loadUsers().map(normalizeUserRecord);
   } else {
-    users = require('./db').getAllUsers();
+    users = require('./db').getAllUsers().map(normalizeUserRecord);
   }
 }
 
 function getUserByUsername(username) {
   if (dbEnabled) {
     const u = require('./db').findUserByUsername(username);
-    return u || null;
+    return normalizeUserRecord(u) || null;
   }
-  return users.find(u => u.username === username);
+  const found = users.find(u => u.username === username);
+  return normalizeUserRecord(found) || null;
 }
 
 function getUserByStripeCustomerId(customerId) {
@@ -1972,12 +2073,14 @@ function getUserByStripeCustomerId(customerId) {
 function getUserByEmail(email) {
   if (dbEnabled) {
     const u = require('./db').findUserByEmail?.(email);
-    return u || null;
+    return normalizeUserRecord(u) || null;
   }
-  return users.find(u => u.email === email);
+  const found = users.find(u => u.email === email);
+  return normalizeUserRecord(found) || null;
 }
 
 function persistUser(user) {
+  user = normalizeUserRecord(user);
   if (USE_POSTGRES) {
     // Keep in-memory cache in sync to avoid duplicate creation within same runtime
     const idx = users.findIndex(u => u.username === user.username);
@@ -1989,6 +2092,11 @@ function persistUser(user) {
     if (user.stripeCustomerId) updatePayload.stripecustomerid = user.stripeCustomerId;
     if (user.subscriptionStatus) updatePayload.subscriptionstatus = user.subscriptionStatus;
     if (user.subscriptionId) updatePayload.subscriptionid = user.subscriptionId;
+    if (Object.prototype.hasOwnProperty.call(user, 'emailVerified')) updatePayload.emailverified = user.emailVerified;
+    if (Object.prototype.hasOwnProperty.call(user, 'emailVerificationToken')) updatePayload.emailverificationtoken = user.emailVerificationToken || null;
+    if (Object.prototype.hasOwnProperty.call(user, 'emailVerificationExpiresAt')) updatePayload.emailverificationexpiresat = user.emailVerificationExpiresAt || null;
+    if (Object.prototype.hasOwnProperty.call(user, 'emailVerificationSentAt')) updatePayload.emailverificationsentat = user.emailVerificationSentAt || null;
+    if (Object.prototype.hasOwnProperty.call(user, 'emailVerifiedAt')) updatePayload.emailverifiedat = user.emailVerifiedAt || null;
 
     // Save async to PostgreSQL (fire and forget to avoid blocking)
     db.getUserByUsername(user.username)
@@ -2021,6 +2129,112 @@ function persistUser(user) {
     console.log('[users] persistUser: end');
     return true;
   }
+}
+
+const EMAIL_VERIFICATION_TTL_MS = Math.max(1, EMAIL_VERIFICATION_TTL_HOURS) * 60 * 60 * 1000;
+
+function getVerificationBaseUrl(req) {
+  if (EMAIL_VERIFICATION_BASE_URL) return EMAIL_VERIFICATION_BASE_URL;
+  if (req && req.protocol && req.get) {
+    const host = req.get('host');
+    if (host) return `${req.protocol}://${host}`;
+  }
+  // Fallback to public production domain
+  return 'https://www.vhr-dashboard-site.com';
+}
+
+function isEmailVerified(user) {
+  if (!user) return false;
+  if (user.emailVerified === undefined && user.emailverified === undefined) return true; // legacy users considered verified
+  return !!(user.emailVerified ?? user.emailverified);
+}
+
+async function findUserByEmailAsync(email) {
+  if (!email) return null;
+  const lookupEmail = String(email).trim();
+  if (USE_POSTGRES && db) {
+    try {
+      const resUser = await db.pool.query('SELECT * FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [lookupEmail]);
+      if (resUser.rows && resUser.rows[0]) return normalizeUserRecord(resUser.rows[0]);
+    } catch (e) {
+      console.error('[users] Postgres email lookup failed:', e && e.message);
+    }
+  }
+  return getUserByEmail(lookupEmail);
+}
+
+async function findUserByUsernameAsync(username) {
+  if (!username) return null;
+  if (USE_POSTGRES && db && db.getUserByUsername) {
+    try {
+      const u = await db.getUserByUsername(username);
+      if (u) return normalizeUserRecord(u);
+    } catch (e) {
+      console.error('[users] Postgres username lookup failed:', e && e.message);
+    }
+  }
+  return getUserByUsername(username);
+}
+
+function issueEmailVerificationToken(user, { forceNew = false } = {}) {
+  if (!user || !user.email) return null;
+  const normalized = normalizeUserRecord(user);
+
+  const now = Date.now();
+  const hasValidToken =
+    normalized.emailVerificationToken &&
+    normalized.emailVerificationExpiresAt &&
+    new Date(normalized.emailVerificationExpiresAt).getTime() > now;
+
+  if (!forceNew && hasValidToken) {
+    return {
+      token: null,
+      expiresAt: normalized.emailVerificationExpiresAt,
+      alreadyValid: true
+    };
+  }
+
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const hashed = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+  normalized.emailVerified = false;
+  normalized.emailVerificationToken = hashed;
+  normalized.emailVerificationExpiresAt = new Date(now + EMAIL_VERIFICATION_TTL_MS).toISOString();
+  normalized.emailVerificationSentAt = new Date().toISOString();
+
+  persistUser(normalized);
+
+  return {
+    token: rawToken,
+    expiresAt: normalized.emailVerificationExpiresAt,
+    alreadyValid: false
+  };
+}
+
+async function findUserByVerificationToken(tokenHash) {
+  if (!tokenHash) return null;
+  if (USE_POSTGRES && db) {
+    try {
+      const resUser = await db.pool.query('SELECT * FROM users WHERE emailverificationtoken = $1 LIMIT 1', [tokenHash]);
+      if (resUser.rows && resUser.rows[0]) return normalizeUserRecord(resUser.rows[0]);
+    } catch (e) {
+      console.warn('[users] verification token lookup failed (postgres):', e && e.message);
+    }
+  }
+
+  const local = users.find(u => u.emailVerificationToken === tokenHash);
+  return normalizeUserRecord(local) || null;
+}
+
+function markUserVerified(user) {
+  if (!user) return null;
+  const normalized = normalizeUserRecord(user);
+  normalized.emailVerified = true;
+  normalized.emailVerifiedAt = new Date().toISOString();
+  normalized.emailVerificationToken = null;
+  normalized.emailVerificationExpiresAt = null;
+  persistUser(normalized);
+  return normalized;
 }
 
 // Ensure a subscription record exists for a given user (free/trial by default)
@@ -2132,6 +2346,9 @@ function authMiddleware(req, res, next) {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
+    if (req.user && req.user.emailVerified === undefined) {
+      req.user.emailVerified = true;
+    }
     next();
   } catch (e) {
     return res.status(401).json({ ok: false, error: 'Token invalide' });
@@ -2143,20 +2360,30 @@ app.post('/api/login', async (req, res) => {
   console.log('[api/login] request received:', req.body);
   const { username, password } = req.body;
   console.log('[api/login] attempting login for:', username);
+  if (!USE_POSTGRES) {
+    reloadUsers();
+  }
   
-  let user;
-  if (USE_POSTGRES) {
-    user = await db.getUserByUsername(username);
-    console.log('[api/login] user from PostgreSQL:', user ? 'found' : 'not found');
+  let user = await findUserByUsernameAsync(username);
+  if (!user && USE_POSTGRES) {
+    console.log('[api/login] user from PostgreSQL: not found');
   } else {
-    reloadUsers(); // Reload users from file in case they were modified externally
-    user = getUserByUsername(username);
-    console.log('[api/login] user from memory:', user ? 'found' : 'not found');
+    console.log('[api/login] user lookup result:', user ? 'found' : 'not found');
   }
   
   if (!user) {
     console.log('[api/login] user not found');
     return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
+  }
+
+  if (REQUIRE_EMAIL_VERIFICATION && !isEmailVerified(user)) {
+    return res.status(403).json({
+      ok: false,
+      error: 'Adresse email non vérifiée. Consultez vos emails pour valider votre compte.',
+      code: 'email_not_verified',
+      verificationRequired: true,
+      email: user.email || null
+    });
   }
   const valid = await bcrypt.compare(password, user.passwordhash || user.passwordHash);
   if (!valid) {
@@ -2164,11 +2391,12 @@ app.post('/api/login', async (req, res) => {
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
   }
   console.log('[api/login] login successful for:', username);
-  const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+  const tokenPayload = { username: user.username, role: user.role, emailVerified: isEmailVerified(user) };
+  const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
   const cookieOptions = buildAuthCookieOptions(req);
   res.cookie('vhr_token', token, cookieOptions);
   console.log('[api/login] cookie set with secure=' + cookieOptions.secure + ', sameSite=' + cookieOptions.sameSite + ', maxAge=' + cookieOptions.maxAge);
-  res.json({ ok: true, token, userId: user.id, username: user.username, role: user.role, email: user.email || null });
+  res.json({ ok: true, token, userId: user.id, username: user.username, role: user.role, email: user.email || null, emailVerified: isEmailVerified(user) });
 });
 
 // --- Route de logout (optionnelle, côté client il suffit de supprimer le token) ---
@@ -2694,8 +2922,18 @@ app.get('/api/admin/diagnose', authMiddleware, async (req, res) => {
 });
 
 // Return authenticated user info (uses auth middleware)
-app.get('/api/me', authMiddleware, (req, res) => {
-  const user = { username: req.user.username, role: req.user.role };
+app.get('/api/me', authMiddleware, async (req, res) => {
+  const dbUser = await findUserByUsernameAsync(req.user.username);
+  const user = dbUser ? {
+    username: dbUser.username,
+    role: dbUser.role,
+    email: dbUser.email || null,
+    emailVerified: isEmailVerified(dbUser)
+  } : {
+    username: req.user.username,
+    role: req.user.role,
+    emailVerified: !!req.user.emailVerified
+  };
   res.json({ ok: true, user });
 });
 
@@ -2838,22 +3076,21 @@ app.post('/api/auth/login', async (req, res) => {
   console.log('[api/auth/login] attempting login for email:', email);
   
   // Find user by email
-  let user = null;
-  if (USE_POSTGRES && db) {
-    try {
-      const resUser = await db.pool.query('SELECT * FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [email]);
-      if (resUser.rows && resUser.rows[0]) user = resUser.rows[0];
-    } catch (e) {
-      console.error('[api/auth/login] Postgres email lookup failed:', e && e.message);
-    }
-  }
-  if (!user) {
-    user = getUserByEmail(email);
-  }
+  const user = await findUserByEmailAsync(email);
 
   if (!user) {
     console.log('[api/auth/login] user not found by email');
     return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
+  }
+
+  if (REQUIRE_EMAIL_VERIFICATION && !isEmailVerified(user)) {
+    return res.status(403).json({
+      ok: false,
+      error: 'Adresse email non vérifiée. Consultez vos emails pour valider votre compte.',
+      code: 'email_not_verified',
+      verificationRequired: true,
+      email: user.email || null
+    });
   }
   
   const valid = await bcrypt.compare(password, user.passwordhash || user.passwordHash);
@@ -2863,8 +3100,8 @@ app.post('/api/auth/login', async (req, res) => {
   }
   
   console.log('[api/auth/login] login successful for:', user.username);
-  
-  const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+  const tokenPayload = { username: user.username, role: user.role, emailVerified: isEmailVerified(user) };
+  const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
   const cookieOptions = buildAuthCookieOptions(req);
   res.cookie('vhr_token', token, cookieOptions);
   
@@ -2874,7 +3111,8 @@ app.post('/api/auth/login', async (req, res) => {
     user: {
       name: user.username,
       email: user.email,
-      role: user.role
+      role: user.role,
+      emailVerified: isEmailVerified(user)
     }
   });
 });
@@ -2930,6 +3168,11 @@ app.post('/api/auth/register', async (req, res) => {
       email,
       passwordHash,
       role: 'user',
+      emailVerified: false,
+      emailVerifiedAt: null,
+      emailVerificationToken: null,
+      emailVerificationExpiresAt: null,
+      emailVerificationSentAt: null,
       demoStartDate: new Date().toISOString(), // Trial starts now
       subscriptionStatus: null,
       subscriptionId: null,
@@ -2950,26 +3193,123 @@ app.post('/api/auth/register', async (req, res) => {
     });
 
     // Envoyer l'email de confirmation de compte (best-effort)
-    sendAccountConfirmationEmail(newUser)
-      .catch(e => console.error('[email] confirmation error:', e && e.message));
+    let confirmationResult = null;
+    try {
+      confirmationResult = await sendAccountConfirmationEmail(newUser, { req });
+    } catch (e) {
+      console.error('[email] confirmation error:', e && e.message);
+    }
+
+    if (REQUIRE_EMAIL_VERIFICATION && (!confirmationResult || confirmationResult.success === false)) {
+      return res.status(500).json({ ok: false, error: 'Impossible d\'envoyer l\'email de vérification. Vérifiez la configuration SMTP.' });
+    }
     
-    // Create JWT token for automatic login
-    const token = jwt.sign({ username: newUser.username, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-    res.cookie('vhr_token', token, buildAuthCookieOptions(req));
-    
+    const shouldAutoLogin = !REQUIRE_EMAIL_VERIFICATION || AUTO_LOGIN_UNVERIFIED;
+    let token = null;
+    if (shouldAutoLogin) {
+      token = jwt.sign({ username: newUser.username, role: newUser.role, emailVerified: isEmailVerified(newUser) }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+      res.cookie('vhr_token', token, buildAuthCookieOptions(req));
+    }
+
     res.json({ 
-      ok: true, 
+      ok: true,
+      verificationRequired: REQUIRE_EMAIL_VERIFICATION,
+      autoLogin: shouldAutoLogin,
       token,
+      message: REQUIRE_EMAIL_VERIFICATION
+        ? 'Compte créé. Merci de confirmer votre adresse email pour activer votre accès.'
+        : 'Compte créé et connecté.',
       user: {
         name: newUser.username,
         email: newUser.email,
-        role: newUser.role
+        role: newUser.role,
+        emailVerified: isEmailVerified(newUser)
       }
     });
   } catch (e) {
     console.error('[api/auth/register] error:', e);
     res.status(500).json({ ok: false, error: 'Erreur lors de l\'inscription' });
   }
+});
+
+// --- Resend verification email ---
+app.post('/api/auth/resend-verification', async (req, res) => {
+  const email = (req.body?.email || '').trim();
+  if (!email) return res.status(400).json({ ok: false, error: 'Email requis' });
+
+  const user = await findUserByEmailAsync(email);
+  if (!user) {
+    return res.status(404).json({ ok: false, error: 'Aucun compte trouvé pour cet email' });
+  }
+
+  if (isEmailVerified(user)) {
+    return res.json({ ok: true, alreadyVerified: true });
+  }
+
+  const lastSent = user.emailVerificationSentAt ? new Date(user.emailVerificationSentAt).getTime() : 0;
+  if (lastSent && Date.now() - lastSent < 2 * 60 * 1000) {
+    return res.status(429).json({ ok: false, error: 'Veuillez patienter avant de renvoyer un nouvel email' });
+  }
+
+  const sendResult = await sendAccountConfirmationEmail(user, { req, resend: true });
+  const success = !!sendResult && sendResult.success !== false;
+  if (!success) {
+    return res.status(500).json({ ok: false, error: 'Impossible d\'envoyer l\'email pour le moment' });
+  }
+
+  res.json({ ok: true, verificationRequired: true });
+});
+
+// --- Verify email ---
+app.get('/api/auth/verify-email', async (req, res) => {
+  const rawToken = String(req.query.token || '').trim();
+  if (!rawToken) {
+    return res.status(400).send('Lien de vérification manquant ou invalide.');
+  }
+
+  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+  const user = await findUserByVerificationToken(tokenHash);
+  if (!user) {
+    return res.status(400).send('Lien de vérification invalide ou déjà utilisé.');
+  }
+
+  const expiresAt = user.emailVerificationExpiresAt ? new Date(user.emailVerificationExpiresAt).getTime() : null;
+  if (expiresAt && expiresAt < Date.now()) {
+    return res.status(410).send('Ce lien a expiré. Veuillez demander un nouvel email de vérification.');
+  }
+
+  const verifiedUser = markUserVerified(user);
+  const tokenPayload = { username: verifiedUser.username, role: verifiedUser.role, emailVerified: true };
+  const authToken = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+  res.cookie('vhr_token', authToken, buildAuthCookieOptions(req));
+
+  const redirectBase = getVerificationBaseUrl(req).replace(/\/$/, '');
+  const redirectUrl = `${redirectBase}/account.html?verification=success`;
+
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="fr">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Email vérifié</title>
+        <style>
+          body { font-family: Arial, sans-serif; background: #0d0f14; color: #ecf0f1; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+          .card { background: #131722; padding: 28px; border-radius: 12px; max-width: 520px; text-align: center; box-shadow: 0 12px 40px rgba(0,0,0,0.35); }
+          a.btn { display: inline-block; margin-top: 16px; padding: 12px 18px; background: #2ecc71; color: #0d0f14; border-radius: 10px; text-decoration: none; font-weight: bold; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>✅ Email vérifié</h1>
+          <p>Merci ! Votre adresse email est maintenant confirmée.</p>
+          <p>Vous pouvez accéder immédiatement à votre espace client.</p>
+          <a class="btn" href="${redirectUrl}">Ouvrir mon compte</a>
+        </div>
+      </body>
+    </html>
+  `);
 });
 
 // ========== ADMIN ROUTES ==========
@@ -6641,6 +6981,7 @@ io.on('connection', socket => {
   }
   // Init ADB tracking only when not skipping ADB
   if (process.env.NO_ADB !== '1') {
+    startBundledAdbServer();
     (async function initServer() {
       try {
         refreshDevices();
@@ -7056,7 +7397,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 // --- Route de register / création de compte ---
 app.post('/api/register', async (req, res) => {
   const { username, password, email } = req.body || {};
-  if (!username || !password) return res.status(400).json({ ok: false, error: 'username and password required' });
+  if (!username || !password || !email) return res.status(400).json({ ok: false, error: 'username, password and email required' });
   try {
     // unique username/email (PostgreSQL vs fallback storage)
     if (USE_POSTGRES && db) {
@@ -7077,6 +7418,11 @@ app.post('/api/register', async (req, res) => {
       passwordHash, 
       role: 'user', 
       email: email || null, 
+      emailVerified: false,
+      emailVerifiedAt: null,
+      emailVerificationToken: null,
+      emailVerificationExpiresAt: null,
+      emailVerificationSentAt: null,
       stripeCustomerId: null,
       demoStartDate: new Date().toISOString() // Initialize demo start date
     };
@@ -7096,15 +7442,35 @@ app.post('/api/register', async (req, res) => {
     });
 
     // Envoyer l'email de confirmation de compte (best-effort)
+    let confirmationResult = null;
     try {
-      await sendAccountConfirmationEmail(newUser);
+      confirmationResult = await sendAccountConfirmationEmail(newUser, { req });
     } catch (mailErr) {
       console.error('[api/register] confirmation email error:', mailErr && mailErr.message ? mailErr.message : mailErr);
     }
-    // create token and set cookie
-    const token = jwt.sign({ username: newUser.username, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-    res.cookie('vhr_token', token, buildAuthCookieOptions(req));
-    res.json({ ok: true, token, userId: newUser.id, username: newUser.username, role: newUser.role, email: newUser.email });
+    if (REQUIRE_EMAIL_VERIFICATION && (!confirmationResult || confirmationResult.success === false)) {
+      return res.status(500).json({ ok: false, error: 'Impossible d\'envoyer l\'email de vérification. Vérifiez la configuration SMTP.' });
+    }
+    const shouldAutoLogin = !REQUIRE_EMAIL_VERIFICATION || AUTO_LOGIN_UNVERIFIED;
+    let token = null;
+    if (shouldAutoLogin) {
+      token = jwt.sign({ username: newUser.username, role: newUser.role, emailVerified: isEmailVerified(newUser) }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+      res.cookie('vhr_token', token, buildAuthCookieOptions(req));
+    }
+    res.json({ 
+      ok: true, 
+      verificationRequired: REQUIRE_EMAIL_VERIFICATION,
+      autoLogin: shouldAutoLogin,
+      token,
+      message: REQUIRE_EMAIL_VERIFICATION
+        ? 'Compte créé. Un email de confirmation a été envoyé.'
+        : 'Compte créé et connecté.',
+      userId: newUser.id, 
+      username: newUser.username, 
+      role: newUser.role, 
+      email: newUser.email,
+      emailVerified: isEmailVerified(newUser)
+    });
   } catch (e) {
     console.error('[api] register:', e);
     res.status(500).json({ ok: false, error: String(e) });
