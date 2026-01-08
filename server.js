@@ -3961,26 +3961,10 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
       }
     }
 
-    // Si pas de stripeCustomerId, tenter de le retrouver via l'email ou le username
+    // Si pas de stripeCustomerId, tenter de le retrouver ou de le créer proprement
     if (!user.stripeCustomerId && process.env.STRIPE_SECRET_KEY) {
       try {
-        if (user.email) {
-          const found = await stripe.customers.list({ email: user.email, limit: 5 });
-          const customer = (found.data || []).find(c => c.email && c.email.toLowerCase() === user.email.toLowerCase());
-          if (customer) {
-            user.stripeCustomerId = customer.id;
-            persistUser(user);
-          }
-        }
-        // Fallback: search by metadata.username if not found by email
-        if (!user.stripeCustomerId) {
-          const found = await stripe.customers.list({ limit: 20 });
-          const customer = (found.data || []).find(c => c.metadata && c.metadata.username && c.metadata.username.toLowerCase() === user.username.toLowerCase());
-          if (customer) {
-            user.stripeCustomerId = customer.id;
-            persistUser(user);
-          }
-        }
+        await ensureStripeCustomerForUser(user);
       } catch (custErr) {
         console.error('[subscriptions] lookup customer error:', custErr && custErr.message ? custErr.message : custErr);
       }
@@ -7201,12 +7185,60 @@ app.get('/stripe-check', async (req, res) => {
 // ---------- Stripe Customer helpers ----------
 async function ensureStripeCustomerForUser(user) {
   if (!stripe) throw new Error('Stripe not configured');
+  if (!user) throw new Error('User is required');
   if (user.stripeCustomerId) return user.stripeCustomerId;
-  // Create a new Stripe customer for this user
+
+  const username = (user.username || '').trim();
+  const email = (user.email || '').trim();
+
+  // Helper: search existing customer by email/username using Stripe Search API (covers large customer lists)
+  async function findExistingCustomer() {
+    try {
+      if (stripe.customers && stripe.customers.search) {
+        if (email) {
+          const byEmail = await stripe.customers.search({ query: `email:'${email}'`, limit: 20 });
+          const exactEmail = (byEmail.data || []).find(c => (c.email || '').toLowerCase() === email.toLowerCase());
+          if (exactEmail) return exactEmail;
+        }
+
+        if (username) {
+          const byUsername = await stripe.customers.search({ query: `metadata['username']:'${username}'`, limit: 20 });
+          const exactUser = (byUsername.data || []).find(c => (c.metadata && c.metadata.username || '').toLowerCase() === username.toLowerCase());
+          if (exactUser) return exactUser;
+        }
+      }
+    } catch (searchErr) {
+      console.warn('[Stripe] customer search fallback to list:', searchErr && searchErr.message ? searchErr.message : searchErr);
+    }
+
+    // Fallback: iterate through the first pages (auto-paging) to find a matching customer
+    try {
+      const iter = stripe.customers.list({ limit: 100 });
+      for await (const c of iter) {
+        const matchEmail = email && (c.email || '').toLowerCase() === email.toLowerCase();
+        const matchUsername = username && c.metadata && c.metadata.username && c.metadata.username.toLowerCase() === username.toLowerCase();
+        const matchName = username && (c.name || '').toLowerCase() === username.toLowerCase();
+        if (matchEmail || matchUsername || matchName) return c;
+      }
+    } catch (listErr) {
+      console.warn('[Stripe] customer list fallback failed:', listErr && listErr.message ? listErr.message : listErr);
+    }
+
+    return null;
+  }
+
+  // Try to re-link to an existing customer before creating a new one
+  const existing = await findExistingCustomer();
+  if (existing) {
+    user.stripeCustomerId = existing.id;
+    try { persistUser(user); } catch (e) { console.error('[users] save after stripe re-link failed:', e && e.message); }
+    return existing.id;
+  }
+
+  // Create a new Stripe customer for this user as a last resort
   try {
-    const cust = await stripe.customers.create({ name: user.username || undefined, email: user.email || undefined, metadata: { username: user.username } });
+    const cust = await stripe.customers.create({ name: username || undefined, email: email || undefined, metadata: { username: username || undefined } });
     user.stripeCustomerId = cust.id;
-    // Persist Stripe customer ID via DB adapter if present
     try { persistUser(user); } catch (e) { console.error('[users] save after stripe create failed:', e && e.message); }
     return cust.id;
   } catch (e) {
@@ -7248,6 +7280,12 @@ app.get('/api/billing/invoices', authMiddleware, async (req, res) => {
     }
 
     if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
+
+    // Tenter de re-lier un client Stripe avant de conclure qu'il n'y en a pas
+    if (!user.stripeCustomerId && stripe) {
+      try { await ensureStripeCustomerForUser(user); } catch (e) { console.warn('[Stripe] ensure customer for invoices failed:', e && e.message ? e.message : e); }
+    }
+
     if (!user.stripeCustomerId) return res.json({ ok: true, invoices: [] });
     const invoices = await stripe.invoices.list({ customer: user.stripeCustomerId, limit: 30 });
     res.json({ ok: true, invoices: invoices.data });
@@ -7273,6 +7311,11 @@ app.get('/api/billing/subscriptions', authMiddleware, async (req, res) => {
     }
 
     if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
+
+    if (!user.stripeCustomerId && stripe) {
+      try { await ensureStripeCustomerForUser(user); } catch (e) { console.warn('[Stripe] ensure customer for subscriptions failed:', e && e.message ? e.message : e); }
+    }
+
     if (!user.stripeCustomerId) return res.json({ ok: true, subscriptions: [] });
     const subs = await stripe.subscriptions.list({ customer: user.stripeCustomerId, limit: 30 });
     res.json({ ok: true, subscriptions: subs.data });
