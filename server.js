@@ -4742,14 +4742,22 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
       list = users;
     }
 
-    // Filter out test accounts from response
-    const filtered = Array.isArray(list)
-      ? list.filter(u => {
+    // Normalize dates and filter out test accounts from response
+    const normalized = Array.isArray(list)
+      ? list.map(u => {
+          const createdAt = u.createdAt || u.createdat || u.created || u.updatedAt || u.updatedat || null;
+          const updatedAt = u.updatedAt || u.updatedat || null;
+          return { ...u, createdAt, updatedAt };
+        })
+      : list;
+
+    const filtered = Array.isArray(normalized)
+      ? normalized.filter(u => {
           const uname = (u.username || '').toLowerCase();
           const mail = (u.email || '').toLowerCase();
           return !uname.includes('test') && !mail.includes('test');
         })
-      : list;
+      : normalized;
 
     res.json({ ok: true, users: filtered });
   } catch (e) {
@@ -5074,13 +5082,21 @@ app.get('/api/admin/stats', authMiddleware, async (req, res) => {
       list = users;
     }
 
-    const filteredUsers = Array.isArray(list)
-      ? list.filter(u => {
+    const normalizedUsers = Array.isArray(list)
+      ? list.map(u => {
+          const createdAt = u.createdAt || u.createdat || u.created || u.updatedAt || u.updatedat || null;
+          const updatedAt = u.updatedAt || u.updatedat || null;
+          return { ...u, createdAt, updatedAt };
+        })
+      : list;
+
+    const filteredUsers = Array.isArray(normalizedUsers)
+      ? normalizedUsers.filter(u => {
           const uname = (u.username || '').toLowerCase();
           const mail = (u.email || '').toLowerCase();
           return !uname.includes('test') && !mail.includes('test');
         })
-      : list;
+      : normalizedUsers;
 
     let totalUsers = Array.isArray(filteredUsers) ? filteredUsers.length : 0;
     let unreadMessages = messages.filter(m => m.status === 'unread').length;
