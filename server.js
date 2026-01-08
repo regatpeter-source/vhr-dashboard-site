@@ -4721,11 +4721,37 @@ app.get('/api/admin', authMiddleware, (req, res) => {
 });
 
 // --- Admin Routes for Dashboard ---
-// Get all users
-app.get('/api/admin/users', authMiddleware, (req, res) => {
+// Get all users (live from DB when PostgreSQL is enabled, otherwise from file cache)
+app.get('/api/admin/users', authMiddleware, async (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;
   try {
-    res.json({ ok: true, users });
+    let list = users;
+
+    if (USE_POSTGRES && db && db.getUsers) {
+      try {
+        const dbUsers = await db.getUsers();
+        if (Array.isArray(dbUsers)) {
+          list = dbUsers.map(u => normalizeUserRecord(u));
+        }
+      } catch (dbErr) {
+        console.error('[api] admin/users Postgres fetch failed:', dbErr && dbErr.message ? dbErr.message : dbErr);
+      }
+    } else {
+      // Refresh from file in SQLite/local mode
+      reloadUsers();
+      list = users;
+    }
+
+    // Filter out test accounts from response
+    const filtered = Array.isArray(list)
+      ? list.filter(u => {
+          const uname = (u.username || '').toLowerCase();
+          const mail = (u.email || '').toLowerCase();
+          return !uname.includes('test') && !mail.includes('test');
+        })
+      : list;
+
+    res.json({ ok: true, users: filtered });
   } catch (e) {
     console.error('[api] admin/users:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -5033,7 +5059,30 @@ app.get('/api/admin/stats', authMiddleware, async (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;
   try {
     let subs = [];
-    let totalUsers = users.length;
+
+    // Always refetch latest users for stats
+    let list = users;
+    if (USE_POSTGRES && db && db.getUsers) {
+      try {
+        const dbUsers = await db.getUsers();
+        if (Array.isArray(dbUsers)) list = dbUsers.map(u => normalizeUserRecord(u));
+      } catch (dbErr) {
+        console.error('[api] admin/stats Postgres fetch failed:', dbErr && dbErr.message ? dbErr.message : dbErr);
+      }
+    } else {
+      reloadUsers();
+      list = users;
+    }
+
+    const filteredUsers = Array.isArray(list)
+      ? list.filter(u => {
+          const uname = (u.username || '').toLowerCase();
+          const mail = (u.email || '').toLowerCase();
+          return !uname.includes('test') && !mail.includes('test');
+        })
+      : list;
+
+    let totalUsers = Array.isArray(filteredUsers) ? filteredUsers.length : 0;
     let unreadMessages = messages.filter(m => m.status === 'unread').length;
     let stripeActive = null;
 
