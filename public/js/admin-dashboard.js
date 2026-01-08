@@ -65,13 +65,22 @@ async function loadUsers() {
     if (data.ok && data.users.length > 0) {
       const tbody = document.getElementById('usersList');
       tbody.innerHTML = '';
-      data.users.forEach(user => {
+      const safeUsers = data.users.map(u => ({
+        ...u,
+        createdAt: u.createdAt || u.createdat || u.created || u.updatedAt || null,
+        updatedAt: u.updatedAt || u.updatedat || null
+      }));
+
+      renderUsersByMonth(safeUsers);
+
+      safeUsers.forEach(user => {
         const row = tbody.insertRow();
+        const createdLabel = user.createdAt ? new Date(user.createdAt).toLocaleDateString('fr-FR') : 'N/A';
         row.innerHTML = `
           <td>${user.username}</td>
           <td>${user.email || 'N/A'}</td>
           <td><span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></td>
-          <td>${new Date(user.createdAt).toLocaleDateString()}</td>
+          <td>${createdLabel}</td>
           <td><button class="action-btn action-btn-view" onclick="viewUser('${user.username}')">View</button></td>
         `;
       });
@@ -214,8 +223,8 @@ async function viewUser(username) {
     const user = data.users.find(u => u.username === username);
     if (user) {
       const modalBody = document.getElementById('messageModalBody');
-      const createdDate = new Date(user.createdAt).toLocaleString();
-      const updatedDate = new Date(user.updatedAt).toLocaleString();
+      const createdDate = user.createdAt ? new Date(user.createdAt).toLocaleString('fr-FR') : 'N/A';
+      const updatedDate = user.updatedAt ? new Date(user.updatedAt).toLocaleString('fr-FR') : 'N/A';
       
       modalBody.innerHTML = `
         <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
@@ -440,4 +449,57 @@ async function init() {
   console.log('[admin-dashboard] Users loaded');
   await loadMessages();
   console.log('[admin-dashboard] Messages loaded - Init complete');
+}
+
+// Render monthly grouping of users
+function renderUsersByMonth(users) {
+  const container = document.getElementById('usersByMonth');
+  if (!container) return;
+
+  if (!users || users.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>Aucun utilisateur</p></div>';
+    return;
+  }
+
+  const groups = new Map();
+  users.forEach(u => {
+    const created = u.createdAt || u.createdat || u.created || u.updatedAt || null;
+    const date = created ? new Date(created) : null;
+    const key = date && !isNaN(date) ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}` : 'unknown';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(u);
+  });
+
+  const sortedKeys = Array.from(groups.keys()).sort((a, b) => {
+    if (a === 'unknown') return 1;
+    if (b === 'unknown') return -1;
+    return a < b ? 1 : -1; // desc
+  }).slice(0, 12); // show latest 12 months/entries
+
+  container.innerHTML = '';
+
+  sortedKeys.forEach(key => {
+    const list = groups.get(key) || [];
+    const label = key === 'unknown'
+      ? 'Date inconnue'
+      : new Date(`${key}-01T00:00:00Z`).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+
+    const card = document.createElement('div');
+    card.className = 'month-card';
+    card.innerHTML = `
+      <h4>${label}</h4>
+      <div class="month-count">${list.length} utilisateur(s)</div>
+      <div class="chip-wrap"></div>
+    `;
+
+    const wrap = card.querySelector('.chip-wrap');
+    list.forEach(u => {
+      const chip = document.createElement('div');
+      chip.className = 'user-chip';
+      chip.innerHTML = `${u.username}${u.email ? `<span>${u.email}</span>` : ''}`;
+      wrap.appendChild(chip);
+    });
+
+    container.appendChild(card);
+  });
 }

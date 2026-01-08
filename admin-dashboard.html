@@ -136,6 +136,54 @@
       overflow-x: auto;
     }
 
+    .users-month-section {
+      margin-top: 20px;
+    }
+
+    .month-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .month-card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 14px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+      border: 1px solid #e2e8f0;
+    }
+
+    .month-card h4 {
+      margin-bottom: 6px;
+      color: #2d3748;
+      font-size: 15px;
+    }
+
+    .month-count {
+      color: #667eea;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .user-chip {
+      display: inline-block;
+      background: #f7fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: #2d3748;
+      margin: 4px 6px 4px 0;
+      white-space: nowrap;
+    }
+
+    .user-chip span {
+      color: #718096;
+      margin-left: 6px;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
@@ -394,6 +442,10 @@
     <div class="tab-content active" id="users-tab">
       <h2>Users</h2>
       <div id="usersMessage"></div>
+      <div class="users-month-section">
+        <h3>Utilisateurs par mois</h3>
+        <div id="usersByMonth" class="month-grid"></div>
+      </div>
       <div class="table-wrapper">
         <table id="usersTable">
           <thead>
