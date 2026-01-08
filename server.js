@@ -70,6 +70,7 @@ const ADMIN_ALLOWLIST = (process.env.ADMIN_ALLOWLIST || 'vhr')
   .split(',')
   .map(u => u.trim().toLowerCase())
   .filter(Boolean);
+const ADMIN_VERIFICATION_BYPASS_EMAIL = (process.env.ADMIN_VERIFICATION_BYPASS_EMAIL || 'admin@example.local').trim().toLowerCase();
 const ADMIN_INIT_SECRET = process.env.ADMIN_INIT_SECRET || null;
 const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || null;
 
@@ -1123,7 +1124,8 @@ async function sendAccountConfirmationEmail(user, options = {}) {
     return { success: false, error: 'transporter_not_initialized' };
   }
 
-  const needsVerification = !isEmailVerified(normalizedUser);
+  const verificationEnforced = shouldEnforceEmailVerification(normalizedUser);
+  const needsVerification = verificationEnforced && !isEmailVerified(normalizedUser);
   let verificationLink = null;
 
   if (needsVerification) {
@@ -2149,6 +2151,28 @@ function isEmailVerified(user) {
   return !!(user.emailVerified ?? user.emailverified);
 }
 
+function shouldEnforceEmailVerification(user) {
+  if (!REQUIRE_EMAIL_VERIFICATION) return false;
+  if (!user) return REQUIRE_EMAIL_VERIFICATION;
+
+  const role = (user.role || '').toString().toLowerCase();
+  const username = (user.username || '').toString().toLowerCase();
+  const email = (user.email || '').toString().toLowerCase();
+
+  const isAdminRole = role === 'admin';
+  const isAllowlisted = isAllowedAdminUser(username) || isAllowedAdminUser(user);
+  const isBypassEmail = email && email === ADMIN_VERIFICATION_BYPASS_EMAIL;
+
+  // Only the allowlisted admin with the expected email can bypass verification on the site vitrine
+  if (isAdminRole && isAllowlisted && isBypassEmail) return false;
+
+  return true;
+}
+
+function isEmailVerifiedOrBypassed(user) {
+  return isEmailVerified(user) || !shouldEnforceEmailVerification(user);
+}
+
 async function findUserByEmailAsync(email) {
   if (!email) return null;
   const lookupEmail = String(email).trim();
@@ -2376,7 +2400,8 @@ app.post('/api/login', async (req, res) => {
     return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
   }
 
-  if (REQUIRE_EMAIL_VERIFICATION && !isEmailVerified(user)) {
+  const verificationEnforced = shouldEnforceEmailVerification(user);
+  if (verificationEnforced && !isEmailVerified(user)) {
     return res.status(403).json({
       ok: false,
       error: 'Adresse email non vérifiée. Consultez vos emails pour valider votre compte.',
@@ -2390,13 +2415,14 @@ app.post('/api/login', async (req, res) => {
     console.log('[api/login] password mismatch');
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
   }
+  const emailVerifiedFlag = isEmailVerifiedOrBypassed(user);
   console.log('[api/login] login successful for:', username);
-  const tokenPayload = { username: user.username, role: user.role, emailVerified: isEmailVerified(user) };
+  const tokenPayload = { username: user.username, role: user.role, emailVerified: emailVerifiedFlag };
   const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
   const cookieOptions = buildAuthCookieOptions(req);
   res.cookie('vhr_token', token, cookieOptions);
   console.log('[api/login] cookie set with secure=' + cookieOptions.secure + ', sameSite=' + cookieOptions.sameSite + ', maxAge=' + cookieOptions.maxAge);
-  res.json({ ok: true, token, userId: user.id, username: user.username, role: user.role, email: user.email || null, emailVerified: isEmailVerified(user) });
+  res.json({ ok: true, token, userId: user.id, username: user.username, role: user.role, email: user.email || null, emailVerified: emailVerifiedFlag });
 });
 
 // --- Route de logout (optionnelle, côté client il suffit de supprimer le token) ---
@@ -3083,7 +3109,8 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
   }
 
-  if (REQUIRE_EMAIL_VERIFICATION && !isEmailVerified(user)) {
+  const verificationEnforced = shouldEnforceEmailVerification(user);
+  if (verificationEnforced && !isEmailVerified(user)) {
     return res.status(403).json({
       ok: false,
       error: 'Adresse email non vérifiée. Consultez vos emails pour valider votre compte.',
@@ -3099,8 +3126,9 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
   }
   
+  const emailVerifiedFlag = isEmailVerifiedOrBypassed(user);
   console.log('[api/auth/login] login successful for:', user.username);
-  const tokenPayload = { username: user.username, role: user.role, emailVerified: isEmailVerified(user) };
+  const tokenPayload = { username: user.username, role: user.role, emailVerified: emailVerifiedFlag };
   const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
   const cookieOptions = buildAuthCookieOptions(req);
   res.cookie('vhr_token', token, cookieOptions);
@@ -3112,7 +3140,7 @@ app.post('/api/auth/login', async (req, res) => {
       name: user.username,
       email: user.email,
       role: user.role,
-      emailVerified: isEmailVerified(user)
+      emailVerified: emailVerifiedFlag
     }
   });
 });
@@ -3193,6 +3221,7 @@ app.post('/api/auth/register', async (req, res) => {
     });
 
     // Envoyer l'email de confirmation de compte (best-effort)
+    const verificationEnforced = shouldEnforceEmailVerification(newUser);
     let confirmationResult = null;
     try {
       confirmationResult = await sendAccountConfirmationEmail(newUser, { req });
@@ -3200,30 +3229,31 @@ app.post('/api/auth/register', async (req, res) => {
       console.error('[email] confirmation error:', e && e.message);
     }
 
-    if (REQUIRE_EMAIL_VERIFICATION && (!confirmationResult || confirmationResult.success === false)) {
+    if (verificationEnforced && (!confirmationResult || confirmationResult.success === false)) {
       return res.status(500).json({ ok: false, error: 'Impossible d\'envoyer l\'email de vérification. Vérifiez la configuration SMTP.' });
     }
     
-    const shouldAutoLogin = !REQUIRE_EMAIL_VERIFICATION || AUTO_LOGIN_UNVERIFIED;
+    const shouldAutoLogin = !verificationEnforced || AUTO_LOGIN_UNVERIFIED;
+    const emailVerifiedFlag = isEmailVerifiedOrBypassed(newUser);
     let token = null;
     if (shouldAutoLogin) {
-      token = jwt.sign({ username: newUser.username, role: newUser.role, emailVerified: isEmailVerified(newUser) }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+      token = jwt.sign({ username: newUser.username, role: newUser.role, emailVerified: emailVerifiedFlag }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
       res.cookie('vhr_token', token, buildAuthCookieOptions(req));
     }
 
     res.json({ 
       ok: true,
-      verificationRequired: REQUIRE_EMAIL_VERIFICATION,
+      verificationRequired: verificationEnforced,
       autoLogin: shouldAutoLogin,
       token,
-      message: REQUIRE_EMAIL_VERIFICATION
+      message: verificationEnforced
         ? 'Compte créé. Merci de confirmer votre adresse email pour activer votre accès.'
         : 'Compte créé et connecté.',
       user: {
         name: newUser.username,
         email: newUser.email,
         role: newUser.role,
-        emailVerified: isEmailVerified(newUser)
+        emailVerified: emailVerifiedFlag
       }
     });
   } catch (e) {
@@ -3242,8 +3272,10 @@ app.post('/api/auth/resend-verification', async (req, res) => {
     return res.status(404).json({ ok: false, error: 'Aucun compte trouvé pour cet email' });
   }
 
-  if (isEmailVerified(user)) {
-    return res.json({ ok: true, alreadyVerified: true });
+  const verificationEnforced = shouldEnforceEmailVerification(user);
+
+  if (!verificationEnforced || isEmailVerified(user)) {
+    return res.json({ ok: true, alreadyVerified: true, verificationRequired: verificationEnforced, bypassed: !verificationEnforced });
   }
 
   const lastSent = user.emailVerificationSentAt ? new Date(user.emailVerificationSentAt).getTime() : 0;
@@ -3257,7 +3289,7 @@ app.post('/api/auth/resend-verification', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Impossible d\'envoyer l\'email pour le moment' });
   }
 
-  res.json({ ok: true, verificationRequired: true });
+  res.json({ ok: true, verificationRequired: verificationEnforced });
 });
 
 // --- Verify email ---
@@ -7442,34 +7474,36 @@ app.post('/api/register', async (req, res) => {
     });
 
     // Envoyer l'email de confirmation de compte (best-effort)
+    const verificationEnforced = shouldEnforceEmailVerification(newUser);
     let confirmationResult = null;
     try {
       confirmationResult = await sendAccountConfirmationEmail(newUser, { req });
     } catch (mailErr) {
       console.error('[api/register] confirmation email error:', mailErr && mailErr.message ? mailErr.message : mailErr);
     }
-    if (REQUIRE_EMAIL_VERIFICATION && (!confirmationResult || confirmationResult.success === false)) {
+    if (verificationEnforced && (!confirmationResult || confirmationResult.success === false)) {
       return res.status(500).json({ ok: false, error: 'Impossible d\'envoyer l\'email de vérification. Vérifiez la configuration SMTP.' });
     }
-    const shouldAutoLogin = !REQUIRE_EMAIL_VERIFICATION || AUTO_LOGIN_UNVERIFIED;
+    const shouldAutoLogin = !verificationEnforced || AUTO_LOGIN_UNVERIFIED;
+    const emailVerifiedFlag = isEmailVerifiedOrBypassed(newUser);
     let token = null;
     if (shouldAutoLogin) {
-      token = jwt.sign({ username: newUser.username, role: newUser.role, emailVerified: isEmailVerified(newUser) }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+      token = jwt.sign({ username: newUser.username, role: newUser.role, emailVerified: emailVerifiedFlag }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
       res.cookie('vhr_token', token, buildAuthCookieOptions(req));
     }
     res.json({ 
       ok: true, 
-      verificationRequired: REQUIRE_EMAIL_VERIFICATION,
+      verificationRequired: verificationEnforced,
       autoLogin: shouldAutoLogin,
       token,
-      message: REQUIRE_EMAIL_VERIFICATION
+      message: verificationEnforced
         ? 'Compte créé. Un email de confirmation a été envoyé.'
         : 'Compte créé et connecté.',
       userId: newUser.id, 
       username: newUser.username, 
       role: newUser.role, 
       email: newUser.email,
-      emailVerified: isEmailVerified(newUser)
+      emailVerified: emailVerifiedFlag
     });
   } catch (e) {
     console.error('[api] register:', e);
