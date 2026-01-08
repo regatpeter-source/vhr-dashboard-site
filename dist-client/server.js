@@ -1831,6 +1831,9 @@ async function reconcilePendingSubscriptions() {
   // Best-effort: check users with a Stripe subscriptionId and ensure status + email confirmation
   for (const user of users) {
     if (!user || !user.subscriptionId) continue;
+    // Ignore placeholder or fake IDs to avoid noisy 404s
+    const subId = String(user.subscriptionId || '').trim();
+    if (!subId.startsWith('sub_')) continue;
 
     let subscription;
     try {
