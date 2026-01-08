@@ -74,6 +74,18 @@ const ADMIN_VERIFICATION_BYPASS_EMAIL = (process.env.ADMIN_VERIFICATION_BYPASS_E
 const ADMIN_INIT_SECRET = process.env.ADMIN_INIT_SECRET || null;
 const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || null;
 
+// Manual email overrides to re-link Stripe customers when the stored email is missing/incorrect.
+// Can be provided via JSON in env USER_EMAIL_OVERRIDES_JSON, e.g. {"pitou":"vhrealityone@gmail.com"}
+const EMAIL_OVERRIDE_MAP = (() => {
+  let map = {};
+  if (process.env.USER_EMAIL_OVERRIDES_JSON) {
+    try { map = JSON.parse(process.env.USER_EMAIL_OVERRIDES_JSON) || {}; } catch (e) { console.warn('[config] Failed to parse USER_EMAIL_OVERRIDES_JSON:', e && e.message ? e.message : e); }
+  }
+  // Hardcoded safety net for reported account
+  if (!map.pitou) map.pitou = 'vhrealityone@gmail.com';
+  return Object.fromEntries(Object.entries(map).map(([k,v]) => [String(k || '').toLowerCase(), v]));
+})();
+
 function isAllowedAdminUser(user) {
   const username = (typeof user === 'string' ? user : (user && user.username) || '').toLowerCase();
   return !!username && ADMIN_ALLOWLIST.includes(username);
@@ -1659,6 +1671,12 @@ function ensureDataDir() {
 function normalizeUserRecord(user) {
   if (!user) return null;
   const normalized = { ...user };
+
+  // Apply email override if configured for this username
+  const overrideEmail = EMAIL_OVERRIDE_MAP[normalized.username ? normalized.username.toLowerCase() : ''];
+  if (overrideEmail && normalized.email !== overrideEmail) {
+    normalized.email = overrideEmail;
+  }
 
   // Normalize verification fields with legacy compatibility
   const verifiedFlag = normalized.emailVerified ?? normalized.emailverified;
@@ -3913,6 +3931,12 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
         user.stripeCustomerId = user.stripeCustomerId || user.stripecustomerid || null;
         user.subscriptionStatus = user.subscriptionStatus || user.subscriptionstatus || null;
         user.subscriptionId = user.subscriptionId || user.subscriptionid || null;
+        // Apply email override if needed
+        const overrideEmail = EMAIL_OVERRIDE_MAP[user.username ? user.username.toLowerCase() : ''];
+        if (overrideEmail && user.email !== overrideEmail) {
+          user.email = overrideEmail;
+          persistUser(user);
+        }
         const idx = users.findIndex(u => u.username === user.username);
         if (idx >= 0) users[idx] = user; else users.push(user);
       }
@@ -7256,6 +7280,12 @@ app.get('/api/billing/invoices', authMiddleware, async (req, res) => {
       user = await db.getUserByUsername(req.user.username);
       if (user) {
         user.stripeCustomerId = user.stripeCustomerId || user.stripecustomerid || null;
+        // Apply email override if needed
+        const overrideEmail = EMAIL_OVERRIDE_MAP[user.username ? user.username.toLowerCase() : ''];
+        if (overrideEmail && user.email !== overrideEmail) {
+          user.email = overrideEmail;
+          persistUser(user);
+        }
         const idx = users.findIndex(u => u.username === user.username);
         if (idx >= 0) users[idx] = user; else users.push(user);
       }
