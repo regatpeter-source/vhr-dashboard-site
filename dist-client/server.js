@@ -72,7 +72,10 @@ const ADMIN_ALLOWLIST = (process.env.ADMIN_ALLOWLIST || 'vhr')
   .filter(Boolean);
 const ADMIN_VERIFICATION_BYPASS_EMAIL = (process.env.ADMIN_VERIFICATION_BYPASS_EMAIL || 'admin@example.local').trim().toLowerCase();
 const ADMIN_INIT_SECRET = process.env.ADMIN_INIT_SECRET || null;
-const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || null;
+// Shared secret used when syncing users from the prod auth API to the local pack.
+// Fallbacks to the same value embedded in dashboard-pro.js to avoid 403 if the
+// environment variable is missing on local installs.
+const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
 
 // Manual email overrides to re-link Stripe customers when the stored email is missing/incorrect.
 // Can be provided via JSON in env USER_EMAIL_OVERRIDES_JSON, e.g. {"pitou":"vhrealityone@gmail.com"}

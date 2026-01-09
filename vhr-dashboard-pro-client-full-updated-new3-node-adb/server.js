@@ -71,7 +71,10 @@ const ADMIN_ALLOWLIST = (process.env.ADMIN_ALLOWLIST || 'vhr')
   .map(u => u.trim().toLowerCase())
   .filter(Boolean);
 const ADMIN_INIT_SECRET = process.env.ADMIN_INIT_SECRET || null;
-const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || null;
+// Shared secret used when syncing users from the prod auth API to the local pack.
+// Fallbacks to the same value embedded in dashboard-pro.js to avoid 403 if the
+// environment variable is missing on local installs.
+const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
 
 function isAllowedAdminUser(user) {
   const username = (typeof user === 'string' ? user : (user && user.username) || '').toLowerCase();
