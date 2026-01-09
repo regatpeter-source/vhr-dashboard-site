@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Guide developpeur : activer le mode developpeur, connecter le casque en USB, puis activer ADB over WiFi pour VHR Dashboard">
+  <title>Guide Developpeur - VHR DASHBOARD</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <nav>
+      <div class="logo">VHR DASHBOARD</div>
+      <ul>
+        <li><a href="index.html">Accueil</a></li>
+        <li><a href="features.html">Fonctionnalites</a></li>
+        <li><a href="pricing.html">Tarifs</a></li>
+        <li><a href="contact.html">Contact</a></li>
+        <li><a href="developer-setup.html">Guide developpeur</a></li>
+        <li><a href="account.html">Mon compte</a></li>
+      </ul>
+    </nav>
+  </header>
+  <main style="max-width:1000px;margin:36px auto;padding:24px;">
+    <h1>Guide Developpeur</h1>
+    <p>Instructions essentielles pour configurer votre environnement de developpement et connecter des casques VR via ADB.</p>
+
+    <section>
+      <h2>Prerequis</h2>
+      <ul>
+        <li><strong>ADB (Android Platform Tools)</strong> - Installes et configures dans le PATH. <a href="https://developer.android.com/studio/releases/platform-tools" target="_blank" rel="noopener noreferrer">Telecharger ici</a>.</li>
+        <li><strong>Drivers USB/ADB</strong> - Sur la plupart des PC Windows 10/11, les drivers generiques suffisent. Si <code>adb devices</code> reste vide, installez l'app PC Meta Quest (qui fournit le driver) ou le <a href="https://developer.android.com/studio/run/win-usb" target="_blank" rel="noopener noreferrer">Google USB Driver</a>, puis forcez <em>WinUSB</em> pour le casque dans le Gestionnaire de peripheriques.</li>
+        <li><strong>Casque VR compatible</strong> - Meta Quest, Pico, HTC Vive Focus, ou tout casque Android avec ADB.</li>
+        <li><strong>Cable USB</strong> - Pour la connexion initiale et le debogage.</li>
+        <li><strong>Mode developpeur</strong> - Activer depuis l'app mobile du casque (si applicable).</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Connexion du Casque (USB)</h2>
+      <ol>
+        <li><strong>Verifier ADB</strong> :
+          <pre><code>adb version
+adb devices</code></pre>
+        </li>
+        <li><strong>Activer le mode developpeur</strong> sur votre casque VR.</li>
+        <li><strong>Connecter le casque en USB</strong> a votre ordinateur.</li>
+        <li><strong>Accepter le debogage USB</strong> sur l'ecran du casque, et cocher <em>Toujours autoriser depuis cet ordinateur</em> pour ne plus voir la pop-up.</li>
+        <li><strong>Verifier la connexion</strong> :
+          <pre><code>adb devices</code></pre>
+          <p>Vous devriez voir votre appareil dans la liste.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Basculer en ADB over WiFi (Optionnel)</h2>
+      <p>Pour se connecter sans cable USB, une fois connectes en USB :</p>
+      <ol>
+        <li><strong>Activer ADB over WiFi</strong> :
+          <pre><code>adb tcpip 5555</code></pre>
+        </li>
+        <li><strong>Trouver l'adresse IP du casque</strong> :
+          <pre><code>adb shell ip addr show wlan0</code></pre>
+          <p>Notez l'adresse IP (ex: 192.168.1.100).</p>
+        </li>
+        <li><strong>Connecter en WiFi</strong> :
+          <pre><code>adb connect 192.168.1.100:5555
+adb devices</code></pre>
+        </li>
+        <li><strong>Deconnecter le cable USB</strong> (optionnel).</li>
+      </ol>
+      <p><strong>Note :</strong> Le serveur peut basculer automatiquement via <code>AUTO_WIFI_FROM_USB=1</code> apres la detection USB initiale.</p>
+    </section>
+
+    <section>
+      <h2>Utiliser VHR DASHBOARD</h2>
+      <p>Apres connexion du casque (USB ou WiFi), le tableau de bord detecte l'appareil et vous permet :</p>
+      <ul>
+        <li>de lancer le streaming d'ecran (ADB screenrecord ou via FFmpeg),</li>
+        <li>de lancer/arreter des apps distantes,</li>
+        <li>de gerer les profils (qualite/latence) et l'enregistrement local.</li>
+      </ul>
+      <p>Pour tout dysfonctionnement, consultez la page <a href="contact.html">Contact</a> ou signalez le probleme via la page de support.</p>
+    </section>
+
+    <section>
+      <h2>Depannage</h2>
+      <ul>
+        <li><strong>"no devices/emulators found"</strong> - Verifiez que le casque est en mode developpeur, connecte en USB, et que le debogage USB est active. Si la liste reste vide, installez le driver Quest via l'app Meta Quest PC ou le Google USB Driver, puis rebranchez le casque.</li>
+        <li><strong>Connexion WiFi instable</strong> - Assurez-vous que le casque et l'ordinateur sont sur le meme reseau. Reconnectez en USB et relancez <code>adb tcpip 5555</code>.</li>
+        <li><strong>ADB non reconnu</strong> - Verifiez que les Android Platform Tools sont installes et configures dans le PATH. Redemarrez votre terminal apres installation.</li>
+      </ul>
+    </section>
+
+  </main>
+  <footer style="text-align:center;padding:36px 24px;">
+    <small> 2025 VHR DASHBOARD - Guide d'installation & mode developpeur</small>
+  </footer>
+  <script src="/script.js"></script>
+</body>
+</html>
