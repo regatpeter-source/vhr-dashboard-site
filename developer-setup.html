@@ -29,6 +29,7 @@
       <h2>Prérequis</h2>
       <ul>
         <li>Un PC (Windows, macOS ou Linux) avec le <b>SDK Platform Tools</b> (adb) installé. Téléchargement officiel : <a href="https://developer.android.com/studio/releases/platform-tools" target="_blank" rel="noopener noreferrer">Android Platform Tools</a>.</li>
+        <li><b>Drivers USB/ADB</b> : sur Windows 10/11 récents, les drivers génériques suffisent souvent. Si <code>adb devices</code> reste vide, installez le driver Quest (app Meta Quest PC) ou le <a href="https://developer.android.com/studio/run/win-usb" target="_blank" rel="noopener noreferrer">Google USB Driver</a>, puis forcez <em>WinUSB</em> pour le casque dans le Gestionnaire de périphériques.</li>
         <li>Le casque VR (Meta Quest / Pico / autre casque Android) et le câble USB pour le connecter au PC.</li>
         <li>L'application mobile ou le compte développeur (pour certains casques comme Meta Quest, il faut créer une organisation sur <a href="https://developer.oculus.com" target="_blank" rel="noopener noreferrer">developer.oculus.com</a> et activer le mode développeur dans l'app mobile).</li>
         <li>Le fichier d'installation (APK) fourni lors du téléchargement de la démo : <code>/vhr-dashboard-demo.apk</code>.</li>
@@ -56,7 +57,7 @@ adb devices</code></pre>
           <h3>Première connexion : brancher le casque en USB</h3>
           <p>Branchez le casque en USB à votre PC. Depuis votre terminal :</p>
           <pre><code>adb devices</code></pre>
-          <p>Une popup apparaitra dans le casque demandant d'autoriser le débogage USB. Acceptez la connexion et cochez « Toujours autoriser » si vous faites confiance à ce PC.</p>
+          <p>Une popup apparaitra dans le casque demandant d'autoriser le débogage USB. Acceptez la connexion et cochez « Toujours autoriser » si vous faites confiance à ce PC pour éviter les demandes répétées.</p>
         </li>
 
         <li>
