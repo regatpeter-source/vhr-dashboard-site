@@ -2964,8 +2964,29 @@ app.post('/api/admin/revoke-subscription', authMiddleware, async (req, res) => {
 // Get demo/trial status - also check Stripe subscription status
 app.get('/api/demo/status', authMiddleware, async (req, res) => {
   try {
-    const user = getUserByUsername(req.user.username);
-    if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+    let user = getUserByUsername(req.user.username);
+
+    // Auto-provision a local user with an active trial when the JWT is valid
+    // but the account has not yet been synced to this instance (common for new
+    // signups coming from the site vitrine before the local pack has the user).
+    if (!user) {
+      console.warn(`[demo/status] User ${req.user.username} not found locally - auto-creating trial account`);
+      user = {
+        id: `auto_${req.user.username}_${Date.now()}`,
+        username: req.user.username,
+        email: req.user.email || null,
+        role: req.user.role || 'user',
+        demoStartDate: new Date().toISOString(),
+        subscriptionStatus: null,
+        subscriptionId: null,
+        stripeCustomerId: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      persistUser(user);
+      ensureUserSubscription(user, { planName: 'auto-provision', status: 'trial' });
+    }
     
     // ADMINS: Skip license/demo checks and grant full access
     if (user.role === 'admin') {

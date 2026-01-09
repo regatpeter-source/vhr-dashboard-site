@@ -145,6 +145,39 @@ if (useHttps && FORCE_HTTP) {
 }
 console.log(`[DB] Mode: ${USE_POSTGRES ? 'PostgreSQL' : 'JSON Files (Development)'}`);
 
+// ========== ADB BINARY DISCOVERY & AUTO-PATH ==========
+const PROJECT_ROOT = __dirname;
+const PLATFORM_TOOLS_DIR = path.join(PROJECT_ROOT, 'platform-tools');
+const ADB_FILENAME = process.platform === 'win32' ? 'adb.exe' : 'adb';
+const BUNDLED_ADB_PATH = path.join(PLATFORM_TOOLS_DIR, ADB_FILENAME);
+const HAS_BUNDLED_ADB = fs.existsSync(BUNDLED_ADB_PATH);
+const ADB_BIN = HAS_BUNDLED_ADB ? BUNDLED_ADB_PATH : ADB_FILENAME;
+
+if (HAS_BUNDLED_ADB) {
+  const adbDir = path.dirname(BUNDLED_ADB_PATH);
+  const currentPath = (process.env.PATH || '').split(path.delimiter);
+  if (!currentPath.includes(adbDir)) {
+    process.env.PATH = `${adbDir}${path.delimiter}${process.env.PATH || ''}`;
+  }
+  console.log(`[ADB] Binaire embarqué détecté: ${ADB_BIN}. Ajouté en priorité au PATH.`);
+} else {
+  console.log('[ADB] Aucun binaire ADB embarqué détecté, utilisation du adb présent dans le PATH système.');
+}
+
+function startBundledAdbServer() {
+  if (process.env.NO_ADB === '1') {
+    console.log('[ADB] NO_ADB=1: démarrage automatique ADB ignoré.');
+    return;
+  }
+  try {
+    const adbStartCmd = `"${ADB_BIN}" start-server`;
+    execSync(adbStartCmd, { stdio: 'ignore', timeout: 5000 });
+    console.log('[ADB] adb start-server lancé automatiquement au démarrage.');
+  } catch (e) {
+    console.warn('[ADB] Impossible de lancer adb start-server automatiquement:', e.message);
+  }
+}
+
 // ========== PROCESS TRACKING & CLEANUP ==========
 // Track all spawned processes for proper cleanup
 const trackedProcesses = new Map(); // pid -> { process, type, serial, startTime }
@@ -3071,8 +3104,29 @@ app.post('/api/admin/revoke-subscription', authMiddleware, async (req, res) => {
 // Get demo/trial status - also check Stripe subscription status
 app.get('/api/demo/status', authMiddleware, async (req, res) => {
   try {
-    const user = getUserByUsername(req.user.username);
-    if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+    let user = getUserByUsername(req.user.username);
+
+    // Auto-provision a local user with an active trial when the JWT is valid
+    // but the account has not yet been synced to this instance (common for new
+    // signups coming from the site vitrine before the local pack has the user).
+    if (!user) {
+      console.warn(`[demo/status] User ${req.user.username} not found locally - auto-creating trial account`);
+      user = {
+        id: `auto_${req.user.username}_${Date.now()}`,
+        username: req.user.username,
+        email: req.user.email || null,
+        role: req.user.role || 'user',
+        demoStartDate: new Date().toISOString(),
+        subscriptionStatus: null,
+        subscriptionId: null,
+        stripeCustomerId: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      persistUser(user);
+      ensureUserSubscription(user, { planName: 'auto-provision', status: 'trial' });
+    }
     
     // ADMINS: Skip license/demo checks and grant full access
     if (user.role === 'admin') {
@@ -6620,6 +6674,7 @@ io.on('connection', socket => {
   }
   // Init ADB tracking only when not skipping ADB
   if (process.env.NO_ADB !== '1') {
+    startBundledAdbServer();
     (async function initServer() {
       try {
         refreshDevices();
