@@ -4814,15 +4814,8 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
         })
       : list;
 
-    const filtered = Array.isArray(normalized)
-      ? normalized.filter(u => {
-          const uname = (u.username || '').toLowerCase();
-          const mail = (u.email || '').toLowerCase();
-          return !uname.includes('test') && !mail.includes('test');
-        })
-      : normalized;
-
-    res.json({ ok: true, users: filtered });
+    // Return all users (including test accounts) so admin can audit every entry
+    res.json({ ok: true, users: normalized });
   } catch (e) {
     console.error('[api] admin/users:', e);
     res.status(500).json({ ok: false, error: String(e) });
