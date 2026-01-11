@@ -453,6 +453,19 @@
             <option value="admin">Admins</option>
           </select>
         </div>
+        <div>
+          <select id="filterUserVerified" style="padding:10px;border:1px solid #cbd5e0;border-radius:6px;min-width:180px;">
+            <option value="">Tous (verifiés ou non)</option>
+            <option value="verified">Email vérifié</option>
+            <option value="unverified">Email non vérifié</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <label for="filterUserDateFrom" style="color:#2d3748;font-size:13px;">Du</label>
+          <input id="filterUserDateFrom" type="date" style="padding:8px;border:1px solid #cbd5e0;border-radius:6px;">
+          <label for="filterUserDateTo" style="color:#2d3748;font-size:13px;">Au</label>
+          <input id="filterUserDateTo" type="date" style="padding:8px;border:1px solid #cbd5e0;border-radius:6px;">
+        </div>
         <button class="btn" id="filterUserReset" style="background:#e2e8f0;color:#2d3748;">Réinitialiser</button>
       </div>
       <div class="users-month-section">

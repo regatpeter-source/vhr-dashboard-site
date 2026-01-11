@@ -84,13 +84,38 @@ async function loadUsers() {
 function applyUserFilters() {
   const search = (document.getElementById('filterUserSearch')?.value || '').toLowerCase().trim();
   const role = (document.getElementById('filterUserRole')?.value || '').toLowerCase();
+  const verified = (document.getElementById('filterUserVerified')?.value || '').toLowerCase();
+  const dateFromRaw = document.getElementById('filterUserDateFrom')?.value || '';
+  const dateToRaw = document.getElementById('filterUserDateTo')?.value || '';
+
+  const dateFrom = dateFromRaw ? new Date(dateFromRaw) : null;
+  const dateTo = dateToRaw ? new Date(dateToRaw) : null;
+  if (dateTo) {
+    // include end date fully
+    dateTo.setHours(23,59,59,999);
+  }
 
   const filtered = (cachedUsers || []).filter(u => {
     const uname = (u.username || '').toLowerCase();
     const mail = (u.email || '').toLowerCase();
     const roleMatch = role ? (String(u.role || '').toLowerCase() === role) : true;
     const searchMatch = search ? (uname.includes(search) || mail.includes(search)) : true;
-    return roleMatch && searchMatch;
+    const verifFlag = u.emailVerified ?? u.emailverified;
+    const verifiedMatch = verified === 'verified'
+      ? verifFlag === true || verifFlag === 1
+      : verified === 'unverified'
+        ? verifFlag === false || verifFlag === 0 || verifFlag === undefined
+        : true;
+
+    const createdAt = u.createdAt ? new Date(u.createdAt) : null;
+    const dateMatch = (() => {
+      if (!createdAt || isNaN(createdAt)) return true;
+      if (dateFrom && createdAt < dateFrom) return false;
+      if (dateTo && createdAt > dateTo) return false;
+      return true;
+    })();
+
+    return roleMatch && searchMatch && verifiedMatch && dateMatch;
   });
 
   renderUsersByMonth(filtered);
@@ -467,13 +492,22 @@ document.addEventListener('DOMContentLoaded', () => {
   // Filters
   const searchInput = document.getElementById('filterUserSearch');
   const roleSelect = document.getElementById('filterUserRole');
+  const verifiedSelect = document.getElementById('filterUserVerified');
+  const dateFromInput = document.getElementById('filterUserDateFrom');
+  const dateToInput = document.getElementById('filterUserDateTo');
   const resetBtn = document.getElementById('filterUserReset');
 
   if (searchInput) searchInput.addEventListener('input', debounce(applyUserFilters, 150));
   if (roleSelect) roleSelect.addEventListener('change', applyUserFilters);
+  if (verifiedSelect) verifiedSelect.addEventListener('change', applyUserFilters);
+  if (dateFromInput) dateFromInput.addEventListener('change', applyUserFilters);
+  if (dateToInput) dateToInput.addEventListener('change', applyUserFilters);
   if (resetBtn) resetBtn.addEventListener('click', () => {
     if (searchInput) searchInput.value = '';
     if (roleSelect) roleSelect.value = '';
+    if (verifiedSelect) verifiedSelect.value = '';
+    if (dateFromInput) dateFromInput.value = '';
+    if (dateToInput) dateToInput.value = '';
     applyUserFilters();
   });
 });
