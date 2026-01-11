@@ -4,7 +4,7 @@
   margin-left: auto;
   margin-right: auto;
 }
-
+  background: url('/assets/logo-vd.svg') no-repeat left center / 54px auto;
 a:focus, button:focus, .cta:focus, .cta-secondary:focus {
   outline: 2px solid #333;
   outline-offset: 2px;
@@ -20,7 +20,7 @@ body {
   font-size: 1.1em;
   font-weight: 400;
   margin: 0;
-}
+  background: url('/assets/logo-vd.svg') center center / contain no-repeat;
 
 header {
   background: linear-gradient(120deg, #2196f3 0%, #43a047 100%);
@@ -42,23 +42,17 @@ nav {
 .logo {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  height: 48px;
+  padding-left: 66px;
+  background: url('assets/logo-vd.svg') no-repeat left center / 54px auto;
   color: #fff;
   font-weight: 800;
   letter-spacing: 0.8px;
   text-transform: uppercase;
   font-size: 1.05em;
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.28));
   white-space: nowrap;
   user-select: none;
-}
-
-.logo::before {
-  content: '';
-  display: inline-block;
-  width: 54px;
-  height: 54px;
-  background: url('/assets/logo-vd.svg') center center / contain no-repeat;
-  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.28));
 }
 
 nav ul {
@@ -107,80 +101,6 @@ nav ul li a.cta-nav:hover {
   font-size: 2.5em;
   margin-bottom: 18px;
   color: #000;
-}
-
-.dashboard-showcase {
-  background: linear-gradient(135deg, #f5f7fa 0%, #e8eef7 100%);
-  border-radius: 18px;
-  margin: 48px auto;
-  max-width: 1700px;
-  padding: 56px 28px;
-  box-shadow: 0 4px 20px #0001;
-}
-
-.showcase-container {
-  display: grid;
-  grid-template-columns: 1fr 1.35fr;
-  gap: 64px;
-  align-items: center;
-}
-
-.showcase-text {
-  text-align: left;
-}
-
-.showcase-text h2 {
-  margin-top: 0;
-  margin-bottom: 14px;
-  font-size: 2.1em;
-  color: #0f172a;
-}
-
-.showcase-text p {
-  margin: 0 0 18px 0;
-  color: #334155;
-}
-
-.showcase-highlights {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 22px 0;
-}
-
-.showcase-highlights li {
-  padding: 10px 0;
-  border-bottom: 1px solid #e3e8f0;
-  color: #0f172a;
-  font-size: 1.05em;
-}
-
-.showcase-highlights li:last-child {
-  border-bottom: none;
-}
-
-.showcase-visual {
-  display: flex;
-  justify-content: center;
-  text-align: center;
-}
-
-.hero-buttons-left {
-  justify-content: flex-start;
-  gap: 12px;
-}
-
-.dashboard-hero-img {
-  display: block;
-  width: 100%;
-  max-width: none;
-  height: auto;
-  max-height: 1450px;
-  object-fit: contain;
-  margin: 0 auto;
-  border-radius: 18px;
-  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.20);
-  border: 1px solid #d9e3f5;
-  background: linear-gradient(135deg, #0b1220 0%, #0f172a 60%, #111827 100%);
 }
 
 /* Download/Demo section */
