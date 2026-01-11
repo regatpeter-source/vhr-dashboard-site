@@ -35,6 +35,24 @@
       </ul>
     </section>
 
+    <section id="drivers" style="border:1px solid #e5e7eb;padding:16px 18px;border-radius:8px;background:#0f172a0d;">
+      <h2>Drivers USB / ADB (tous casques Android)</h2>
+      <p>Si votre casque n’est pas reconnu, installez ou mettez à jour les drivers ci-dessous puis rebranchez le câble :</p>
+      <ol>
+        <li><strong>Platform Tools (ADB)</strong> : <a href="https://developer.android.com/studio/releases/platform-tools" target="_blank" rel="noopener noreferrer">télécharger</a>, dézipper et ajouter le dossier <code>platform-tools</code> dans votre <code>PATH</code>.</li>
+        <li><strong>Windows</strong> : installez un driver USB valide :
+          <ul>
+            <li><a href="https://developer.android.com/studio/run/win-usb" target="_blank" rel="noopener noreferrer">Driver USB Google</a> (générique, fonctionne pour la plupart des casques Android).</li>
+            <li>Ou le driver constructeur (Meta Quest / Pico / HTC…) depuis le site du fabricant si l’appareil n’apparait toujours pas.</li>
+          </ul>
+        </li>
+        <li>Utilisez un câble USB data de bonne qualité, changez de port USB si besoin, puis acceptez la demande de <strong>débogage USB</strong> dans le casque.</li>
+        <li>Vérifiez :
+          <pre><code>adb devices</code></pre>
+          L’appareil doit apparaitre <em>device</em> dans la liste. Sinon, redémarrez le casque et relancez l’étape driver.</li>
+      </ol>
+    </section>
+
     <section>
       <h2>Connexion initiale (USB)</h2>
       <ol>
