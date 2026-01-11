@@ -3358,6 +3358,11 @@ app.get('/api/auth/verify-email', async (req, res) => {
   }
 
   const verifiedUser = markUserVerified(user);
+
+  // Envoyer un email de confirmation/bienvenue après vérification (best-effort)
+  sendAccountConfirmationEmail(verifiedUser, { req, postVerification: true })
+    .catch(e => console.error('[email] post-verify confirmation error:', e && e.message));
+
   const tokenPayload = { username: verifiedUser.username, role: verifiedUser.role, emailVerified: true };
   const authToken = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
   res.cookie('vhr_token', authToken, buildAuthCookieOptions(req));
