@@ -442,6 +442,19 @@
     <div class="tab-content active" id="users-tab">
       <h2>Users</h2>
       <div id="usersMessage"></div>
+      <div class="table-toolbar" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:12px 0 6px 0;">
+        <div style="flex:1 1 220px;min-width:220px;">
+          <input id="filterUserSearch" type="text" placeholder="Rechercher (nom ou email)" style="width:100%;padding:10px;border:1px solid #cbd5e0;border-radius:6px;">
+        </div>
+        <div>
+          <select id="filterUserRole" style="padding:10px;border:1px solid #cbd5e0;border-radius:6px;min-width:140px;">
+            <option value="">Tous les rôles</option>
+            <option value="user">Users</option>
+            <option value="admin">Admins</option>
+          </select>
+        </div>
+        <button class="btn" id="filterUserReset" style="background:#e2e8f0;color:#2d3748;">Réinitialiser</button>
+      </div>
       <div class="users-month-section">
         <h3>Utilisateurs par mois</h3>
         <div id="usersByMonth" class="month-grid"></div>

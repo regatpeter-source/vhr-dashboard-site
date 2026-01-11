@@ -3,6 +3,7 @@ const API_BASE = OFFICIAL_HOSTS.includes(window.location.hostname)
   ? '/api'
   : 'https://www.vhr-dashboard-site.com/api';
 let currentUser = null;
+let cachedUsers = [];
 
 // Helper to make authenticated fetch requests with cookies
 async function authFetch(url, options = {}) {
@@ -63,27 +64,13 @@ async function loadUsers() {
     const res = await authFetch(`${API_BASE}/admin/users`);
     const data = await res.json();
     if (data.ok && data.users.length > 0) {
-      const tbody = document.getElementById('usersList');
-      tbody.innerHTML = '';
-      const safeUsers = data.users.map(u => ({
+      cachedUsers = data.users.map(u => ({
         ...u,
         createdAt: u.createdAt || u.createdat || u.created || u.updatedAt || null,
         updatedAt: u.updatedAt || u.updatedat || null
       }));
 
-      renderUsersByMonth(safeUsers);
-
-      safeUsers.forEach(user => {
-        const row = tbody.insertRow();
-        const createdLabel = user.createdAt ? new Date(user.createdAt).toLocaleDateString('fr-FR') : 'N/A';
-        row.innerHTML = `
-          <td>${user.username}</td>
-          <td>${user.email || 'N/A'}</td>
-          <td><span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></td>
-          <td>${createdLabel}</td>
-          <td><button class="action-btn action-btn-view" onclick="viewUser('${user.username}')">View</button></td>
-        `;
-      });
+      applyUserFilters();
     } else {
       document.getElementById('usersMessage').innerHTML = '<div class="empty-state"><p>No users found</p></div>';
     }
@@ -91,6 +78,46 @@ async function loadUsers() {
     console.error('Error loading users:', e);
     document.getElementById('usersMessage').innerHTML = `<div class="error">Error loading users</div>`;
   }
+}
+
+// Apply filters to cached users and render
+function applyUserFilters() {
+  const search = (document.getElementById('filterUserSearch')?.value || '').toLowerCase().trim();
+  const role = (document.getElementById('filterUserRole')?.value || '').toLowerCase();
+
+  const filtered = (cachedUsers || []).filter(u => {
+    const uname = (u.username || '').toLowerCase();
+    const mail = (u.email || '').toLowerCase();
+    const roleMatch = role ? (String(u.role || '').toLowerCase() === role) : true;
+    const searchMatch = search ? (uname.includes(search) || mail.includes(search)) : true;
+    return roleMatch && searchMatch;
+  });
+
+  renderUsersByMonth(filtered);
+  renderUsersTable(filtered);
+}
+
+function renderUsersTable(list) {
+  const tbody = document.getElementById('usersList');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  if (!list || list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#718096;padding:18px;">Aucun utilisateur pour ces filtres</td></tr>';
+    return;
+  }
+
+  list.forEach(user => {
+    const row = tbody.insertRow();
+    const createdLabel = user.createdAt ? new Date(user.createdAt).toLocaleDateString('fr-FR') : 'N/A';
+    row.innerHTML = `
+      <td>${user.username}</td>
+      <td>${user.email || 'N/A'}</td>
+      <td><span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></td>
+      <td>${createdLabel}</td>
+      <td><button class="action-btn action-btn-view" onclick="viewUser('${user.username}')">View</button></td>
+    `;
+  });
 }
 
 // Load subscriptions
@@ -436,7 +463,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize
   init();
+
+  // Filters
+  const searchInput = document.getElementById('filterUserSearch');
+  const roleSelect = document.getElementById('filterUserRole');
+  const resetBtn = document.getElementById('filterUserReset');
+
+  if (searchInput) searchInput.addEventListener('input', debounce(applyUserFilters, 150));
+  if (roleSelect) roleSelect.addEventListener('change', applyUserFilters);
+  if (resetBtn) resetBtn.addEventListener('click', () => {
+    if (searchInput) searchInput.value = '';
+    if (roleSelect) roleSelect.value = '';
+    applyUserFilters();
+  });
 });
+
+// Simple debounce to avoid spamming filter while typing
+function debounce(fn, wait = 200) {
+  let t;
+  return (...args) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn.apply(null, args), wait);
+  };
+}
 
 // Initialize
 async function init() {
