@@ -1849,12 +1849,20 @@ let subscriptionReconcileTimer = null;
 
 async function reconcilePendingSubscriptions() {
   if (!stripe) return;
+  let dirty = false;
   // Best-effort: check users with a Stripe subscriptionId and ensure status + email confirmation
   for (const user of users) {
     if (!user || !user.subscriptionId) continue;
     // Ignore placeholder or fake IDs to avoid noisy 404s
     const subId = String(user.subscriptionId || '').trim();
     if (!subId.startsWith('sub_')) continue;
+    if (subId.includes('placeholder')) {
+      console.warn('[subscription] Detected placeholder subscriptionId, clearing:', subId);
+      user.subscriptionId = null;
+      user.subscriptionStatus = null;
+      dirty = true;
+      continue;
+    }
 
     let subscription;
     try {
@@ -1867,6 +1875,7 @@ async function reconcilePendingSubscriptions() {
     const status = subscription?.status || user.subscriptionStatus || 'unknown';
     if (status !== user.subscriptionStatus) {
       user.subscriptionStatus = status;
+      dirty = true;
     }
 
     // Send confirmation email once when active and not already sent
@@ -1890,6 +1899,7 @@ async function reconcilePendingSubscriptions() {
 
         if (!emailResult || emailResult.success !== false) {
           user.subscriptionConfirmationSentAt = new Date().toISOString();
+          dirty = true;
           console.log('[subscription] Confirmation email sent (reconcile) to', user.email);
         } else {
           console.error('[subscription] Confirmation email failed (reconcile):', emailResult.error);
@@ -1897,6 +1907,14 @@ async function reconcilePendingSubscriptions() {
       } catch (e) {
         console.error('[subscription] Error sending confirmation (reconcile):', e && e.message);
       }
+    }
+  }
+
+  if (dirty) {
+    try {
+      saveUsers();
+    } catch (e) {
+      console.error('[subscription] Failed to persist subscription updates:', e && e.message);
     }
   }
 
