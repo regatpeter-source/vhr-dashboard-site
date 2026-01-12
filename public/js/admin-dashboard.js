@@ -140,7 +140,10 @@ function renderUsersTable(list) {
       <td>${user.email || 'N/A'}</td>
       <td><span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></td>
       <td>${createdLabel}</td>
-      <td><button class="action-btn action-btn-view" onclick="viewUser('${user.username}')">View</button></td>
+      <td>
+        <button class="action-btn action-btn-view" onclick="viewUser('${user.username}')">View</button>
+        <button class="action-btn action-btn-delete" onclick="deleteUserAccount('${user.username}')">Delete</button>
+      </td>
     `;
   });
 }
@@ -297,6 +300,42 @@ async function viewUser(username) {
   } catch (e) {
     console.error('Error viewing user:', e);
     alert('Error loading user details');
+  }
+}
+
+// Delete a user (admin only)
+async function deleteUserAccount(username) {
+  const normalized = String(username || '').trim();
+
+  if (!normalized) {
+    alert('Nom d\'utilisateur manquant');
+    return;
+  }
+
+  if (currentUser && currentUser.username && currentUser.username.toLowerCase() === normalized.toLowerCase()) {
+    alert('Vous ne pouvez pas supprimer votre propre compte depuis cette page.');
+    return;
+  }
+
+  const confirmed = confirm(`Supprimer l'utilisateur "${normalized}" ? Cette action est définitive.`);
+  if (!confirmed) return;
+
+  try {
+    const res = await authFetch(`${API_BASE}/admin/users/${encodeURIComponent(normalized)}`, { method: 'DELETE' });
+    const data = await res.json();
+
+    if (!res.ok || !data.ok) {
+      const message = (data && data.error) ? data.error : 'Erreur serveur';
+      alert('❌ ' + message);
+      return;
+    }
+
+    alert('✅ Utilisateur supprimé avec succès');
+    await loadUsers();
+    await loadStats();
+  } catch (e) {
+    console.error('[users] delete error:', e);
+    alert('❌ Erreur lors de la suppression: ' + e.message);
   }
 }
 

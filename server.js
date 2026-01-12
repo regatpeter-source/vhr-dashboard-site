@@ -2373,8 +2373,13 @@ function ensureUserSubscription(user, options = {}) {
 
 function removeUserByUsername(username) {
   if (dbEnabled) {
-      const user = getUserByUsername(username);
-    users = require('./db').getAllUsers();
+    try {
+      const adapter = require('./db');
+      adapter.deleteUserByUsername(username);
+      users = adapter.getAllUsers();
+    } catch (e) {
+      console.error('[users] sqlite delete error:', e && (e.message || e));
+    }
   } else {
     const idx = users.findIndex(u => u.username === username);
     if (idx >= 0) users.splice(idx, 1);
@@ -4837,6 +4842,54 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
   } catch (e) {
     console.error('[api] admin/users:', e);
     res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Delete a user (admin only)
+app.delete('/api/admin/users/:username', authMiddleware, async (req, res) => {
+  if (!ensureAllowedAdmin(req, res)) return;
+
+  const usernameParam = String(req.params.username || '').trim();
+  if (!usernameParam) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur requis' });
+
+  // Prevent accidental self-deletion from the admin panel
+  if (req.user && req.user.username && req.user.username.toLowerCase() === usernameParam.toLowerCase()) {
+    return res.status(400).json({ ok: false, error: 'Vous ne pouvez pas supprimer votre propre compte depuis l\'admin' });
+  }
+
+  try {
+    let targetUser = getUserByUsername(usernameParam);
+
+    // In PostgreSQL mode, ensure we look up in DB if not found in memory
+    if (!targetUser && USE_POSTGRES && db && db.getUsers) {
+      const dbUsers = await db.getUsers();
+      targetUser = (dbUsers || []).map(normalizeUserRecord).find(u => String(u.username || '').toLowerCase() === usernameParam.toLowerCase()) || null;
+    }
+
+    if (!targetUser) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
+
+    if (USE_POSTGRES && db && db.deleteUser) {
+      const deletedId = await db.deleteUser(targetUser.id);
+      if (!deletedId) throw new Error('Suppression PostgreSQL non confirmée');
+    } else if (dbEnabled) {
+      const adapter = require('./db');
+      adapter.deleteUserByUsername(targetUser.username);
+      users = adapter.getAllUsers();
+    } else {
+      removeUserByUsername(targetUser.username);
+    }
+
+    // Clean up local subscriptions when using file/SQLite storage
+    if (!USE_POSTGRES && Array.isArray(subscriptions)) {
+      const before = subscriptions.length;
+      subscriptions = subscriptions.filter(s => String(s.username || '').toLowerCase() !== targetUser.username.toLowerCase());
+      if (before !== subscriptions.length) saveSubscriptions();
+    }
+
+    return res.json({ ok: true, message: 'Utilisateur supprimé' });
+  } catch (e) {
+    console.error('[api] admin/delete-user:', e);
+    return res.status(500).json({ ok: false, error: 'Erreur serveur lors de la suppression' });
   }
 });
 
