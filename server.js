@@ -1707,6 +1707,12 @@ function normalizeUserRecord(user) {
   normalized.emailVerificationSentAt = normalized.emailVerificationSentAt || normalized.emailverificationsentat || null;
   normalized.emailVerifiedAt = normalized.emailVerifiedAt || normalized.emailverifiedat || (normalized.emailVerified ? normalized.emailVerifiedAt || new Date().toISOString() : null);
 
+  // Normalize activity & timestamps
+  normalized.createdAt = normalized.createdAt || normalized.createdat || null;
+  normalized.updatedAt = normalized.updatedAt || normalized.updatedat || null;
+  normalized.lastLogin = normalized.lastLogin || normalized.lastlogin || null;
+  normalized.lastActivity = normalized.lastActivity || normalized.lastactivity || null;
+
   return normalized;
 }
 
@@ -1724,6 +1730,10 @@ function saveUsers() {
       lastInvoicePaidAt: u.lastInvoicePaidAt || null,
       subscriptionStatus: u.subscriptionStatus || null,
       subscriptionId: u.subscriptionId || null,
+      lastLogin: u.lastLogin || null,
+      lastActivity: u.lastActivity || null,
+      createdAt: u.createdAt || null,
+      updatedAt: u.updatedAt || null,
       emailVerified: u.emailVerified ?? true,
       emailVerificationToken: u.emailVerificationToken || null,
       emailVerificationExpiresAt: u.emailVerificationExpiresAt || null,
@@ -2101,6 +2111,8 @@ function reloadUsers() {
           stripeCustomerId: u.stripecustomerid || u.stripeCustomerId || null,
           subscriptionStatus: u.subscriptionstatus || u.subscriptionStatus || null,
           subscriptionId: u.subscriptionid || u.subscriptionId || null,
+          lastLogin: u.lastlogin || u.lastLogin || null,
+          lastActivity: u.lastactivity || u.lastActivity || null,
           createdAt: u.createdat || u.createdAt || null,
           updatedAt: u.updatedat || u.updatedAt || null,
           emailVerified: u.emailverified ?? u.emailVerified,
@@ -2159,6 +2171,9 @@ function persistUser(user) {
     if (user.stripeCustomerId) updatePayload.stripecustomerid = user.stripeCustomerId;
     if (user.subscriptionStatus) updatePayload.subscriptionstatus = user.subscriptionStatus;
     if (user.subscriptionId) updatePayload.subscriptionid = user.subscriptionId;
+    if (user.lastLogin) updatePayload.lastlogin = user.lastLogin;
+    if (user.lastActivity) updatePayload.lastactivity = user.lastActivity;
+    if (user.updatedAt) updatePayload.updatedat = user.updatedAt;
     if (Object.prototype.hasOwnProperty.call(user, 'emailVerified')) updatePayload.emailverified = user.emailVerified;
     if (Object.prototype.hasOwnProperty.call(user, 'emailVerificationToken')) updatePayload.emailverificationtoken = user.emailVerificationToken || null;
     if (Object.prototype.hasOwnProperty.call(user, 'emailVerificationExpiresAt')) updatePayload.emailverificationexpiresat = user.emailVerificationExpiresAt || null;
@@ -2195,6 +2210,46 @@ function persistUser(user) {
     }
     console.log('[users] persistUser: end');
     return true;
+  }
+}
+
+const lastActivityWriteCache = new Map();
+
+async function updateUserActivity(username, { reason = 'activity' } = {}) {
+  if (!username) return;
+
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const throttleMs = reason === 'login' ? 0 : 60 * 1000; // avoid hammering storage on every request
+  const lastWrite = lastActivityWriteCache.get(username) || 0;
+
+  if (reason !== 'login' && Date.now() - lastWrite < throttleMs) {
+    return;
+  }
+
+  let userRecord = null;
+  try {
+    if (USE_POSTGRES && db && db.getUserByUsername) {
+      userRecord = await db.getUserByUsername(username);
+      userRecord = normalizeUserRecord(userRecord);
+    } else {
+      userRecord = getUserByUsername(username);
+    }
+  } catch (e) {
+    console.warn('[users] updateUserActivity lookup error:', e && e.message ? e.message : e);
+  }
+
+  if (!userRecord) return;
+
+  userRecord.lastActivity = nowIso;
+  if (reason === 'login') userRecord.lastLogin = nowIso;
+  userRecord.updatedAt = nowIso;
+
+  try {
+    persistUser(userRecord);
+    lastActivityWriteCache.set(username, Date.now());
+  } catch (e) {
+    console.error('[users] updateUserActivity persist error:', e && e.message ? e.message : e);
   }
 }
 
@@ -2443,6 +2498,8 @@ function authMiddleware(req, res, next) {
     if (req.user && req.user.emailVerified === undefined) {
       req.user.emailVerified = true;
     }
+    updateUserActivity(req.user.username, { reason: 'activity' })
+      .catch(e => console.warn('[auth] unable to record activity:', e && e.message ? e.message : e));
     next();
   } catch (e) {
     return res.status(401).json({ ok: false, error: 'Token invalide' });
@@ -2487,6 +2544,7 @@ app.post('/api/login', async (req, res) => {
   }
   const emailVerifiedFlag = isEmailVerifiedOrBypassed(user);
   console.log('[api/login] login successful for:', username);
+  await updateUserActivity(user.username, { reason: 'login' });
   const tokenPayload = { username: user.username, role: user.role, emailVerified: emailVerifiedFlag };
   const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
   const cookieOptions = buildAuthCookieOptions(req);
@@ -4833,7 +4891,9 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
       ? list.map(u => {
           const createdAt = u.createdAt || u.createdat || u.created || u.updatedAt || u.updatedat || null;
           const updatedAt = u.updatedAt || u.updatedat || null;
-          return { ...u, createdAt, updatedAt };
+          const lastLogin = u.lastLogin || u.lastlogin || null;
+          const lastActivity = u.lastActivity || u.lastactivity || null;
+          return { ...u, createdAt, updatedAt, lastLogin, lastActivity };
         })
       : list;
 

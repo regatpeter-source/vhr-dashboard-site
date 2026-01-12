@@ -62,6 +62,8 @@ async function initDatabase() {
           lastinvoicepaidat TIMESTAMPTZ,
           subscriptionstatus VARCHAR(50),
           subscriptionid VARCHAR(255),
+          lastlogin TIMESTAMPTZ,
+          lastactivity TIMESTAMPTZ,
           emailverified BOOLEAN DEFAULT FALSE,
           emailverificationtoken TEXT,
           emailverificationexpiresat TIMESTAMPTZ,
@@ -79,6 +81,8 @@ async function initDatabase() {
         { name: 'lastinvoicepaidat', type: 'TIMESTAMPTZ' },
         { name: 'subscriptionstatus', type: 'VARCHAR(50)' },
           { name: 'subscriptionid', type: 'VARCHAR(255)' },
+          { name: 'lastlogin', type: 'TIMESTAMPTZ' },
+          { name: 'lastactivity', type: 'TIMESTAMPTZ' },
           { name: 'emailverified', type: 'BOOLEAN DEFAULT FALSE' },
           { name: 'emailverificationtoken', type: 'TEXT' },
           { name: 'emailverificationexpiresat', type: 'TIMESTAMPTZ' },
@@ -287,7 +291,7 @@ async function deleteMessage(id) {
 async function getUsers() {
   try {
     const result = await pool.query(
-      'SELECT id, username, email, role, createdat, updatedat, subscriptionstatus, subscriptionid, stripecustomerid, emailverified, emailverificationtoken, emailverificationexpiresat, emailverificationsentat, emailverifiedat FROM users ORDER BY createdat DESC'
+      'SELECT id, username, email, role, createdat, updatedat, lastlogin, lastactivity, subscriptionstatus, subscriptionid, stripecustomerid, emailverified, emailverificationtoken, emailverificationexpiresat, emailverificationsentat, emailverifiedat FROM users ORDER BY createdat DESC'
     );
     return result.rows || [];
   } catch (err) {
@@ -328,6 +332,8 @@ async function getUserByUsername(username) {
            lastinvoicepaidat,
            subscriptionstatus,
            subscriptionid,
+           lastlogin,
+           lastactivity,
            createdat,
            updatedat,
            emailverified,
@@ -365,6 +371,10 @@ async function getUserByUsername(username) {
       subscriptionStatus: optionalFields.subscriptionstatus || null,
       subscriptionid: optionalFields.subscriptionid || null,
       subscriptionId: optionalFields.subscriptionid || null,
+      lastlogin: optionalFields.lastlogin || null,
+      lastLogin: optionalFields.lastlogin || null,
+      lastactivity: optionalFields.lastactivity || null,
+      lastActivity: optionalFields.lastactivity || null,
       emailverified: optionalFields.emailverified ?? null,
       emailVerified: optionalFields.emailverified ?? null,
       emailverificationtoken: optionalFields.emailverificationtoken || null,
@@ -412,6 +422,8 @@ async function updateUser(id, updates) {
       'lastinvoicepaidat',
       'subscriptionstatus',
       'subscriptionid',
+      'lastlogin',
+      'lastactivity',
       'emailverified',
       'emailverificationtoken',
       'emailverificationexpiresat',

@@ -67,7 +67,9 @@ async function loadUsers() {
       cachedUsers = data.users.map(u => ({
         ...u,
         createdAt: u.createdAt || u.createdat || u.created || u.updatedAt || null,
-        updatedAt: u.updatedAt || u.updatedat || null
+        updatedAt: u.updatedAt || u.updatedat || null,
+        lastLogin: u.lastLogin || u.lastlogin || u.last_connection || null,
+        lastActivity: u.lastActivity || u.lastactivity || u.last_active || null
       }));
 
       applyUserFilters();
@@ -128,19 +130,22 @@ function renderUsersTable(list) {
   tbody.innerHTML = '';
 
   if (!list || list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#718096;padding:18px;">Aucun utilisateur pour ces filtres</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#718096;padding:18px;">Aucun utilisateur pour ces filtres</td></tr>';
     return;
   }
 
   list.forEach(user => {
     const row = tbody.insertRow();
     const createdLabel = user.createdAt ? new Date(user.createdAt).toLocaleDateString('fr-FR') : 'N/A';
+    const lastSeenValue = user.lastActivity || user.lastLogin || null;
+    const lastSeenLabel = lastSeenValue ? new Date(lastSeenValue).toLocaleString('fr-FR') : 'N/A';
     const isProtectedAdmin = user.role === 'admin' && user.username && user.username.toLowerCase() === 'vhr';
     row.innerHTML = `
       <td>${user.username}</td>
       <td>${user.email || 'N/A'}</td>
       <td><span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></td>
       <td>${createdLabel}</td>
+      <td>${lastSeenLabel}</td>
       <td>
         <button class="action-btn action-btn-view" onclick="viewUser('${user.username}')">View</button>
         ${isProtectedAdmin ? '' : `<button class="action-btn action-btn-delete" onclick="deleteUserAccount('${user.username}')">Delete</button>`}
@@ -281,6 +286,8 @@ async function viewUser(username) {
       const modalBody = document.getElementById('messageModalBody');
       const createdDate = user.createdAt ? new Date(user.createdAt).toLocaleString('fr-FR') : 'N/A';
       const updatedDate = user.updatedAt ? new Date(user.updatedAt).toLocaleString('fr-FR') : 'N/A';
+      const lastLogin = user.lastLogin ? new Date(user.lastLogin).toLocaleString('fr-FR') : 'N/A';
+      const lastActivity = user.lastActivity ? new Date(user.lastActivity).toLocaleString('fr-FR') : 'N/A';
       const subStatusLabel = user.subscriptionStatus || 'None';
       
       modalBody.innerHTML = `
@@ -289,7 +296,9 @@ async function viewUser(username) {
           <p style="margin: 0 0 10px 0;"><strong>Email:</strong> ${user.email || 'N/A'}</p>
           <p style="margin: 0 0 10px 0;"><strong>Role:</strong> <span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></p>
           <p style="margin: 0 0 10px 0;"><strong>Created:</strong> ${createdDate}</p>
-          <p style="margin: 0 0 0 0;"><strong>Updated:</strong> ${updatedDate}</p>
+          <p style="margin: 0 0 10px 0;"><strong>Updated:</strong> ${updatedDate}</p>
+          <p style="margin: 0 0 6px 0;"><strong>Dernière connexion:</strong> ${lastLogin}</p>
+          <p style="margin: 0 0 0 0;"><strong>Dernière activité:</strong> ${lastActivity}</p>
         </div>
         <div style="padding: 15px; background: #fff; border-radius: 8px; border: 1px solid #e0e0e0;">
           <h4 style="margin-top: 0;">Subscription Info</h4>
