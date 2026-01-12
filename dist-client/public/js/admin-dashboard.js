@@ -64,6 +64,7 @@ async function loadUsers() {
       tbody.innerHTML = '';
       data.users.forEach(user => {
         const row = tbody.insertRow();
+        const isProtectedAdmin = user.role === 'admin' && user.username && user.username.toLowerCase() === 'vhr';
         row.innerHTML = `
           <td>${user.username}</td>
           <td>${user.email || 'N/A'}</td>
@@ -71,7 +72,7 @@ async function loadUsers() {
           <td>${new Date(user.createdAt).toLocaleDateString()}</td>
           <td>
             <button class="action-btn action-btn-view" onclick="viewUser('${user.username}')">View</button>
-            <button class="action-btn action-btn-delete" onclick="deleteUserAccount('${user.username}')">Delete</button>
+            ${isProtectedAdmin ? '' : `<button class="action-btn action-btn-delete" onclick="deleteUserAccount('${user.username}')">Delete</button>`}
           </td>
         `;
       });

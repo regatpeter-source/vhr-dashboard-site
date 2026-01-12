@@ -4937,6 +4937,10 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
     }
     if (!targetUser) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
 
+    if (targetUser.role === 'admin' && isAllowedAdminUser(targetUser.username)) {
+      return res.status(403).json({ ok: false, error: 'Compte administrateur protégé' });
+    }
+
     // ---------- Action handlers ----------
     const persistUserChanges = async () => {
       if (USE_POSTGRES && db && db.updateUser && targetUser.id) {
@@ -5073,6 +5077,12 @@ app.delete('/api/admin/users/:username', authMiddleware, async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Vous ne pouvez pas supprimer votre propre compte depuis l\'admin' });
   }
 
+  // Prevent deletion of allowlisted admin accounts
+  const isProtectedAdmin = isAllowedAdminUser(usernameParam);
+  if (isProtectedAdmin) {
+    return res.status(403).json({ ok: false, error: 'Compte administrateur protégé' });
+  }
+
   try {
     let targetUser = getUserByUsername(usernameParam);
 
@@ -5083,6 +5093,10 @@ app.delete('/api/admin/users/:username', authMiddleware, async (req, res) => {
     }
 
     if (!targetUser) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
+
+    if (targetUser.role === 'admin' && isAllowedAdminUser(targetUser.username)) {
+      return res.status(403).json({ ok: false, error: 'Compte administrateur protégé' });
+    }
 
     if (USE_POSTGRES && db && db.deleteUser) {
       const deletedId = await db.deleteUser(targetUser.id);

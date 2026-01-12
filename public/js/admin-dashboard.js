@@ -135,6 +135,7 @@ function renderUsersTable(list) {
   list.forEach(user => {
     const row = tbody.insertRow();
     const createdLabel = user.createdAt ? new Date(user.createdAt).toLocaleDateString('fr-FR') : 'N/A';
+    const isProtectedAdmin = user.role === 'admin' && user.username && user.username.toLowerCase() === 'vhr';
     row.innerHTML = `
       <td>${user.username}</td>
       <td>${user.email || 'N/A'}</td>
@@ -142,7 +143,7 @@ function renderUsersTable(list) {
       <td>${createdLabel}</td>
       <td>
         <button class="action-btn action-btn-view" onclick="viewUser('${user.username}')">View</button>
-        <button class="action-btn action-btn-delete" onclick="deleteUserAccount('${user.username}')">Delete</button>
+        ${isProtectedAdmin ? '' : `<button class="action-btn action-btn-delete" onclick="deleteUserAccount('${user.username}')">Delete</button>`}
       </td>
     `;
   });
