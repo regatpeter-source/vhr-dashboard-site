@@ -4845,6 +4845,222 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
   }
 });
 
+// Manage subscription / billing status for a user (cancel, refund, free month, extend trial)
+app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
+  if (!ensureAllowedAdmin(req, res)) return;
+
+  const { username, action, days } = req.body || {};
+  const normalizedUser = String(username || '').trim();
+  const normalizedAction = String(action || '').toLowerCase();
+  if (!normalizedUser) return res.status(400).json({ ok: false, error: 'username required' });
+
+  const allowedActions = new Set(['cancel', 'refund', 'free_month', 'extend_trial']);
+  if (!allowedActions.has(normalizedAction)) {
+    return res.status(400).json({ ok: false, error: 'invalid action' });
+  }
+
+  const now = new Date();
+  const toIso = d => (d instanceof Date ? d.toISOString() : new Date(d).toISOString());
+  const extraDays = Number(days || 0) || 7;
+
+  try {
+    // ---------- Helper: upsert subscription in local/SQLite mode ----------
+    const upsertLocalSubscription = (opts) => {
+      const {
+        status,
+        planName,
+        startDate,
+        endDate,
+        cancelledAt
+      } = opts;
+
+      if (!Array.isArray(subscriptions)) subscriptions = [];
+      const idx = subscriptions.findIndex(s => String(s.username || '').toLowerCase() === normalizedUser.toLowerCase());
+      const base = idx >= 0 ? { ...subscriptions[idx] } : { id: subscriptionIdCounter++, username: normalizedUser };
+
+      const updated = {
+        ...base,
+        status: status || base.status || null,
+        planName: planName || base.planName || null,
+        startDate: startDate || base.startDate || now.toISOString(),
+        endDate: endDate || base.endDate || null,
+        cancelledAt: cancelledAt || base.cancelledAt || null,
+        updatedAt: now.toISOString()
+      };
+
+      if (idx >= 0) subscriptions[idx] = updated; else subscriptions.push(updated);
+      saveSubscriptions();
+      return updated;
+    };
+
+    // ---------- Helper: upsert subscription in PostgreSQL mode ----------
+    const upsertPgSubscription = async (opts) => {
+      const {
+        status,
+        planName,
+        startDate,
+        endDate,
+        cancelledAt
+      } = opts;
+
+      let subList = [];
+      if (db && db.getAllSubscriptions) {
+        try { subList = await db.getAllSubscriptions(); } catch (e) { console.warn('[admin] pg getAllSubscriptions failed', e && e.message); }
+      }
+      const existing = (subList || []).find(s => String(s.username || '').toLowerCase() === normalizedUser.toLowerCase());
+      if (existing && db && db.updateSubscription) {
+        return await db.updateSubscription(existing.id, {
+          status,
+          planName,
+          startDate,
+          endDate,
+          cancelledAt
+        });
+      }
+      if (db && db.addSubscription) {
+        return await db.addSubscription({
+          username: normalizedUser,
+          email: existing?.email || null,
+          status,
+          planName,
+          startDate,
+          endDate
+        });
+      }
+      return null;
+    };
+
+    // ---------- Locate user ----------
+    let targetUser = getUserByUsername(normalizedUser);
+    if (!targetUser && USE_POSTGRES && db && db.getUserByUsername) {
+      targetUser = await db.getUserByUsername(normalizedUser);
+    }
+    if (!targetUser) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
+
+    // ---------- Action handlers ----------
+    const persistUserChanges = async () => {
+      if (USE_POSTGRES && db && db.updateUser && targetUser.id) {
+        await db.updateUser(targetUser.id, {
+          subscriptionstatus: targetUser.subscriptionStatus || null,
+          subscriptionid: targetUser.subscriptionId || null
+        });
+      } else {
+        persistUser(targetUser);
+      }
+    };
+
+    let subscriptionRecord = null;
+    switch (normalizedAction) {
+      case 'cancel': {
+        targetUser.subscriptionStatus = 'canceled';
+        targetUser.subscriptionId = targetUser.subscriptionId || null;
+        if (USE_POSTGRES && db) {
+          subscriptionRecord = await upsertPgSubscription({
+            status: 'canceled',
+            planName: 'admin-cancel',
+            endDate: toIso(now),
+            cancelledAt: toIso(now)
+          });
+        } else {
+          subscriptionRecord = upsertLocalSubscription({
+            status: 'canceled',
+            planName: 'admin-cancel',
+            endDate: toIso(now),
+            cancelledAt: toIso(now)
+          });
+        }
+        break;
+      }
+      case 'refund': {
+        targetUser.subscriptionStatus = 'refunded';
+        if (USE_POSTGRES && db) {
+          subscriptionRecord = await upsertPgSubscription({
+            status: 'refunded',
+            planName: 'admin-refund',
+            endDate: toIso(now),
+            cancelledAt: toIso(now)
+          });
+        } else {
+          subscriptionRecord = upsertLocalSubscription({
+            status: 'refunded',
+            planName: 'admin-refund',
+            endDate: toIso(now),
+            cancelledAt: toIso(now)
+          });
+        }
+        break;
+      }
+      case 'free_month': {
+        const end = new Date(now);
+        end.setMonth(end.getMonth() + 1);
+        targetUser.subscriptionStatus = 'active';
+        targetUser.subscriptionId = targetUser.subscriptionId || `sub_admin_free_${Date.now()}`;
+        if (USE_POSTGRES && db) {
+          subscriptionRecord = await upsertPgSubscription({
+            status: 'active',
+            planName: 'admin-free-month',
+            startDate: toIso(now),
+            endDate: toIso(end)
+          });
+        } else {
+          subscriptionRecord = upsertLocalSubscription({
+            status: 'active',
+            planName: 'admin-free-month',
+            startDate: toIso(now),
+            endDate: toIso(end)
+          });
+        }
+        break;
+      }
+      case 'extend_trial': {
+        const addedMs = extraDays * 24 * 60 * 60 * 1000;
+        const baseStart = targetUser.demoStartDate ? new Date(targetUser.demoStartDate) : now;
+        const newStart = new Date(baseStart.getTime() - addedMs);
+        targetUser.demoStartDate = toIso(newStart);
+        targetUser.subscriptionStatus = targetUser.subscriptionStatus || 'trial';
+
+        const trialEnd = new Date(newStart.getTime() + demoConfig.DEMO_DURATION_MS + addedMs);
+
+        if (USE_POSTGRES && db) {
+          subscriptionRecord = await upsertPgSubscription({
+            status: 'trial',
+            planName: 'admin-extended-trial',
+            startDate: toIso(newStart),
+            endDate: toIso(trialEnd)
+          });
+        } else {
+          subscriptionRecord = upsertLocalSubscription({
+            status: 'trial',
+            planName: 'admin-extended-trial',
+            startDate: toIso(newStart),
+            endDate: toIso(trialEnd)
+          });
+        }
+        break;
+      }
+      default:
+        return res.status(400).json({ ok: false, error: 'unknown action' });
+    }
+
+    await persistUserChanges();
+
+    return res.json({
+      ok: true,
+      action: normalizedAction,
+      user: {
+        username: targetUser.username,
+        subscriptionStatus: targetUser.subscriptionStatus,
+        subscriptionId: targetUser.subscriptionId || null,
+        demoStartDate: targetUser.demoStartDate || null
+      },
+      subscription: subscriptionRecord || null
+    });
+  } catch (e) {
+    console.error('[api] admin/subscription/manage:', e);
+    return res.status(500).json({ ok: false, error: 'Erreur serveur' });
+  }
+});
+
 // Delete a user (admin only)
 app.delete('/api/admin/users/:username', authMiddleware, async (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;
