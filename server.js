@@ -1761,9 +1761,50 @@ app.post('/create-checkout-session', async (req, res) => {
 
 // --- Utilisateurs (simple persistence JSON: replace with a proper DB in production) ---
 const USERS_FILE = path.join(__dirname, 'data', 'users.json');
+const DELETED_USERS_FILE = path.join(__dirname, 'data', 'deleted-users.json');
 
 function ensureDataDir() {
   try { fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true }); } catch (e) { }
+}
+
+function loadDeletedUsers() {
+  ensureDataDir();
+  try {
+    if (fs.existsSync(DELETED_USERS_FILE)) {
+      const raw = fs.readFileSync(DELETED_USERS_FILE, 'utf8');
+      const parsed = JSON.parse(raw || '[]');
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.warn('[users] failed to load deleted-users file:', e && e.message);
+  }
+  return [];
+}
+
+function saveDeletedUsers(list) {
+  ensureDataDir();
+  try {
+    fs.writeFileSync(DELETED_USERS_FILE, JSON.stringify(list || [], null, 2), 'utf8');
+  } catch (e) {
+    console.warn('[users] failed to save deleted-users file:', e && e.message);
+  }
+}
+
+function markUserDeleted(username) {
+  if (!username) return;
+  const list = loadDeletedUsers();
+  const uname = String(username).toLowerCase();
+  const existingIdx = list.findIndex(e => String(e.username || '').toLowerCase() === uname);
+  const entry = { username, deletedAt: new Date().toISOString() };
+  if (existingIdx >= 0) list[existingIdx] = entry; else list.push(entry);
+  saveDeletedUsers(list);
+}
+
+function isUsernameDeleted(username) {
+  if (!username) return false;
+  const uname = String(username).toLowerCase();
+  const list = loadDeletedUsers();
+  return list.some(e => String(e.username || '').toLowerCase() === uname);
 }
 
 function normalizeUserRecord(user) {
@@ -2529,9 +2570,24 @@ function ensureUserSubscription(user, options = {}) {
 }
 
 function removeUserByUsername(username) {
+  // Soft-delete: mark tombstone to prevent re-creation on sync/auto-provision
+  markUserDeleted(username);
+
   if (dbEnabled) {
     try {
       const adapter = require('./db');
+      const existing = adapter.findUserByUsername(username);
+      if (existing) {
+        adapter.updateUserFields(username, {
+          status: 'deleted',
+          emailVerified: 0,
+          updatedAt: new Date().toISOString(),
+          // Keep hashes but mark deletion
+          deletedAt: new Date().toISOString()
+        });
+        users = adapter.getAllUsers();
+        return;
+      }
       adapter.deleteUserByUsername(username);
       users = adapter.getAllUsers();
     } catch (e) {
@@ -2539,7 +2595,16 @@ function removeUserByUsername(username) {
     }
   } else {
     const idx = users.findIndex(u => u.username === username);
-    if (idx >= 0) users.splice(idx, 1);
+    if (idx >= 0) {
+      const existing = users[idx];
+      users[idx] = {
+        ...existing,
+        status: 'deleted',
+        isDeleted: true,
+        deletedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+    }
     saveUsers();
   }
 }
@@ -2604,7 +2669,10 @@ function authMiddleware(req, res, next) {
     // Block deleted/disabled accounts even if a stale token is presented
     try {
       const storedUser = getUserByUsername(decoded.username);
-      if (isUserDeletedOrDisabled(storedUser)) {
+      if (storedUser && isUserDeletedOrDisabled(storedUser)) {
+        return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+      }
+      if (!storedUser && isUsernameDeleted(decoded.username)) {
         return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
       }
     } catch (lookupErr) {
@@ -2636,6 +2704,9 @@ app.post('/api/login', async (req, res) => {
   }
   
   if (!user) {
+    if (isUsernameDeleted(username)) {
+      return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+    }
     console.log('[api/login] user not found');
     return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
   }
@@ -2753,6 +2824,9 @@ app.post('/api/dashboard/login', async (req, res) => {
   const user = getUserByUsername(username);
   
   if (!user) {
+    if (isUsernameDeleted(username)) {
+      return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+    }
     return res.status(401).json({ ok: false, error: 'Utilisateur non trouvé' });
   }
 
@@ -3078,6 +3152,10 @@ app.post('/api/admin/sync-user', async (req, res) => {
   const { username, email, role = 'user', password, passwordHash, stripeCustomerId, subscriptionStatus } = req.body || {};
   if (!username) {
     return res.status(400).json({ ok: false, error: 'username requis' });
+  }
+
+  if (isUsernameDeleted(username)) {
+    return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
   }
 
   try {
@@ -3733,6 +3811,9 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
     // but the account has not yet been synced to this instance (common for new
     // signups coming from the site vitrine before the local pack has the user).
     if (!user) {
+      if (isUsernameDeleted(req.user.username)) {
+        return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+      }
       console.warn(`[demo/status] User ${req.user.username} not found locally - auto-creating trial account`);
       user = {
         id: `auto_${req.user.username}_${Date.now()}`,
