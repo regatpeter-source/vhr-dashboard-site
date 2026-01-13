@@ -728,12 +728,17 @@ app.use(helmet({
         'https://cdn.botpress.cloud',
         'https://www.vhr-dashboard-site.com',
         'https://vhr-dashboard-site.com',
+        // Autoriser toutes les cibles HTTP (LAN/clients) pour éviter les blocages CSP sur les nouveaux utilisateurs
+        'http:',
         // Autoriser le WebSocket local/LAN pour l'audio
         'ws:', 'wss:',
         'http://localhost:3000',
         'http://127.0.0.1:3000',
         'http://192.168.1.3:3000',
-        'http://192.168.1.3'
+        'http://192.168.1.3',
+        // Autoriser l'instance locale utilisée par titouille44 pour la voix
+        'http://192.168.1.155:3000',
+        'http://192.168.1.155'
       ],
       frameSrc: ["'self'", 'https://messaging.botpress.cloud', 'https://checkout.stripe.com', 'https://js.stripe.com'],
       objectSrc: ["'none'"],
@@ -1180,6 +1185,17 @@ app.get('/test-dashboard', (req, res) => {
 });
 
 // ========== STATIC MIDDLEWARE (serves all public files) ==========
+
+// No-cache for the main dashboard bundles to avoid stale builds
+app.use((req, res, next) => {
+  const p = req.path || '';
+  if (p.endsWith('/dashboard-pro.js') || p.endsWith('/vhr-audio-stream.js')) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  next();
+});
 
 // Downloads system removed - using launcher system instead
 app.use(express.static(path.join(__dirname, 'public')));
@@ -7742,6 +7758,67 @@ app.get('/api/audio/session/:sessionId', authMiddleware, async (req, res) => {
       ok: false,
       error: error.message
     });
+  }
+});
+
+// ========== SCRCPY GUI LAUNCH ============
+function resolveScrcpyExecutable() {
+  const candidates = [
+    path.join(__dirname, 'scrcpy', 'scrcpy.exe'),
+    path.join(__dirname, 'scrcpy', 'scrcpy'),
+    'C:/ProgramData/chocolatey/lib/scrcpy/tools/scrcpy.exe',
+    'scrcpy'
+  ];
+  for (const exe of candidates) {
+    try {
+      if (fs.existsSync(exe)) return exe;
+    } catch (_) {}
+  }
+  return 'scrcpy';
+}
+
+app.post('/api/scrcpy-gui', async (req, res) => {
+  const { serial, audioOutput } = req.body || {};
+  if (!serial) return res.status(400).json({ ok: false, error: 'serial requis' });
+  try {
+    const scrcpyArgs = ['-s', serial, '--window-width', '640', '--window-height', '360'];
+
+    if (audioOutput === 'pc' || audioOutput === 'both') {
+      scrcpyArgs.push('--audio-codec=opus');
+      console.log('[scrcpy] Audio enabled: forwarding to PC');
+    } else {
+      scrcpyArgs.push('--no-audio');
+      console.log('[scrcpy] Audio disabled: stays on headset only');
+    }
+
+    const scrcpyExe = resolveScrcpyExecutable();
+    console.log('[scrcpy] Using executable:', scrcpyExe);
+    console.log('[scrcpy] Launching with args:', scrcpyArgs);
+
+    const proc = spawn(scrcpyExe, scrcpyArgs, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false
+    });
+
+    proc.unref();
+
+    const scrcpyPid = proc.pid;
+    if (scrcpyPid) {
+      console.log(`[scrcpy] Started with PID: ${scrcpyPid}`);
+      setTimeout(() => {
+        console.log(`[scrcpy] Session info: PID ${scrcpyPid} was started at ${new Date().toISOString()}`);
+      }, 100);
+    }
+
+    proc.on('error', (err) => {
+      console.error('[scrcpy] Process error:', err.message);
+    });
+
+    return res.json({ ok: true, audioOutput: audioOutput || 'headset', pid: scrcpyPid });
+  } catch (e) {
+    console.error('[api] scrcpy-gui:', e);
+    return res.status(500).json({ ok: false, error: e.message });
   }
 });
 

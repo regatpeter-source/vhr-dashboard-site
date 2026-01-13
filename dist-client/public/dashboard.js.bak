@@ -1,0 +1,986 @@
+// Backup avant refonte UI/UX et enrichissement pro
+// Date: 2025-11-22
+
+// ========== MULTI-UTILISATEURS ENRICHI ========== 
+let currentUser = localStorage.getItem('vrm_user') || '';
+let userList = JSON.parse(localStorage.getItem('vrm_user_list') || '[]');
+let userRoles = JSON.parse(localStorage.getItem('vrm_user_roles') || '{}'); // { user: role }
+
+function saveUserList() {
+	localStorage.setItem('vrm_user_list', JSON.stringify(userList));
+	localStorage.setItem('vrm_user_roles', JSON.stringify(userRoles));
+}
+
+function setUser(user) {
+	currentUser = user;
+	localStorage.setItem('vrm_user', user);
+	if (!userList.includes(user)) {
+		userList.push(user);
+		saveUserList();
+	}
+	updateUserUI();
+}
+
+function removeUser(user) {
+	userList = userList.filter(u => u !== user);
+	if (userRoles[user]) delete userRoles[user];
+	saveUserList();
+	if (currentUser === user) {
+		setUser(userList[0] || 'Invité');
+	} else {
+		updateUserUI();
+	}
+}
+
+function setUserRole(user, role) {
+	userRoles[user] = role;
+	saveUserList();
+	updateUserUI();
+}
+
+function updateUserUI() {
+	let userBar = document.getElementById('userBar');
+	if (!userBar) {
+		userBar = document.createElement('div');
+		userBar.id = 'userBar';
+		userBar.style = 'position:fixed;top:0;right:0;background:#222;color:#fff;padding:6px 16px;z-index:1000;border-radius:0 0 0 8px;font-size:15px;min-width:260px;';
+		document.body.appendChild(userBar);
+	}
+	let role = userRoles[currentUser] || 'user';
+	let html = `👤 <b>${currentUser ? currentUser : '<i>non connecté</i>'}</b> <span style="font-size:12px;opacity:.7;">[${role}]</span> `;
+	html += `<button id="changeUserBtn">Changer</button> <button id="userMenuBtn">Menu</button>`;
+	userBar.innerHTML = html;
+	document.getElementById('changeUserBtn').onclick = () => {
+		const name = prompt('Nom d\'utilisateur ?', currentUser);
+		if (name && name.trim()) setUser(name.trim());
+	};
+	document.getElementById('userMenuBtn').onclick = showUserMenu;
+}
+
+function showUserMenu() {
+	let menu = document.getElementById('userMenu');
+	if (menu) menu.remove();
+	menu = document.createElement('div');
+	menu.id = 'userMenu';
+	menu.style = 'position:fixed;top:38px;right:0;background:#222;color:#fff;padding:12px 18px;z-index:1001;border-radius:0 0 0 8px;box-shadow:0 2px 8px #0006;min-width:260px;';
+	let html = `<b>Utilisateurs connus</b><ul style='margin:8px 0 12px 0;padding:0;list-style:none;'>`;
+	userList.forEach(u => {
+		html += `<li style='margin-bottom:4px;'>
+			<span style='cursor:pointer;color:${u===currentUser?'#0f0':'#fff'}' onclick='setUser("${u}")'>${u}</span>
+			<span style='font-size:11px;opacity:.7;'>[${userRoles[u]||'user'}]</span>
+			${u!=='Invité'?`<button onclick='removeUser("${u}")' style='margin-left:8px;font-size:11px;'>Suppr</button>`:''}
+			<button onclick='setUserRolePrompt("${u}")' style='margin-left:4px;font-size:11px;'>Rôle</button>
+		</li>`;
+	});
+	html += `</ul>`;
+	html += `<button onclick='addUserPrompt()'>Ajouter un utilisateur</button> <button onclick='closeUserMenu()'>Fermer</button>`;
+	menu.innerHTML = html;
+	document.body.appendChild(menu);
+}
+
+window.setUser = setUser;
+window.removeUser = removeUser;
+window.setUserRolePrompt = function(u) {
+	const role = prompt('Rôle pour '+u+' ? (admin/user/guest)', userRoles[u]||'user');
+	if (role && role.trim()) setUserRole(u, role.trim());
+};
+window.addUserPrompt = function() {
+	const name = prompt('Nom du nouvel utilisateur ?');
+	if (name && name.trim()) setUser(name.trim());
+};
+window.closeUserMenu = function() {
+	const menu = document.getElementById('userMenu');
+	if (menu) menu.remove();
+};
+
+if (!currentUser) {
+	setTimeout(() => {
+		const name = prompt('Bienvenue ! Entrez votre nom d\'utilisateur :');
+		if (name && name.trim()) setUser(name.trim());
+		else setUser('Invité');
+	}, 300);
+} else {
+	updateUserUI();
+}
+
+// ========== CONSTANTES & INIT ========== 
+const API_BASE = '/api';
+const socket = io();
+let devices = [];
+let games = [];
+let favorites = [];
+
+const grid = document.getElementById('deviceGrid');
+const streamViewers = document.getElementById('streamViewers');
+
+// ========== API Helper ========== 
+async function api(path, opts = {}) {
+	try {
+		const res = await fetch(path, opts);
+		return await res.json();
+	} catch (e) {
+		console.error('[api]', path, e);
+		return { ok: false, error: e.message };
+	}
+}
+
+// ========== Devices ========== 
+async function loadDevices() {
+	const data = await api('/api/devices');
+	if (data.ok && Array.isArray(data.devices)) {
+		devices = data.devices;
+		renderDevices();
+	}
+}
+
+function renderDevices() {
+	grid.innerHTML = '';
+	if (devices.length === 0) {
+		const msg = document.createElement('div');
+		msg.className = 'no-device-msg';
+		msg.innerHTML = `Aucun casque détecté.<br><button id="forceRefreshBtn">Rafraîchir</button>`;
+		grid.appendChild(msg);
+		setTimeout(() => {
+			if (devices.length === 0) msg.style.color = 'red';
+		}, 2000);
+		setTimeout(() => {
+			const btn = document.getElementById('forceRefreshBtn');
+			if (btn) btn.onclick = () => {
+				loadDevices();
+			};
+		}, 100);
+		return;
+	}
+	devices.forEach(d => {
+		let card = createDeviceCard(d);
+		grid.appendChild(card);
+	});
+}
+
+function createDeviceCard(d) {
+	const card = document.createElement('div');
+	card.className = 'device-card';
+	card.dataset.serial = d.serial;
+	// Profils disponibles (doivent correspondre à ceux du backend)
+	const profiles = [
+		{ value: 'ultra-low', label: 'Ultra Low (320p, 600K)' },
+		{ value: 'low', label: 'Low (480p, 1.5M)' },
+		{ value: 'wifi', label: 'WiFi (640p, 2M)' },
+		{ value: 'default', label: '720p, 3M' },
+		{ value: 'high', label: 'High (1280p, 8M)' },
+		{ value: 'ultra', label: 'Ultra (1920p, 12M)' }
+	];
+	let profileSelect = '';
+	if (d.status !== 'streaming') {
+		profileSelect = `<select class="stream-profile-select" data-serial="${d.serial}">
+			${profiles.map(p => `<option value="${p.value}">${p.label}</option>`).join('')}
+		</select>`;
+	}
+	// Bouton scrcpy natif
+	const scrcpyBtn = `<button class="btn-scrcpy-gui" data-serial="${d.serial}">🖥️ Ouvrir scrcpy</button>`;
+	// Always show Stop Stream button, disable if not streaming
+	const stopBtn = `<button class="btn-stop-stream" data-serial="${d.serial}" ${d.status === 'streaming' ? '' : 'disabled style="opacity:0.5;cursor:not-allowed;"'}>⏹️ Stop Stream</button>`;
+	card.innerHTML = `
+		<div class="card-header-line">
+			<b>${d.name}</b>
+			<small>${d.serial}</small>
+			<span class="badge ${d.status}">${d.status === 'streaming' ? '🟢 Streaming' : d.status}</span>
+		</div>
+		<div class="card-action-line">
+			${profileSelect}
+			${scrcpyBtn}
+			${stopBtn}
+		</div>
+		<div class="card-action-line">
+			<button class="btn-rename" data-serial="${d.serial}">✏️ Renommer</button>
+			<button class="btn-apps" data-serial="${d.serial}">📱 Apps</button>
+			<button class="btn-fav" data-serial="${d.serial}">⭐ Favoris</button>
+			<button class="btn-storage" data-serial="${d.serial}">💾 Stockage</button>
+			${d.serial && !d.serial.includes(':') && !d.serial.includes('.') ? `<button class="btn-wifi" data-serial="${d.serial}">📶 WiFi</button>` : ''}
+		</div>
+	`;
+	// Event listeners
+	card.querySelector('.btn-stop-stream').onclick = () => {
+		if (d.status === 'streaming') stopStream(d);
+	};
+	const scrcpyBtnEl = card.querySelector('.btn-scrcpy-gui');
+	if (scrcpyBtnEl) scrcpyBtnEl.onclick = async () => {
+		const res = await api('/api/scrcpy-gui', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ serial: d.serial })
+		});
+		if (!res.ok) alert('Erreur lancement scrcpy: ' + (res.error || 'inconnue'));
+	};
+
+	card.querySelector('.btn-rename').onclick = () => renameDevice(d);
+	card.querySelector('.btn-apps').onclick = () => showAppsDialog(d);
+	card.querySelector('.btn-fav').onclick = () => showFavoritesDialog(d);
+	card.querySelector('.btn-storage').onclick = () => showStorageDialog(d);
+	const wifiBtn = card.querySelector('.btn-wifi');
+	if (wifiBtn) wifiBtn.onclick = () => connectWifi(d);
+	return card;
+}
+
+// ========== STREAM CONTROL ========== 
+async function startStream(device, profile) {
+	const res = await api('/api/stream/start', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ serial: device.serial, profile: profile || 'default' })
+	});
+	if (!res.ok) alert('Erreur démarrage stream: ' + (res.error || 'inconnue'));
+	setTimeout(loadDevices, 500); // Refresh state
+}
+
+async function stopStream(device) {
+	const res = await api('/api/stream/stop', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ serial: device.serial })
+	});
+	if (!res.ok) alert('Erreur arrêt stream: ' + (res.error || 'inconnue'));
+	setTimeout(loadDevices, 500);
+}
+
+// ========== WIFI PAIRING ========== 
+async function connectWifi(device) {
+	const ip = prompt('Adresse IP du casque (ex: 192.168.1.42)');
+	if (!ip) return;
+	const res = await api('/api/adb/wifi-connect', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ serial: device.serial, ip })
+	});
+	if (res.ok) alert('Connexion WiFi réussie !');
+	else alert('Erreur WiFi: ' + (res.error || 'inconnue'));
+	setTimeout(loadDevices, 1000);
+}
+
+// ========== STREAMING ========== 
+
+// ========== RENOMMAGE ========== 
+async function renameDevice(device) {
+	const name = prompt('Nouveau nom pour le casque', device.name);
+	if (!name || name === device.name) return;
+	const res = await api('/api/devices/rename', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ serial: device.serial, name })
+	});
+	if (res.ok) loadDevices();
+	else alert('Erreur: ' + (res.error || 'inconnue'));
+}
+
+// ========== APPS ========== 
+async function showAppsDialog(device) {
+	const res = await api(`/api/apps/${device.serial}`);
+	if (!res.ok) return alert('Erreur chargement apps');
+	const apps = res.apps || [];
+	let html = `<h3>Apps installées</h3><ul>`;
+	apps.forEach(pkg => {
+		html += `<li>${pkg} <button onclick="launchApp('${device.serial}','${pkg}')">Lancer</button></li>`;
+	});
+	html += '</ul>';
+	showModal(html);
+}
+
+async function launchApp(serial, pkg) {
+	await api(`/api/apps/${serial}/launch`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ package: pkg })
+	});
+}
+
+// ========== FAVORIS ========== 
+async function showFavoritesDialog(device) {
+	const res = await api('/api/favorites');
+	if (!res.ok) return alert('Erreur chargement favoris');
+	const favs = res.favorites || [];
+	let html = `<h3>Favoris</h3><ul>`;
+	favs.forEach(fav => {
+		html += `<li>${fav.name} <button onclick="launchApp('${device.serial}','${fav.packageId}')">Lancer</button></li>`;
+	});
+	html += '</ul>';
+	showModal(html);
+}
+
+// ========== STOCKAGE ========== 
+async function showStorageDialog(device) {
+	// Placeholder: could list files, storage info, etc.
+	alert('Fonction stockage à implémenter');
+}
+
+// ========== MODAL ========== 
+function showModal(html) {
+	let modal = document.getElementById('modal');
+	if (!modal) {
+		modal = document.createElement('div');
+		modal.id = 'modal';
+		modal.className = 'modal';
+		document.body.appendChild(modal);
+	}
+	modal.innerHTML = `<div class='modal-content'>${html}<br><button onclick="closeModal()">Fermer</button></div>`;
+	modal.style.display = 'block';
+}
+function closeModal() {
+	const modal = document.getElementById('modal');
+	if (modal) modal.style.display = 'none';
+}
+
+// ========== SOCKET.IO EVENTS ========== 
+socket.on('devices-update', (data) => {
+	devices = data;
+	renderDevices();
+});
+socket.on('games-update', (data) => {
+	games = data;
+});
+socket.on('favorites-update', (data) => {
+	favorites = data;
+});
+socket.on('stream-event', (evt) => {
+	if (evt.type === 'start') {
+		// Optionally: show streaming indicator
+	}
+	if (evt.type === 'stop') {
+		// Optionally: hide streaming indicator
+	}
+});
+
+// ========== INIT ========== 
+console.log('[Dashboard] Init');
+loadDevices();
+// ========== CONSTANTES & INIT ========== 
+const API_BASE = '/api';
+const socket = io();
+let devices = [];
+let games = [];
+let favorites = [];
+
+const grid = document.getElementById('deviceGrid');
+const streamViewers = document.getElementById('streamViewers');
+
+// ========== API Helper ========== 
+async function api(path, opts = {}) {
+	try {
+		const res = await fetch(path, opts);
+		return await res.json();
+	} catch (e) {
+		console.error('[api]', path, e);
+		return { ok: false, error: e.message };
+	}
+}
+
+// ========== Devices ========== 
+async function loadDevices() {
+	const data = await api('/api/devices');
+	if (data.ok && Array.isArray(data.devices)) {
+		devices = data.devices;
+		renderDevices();
+	}
+}
+
+function renderDevices() {
+	grid.innerHTML = '';
+	if (devices.length === 0) {
+		const msg = document.createElement('div');
+		msg.className = 'no-device-msg';
+		msg.innerHTML = `Aucun casque détecté.<br><button id="forceRefreshBtn">Rafraîchir</button>`;
+		grid.appendChild(msg);
+		setTimeout(() => {
+			if (devices.length === 0) msg.style.color = 'red';
+		}, 2000);
+		setTimeout(() => {
+			const btn = document.getElementById('forceRefreshBtn');
+			if (btn) btn.onclick = () => {
+				loadDevices();
+			};
+		}, 100);
+		return;
+	}
+	devices.forEach(d => {
+		let card = createDeviceCard(d);
+		grid.appendChild(card);
+	});
+}
+
+function createDeviceCard(d) {
+	const card = document.createElement('div');
+	card.className = 'device-card';
+	card.dataset.serial = d.serial;
+	// Profils disponibles (doivent correspondre à ceux du backend)
+	const profiles = [
+		{ value: 'ultra-low', label: 'Ultra Low (320p, 600K)' },
+		{ value: 'low', label: 'Low (480p, 1.5M)' },
+		{ value: 'wifi', label: 'WiFi (640p, 2M)' },
+		{ value: 'default', label: '720p, 3M' },
+		{ value: 'high', label: 'High (1280p, 8M)' },
+		{ value: 'ultra', label: 'Ultra (1920p, 12M)' }
+	];
+	let profileSelect = '';
+	if (d.status !== 'streaming') {
+		profileSelect = `<select class="stream-profile-select" data-serial="${d.serial}">
+			${profiles.map(p => `<option value="${p.value}">${p.label}</option>`).join('')}
+		</select>`;
+	}
+	// Bouton scrcpy natif
+	const scrcpyBtn = `<button class="btn-scrcpy-gui" data-serial="${d.serial}">🖥️ Ouvrir scrcpy</button>`;
+	// Always show Stop Stream button, disable if not streaming
+	const stopBtn = `<button class="btn-stop-stream" data-serial="${d.serial}" ${d.status === 'streaming' ? '' : 'disabled style="opacity:0.5;cursor:not-allowed;"'}>⏹️ Stop Stream</button>`;
+	card.innerHTML = `
+		<div class="card-header-line">
+			<b>${d.name}</b>
+			<small>${d.serial}</small>
+			<span class="badge ${d.status}">${d.status === 'streaming' ? '🟢 Streaming' : d.status}</span>
+		</div>
+		<div class="card-action-line">
+			${profileSelect}
+			${scrcpyBtn}
+			${stopBtn}
+		</div>
+		<div class="card-action-line">
+			<button class="btn-rename" data-serial="${d.serial}">✏️ Renommer</button>
+			<button class="btn-apps" data-serial="${d.serial}">📱 Apps</button>
+			<button class="btn-fav" data-serial="${d.serial}">⭐ Favoris</button>
+			<button class="btn-storage" data-serial="${d.serial}">💾 Stockage</button>
+			${d.serial && !d.serial.includes(':') && !d.serial.includes('.') ? `<button class="btn-wifi" data-serial="${d.serial}">📶 WiFi</button>` : ''}
+		</div>
+	`;
+	// Event listeners
+	card.querySelector('.btn-stop-stream').onclick = () => {
+		if (d.status === 'streaming') stopStream(d);
+	};
+	const scrcpyBtnEl = card.querySelector('.btn-scrcpy-gui');
+	if (scrcpyBtnEl) scrcpyBtnEl.onclick = async () => {
+		const res = await api('/api/scrcpy-gui', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ serial: d.serial })
+		});
+		if (!res.ok) alert('Erreur lancement scrcpy: ' + (res.error || 'inconnue'));
+	};
+
+	card.querySelector('.btn-rename').onclick = () => renameDevice(d);
+	card.querySelector('.btn-apps').onclick = () => showAppsDialog(d);
+	card.querySelector('.btn-fav').onclick = () => showFavoritesDialog(d);
+	card.querySelector('.btn-storage').onclick = () => showStorageDialog(d);
+	const wifiBtn = card.querySelector('.btn-wifi');
+	if (wifiBtn) wifiBtn.onclick = () => connectWifi(d);
+	return card;
+}
+
+// ========== STREAM CONTROL ========== 
+async function startStream(device, profile) {
+	const res = await api('/api/stream/start', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ serial: device.serial, profile: profile || 'default' })
+	});
+	if (!res.ok) alert('Erreur démarrage stream: ' + (res.error || 'inconnue'));
+	setTimeout(loadDevices, 500); // Refresh state
+}
+
+async function stopStream(device) {
+	const res = await api('/api/stream/stop', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ serial: device.serial })
+	});
+	if (!res.ok) alert('Erreur arrêt stream: ' + (res.error || 'inconnue'));
+	setTimeout(loadDevices, 500);
+}
+
+// ========== WIFI PAIRING ========== 
+async function connectWifi(device) {
+	const ip = prompt('Adresse IP du casque (ex: 192.168.1.42)');
+	if (!ip) return;
+	const res = await api('/api/adb/wifi-connect', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ serial: device.serial, ip })
+	});
+	if (res.ok) alert('Connexion WiFi réussie !');
+	else alert('Erreur WiFi: ' + (res.error || 'inconnue'));
+	setTimeout(loadDevices, 1000);
+}
+
+// ========== STREAMING ========== 
+
+// ========== RENOMMAGE ========== 
+async function renameDevice(device) {
+	const name = prompt('Nouveau nom pour le casque', device.name);
+	if (!name || name === device.name) return;
+	const res = await api('/api/devices/rename', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ serial: device.serial, name })
+	});
+	if (res.ok) loadDevices();
+	else alert('Erreur: ' + (res.error || 'inconnue'));
+}
+
+// ========== APPS ========== 
+async function showAppsDialog(device) {
+	const res = await api(`/api/apps/${device.serial}`);
+	if (!res.ok) return alert('Erreur chargement apps');
+	const apps = res.apps || [];
+	let html = `<h3>Apps installées</h3><ul>`;
+	apps.forEach(pkg => {
+		html += `<li>${pkg} <button onclick="launchApp('${device.serial}','${pkg}')">Lancer</button></li>`;
+	});
+	html += '</ul>';
+	showModal(html);
+}
+
+async function launchApp(serial, pkg) {
+	await api(`/api/apps/${serial}/launch`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ package: pkg })
+	});
+}
+
+// ========== FAVORIS ========== 
+async function showFavoritesDialog(device) {
+	const res = await api('/api/favorites');
+	if (!res.ok) return alert('Erreur chargement favoris');
+	const favs = res.favorites || [];
+	let html = `<h3>Favoris</h3><ul>`;
+	favs.forEach(fav => {
+		html += `<li>${fav.name} <button onclick="launchApp('${device.serial}','${fav.packageId}')">Lancer</button></li>`;
+	});
+	html += '</ul>';
+	showModal(html);
+}
+
+// ========== STOCKAGE ========== 
+async function showStorageDialog(device) {
+	// Placeholder: could list files, storage info, etc.
+	alert('Fonction stockage à implémenter');
+}
+
+// ========== MODAL ========== 
+function showModal(html) {
+	let modal = document.getElementById('modal');
+	if (!modal) {
+		modal = document.createElement('div');
+		modal.id = 'modal';
+		modal.className = 'modal';
+		document.body.appendChild(modal);
+	}
+	modal.innerHTML = `<div class='modal-content'>${html}<br><button onclick="closeModal()">Fermer</button></div>`;
+	modal.style.display = 'block';
+}
+function closeModal() {
+	const modal = document.getElementById('modal');
+	if (modal) modal.style.display = 'none';
+}
+
+// ========== SOCKET.IO EVENTS ========== 
+socket.on('devices-update', (data) => {
+	devices = data;
+	renderDevices();
+});
+socket.on('games-update', (data) => {
+	games = data;
+});
+socket.on('favorites-update', (data) => {
+	favorites = data;
+});
+socket.on('stream-event', (evt) => {
+	if (evt.type === 'start') {
+		// Optionally: show streaming indicator
+	}
+	if (evt.type === 'stop') {
+		// Optionally: hide streaming indicator
+	}
+});
+
+// ========== INIT ========== 
+console.log('[Dashboard] Init');
+loadDevices();
+
+// Backup of dashboard.js before professional enhancements (device filtering, animations, role-based UI, polish)
+// Date: 2025-11-22
+
+// ========== NAVBAR & MULTI-UTILISATEURS PRO ========== 
+// Barre de navigation moderne
+function createNavbar() {
+	if (document.getElementById('mainNavbar')) return;
+	const nav = document.createElement('nav');
+	nav.id = 'mainNavbar';
+	nav.style = 'position:fixed;top:0;left:0;width:100vw;height:44px;background:#181c24;color:#fff;z-index:1100;display:flex;align-items:center;box-shadow:0 2px 8px #0003;';
+	nav.innerHTML = `
+		<div style='display:flex;align-items:center;font-size:20px;font-weight:bold;margin-left:18px;'>
+			<img src='https://cdn-icons-png.flaticon.com/512/1055/1055687.png' alt='VR' style='height:28px;width:28px;margin-right:10px;vertical-align:middle;'>
+			VHR DASHBOARD
+		</div>
+		<div style='flex:1'></div>
+		<div id='navbarQuick' style='margin-right:24px;display:flex;gap:16px;align-items:center;'></div>
+	`;
+	document.body.appendChild(nav);
+	document.body.style.paddingTop = '48px';
+}
+createNavbar();
+
+let currentUser = localStorage.getItem('vrm_user') || '';
+let userList = JSON.parse(localStorage.getItem('vrm_user_list') || '[]');
+let userRoles = JSON.parse(localStorage.getItem('vrm_user_roles') || '{}'); // { user: role }
+
+function saveUserList() {
+	localStorage.setItem('vrm_user_list', JSON.stringify(userList));
+	localStorage.setItem('vrm_user_roles', JSON.stringify(userRoles));
+}
+
+function setUser(user) {
+	currentUser = user;
+	localStorage.setItem('vrm_user', user);
+	if (!userList.includes(user)) {
+		userList.push(user);
+		saveUserList();
+	}
+	updateUserUI();
+}
+
+function removeUser(user) {
+	userList = userList.filter(u => u !== user);
+	if (userRoles[user]) delete userRoles[user];
+	saveUserList();
+	if (currentUser === user) {
+		setUser(userList[0] || 'Invité');
+	} else {
+		updateUserUI();
+	}
+}
+
+function setUserRole(user, role) {
+	userRoles[user] = role;
+	saveUserList();
+	updateUserUI();
+}
+
+function updateUserUI() {
+	let quick = document.getElementById('navbarQuick');
+	if (!quick) return;
+	let role = userRoles[currentUser] || 'user';
+	let roleColor = role==='admin' ? '#ff9800' : (role==='user' ? '#2196f3' : '#aaa');
+	let html = `<span style='font-size:18px;vertical-align:middle;'>👤</span> <b>${currentUser ? currentUser : '<i>non connecté</i>'}</b> <span style="font-size:12px;background:${roleColor};color:#fff;padding:2px 8px;border-radius:8px;margin-left:6px;">${role}</span> `;
+	html += `<button id="changeUserBtn" style='margin-left:10px;'>Changer</button> <button id="userMenuBtn">Menu</button>`;
+	quick.innerHTML = html;
+	document.getElementById('changeUserBtn').onclick = () => {
+		const name = prompt('Nom d\'utilisateur ?', currentUser);
+		if (name && name.trim()) setUser(name.trim());
+	};
+	document.getElementById('userMenuBtn').onclick = showUserMenu;
+}
+
+function showUserMenu() {
+	let menu = document.getElementById('userMenu');
+	if (menu) menu.remove();
+	menu = document.createElement('div');
+	menu.id = 'userMenu';
+	menu.style = 'position:fixed;top:48px;right:16px;background:#23272f;color:#fff;padding:16px 22px;z-index:1200;border-radius:8px;box-shadow:0 2px 16px #0008;min-width:270px;max-width:90vw;';
+	let html = `<b style='font-size:17px;'>Utilisateurs</b><ul style='margin:10px 0 14px 0;padding:0;list-style:none;'>`;
+	userList.forEach(u => {
+		let role = userRoles[u]||'user';
+		let roleColor = role==='admin' ? '#ff9800' : (role==='user' ? '#2196f3' : '#aaa');
+		html += `<li style='margin-bottom:6px;'>
+			<span style='cursor:pointer;color:${u===currentUser?'#0f0':'#fff'};font-weight:${u===currentUser?'bold':'normal'}' onclick='setUser("${u}")'>${u}</span>
+			<span style='font-size:11px;background:${roleColor};color:#fff;padding:2px 8px;border-radius:8px;margin-left:6px;'>${role}</span>
+			${u!=='Invité'?`<button onclick='removeUser("${u}")' style='margin-left:8px;font-size:11px;'>Suppr</button>`:''}
+			<button onclick='setUserRolePrompt("${u}")' style='margin-left:4px;font-size:11px;'>Rôle</button>
+		</li>`;
+	});
+	html += `</ul>`;
+	html += `<button onclick='addUserPrompt()'>Ajouter un utilisateur</button> <button onclick='closeUserMenu()'>Fermer</button>`;
+	menu.innerHTML = html;
+	document.body.appendChild(menu);
+}
+// ========== NOTIFICATIONS (TOAST) ========== 
+function showToast(msg, type='info', duration=3000) {
+	let toast = document.createElement('div');
+	toast.className = 'toast-notif';
+	toast.style = `position:fixed;bottom:32px;right:32px;z-index:2000;background:${type==='error'?'#e53935':type==='success'?'#43a047':'#222'};color:#fff;padding:14px 28px;border-radius:8px;box-shadow:0 2px 12px #0007;font-size:16px;opacity:0;transition:opacity .3s;pointer-events:none;`;
+	toast.innerHTML = msg;
+	document.body.appendChild(toast);
+	setTimeout(()=>{toast.style.opacity=1;},50);
+	setTimeout(()=>{toast.style.opacity=0;setTimeout(()=>toast.remove(),400);},duration);
+}
+
+window.setUser = setUser;
+window.removeUser = removeUser;
+window.setUserRolePrompt = function(u) {
+	const role = prompt('Rôle pour '+u+' ? (admin/user/guest)', userRoles[u]||'user');
+	if (role && role.trim()) setUserRole(u, role.trim());
+};
+window.addUserPrompt = function() {
+	const name = prompt('Nom du nouvel utilisateur ?');
+	if (name && name.trim()) setUser(name.trim());
+};
+window.closeUserMenu = function() {
+	const menu = document.getElementById('userMenu');
+	if (menu) menu.remove();
+};
+
+if (!currentUser) {
+	setTimeout(() => {
+		const name = prompt('Bienvenue ! Entrez votre nom d\'utilisateur :');
+		if (name && name.trim()) setUser(name.trim());
+		else setUser('Invité');
+	}, 300);
+} else {
+	updateUserUI();
+}
+
+// ========== CONSTANTES & INIT ========== 
+const API_BASE = '/api';
+const socket = io();
+let devices = [];
+let games = [];
+let favorites = [];
+
+const grid = document.getElementById('deviceGrid');
+const streamViewers = document.getElementById('streamViewers');
+
+// ========== API Helper ========== 
+async function api(path, opts = {}) {
+	try {
+		const res = await fetch(path, opts);
+		return await res.json();
+	} catch (e) {
+		console.error('[api]', path, e);
+		return { ok: false, error: e.message };
+	}
+}
+
+// ========== Devices ========== 
+async function loadDevices() {
+	const data = await api('/api/devices');
+	if (data.ok && Array.isArray(data.devices)) {
+		devices = data.devices;
+		renderDevices();
+	}
+}
+
+function renderDevices() {
+	grid.innerHTML = '';
+	if (devices.length === 0) {
+		const msg = document.createElement('div');
+		msg.className = 'no-device-msg';
+		msg.innerHTML = `Aucun casque détecté.<br><button id="forceRefreshBtn">Rafraîchir</button>`;
+		grid.appendChild(msg);
+		setTimeout(() => {
+			if (devices.length === 0) msg.style.color = 'red';
+		}, 2000);
+		setTimeout(() => {
+			const btn = document.getElementById('forceRefreshBtn');
+			if (btn) btn.onclick = () => {
+				loadDevices();
+			};
+		}, 100);
+		return;
+	}
+	devices.forEach(d => {
+		let card = createDeviceCard(d);
+		grid.appendChild(card);
+	});
+}
+
+function createDeviceCard(d) {
+	const card = document.createElement('div');
+	card.className = 'device-card';
+	card.dataset.serial = d.serial;
+	// Profils disponibles (doivent correspondre à ceux du backend)
+	const profiles = [
+		{ value: 'ultra-low', label: 'Ultra Low (320p, 600K)' },
+		{ value: 'low', label: 'Low (480p, 1.5M)' },
+		{ value: 'wifi', label: 'WiFi (640p, 2M)' },
+		{ value: 'default', label: '720p, 3M' },
+		{ value: 'high', label: 'High (1280p, 8M)' },
+		{ value: 'ultra', label: 'Ultra (1920p, 12M)' }
+	];
+	let profileSelect = '';
+	if (d.status !== 'streaming') {
+		profileSelect = `<select class="stream-profile-select" data-serial="${d.serial}">
+			${profiles.map(p => `<option value="${p.value}">${p.label}</option>`).join('')}
+		</select>`;
+	}
+	// Bouton scrcpy natif
+	const scrcpyBtn = `<button class="btn-scrcpy-gui" data-serial="${d.serial}">🖥️ Ouvrir scrcpy</button>`;
+	// Always show Stop Stream button, disable if not streaming
+	const stopBtn = `<button class="btn-stop-stream" data-serial="${d.serial}" ${d.status === 'streaming' ? '' : 'disabled style="opacity:0.5;cursor:not-allowed;"'}>⏹️ Stop Stream</button>`;
+	card.innerHTML = `
+		<div class="card-header-line">
+			<b>${d.name}</b>
+			<small>${d.serial}</small>
+			<span class="badge ${d.status}">${d.status === 'streaming' ? '🟢 Streaming' : d.status}</span>
+		</div>
+		<div class="card-action-line">
+			${profileSelect}
+			${scrcpyBtn}
+			${stopBtn}
+		</div>
+		<div class="card-action-line">
+			<button class="btn-rename" data-serial="${d.serial}">✏️ Renommer</button>
+			<button class="btn-apps" data-serial="${d.serial}">📱 Apps</button>
+			<button class="btn-fav" data-serial="${d.serial}">⭐ Favoris</button>
+			<button class="btn-storage" data-serial="${d.serial}">💾 Stockage</button>
+			${d.serial && !d.serial.includes(':') && !d.serial.includes('.') ? `<button class="btn-wifi" data-serial="${d.serial}">📶 WiFi</button>` : ''}
+		</div>
+	`;
+	// Event listeners
+	card.querySelector('.btn-stop-stream').onclick = () => {
+		if (d.status === 'streaming') stopStream(d);
+	};
+	const scrcpyBtnEl = card.querySelector('.btn-scrcpy-gui');
+	if (scrcpyBtnEl) scrcpyBtnEl.onclick = async () => {
+		const res = await api('/api/scrcpy-gui', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ serial: d.serial })
+		});
+		if (!res.ok) alert('Erreur lancement scrcpy: ' + (res.error || 'inconnue'));
+	};
+
+	card.querySelector('.btn-rename').onclick = () => renameDevice(d);
+	card.querySelector('.btn-apps').onclick = () => showAppsDialog(d);
+	card.querySelector('.btn-fav').onclick = () => showFavoritesDialog(d);
+	card.querySelector('.btn-storage').onclick = () => showStorageDialog(d);
+	const wifiBtn = card.querySelector('.btn-wifi');
+	if (wifiBtn) wifiBtn.onclick = () => connectWifi(d);
+	return card;
+}
+
+// ========== STREAM CONTROL ========== 
+async function startStream(device, profile) {
+	const res = await api('/api/stream/start', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ serial: device.serial, profile: profile || 'default' })
+	});
+	if (!res.ok) alert('Erreur démarrage stream: ' + (res.error || 'inconnue'));
+	setTimeout(loadDevices, 500); // Refresh state
+}
+
+async function stopStream(device) {
+	const res = await api('/api/stream/stop', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ serial: device.serial })
+	});
+	if (!res.ok) alert('Erreur arrêt stream: ' + (res.error || 'inconnue'));
+	setTimeout(loadDevices, 500);
+}
+
+// ========== WIFI PAIRING ========== 
+async function connectWifi(device) {
+	const ip = prompt('Adresse IP du casque (ex: 192.168.1.42)');
+	if (!ip) return;
+	const res = await api('/api/adb/wifi-connect', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ serial: device.serial, ip })
+	});
+	if (res.ok) alert('Connexion WiFi réussie !');
+	else alert('Erreur WiFi: ' + (res.error || 'inconnue'));
+	setTimeout(loadDevices, 1000);
+}
+
+// ========== STREAMING ========== 
+
+// ========== RENOMMAGE ========== 
+async function renameDevice(device) {
+	const name = prompt('Nouveau nom pour le casque', device.name);
+	if (!name || name === device.name) return;
+	const res = await api('/api/devices/rename', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ serial: device.serial, name })
+	});
+	if (res.ok) loadDevices();
+	else alert('Erreur: ' + (res.error || 'inconnue'));
+}
+
+// ========== APPS ========== 
+async function showAppsDialog(device) {
+	const res = await api(`/api/apps/${device.serial}`);
+	if (!res.ok) return alert('Erreur chargement apps');
+	const apps = res.apps || [];
+	let html = `<h3>Apps installées</h3><ul>`;
+	apps.forEach(pkg => {
+		html += `<li>${pkg} <button onclick="launchApp('${device.serial}','${pkg}')">Lancer</button></li>`;
+	});
+	html += '</ul>';
+	showModal(html);
+}
+
+async function launchApp(serial, pkg) {
+	await api(`/api/apps/${serial}/launch`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ package: pkg })
+	});
+}
+
+// ========== FAVORIS ========== 
+async function showFavoritesDialog(device) {
+	const res = await api('/api/favorites');
+	if (!res.ok) return alert('Erreur chargement favoris');
+	const favs = res.favorites || [];
+	let html = `<h3>Favoris</h3><ul>`;
+	favs.forEach(fav => {
+		html += `<li>${fav.name} <button onclick="launchApp('${device.serial}','${fav.packageId}')">Lancer</button></li>`;
+	});
+	html += '</ul>';
+	showModal(html);
+}
+
+// ========== STOCKAGE ========== 
+async function showStorageDialog(device) {
+	// Placeholder: could list files, storage info, etc.
+	alert('Fonction stockage à implémenter');
+}
+
+// ========== MODAL ========== 
+function showModal(html) {
+	let modal = document.getElementById('modal');
+	if (!modal) {
+		modal = document.createElement('div');
+		modal.id = 'modal';
+		modal.className = 'modal';
+		document.body.appendChild(modal);
+	}
+	modal.innerHTML = `<div class='modal-content'>${html}<br><button onclick="closeModal()">Fermer</button></div>`;
+	modal.style.display = 'block';
+}
+function closeModal() {
+	const modal = document.getElementById('modal');
+	if (modal) modal.style.display = 'none';
+}
+
+// ========== SOCKET.IO EVENTS ========== 
+socket.on('devices-update', (data) => {
+	devices = data;
+	renderDevices();
+});
+socket.on('games-update', (data) => {
+	games = data;
+});
+socket.on('favorites-update', (data) => {
+	favorites = data;
+});
+socket.on('stream-event', (evt) => {
+	if (evt.type === 'start') {
+		// Optionally: show streaming indicator
+	}
+	if (evt.type === 'stop') {
+		// Optionally: hide streaming indicator
+	}
+});
+
+// ========== INIT ========== 
+console.log('[Dashboard] Init');
+loadDevices();
+

@@ -1,0 +1,60 @@
+<svg width="760" height="480" viewBox="0 0 760 480" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ring" x1="120" y1="340" x2="640" y2="140" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3CFF9E"/>
+      <stop offset="0.5" stop-color="#24E2C4"/>
+      <stop offset="1" stop-color="#22A6FF"/>
+    </linearGradient>
+    <linearGradient id="ring-soft" x1="150" y1="360" x2="620" y2="130" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5DFFA9" stop-opacity="0.65"/>
+      <stop offset="0.55" stop-color="#3AE5FF" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#2FA0FF" stop-opacity="0.35"/>
+    </linearGradient>
+    <linearGradient id="vGrad" x1="220" y1="340" x2="350" y2="150" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#32A8FF"/>
+      <stop offset="0.45" stop-color="#52C7FF"/>
+      <stop offset="1" stop-color="#D6F3FF"/>
+    </linearGradient>
+    <linearGradient id="dGrad" x1="330" y1="360" x2="520" y2="140" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#40E68A"/>
+      <stop offset="0.4" stop-color="#55F3A7"/>
+      <stop offset="1" stop-color="#DBFFE9"/>
+    </linearGradient>
+    <radialGradient id="shine" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(380 230) rotate(90) scale(240 320)">
+      <stop stop-color="#9CF0FF" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#9CF0FF" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="40" y="40" width="680" height="400" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.1  0 0 0 0 0.8  0 0 0 0 0.4  0 0 0 0.55 0"/>
+      <feBlend in2="SourceGraphic" mode="screen"/>
+    </filter>
+    <filter id="textGlow" x="160" y="120" width="460" height="260" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.2  0 0 0 0 0.7  0 0 0 0 0.5  0 0 0 0.8 0"/>
+      <feBlend in2="SourceGraphic" mode="screen"/>
+    </filter>
+  </defs>
+
+  <rect width="760" height="480" fill="none"/>
+  <ellipse cx="380" cy="240" rx="280" ry="138" fill="url(#shine)" opacity="0.65"/>
+
+  <g filter="url(#glow)">
+    <ellipse cx="380" cy="240" rx="260" ry="120" stroke="url(#ring-soft)" stroke-width="28" stroke-linecap="round" fill="none"/>
+    <ellipse cx="380" cy="240" rx="248" ry="112" stroke="url(#ring)" stroke-width="16" stroke-linecap="round" fill="none"/>
+  </g>
+
+  <g filter="url(#textGlow)">
+    <text x="210" y="282" fill="url(#vGrad)" font-family="'Poppins','Segoe UI','Inter',system-ui,sans-serif" font-size="200" font-weight="800" letter-spacing="-8">V</text>
+    <text x="330" y="282" fill="url(#dGrad)" font-family="'Poppins','Segoe UI','Inter',system-ui,sans-serif" font-size="200" font-weight="800" letter-spacing="-10">D</text>
+    <text x="210" y="282" fill="none" stroke="#E9FFFF" stroke-opacity="0.4" stroke-width="6" font-family="'Poppins','Segoe UI','Inter',system-ui,sans-serif" font-size="200" font-weight="800" letter-spacing="-8">V</text>
+    <text x="330" y="282" fill="none" stroke="#E8FFF5" stroke-opacity="0.35" stroke-width="6" font-family="'Poppins','Segoe UI','Inter',system-ui,sans-serif" font-size="200" font-weight="800" letter-spacing="-10">D</text>
+  </g>
+
+  <circle cx="570" cy="178" r="6" fill="#8FFFB8" opacity="0.85"/>
+  <circle cx="210" cy="300" r="5" fill="#4FD6FF" opacity="0.6"/>
+  <circle cx="500" cy="320" r="4" fill="#33FFA1" opacity="0.7"/>
+  <circle cx="276" cy="176" r="4" fill="#33B9FF" opacity="0.65"/>
+  <circle cx="160" cy="240" r="3.5" fill="#20CFFF" opacity="0.6"/>
+  <circle cx="600" cy="244" r="3.5" fill="#21FFA6" opacity="0.7"/>
+</svg>

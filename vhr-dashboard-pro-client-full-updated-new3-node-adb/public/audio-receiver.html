@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/6XbR1kAAAAASUVORK5CYII=">
+    <title>🎤 Récepteur Audio VHR</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #0a0e17;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            background: #1a1d24;
+            border: 3px solid #1abc9c;
+            border-radius: 16px;
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+        
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            margin-bottom: 32px;
+        }
+        
+        .header-icon {
+            font-size: 60px;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            color: #1abc9c;
+        }
+        
+        .status {
+            margin-bottom: 24px;
+            padding: 20px;
+            background: #23272f;
+            border-radius: 12px;
+            border-left: 4px solid #1abc9c;
+        }
+        
+        .status-label {
+            font-size: 12px;
+            color: #95a5a6;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+        
+        .status-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #1abc9c;
+        }
+        
+        .status.disconnected .status-value {
+            color: #e74c3c;
+        }
+        
+        .status.connected .status-value {
+            color: #2ecc71;
+        }
+        
+        .visualizer {
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            gap: 3px;
+            height: 120px;
+            background: #0d0f14;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 24px;
+        }
+        
+        .visualizer div {
+            flex: 1;
+            background: linear-gradient(to top, #1abc9c, #2ecc71);
+            border-radius: 2px;
+            min-height: 4px;
+            transition: height 100ms ease;
+        }
+        
+        .device-info {
+            margin-bottom: 24px;
+            padding: 16px;
+            background: #23272f;
+            border-radius: 8px;
+            font-size: 13px;
+        }
+        
+        .device-info label {
+            color: #95a5a6;
+            display: block;
+            margin-bottom: 8px;
+        }
+        
+        .device-info input {
+            width: 100%;
+            background: #1a1d24;
+            color: #fff;
+            border: 2px solid #34495e;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        
+        button {
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+            transition: all 200ms;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-connect {
+            background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+            color: #000;
+            grid-column: 1 / -1;
+        }
+        
+        .btn-disconnect {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            color: #fff;
+            grid-column: 1 / -1;
+            display: none;
+        }
+        
+        .btn-disconnect.active {
+            display: block;
+        }
+        
+        .info-box {
+            padding: 12px;
+            background: rgba(26, 188, 156, 0.1);
+            border-left: 4px solid #1abc9c;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #bdc3c7;
+            line-height: 1.6;
+        }
+        
+        .error {
+            padding: 12px;
+            background: rgba(231, 76, 60, 0.1);
+            border-left: 4px solid #e74c3c;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #e74c3c;
+            margin-bottom: 16px;
+            display: none;
+        }
+        
+        .error.active {
+            display: block;
+        }
+        
+        audio {
+            width: 100%;
+            margin-bottom: 16px;
+        }
+        
+        .debug-info {
+            margin-top: 16px;
+            padding: 12px;
+            background: #0d0f14;
+            border-radius: 8px;
+            font-size: 11px;
+            color: #7f8c8d;
+            text-align: left;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        
+        .debug-info div {
+            margin-bottom: 4px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-icon">🎤</div>
+            <div>
+                <h1>Récepteur Audio</h1>
+                <div id="deviceLabel" style="color:#bdc3c7;font-size:13px;margin-top:4px;">Casque non détecté</div>
+            </div>
+        </div>
+        
+        <div class="error" id="errorBox"></div>
+        
+        <div class="status disconnected" id="status">
+            <div class="status-label">Statut</div>
+            <div class="status-value" id="statusValue">❌ Déconnecté</div>
+        </div>
+        
+        <div class="visualizer" id="visualizer">
+            <div></div><div></div><div></div><div></div><div></div>
+            <div></div><div></div><div></div><div></div><div></div>
+            <div></div><div></div><div></div><div></div><div></div>
+            <div></div><div></div><div></div><div></div><div></div>
+        </div>
+        
+        <div class="device-info">
+            <label for="deviceSerial">Numéro de série du casque:</label>
+            <input type="text" id="deviceSerial" placeholder="ex: FA123456789">
+        </div>
+        
+        <div class="controls">
+            <button class="btn-connect" id="connectBtn">🔗 Connecter</button>
+            <button class="btn-disconnect" id="disconnectBtn">🔌 Déconnecter</button>
+        </div>
+        
+        <audio id="audioPlayer" controls style="display:none;"></audio>
+        
+        <div class="info-box">
+            <strong>💡 Comment ça marche :</strong><br>
+            • Le dashboard ouvre cette page automatiquement avec le numéro de série du casque.<br>
+            • Touchez l’écran une fois (si demandé) pour autoriser le son.<br>
+            • L’audio du PC est alors diffusé vers ce casque.
+        </div>
+        
+        <div class="debug-info" id="debugInfo">
+            <div>🔧 Debug console...</div>
+        </div>
+    </div>
+    
+    <script src="/audio-receiver.js"></script>
+</body>
+</html>

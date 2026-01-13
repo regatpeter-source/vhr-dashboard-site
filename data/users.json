@@ -8,7 +8,12 @@
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
     "subscriptionStatus": null,
-    "subscriptionId": null
+    "subscriptionId": null,
+    "emailVerified": true,
+    "emailVerificationToken": null,
+    "emailVerificationExpiresAt": null,
+    "emailVerificationSentAt": null,
+    "emailVerifiedAt": "2026-01-11T12:41:06.113Z"
   },
   {
     "username": "VhrDashboard",
@@ -19,7 +24,12 @@
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
     "subscriptionStatus": null,
-    "subscriptionId": null
+    "subscriptionId": null,
+    "emailVerified": true,
+    "emailVerificationToken": null,
+    "emailVerificationExpiresAt": null,
+    "emailVerificationSentAt": null,
+    "emailVerifiedAt": "2026-01-11T12:41:06.113Z"
   },
   {
     "username": "samsam44410",
@@ -30,7 +40,12 @@
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
     "subscriptionStatus": null,
-    "subscriptionId": null
+    "subscriptionId": null,
+    "emailVerified": true,
+    "emailVerificationToken": null,
+    "emailVerificationExpiresAt": null,
+    "emailVerificationSentAt": null,
+    "emailVerifiedAt": "2026-01-11T12:41:06.113Z"
   },
   {
     "username": "testuser_payment",
@@ -41,7 +56,12 @@
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
     "subscriptionStatus": null,
-    "subscriptionId": null
+    "subscriptionId": null,
+    "emailVerified": true,
+    "emailVerificationToken": null,
+    "emailVerificationExpiresAt": null,
+    "emailVerificationSentAt": null,
+    "emailVerifiedAt": "2026-01-11T12:41:06.113Z"
   },
   {
     "username": "testpay_user",
@@ -52,7 +72,12 @@
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
     "subscriptionStatus": null,
-    "subscriptionId": null
+    "subscriptionId": null,
+    "emailVerified": true,
+    "emailVerificationToken": null,
+    "emailVerificationExpiresAt": null,
+    "emailVerificationSentAt": null,
+    "emailVerifiedAt": "2026-01-11T12:41:06.113Z"
   },
   {
     "username": "testpay_user3",
@@ -63,6 +88,27 @@
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
     "subscriptionStatus": null,
-    "subscriptionId": null
+    "subscriptionId": null,
+    "emailVerified": true,
+    "emailVerificationToken": null,
+    "emailVerificationExpiresAt": null,
+    "emailVerificationSentAt": null,
+    "emailVerifiedAt": "2026-01-11T12:41:06.113Z"
+  },
+  {
+    "username": "testo",
+    "passwordHash": "$2b$10$UN3HQ6YRq4ASaNgyTZfrE.PljRYuUoUqRm3TSgpr9RxTrVXVV223e",
+    "role": "user",
+    "email": "peter.regat.rpc@gmail.com",
+    "stripeCustomerId": null,
+    "latestInvoiceId": null,
+    "lastInvoicePaidAt": null,
+    "subscriptionStatus": null,
+    "subscriptionId": null,
+    "emailVerified": true,
+    "emailVerificationToken": null,
+    "emailVerificationExpiresAt": null,
+    "emailVerificationSentAt": null,
+    "emailVerifiedAt": "2026-01-11T12:41:06.113Z"
   }
 ]

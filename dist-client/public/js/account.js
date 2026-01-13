@@ -2,31 +2,55 @@
 (function(){
   const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
   const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
-  const PROD_API = 'https://www.vhr-dashboard-site.com';
-  const SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
   // Forcer l'API vers la prod pour que les comptes créés en ligne soient reconnus, même si la page est servie en localhost/LAN.
-  const API_BASE = PROD_API;
+  const API_BASE = 'https://www.vhr-dashboard-site.com';
+  const SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
+  const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
+
+  // --- Token bootstrap via querystring (to support redirection depuis le site https) ---
+  const params = new URLSearchParams(window.location.search || '');
+  const qsToken = params.get('token') || params.get('vhr_token');
+  if (qsToken) {
+    saveAuthToken(qsToken);
+    // Nettoyer l'URL pour éviter de laisser le token dans l'historique
+    try {
+      params.delete('token');
+      params.delete('vhr_token');
+      const newQuery = params.toString();
+      const cleanUrl = window.location.pathname + (newQuery ? '?' + newQuery : '') + window.location.hash;
+      window.history.replaceState({}, document.title, cleanUrl);
+    } catch (e) {
+      console.warn('[account] Impossible de nettoyer le token dans l’URL', e);
+    }
+  }
+
+  function getStoredToken() {
+    try {
+      return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function saveAuthToken(token) {
+    try {
+      if (token && token.trim()) {
+        localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token.trim());
+        return token.trim();
+      }
+      localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    } catch (e) {}
+    return '';
+  }
+
+  function clearAuthToken() {
+    saveAuthToken('');
+  }
 
   function isOfficialHost() {
     // Gardé pour la logique de facturation; n'affecte plus le routage API
     return OFFICIAL_HOSTS.includes(window.location.hostname);
   }
-    // --- Token bootstrap via querystring (to support redirection depuis le site https) ---
-    const params = new URLSearchParams(window.location.search || '');
-    const qsToken = params.get('token') || params.get('vhr_token');
-    if (qsToken) {
-      saveAuthToken(qsToken);
-      // Nettoyer l'URL pour éviter de laisser le token dans l'historique
-      try {
-        params.delete('token');
-        params.delete('vhr_token');
-        const newQuery = params.toString();
-        const cleanUrl = window.location.pathname + (newQuery ? '?' + newQuery : '') + window.location.hash;
-        window.history.replaceState({}, document.title, cleanUrl);
-      } catch (e) {
-        console.warn('[account] Impossible de nettoyer le token dans l’URL', e);
-      }
-    }
   // Toggle password visibility
   document.addEventListener('DOMContentLoaded', () => {
     const toggleButtons = document.querySelectorAll('.togglePassword');
@@ -50,6 +74,10 @@
 
   async function api(path, opts = {}) {
     opts = Object.assign({ credentials: 'include' }, opts);
+    const storedToken = getStoredToken();
+    if (storedToken) {
+      opts.headers = Object.assign({}, opts.headers || {}, { Authorization: 'Bearer ' + storedToken });
+    }
     try { 
       const url = API_BASE + path;
       const res = await fetch(url, opts); 
@@ -145,6 +173,7 @@
     document.getElementById('profileEmail').value = user.email || '';
   }
   function showLoggedOut() {
+    clearAuthToken();
     loggedOutBox.style.display = 'block';
     loggedInBox.style.display = 'none';
   }
@@ -172,6 +201,7 @@
       console.log('[LOGIN] Response:', res);
       
       if (res && res.ok) { 
+        if (res.token) saveAuthToken(res.token);
         loginMessage.textContent = 'Connexion réussie ✓'; 
         await new Promise(r => setTimeout(r, 500));
         // Redirection immédiate si demandée, même avant le rafraîchissement du profil
@@ -207,7 +237,9 @@
     loginMessage.textContent = 'Création du compte...';
     const res = await api('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: p1, email }) });
     if (res && res.ok) { 
+      if (res.token) saveAuthToken(res.token);
       loginMessage.textContent = 'Compte créé ✓ Vous êtes connecté(e).'; 
+      // Sync vers backend Dashboard PRO (PostgreSQL)
       try {
         fetch(API_BASE + '/api/admin/sync-user', {
           method: 'POST',
@@ -235,7 +267,7 @@
   if (logoutBtn) logoutBtn.addEventListener('click', async () => { setToken(null); await api('/api/logout', { method: 'POST' }); showLoggedOut(); });
 
   // Profile update
-  const profileForm = document.getElementById('profileForm');
+  if (logoutBtn) logoutBtn.addEventListener('click', async () => { clearAuthToken(); setToken(null); await api('/api/logout', { method: 'POST' }); showLoggedOut(); });
   const passwordForm = document.getElementById('passwordForm');
   if (profileForm) profileForm.addEventListener('submit', async (e) => {
     e.preventDefault();

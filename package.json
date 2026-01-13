@@ -22,7 +22,8 @@
     "build:demo": "node scripts/package-demo.js",
     "build:demo:zip": "node scripts/package-demo.js zip",
     "package:dashboard": "node scripts/package-dashboard.js",
-    "generate:cert": "node scripts/create-local-cert.js"
+    "generate:cert": "node scripts/create-local-cert.js",
+    "test:sessions": "node scripts/test-sessions.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
@@ -36,6 +37,7 @@
     "node-fetch": "^2.7.0",
     "nodemailer": "^7.0.11",
     "pg": "^8.16.3",
+    "redis": "^4.6.14",
     "socket.io": "^4.8.1",
     "stripe": "^14.21.0",
     "unzipper": "^0.10.14",
@@ -49,6 +51,7 @@
     "archiver": "^6.0.1",
     "fs-extra": "^11.1.1",
     "open": "^8.4.2",
-    "pkg": "^5.8.1"
+    "pkg": "^5.8.1",
+    "socket.io-client": "^4.8.1"
   }
 }

@@ -70,24 +70,11 @@ const ADMIN_ALLOWLIST = (process.env.ADMIN_ALLOWLIST || 'vhr')
   .split(',')
   .map(u => u.trim().toLowerCase())
   .filter(Boolean);
-const ADMIN_VERIFICATION_BYPASS_EMAIL = (process.env.ADMIN_VERIFICATION_BYPASS_EMAIL || 'admin@example.local').trim().toLowerCase();
 const ADMIN_INIT_SECRET = process.env.ADMIN_INIT_SECRET || null;
 // Shared secret used when syncing users from the prod auth API to the local pack.
 // Fallbacks to the same value embedded in dashboard-pro.js to avoid 403 if the
 // environment variable is missing on local installs.
 const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
-
-// Manual email overrides to re-link Stripe customers when the stored email is missing/incorrect.
-// Can be provided via JSON in env USER_EMAIL_OVERRIDES_JSON, e.g. {"pitou":"vhrealityone@gmail.com"}
-const EMAIL_OVERRIDE_MAP = (() => {
-  let map = {};
-  if (process.env.USER_EMAIL_OVERRIDES_JSON) {
-    try { map = JSON.parse(process.env.USER_EMAIL_OVERRIDES_JSON) || {}; } catch (e) { console.warn('[config] Failed to parse USER_EMAIL_OVERRIDES_JSON:', e && e.message ? e.message : e); }
-  }
-  // Hardcoded safety net for reported account
-  if (!map.pitou) map.pitou = 'vhrealityone@gmail.com';
-  return Object.fromEntries(Object.entries(map).map(([k,v]) => [String(k || '').toLowerCase(), v]));
-})();
 
 function isAllowedAdminUser(user) {
   const username = (typeof user === 'string' ? user : (user && user.username) || '').toLowerCase();
@@ -154,6 +141,13 @@ if (HTTPS_ENABLED && hasCert) {
 } else {
   console.log('[HTTPS] HTTPS désactivé - démarrage principal en HTTP.');
 }
+
+if (useHttps && FORCE_HTTP) {
+  useHttps = false;
+  console.log('[HTTPS] FORCE_HTTP=1 détecté - démarrage forcé en HTTP malgré certificat.');
+}
+console.log(`[DB] Mode: ${USE_POSTGRES ? 'PostgreSQL' : 'JSON Files (Development)'}`);
+
 // ========== ADB BINARY DISCOVERY & AUTO-PATH ==========
 const PROJECT_ROOT = __dirname;
 const PLATFORM_TOOLS_DIR = path.join(PROJECT_ROOT, 'platform-tools');
@@ -734,12 +728,17 @@ app.use(helmet({
         'https://cdn.botpress.cloud',
         'https://www.vhr-dashboard-site.com',
         'https://vhr-dashboard-site.com',
+        // Autoriser toutes les cibles HTTP (LAN/clients) pour éviter les blocages CSP sur les nouveaux utilisateurs
+        'http:',
         // Autoriser le WebSocket local/LAN pour l'audio
         'ws:', 'wss:',
         'http://localhost:3000',
         'http://127.0.0.1:3000',
         'http://192.168.1.3:3000',
-        'http://192.168.1.3'
+        'http://192.168.1.3',
+        // Autoriser l'instance locale utilisée par titouille44 pour la voix
+        'http://192.168.1.155:3000',
+        'http://192.168.1.155'
       ],
       frameSrc: ["'self'", 'https://messaging.botpress.cloud', 'https://checkout.stripe.com', 'https://js.stripe.com'],
       objectSrc: ["'none'"],
@@ -841,17 +840,6 @@ const emailTransporter = nodemailer.createTransport({
   logger: true,  // Enable logging
   debug: true    // Show debug info
 });
-
-// Email verification settings
-const REQUIRE_EMAIL_VERIFICATION = (process.env.REQUIRE_EMAIL_VERIFICATION || '1') === '1';
-const AUTO_LOGIN_UNVERIFIED = process.env.AUTO_LOGIN_UNVERIFIED === '1';
-const EMAIL_VERIFICATION_TTL_HOURS_RAW = parseInt(process.env.EMAIL_VERIFICATION_TTL_HOURS || '48', 10);
-const EMAIL_VERIFICATION_TTL_HOURS = Number.isFinite(EMAIL_VERIFICATION_TTL_HOURS_RAW) ? EMAIL_VERIFICATION_TTL_HOURS_RAW : 48;
-const EMAIL_VERIFICATION_BASE_URL = (process.env.EMAIL_VERIFICATION_BASE_URL
-  || process.env.PUBLIC_BASE_URL
-  || process.env.FRONTEND_URL
-  || process.env.SITE_URL
-  || '').replace(/\/$/, '');
 
 // Verify email configuration at startup
 if (emailUser && emailPass) {
@@ -1121,71 +1109,38 @@ async function sendLicenseEmail(email, licenseKey, username) {
 }
 
 // Send account confirmation / welcome email on signup
-async function sendAccountConfirmationEmail(user, options = {}) {
-  const normalizedUser = normalizeUserRecord(user);
-
-  if (!normalizedUser || !normalizedUser.email) {
+async function sendAccountConfirmationEmail(user) {
+  if (!user || !user.email) {
     console.warn('[email] No recipient email for confirmation');
-    return { success: false, error: 'no_recipient' };
+    return false;
   }
 
   if (!emailUser || !emailPass) {
     console.warn('[email] SMTP not configured, skip confirmation email');
-    return { success: false, error: 'smtp_not_configured' };
+    return false;
   }
 
   if (!emailTransporter) {
     console.error('[email] emailTransporter not initialized');
-    return { success: false, error: 'transporter_not_initialized' };
+    return false;
   }
-
-  const verificationEnforced = shouldEnforceEmailVerification(normalizedUser);
-  const needsVerification = verificationEnforced && !isEmailVerified(normalizedUser);
-  let verificationLink = null;
-
-  if (needsVerification) {
-    const tokenInfo = issueEmailVerificationToken(normalizedUser, { forceNew: true });
-    if (!tokenInfo || !tokenInfo.token) {
-      console.warn('[email] Unable to generate verification token');
-    } else {
-      const base = getVerificationBaseUrl(options.req);
-      const cleanBase = (base || '').replace(/\/$/, '');
-      verificationLink = `${cleanBase || 'https://www.vhr-dashboard-site.com'}/api/auth/verify-email?token=${tokenInfo.token}`;
-    }
-  }
-
-  const subject = needsVerification
-    ? '🔐 Confirmez votre adresse email'
-    : '🎉 Bienvenue sur VHR Dashboard';
-
-  const actionButton = needsVerification && verificationLink
-    ? `<p style="text-align:center;margin-top:24px;">
-        <a href="${verificationLink}" style="background:#2ecc71;color:#0d0f14;padding:14px 20px;border-radius:10px;text-decoration:none;font-weight:bold;display:inline-block;">Confirmer mon email</a>
-      </p>`
-    : `<p style="text-align:center;margin-top:24px;">
-        <a href="https://www.vhr-dashboard-site.com/launch-dashboard.html" style="background:#2ecc71;color:#0d0f14;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:bold;">Ouvrir le dashboard</a>
-      </p>`;
-
-  const verificationReminder = needsVerification ? `
-    <p style="background:#1a1d24;padding:14px;border-radius:10px;margin:18px 0;">🚨 Pour sécuriser votre compte, merci de confirmer votre adresse email dans les ${EMAIL_VERIFICATION_TTL_HOURS}h.</p>
-    ${verificationLink ? `<p style="font-size:12px;color:#95a5a6;">Lien direct : <a href="${verificationLink}" style="color:#3498db;">${verificationLink}</a></p>` : ''}
-  ` : '';
 
   const mailOptions = {
     from: process.env.EMAIL_FROM || emailUser || 'noreply@vhr-dashboard-site.com',
-    to: normalizedUser.email,
-    subject,
+    to: user.email,
+    subject: '🎉 Bienvenue sur VHR Dashboard',
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; padding: 24px; background: #0d0f14; color: #ecf0f1; border-radius: 12px;">
-        <h1 style="color: #2ecc71; text-align: center;">${needsVerification ? 'Vérifiez votre email' : 'Bienvenue, ' + (normalizedUser.username || 'cher utilisateur') + ' !'}</h1>
-        <p style="line-height: 1.6;">Merci d'avoir créé votre compte VHR Dashboard.</p>
+        <h1 style="color: #2ecc71; text-align: center;">Bienvenue, ${user.username || 'cher utilisateur'} !</h1>
+        <p style="line-height: 1.6;">Merci d'avoir créé votre compte VHR Dashboard. Votre accès est actif et vous disposez d'une période d'essai.</p>
         <div style="background:#1a1d24;padding:16px;border-radius:10px;margin:20px 0;">
-          <p style="margin:0 0 8px 0;">📧 Email: <strong>${normalizedUser.email}</strong></p>
-          <p style="margin:0;">👤 Identifiant: <strong>${normalizedUser.username || 'votre compte'}</strong></p>
+          <p style="margin:0 0 8px 0;">📧 Email: <strong>${user.email}</strong></p>
+          <p style="margin:0;">👤 Identifiant: <strong>${user.username || 'votre compte'}</strong></p>
         </div>
-        ${verificationReminder}
         <p style="line-height: 1.6;">Vous pouvez à tout moment gérer votre abonnement ou passer en offre complète depuis votre espace.</p>
-        ${actionButton}
+        <p style="text-align:center;margin-top:24px;">
+          <a href="https://www.vhr-dashboard-site.com/launch-dashboard.html" style="background:#2ecc71;color:#0d0f14;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:bold;">Ouvrir le dashboard</a>
+        </p>
         <p style="color:#95a5a6;font-size:12px;margin-top:30px;text-align:center;">
           Si vous n'êtes pas à l'origine de cette création de compte, ignorez cet email ou contactez le support.
         </p>
@@ -1195,11 +1150,11 @@ async function sendAccountConfirmationEmail(user, options = {}) {
 
   try {
     const info = await emailTransporter.sendMail(mailOptions);
-    console.log('[email] ✓ Confirmation envoyée à', normalizedUser.email, 'messageId:', info && info.messageId);
-    return { success: true, verificationLink };
+    console.log('[email] ✓ Confirmation envoyée à', user.email, 'messageId:', info && info.messageId);
+    return true;
   } catch (e) {
     console.error('[email] ✗ Échec envoi confirmation:', e && e.message);
-    return { success: false, error: e && e.message, verificationLink };
+    return false;
   }
 }
 
@@ -1209,12 +1164,6 @@ async function sendAccountConfirmationEmail(user, options = {}) {
 app.get('/launch-dashboard.html', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.sendFile(path.join(__dirname, 'launch-dashboard.html'));
-});
-
-// Alias /dashboard-pro.html -> serve vhr-dashboard-pro.html (main dashboard)
-app.get(['/dashboard-pro.html', '/dashboard-pro'], (req, res) => {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.sendFile(path.join(__dirname, 'public', 'vhr-dashboard-pro.html'));
 });
 
 // Redirect vhr-dashboard-app.html to vhr-dashboard-pro.html
@@ -1236,6 +1185,17 @@ app.get('/test-dashboard', (req, res) => {
 });
 
 // ========== STATIC MIDDLEWARE (serves all public files) ==========
+
+// No-cache for the main dashboard bundles to avoid stale builds
+app.use((req, res, next) => {
+  const p = req.path || '';
+  if (p.endsWith('/dashboard-pro.js') || p.endsWith('/vhr-audio-stream.js')) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  next();
+});
 
 // Downloads system removed - using launcher system instead
 app.use(express.static(path.join(__dirname, 'public')));
@@ -1671,27 +1631,6 @@ function ensureDataDir() {
   try { fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true }); } catch (e) { }
 }
 
-function normalizeUserRecord(user) {
-  if (!user) return null;
-  const normalized = { ...user };
-
-  // Apply email override if configured for this username
-  const overrideEmail = EMAIL_OVERRIDE_MAP[normalized.username ? normalized.username.toLowerCase() : ''];
-  if (overrideEmail && normalized.email !== overrideEmail) {
-    normalized.email = overrideEmail;
-  }
-
-  // Normalize verification fields with legacy compatibility
-  const verifiedFlag = normalized.emailVerified ?? normalized.emailverified;
-  normalized.emailVerified = verifiedFlag !== undefined ? !!verifiedFlag : true; // legacy users are trusted
-  normalized.emailVerificationToken = normalized.emailVerificationToken || normalized.emailverificationtoken || null;
-  normalized.emailVerificationExpiresAt = normalized.emailVerificationExpiresAt || normalized.emailverificationexpiresat || null;
-  normalized.emailVerificationSentAt = normalized.emailVerificationSentAt || normalized.emailverificationsentat || null;
-  normalized.emailVerifiedAt = normalized.emailVerifiedAt || normalized.emailverifiedat || (normalized.emailVerified ? normalized.emailVerifiedAt || new Date().toISOString() : null);
-
-  return normalized;
-}
-
 function saveUsers() {
   try {
     ensureDataDir();
@@ -1705,12 +1644,7 @@ function saveUsers() {
       latestInvoiceId: u.latestInvoiceId || null,
       lastInvoicePaidAt: u.lastInvoicePaidAt || null,
       subscriptionStatus: u.subscriptionStatus || null,
-      subscriptionId: u.subscriptionId || null,
-      emailVerified: u.emailVerified ?? true,
-      emailVerificationToken: u.emailVerificationToken || null,
-      emailVerificationExpiresAt: u.emailVerificationExpiresAt || null,
-      emailVerificationSentAt: u.emailVerificationSentAt || null,
-      emailVerifiedAt: u.emailVerifiedAt || null
+      subscriptionId: u.subscriptionId || null
     }));
     fs.writeFileSync(USERS_FILE, JSON.stringify(toSave, null, 2), 'utf8');
     return true;
@@ -1763,12 +1697,11 @@ function loadUsers() {
       
       // Ajouter un ID aux utilisateurs qui n'en ont pas
       userList = userList.map(user => {
-        const normalized = normalizeUserRecord(user);
-        if (!normalized.id) {
-          normalized.id = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-          console.log(`[users] Generated ID for user ${normalized.username}: ${normalized.id}`);
+        if (!user.id) {
+          user.id = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          console.log(`[users] Generated ID for user ${user.username}: ${user.id}`);
         }
-        return normalized;
+        return user;
       });
       
       return userList;
@@ -1780,7 +1713,7 @@ function loadUsers() {
   }
   // Default fallback: admin user
   console.log('[users] using default fallback admin user');
-  return [normalizeUserRecord({ id: 'admin', username: 'vhr', passwordHash: '$2b$10$9pY5QEUol9cD525SEyFibeS/mIzkVhQQJBRm9TESMKGlKgqUWeZLG', role: 'admin', email: 'admin@example.local', stripeCustomerId: null })];
+  return [{ id: 'admin', username: 'vhr', passwordHash: '$2b$10$9pY5QEUol9cD525SEyFibeS/mIzkVhQQJBRm9TESMKGlKgqUWeZLG', role: 'admin', email: 'admin@example.local', stripeCustomerId: null }];
 }
 
 let users = loadUsers();
@@ -1791,7 +1724,7 @@ if (USE_POSTGRES && db && db.getUsers) {
     try {
       const dbUsers = await db.getUsers();
       if (Array.isArray(dbUsers)) {
-        users = dbUsers.map(u => normalizeUserRecord({
+        users = dbUsers.map(u => ({
           id: u.id || `user_${u.username}`,
           username: u.username,
           passwordHash: u.passwordhash || u.passwordHash || null,
@@ -1801,12 +1734,7 @@ if (USE_POSTGRES && db && db.getUsers) {
           subscriptionStatus: u.subscriptionstatus || u.subscriptionStatus || null,
           subscriptionId: u.subscriptionid || u.subscriptionId || null,
           createdAt: u.createdat || u.createdAt || null,
-          updatedAt: u.updatedat || u.updatedAt || null,
-          emailVerified: u.emailverified ?? u.emailVerified,
-          emailVerificationToken: u.emailverificationtoken || u.emailVerificationToken || null,
-          emailVerificationExpiresAt: u.emailverificationexpiresat || u.emailVerificationExpiresAt || null,
-          emailVerificationSentAt: u.emailverificationsentat || u.emailVerificationSentAt || null,
-          emailVerifiedAt: u.emailverifiedat || u.emailVerifiedAt || null
+          updatedAt: u.updatedat || u.updatedAt || null
         }));
         console.log(`[users] Hydrated ${users.length} user(s) from PostgreSQL`);
       }
@@ -1834,9 +1762,6 @@ async function reconcilePendingSubscriptions() {
   // Best-effort: check users with a Stripe subscriptionId and ensure status + email confirmation
   for (const user of users) {
     if (!user || !user.subscriptionId) continue;
-    // Ignore placeholder or fake IDs to avoid noisy 404s
-    const subId = String(user.subscriptionId || '').trim();
-    if (!subId.startsWith('sub_')) continue;
 
     let subscription;
     try {
@@ -2056,7 +1981,7 @@ function reloadUsers() {
   if (USE_POSTGRES && db && db.getUsers) {
     db.getUsers().then(dbUsers => {
       if (Array.isArray(dbUsers)) {
-        users = dbUsers.map(u => normalizeUserRecord({
+        users = dbUsers.map(u => ({
           id: u.id || `user_${u.username}`,
           username: u.username,
           passwordHash: u.passwordhash || u.passwordHash || null,
@@ -2066,29 +1991,23 @@ function reloadUsers() {
           subscriptionStatus: u.subscriptionstatus || u.subscriptionStatus || null,
           subscriptionId: u.subscriptionid || u.subscriptionId || null,
           createdAt: u.createdat || u.createdAt || null,
-          updatedAt: u.updatedat || u.updatedAt || null,
-          emailVerified: u.emailverified ?? u.emailVerified,
-          emailVerificationToken: u.emailverificationtoken || u.emailVerificationToken || null,
-          emailVerificationExpiresAt: u.emailverificationexpiresat || u.emailVerificationExpiresAt || null,
-          emailVerificationSentAt: u.emailverificationsentat || u.emailVerificationSentAt || null,
-          emailVerifiedAt: u.emailverifiedat || u.emailVerifiedAt || null
+          updatedAt: u.updatedat || u.updatedAt || null
         }));
       }
     }).catch(e => console.error('[users] reload from Postgres failed:', e && e.message));
   } else if (!dbEnabled) {
-    users = loadUsers().map(normalizeUserRecord);
+    users = loadUsers();
   } else {
-    users = require('./db').getAllUsers().map(normalizeUserRecord);
+    users = require('./db').getAllUsers();
   }
 }
 
 function getUserByUsername(username) {
   if (dbEnabled) {
     const u = require('./db').findUserByUsername(username);
-    return normalizeUserRecord(u) || null;
+    return u || null;
   }
-  const found = users.find(u => u.username === username);
-  return normalizeUserRecord(found) || null;
+  return users.find(u => u.username === username);
 }
 
 function getUserByStripeCustomerId(customerId) {
@@ -2099,14 +2018,12 @@ function getUserByStripeCustomerId(customerId) {
 function getUserByEmail(email) {
   if (dbEnabled) {
     const u = require('./db').findUserByEmail?.(email);
-    return normalizeUserRecord(u) || null;
+    return u || null;
   }
-  const found = users.find(u => u.email === email);
-  return normalizeUserRecord(found) || null;
+  return users.find(u => u.email === email);
 }
 
 function persistUser(user) {
-  user = normalizeUserRecord(user);
   if (USE_POSTGRES) {
     // Keep in-memory cache in sync to avoid duplicate creation within same runtime
     const idx = users.findIndex(u => u.username === user.username);
@@ -2118,11 +2035,6 @@ function persistUser(user) {
     if (user.stripeCustomerId) updatePayload.stripecustomerid = user.stripeCustomerId;
     if (user.subscriptionStatus) updatePayload.subscriptionstatus = user.subscriptionStatus;
     if (user.subscriptionId) updatePayload.subscriptionid = user.subscriptionId;
-    if (Object.prototype.hasOwnProperty.call(user, 'emailVerified')) updatePayload.emailverified = user.emailVerified;
-    if (Object.prototype.hasOwnProperty.call(user, 'emailVerificationToken')) updatePayload.emailverificationtoken = user.emailVerificationToken || null;
-    if (Object.prototype.hasOwnProperty.call(user, 'emailVerificationExpiresAt')) updatePayload.emailverificationexpiresat = user.emailVerificationExpiresAt || null;
-    if (Object.prototype.hasOwnProperty.call(user, 'emailVerificationSentAt')) updatePayload.emailverificationsentat = user.emailVerificationSentAt || null;
-    if (Object.prototype.hasOwnProperty.call(user, 'emailVerifiedAt')) updatePayload.emailverifiedat = user.emailVerifiedAt || null;
 
     // Save async to PostgreSQL (fire and forget to avoid blocking)
     db.getUserByUsername(user.username)
@@ -2155,134 +2067,6 @@ function persistUser(user) {
     console.log('[users] persistUser: end');
     return true;
   }
-}
-
-const EMAIL_VERIFICATION_TTL_MS = Math.max(1, EMAIL_VERIFICATION_TTL_HOURS) * 60 * 60 * 1000;
-
-function getVerificationBaseUrl(req) {
-  if (EMAIL_VERIFICATION_BASE_URL) return EMAIL_VERIFICATION_BASE_URL;
-  if (req && req.protocol && req.get) {
-    const host = req.get('host');
-    if (host) return `${req.protocol}://${host}`;
-  }
-  // Fallback to public production domain
-  return 'https://www.vhr-dashboard-site.com';
-}
-
-function isEmailVerified(user) {
-  if (!user) return false;
-  if (user.emailVerified === undefined && user.emailverified === undefined) return true; // legacy users considered verified
-  return !!(user.emailVerified ?? user.emailverified);
-}
-
-function shouldEnforceEmailVerification(user) {
-  if (!REQUIRE_EMAIL_VERIFICATION) return false;
-  if (!user) return REQUIRE_EMAIL_VERIFICATION;
-
-  const role = (user.role || '').toString().toLowerCase();
-  const username = (user.username || '').toString().toLowerCase();
-  const email = (user.email || '').toString().toLowerCase();
-
-  const isAdminRole = role === 'admin';
-  const isAllowlisted = isAllowedAdminUser(username) || isAllowedAdminUser(user);
-  const isBypassEmail = email && email === ADMIN_VERIFICATION_BYPASS_EMAIL;
-
-  // Only the allowlisted admin with the expected email can bypass verification on the site vitrine
-  if (isAdminRole && isAllowlisted && isBypassEmail) return false;
-
-  return true;
-}
-
-function isEmailVerifiedOrBypassed(user) {
-  return isEmailVerified(user) || !shouldEnforceEmailVerification(user);
-}
-
-async function findUserByEmailAsync(email) {
-  if (!email) return null;
-  const lookupEmail = String(email).trim();
-  if (USE_POSTGRES && db) {
-    try {
-      const resUser = await db.pool.query('SELECT * FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [lookupEmail]);
-      if (resUser.rows && resUser.rows[0]) return normalizeUserRecord(resUser.rows[0]);
-    } catch (e) {
-      console.error('[users] Postgres email lookup failed:', e && e.message);
-    }
-  }
-  return getUserByEmail(lookupEmail);
-}
-
-async function findUserByUsernameAsync(username) {
-  if (!username) return null;
-  if (USE_POSTGRES && db && db.getUserByUsername) {
-    try {
-      const u = await db.getUserByUsername(username);
-      if (u) return normalizeUserRecord(u);
-    } catch (e) {
-      console.error('[users] Postgres username lookup failed:', e && e.message);
-    }
-  }
-  return getUserByUsername(username);
-}
-
-function issueEmailVerificationToken(user, { forceNew = false } = {}) {
-  if (!user || !user.email) return null;
-  const normalized = normalizeUserRecord(user);
-
-  const now = Date.now();
-  const hasValidToken =
-    normalized.emailVerificationToken &&
-    normalized.emailVerificationExpiresAt &&
-    new Date(normalized.emailVerificationExpiresAt).getTime() > now;
-
-  if (!forceNew && hasValidToken) {
-    return {
-      token: null,
-      expiresAt: normalized.emailVerificationExpiresAt,
-      alreadyValid: true
-    };
-  }
-
-  const rawToken = crypto.randomBytes(32).toString('hex');
-  const hashed = crypto.createHash('sha256').update(rawToken).digest('hex');
-
-  normalized.emailVerified = false;
-  normalized.emailVerificationToken = hashed;
-  normalized.emailVerificationExpiresAt = new Date(now + EMAIL_VERIFICATION_TTL_MS).toISOString();
-  normalized.emailVerificationSentAt = new Date().toISOString();
-
-  persistUser(normalized);
-
-  return {
-    token: rawToken,
-    expiresAt: normalized.emailVerificationExpiresAt,
-    alreadyValid: false
-  };
-}
-
-async function findUserByVerificationToken(tokenHash) {
-  if (!tokenHash) return null;
-  if (USE_POSTGRES && db) {
-    try {
-      const resUser = await db.pool.query('SELECT * FROM users WHERE emailverificationtoken = $1 LIMIT 1', [tokenHash]);
-      if (resUser.rows && resUser.rows[0]) return normalizeUserRecord(resUser.rows[0]);
-    } catch (e) {
-      console.warn('[users] verification token lookup failed (postgres):', e && e.message);
-    }
-  }
-
-  const local = users.find(u => u.emailVerificationToken === tokenHash);
-  return normalizeUserRecord(local) || null;
-}
-
-function markUserVerified(user) {
-  if (!user) return null;
-  const normalized = normalizeUserRecord(user);
-  normalized.emailVerified = true;
-  normalized.emailVerifiedAt = new Date().toISOString();
-  normalized.emailVerificationToken = null;
-  normalized.emailVerificationExpiresAt = null;
-  persistUser(normalized);
-  return normalized;
 }
 
 // Ensure a subscription record exists for a given user (free/trial by default)
@@ -2394,9 +2178,6 @@ function authMiddleware(req, res, next) {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
-    if (req.user && req.user.emailVerified === undefined) {
-      req.user.emailVerified = true;
-    }
     next();
   } catch (e) {
     return res.status(401).json({ ok: false, error: 'Token invalide' });
@@ -2408,45 +2189,32 @@ app.post('/api/login', async (req, res) => {
   console.log('[api/login] request received:', req.body);
   const { username, password } = req.body;
   console.log('[api/login] attempting login for:', username);
-  if (!USE_POSTGRES) {
-    reloadUsers();
-  }
   
-  let user = await findUserByUsernameAsync(username);
-  if (!user && USE_POSTGRES) {
-    console.log('[api/login] user from PostgreSQL: not found');
+  let user;
+  if (USE_POSTGRES) {
+    user = await db.getUserByUsername(username);
+    console.log('[api/login] user from PostgreSQL:', user ? 'found' : 'not found');
   } else {
-    console.log('[api/login] user lookup result:', user ? 'found' : 'not found');
+    reloadUsers(); // Reload users from file in case they were modified externally
+    user = getUserByUsername(username);
+    console.log('[api/login] user from memory:', user ? 'found' : 'not found');
   }
   
   if (!user) {
     console.log('[api/login] user not found');
     return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
   }
-
-  const verificationEnforced = shouldEnforceEmailVerification(user);
-  if (verificationEnforced && !isEmailVerified(user)) {
-    return res.status(403).json({
-      ok: false,
-      error: 'Adresse email non vérifiée. Consultez vos emails pour valider votre compte.',
-      code: 'email_not_verified',
-      verificationRequired: true,
-      email: user.email || null
-    });
-  }
   const valid = await bcrypt.compare(password, user.passwordhash || user.passwordHash);
   if (!valid) {
     console.log('[api/login] password mismatch');
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
   }
-  const emailVerifiedFlag = isEmailVerifiedOrBypassed(user);
   console.log('[api/login] login successful for:', username);
-  const tokenPayload = { username: user.username, role: user.role, emailVerified: emailVerifiedFlag };
-  const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+  const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
   const cookieOptions = buildAuthCookieOptions(req);
   res.cookie('vhr_token', token, cookieOptions);
   console.log('[api/login] cookie set with secure=' + cookieOptions.secure + ', sameSite=' + cookieOptions.sameSite + ', maxAge=' + cookieOptions.maxAge);
-  res.json({ ok: true, token, userId: user.id, username: user.username, role: user.role, email: user.email || null, emailVerified: emailVerifiedFlag });
+  res.json({ ok: true, token, userId: user.id, username: user.username, role: user.role, email: user.email || null });
 });
 
 // --- Route de logout (optionnelle, côté client il suffit de supprimer le token) ---
@@ -2972,18 +2740,8 @@ app.get('/api/admin/diagnose', authMiddleware, async (req, res) => {
 });
 
 // Return authenticated user info (uses auth middleware)
-app.get('/api/me', authMiddleware, async (req, res) => {
-  const dbUser = await findUserByUsernameAsync(req.user.username);
-  const user = dbUser ? {
-    username: dbUser.username,
-    role: dbUser.role,
-    email: dbUser.email || null,
-    emailVerified: isEmailVerified(dbUser)
-  } : {
-    username: req.user.username,
-    role: req.user.role,
-    emailVerified: !!req.user.emailVerified
-  };
+app.get('/api/me', authMiddleware, (req, res) => {
+  const user = { username: req.user.username, role: req.user.role };
   res.json({ ok: true, user });
 });
 
@@ -3126,22 +2884,22 @@ app.post('/api/auth/login', async (req, res) => {
   console.log('[api/auth/login] attempting login for email:', email);
   
   // Find user by email
-  const user = await findUserByEmailAsync(email);
+  let user = null;
+  if (USE_POSTGRES && db) {
+    try {
+      const resUser = await db.pool.query('SELECT * FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [email]);
+      if (resUser.rows && resUser.rows[0]) user = resUser.rows[0];
+    } catch (e) {
+      console.error('[api/auth/login] Postgres email lookup failed:', e && e.message);
+    }
+  }
+  if (!user) {
+    user = getUserByEmail(email);
+  }
 
   if (!user) {
     console.log('[api/auth/login] user not found by email');
     return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
-  }
-
-  const verificationEnforced = shouldEnforceEmailVerification(user);
-  if (verificationEnforced && !isEmailVerified(user)) {
-    return res.status(403).json({
-      ok: false,
-      error: 'Adresse email non vérifiée. Consultez vos emails pour valider votre compte.',
-      code: 'email_not_verified',
-      verificationRequired: true,
-      email: user.email || null
-    });
   }
   
   const valid = await bcrypt.compare(password, user.passwordhash || user.passwordHash);
@@ -3150,10 +2908,9 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
   }
   
-  const emailVerifiedFlag = isEmailVerifiedOrBypassed(user);
   console.log('[api/auth/login] login successful for:', user.username);
-  const tokenPayload = { username: user.username, role: user.role, emailVerified: emailVerifiedFlag };
-  const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+  
+  const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
   const cookieOptions = buildAuthCookieOptions(req);
   res.cookie('vhr_token', token, cookieOptions);
   
@@ -3163,8 +2920,7 @@ app.post('/api/auth/login', async (req, res) => {
     user: {
       name: user.username,
       email: user.email,
-      role: user.role,
-      emailVerified: emailVerifiedFlag
+      role: user.role
     }
   });
 });
@@ -3220,11 +2976,6 @@ app.post('/api/auth/register', async (req, res) => {
       email,
       passwordHash,
       role: 'user',
-      emailVerified: false,
-      emailVerifiedAt: null,
-      emailVerificationToken: null,
-      emailVerificationExpiresAt: null,
-      emailVerificationSentAt: null,
       demoStartDate: new Date().toISOString(), // Trial starts now
       subscriptionStatus: null,
       subscriptionId: null,
@@ -3245,127 +2996,26 @@ app.post('/api/auth/register', async (req, res) => {
     });
 
     // Envoyer l'email de confirmation de compte (best-effort)
-    const verificationEnforced = shouldEnforceEmailVerification(newUser);
-    let confirmationResult = null;
-    try {
-      confirmationResult = await sendAccountConfirmationEmail(newUser, { req });
-    } catch (e) {
-      console.error('[email] confirmation error:', e && e.message);
-    }
-
-    if (verificationEnforced && (!confirmationResult || confirmationResult.success === false)) {
-      return res.status(500).json({ ok: false, error: 'Impossible d\'envoyer l\'email de vérification. Vérifiez la configuration SMTP.' });
-    }
+    sendAccountConfirmationEmail(newUser)
+      .catch(e => console.error('[email] confirmation error:', e && e.message));
     
-    const shouldAutoLogin = !verificationEnforced || AUTO_LOGIN_UNVERIFIED;
-    const emailVerifiedFlag = isEmailVerifiedOrBypassed(newUser);
-    let token = null;
-    if (shouldAutoLogin) {
-      token = jwt.sign({ username: newUser.username, role: newUser.role, emailVerified: emailVerifiedFlag }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-      res.cookie('vhr_token', token, buildAuthCookieOptions(req));
-    }
-
+    // Create JWT token for automatic login
+    const token = jwt.sign({ username: newUser.username, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    res.cookie('vhr_token', token, buildAuthCookieOptions(req));
+    
     res.json({ 
-      ok: true,
-      verificationRequired: verificationEnforced,
-      autoLogin: shouldAutoLogin,
+      ok: true, 
       token,
-      message: verificationEnforced
-        ? 'Compte créé. Merci de confirmer votre adresse email pour activer votre accès.'
-        : 'Compte créé et connecté.',
       user: {
         name: newUser.username,
         email: newUser.email,
-        role: newUser.role,
-        emailVerified: emailVerifiedFlag
+        role: newUser.role
       }
     });
   } catch (e) {
     console.error('[api/auth/register] error:', e);
     res.status(500).json({ ok: false, error: 'Erreur lors de l\'inscription' });
   }
-});
-
-// --- Resend verification email ---
-app.post('/api/auth/resend-verification', async (req, res) => {
-  const email = (req.body?.email || '').trim();
-  if (!email) return res.status(400).json({ ok: false, error: 'Email requis' });
-
-  const user = await findUserByEmailAsync(email);
-  if (!user) {
-    return res.status(404).json({ ok: false, error: 'Aucun compte trouvé pour cet email' });
-  }
-
-  const verificationEnforced = shouldEnforceEmailVerification(user);
-
-  if (!verificationEnforced || isEmailVerified(user)) {
-    return res.json({ ok: true, alreadyVerified: true, verificationRequired: verificationEnforced, bypassed: !verificationEnforced });
-  }
-
-  const lastSent = user.emailVerificationSentAt ? new Date(user.emailVerificationSentAt).getTime() : 0;
-  if (lastSent && Date.now() - lastSent < 2 * 60 * 1000) {
-    return res.status(429).json({ ok: false, error: 'Veuillez patienter avant de renvoyer un nouvel email' });
-  }
-
-  const sendResult = await sendAccountConfirmationEmail(user, { req, resend: true });
-  const success = !!sendResult && sendResult.success !== false;
-  if (!success) {
-    return res.status(500).json({ ok: false, error: 'Impossible d\'envoyer l\'email pour le moment' });
-  }
-
-  res.json({ ok: true, verificationRequired: verificationEnforced });
-});
-
-// --- Verify email ---
-app.get('/api/auth/verify-email', async (req, res) => {
-  const rawToken = String(req.query.token || '').trim();
-  if (!rawToken) {
-    return res.status(400).send('Lien de vérification manquant ou invalide.');
-  }
-
-  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-  const user = await findUserByVerificationToken(tokenHash);
-  if (!user) {
-    return res.status(400).send('Lien de vérification invalide ou déjà utilisé.');
-  }
-
-  const expiresAt = user.emailVerificationExpiresAt ? new Date(user.emailVerificationExpiresAt).getTime() : null;
-  if (expiresAt && expiresAt < Date.now()) {
-    return res.status(410).send('Ce lien a expiré. Veuillez demander un nouvel email de vérification.');
-  }
-
-  const verifiedUser = markUserVerified(user);
-  const tokenPayload = { username: verifiedUser.username, role: verifiedUser.role, emailVerified: true };
-  const authToken = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-  res.cookie('vhr_token', authToken, buildAuthCookieOptions(req));
-
-  const redirectBase = getVerificationBaseUrl(req).replace(/\/$/, '');
-  const redirectUrl = `${redirectBase}/account.html?verification=success`;
-
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="fr">
-      <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Email vérifié</title>
-        <style>
-          body { font-family: Arial, sans-serif; background: #0d0f14; color: #ecf0f1; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-          .card { background: #131722; padding: 28px; border-radius: 12px; max-width: 520px; text-align: center; box-shadow: 0 12px 40px rgba(0,0,0,0.35); }
-          a.btn { display: inline-block; margin-top: 16px; padding: 12px 18px; background: #2ecc71; color: #0d0f14; border-radius: 10px; text-decoration: none; font-weight: bold; }
-        </style>
-      </head>
-      <body>
-        <div class="card">
-          <h1>✅ Email vérifié</h1>
-          <p>Merci ! Votre adresse email est maintenant confirmée.</p>
-          <p>Vous pouvez accéder immédiatement à votre espace client.</p>
-          <a class="btn" href="${redirectUrl}">Ouvrir mon compte</a>
-        </div>
-      </body>
-    </html>
-  `);
 });
 
 // ========== ADMIN ROUTES ==========
@@ -3958,12 +3608,6 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
         user.stripeCustomerId = user.stripeCustomerId || user.stripecustomerid || null;
         user.subscriptionStatus = user.subscriptionStatus || user.subscriptionstatus || null;
         user.subscriptionId = user.subscriptionId || user.subscriptionid || null;
-        // Apply email override if needed
-        const overrideEmail = EMAIL_OVERRIDE_MAP[user.username ? user.username.toLowerCase() : ''];
-        if (overrideEmail && user.email !== overrideEmail) {
-          user.email = overrideEmail;
-          persistUser(user);
-        }
         const idx = users.findIndex(u => u.username === user.username);
         if (idx >= 0) users[idx] = user; else users.push(user);
       }
@@ -4012,10 +3656,26 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
       }
     }
 
-    // Si pas de stripeCustomerId, tenter de le retrouver ou de le créer proprement
+    // Si pas de stripeCustomerId, tenter de le retrouver via l'email ou le username
     if (!user.stripeCustomerId && process.env.STRIPE_SECRET_KEY) {
       try {
-        await ensureStripeCustomerForUser(user);
+        if (user.email) {
+          const found = await stripe.customers.list({ email: user.email, limit: 5 });
+          const customer = (found.data || []).find(c => c.email && c.email.toLowerCase() === user.email.toLowerCase());
+          if (customer) {
+            user.stripeCustomerId = customer.id;
+            persistUser(user);
+          }
+        }
+        // Fallback: search by metadata.username if not found by email
+        if (!user.stripeCustomerId) {
+          const found = await stripe.customers.list({ limit: 20 });
+          const customer = (found.data || []).find(c => c.metadata && c.metadata.username && c.metadata.username.toLowerCase() === user.username.toLowerCase());
+          if (customer) {
+            user.stripeCustomerId = customer.id;
+            persistUser(user);
+          }
+        }
       } catch (custErr) {
         console.error('[subscriptions] lookup customer error:', custErr && custErr.message ? custErr.message : custErr);
       }
@@ -4756,37 +4416,11 @@ app.get('/api/admin', authMiddleware, (req, res) => {
 });
 
 // --- Admin Routes for Dashboard ---
-// Get all users (live from DB when PostgreSQL is enabled, otherwise from file cache)
-app.get('/api/admin/users', authMiddleware, async (req, res) => {
+// Get all users
+app.get('/api/admin/users', authMiddleware, (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;
   try {
-    let list = users;
-
-    if (USE_POSTGRES && db && db.getUsers) {
-      try {
-        const dbUsers = await db.getUsers();
-        if (Array.isArray(dbUsers)) {
-          list = dbUsers.map(u => normalizeUserRecord(u));
-        }
-      } catch (dbErr) {
-        console.error('[api] admin/users Postgres fetch failed:', dbErr && dbErr.message ? dbErr.message : dbErr);
-      }
-    } else {
-      // Refresh from file in SQLite/local mode
-      reloadUsers();
-      list = users;
-    }
-
-    // Filter out test accounts from response
-    const filtered = Array.isArray(list)
-      ? list.filter(u => {
-          const uname = (u.username || '').toLowerCase();
-          const mail = (u.email || '').toLowerCase();
-          return !uname.includes('test') && !mail.includes('test');
-        })
-      : list;
-
-    res.json({ ok: true, users: filtered });
+    res.json({ ok: true, users });
   } catch (e) {
     console.error('[api] admin/users:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -5094,30 +4728,7 @@ app.get('/api/admin/stats', authMiddleware, async (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;
   try {
     let subs = [];
-
-    // Always refetch latest users for stats
-    let list = users;
-    if (USE_POSTGRES && db && db.getUsers) {
-      try {
-        const dbUsers = await db.getUsers();
-        if (Array.isArray(dbUsers)) list = dbUsers.map(u => normalizeUserRecord(u));
-      } catch (dbErr) {
-        console.error('[api] admin/stats Postgres fetch failed:', dbErr && dbErr.message ? dbErr.message : dbErr);
-      }
-    } else {
-      reloadUsers();
-      list = users;
-    }
-
-    const filteredUsers = Array.isArray(list)
-      ? list.filter(u => {
-          const uname = (u.username || '').toLowerCase();
-          const mail = (u.email || '').toLowerCase();
-          return !uname.includes('test') && !mail.includes('test');
-        })
-      : list;
-
-    let totalUsers = Array.isArray(filteredUsers) ? filteredUsers.length : 0;
+    let totalUsers = users.length;
     let unreadMessages = messages.filter(m => m.status === 'unread').length;
     let stripeActive = null;
 
@@ -6478,7 +6089,8 @@ app.get('/api/server-info', (req, res) => {
   const hostHeader = req.headers.host || '';
   const portMatch = hostHeader.match(/:(\d+)/);
   const port = portMatch ? Number(portMatch[1]) : PORT;
-  res.json({ ok: true, host: hostHeader, lanIp, port });
+  const publicUrl = process.env.SIGNALING_PUBLIC_URL || process.env.PUBLIC_DASHBOARD_URL || '';
+  res.json({ ok: true, host: hostHeader, lanIp, port, publicUrl });
 });
 
 app.post('/api/favorites/add', (req, res) => {
@@ -6882,24 +6494,12 @@ app.post('/api/stream/audio-output', async (req, res) => {
 // ---------- Collaborative Sessions Storage ----------
 const collaborativeSessions = new Map(); // sessionCode -> { host, hostSocket, users: [{username, socketId}], createdAt }
 
-function normalizeSessionCode(rawCode) {
-  if (!rawCode) return '';
-  return String(rawCode)
-    .trim()
-    .replace(/\s+/g, '')
-    .replace(/[^A-Za-z0-9]/g, '')
-    .toUpperCase();
-}
-
 function generateSessionCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
-  do {
-    code = '';
-    for (let i = 0; i < 6; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-  } while (collaborativeSessions.has(code));
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
   return code;
 }
 
@@ -6914,7 +6514,7 @@ io.on('connection', socket => {
   
   // Create a new collaborative session
   socket.on('create-session', (data) => {
-    const username = data && data.username ? String(data.username) : 'Utilisateur';
+    const { username } = data;
     const sessionCode = generateSessionCode();
     
     collaborativeSessions.set(sessionCode, {
@@ -6935,17 +6535,13 @@ io.on('connection', socket => {
   
   // Join an existing session
   socket.on('join-session', (data) => {
-    const username = data && data.username ? String(data.username) : undefined;
-    const sessionCode = normalizeSessionCode(data && data.sessionCode);
-    
-    if (!sessionCode || sessionCode.length !== 6) {
-      socket.emit('session-error', { error: 'Code de session invalide.' });
-      return;
-    }
-    
+    const rawCode = (data && data.sessionCode) ? String(data.sessionCode) : '';
+    const sessionCode = rawCode.trim().replace(/\s+/g, '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const username = data && data.username ? data.username : undefined;
     const session = collaborativeSessions.get(sessionCode);
     
     if (!session) {
+      console.warn(`[Session] join failed for code=${sessionCode || '(empty)'} by ${username || 'unknown'}`);
       socket.emit('session-error', { error: 'Session non trouvée. Vérifiez le code.' });
       return;
     }
@@ -7110,7 +6706,6 @@ io.on('connection', socket => {
 })();
 
 const PORT = process.env.PORT || 3000;
-const HOST = process.env.BIND_HOST || process.env.HOST || '0.0.0.0';
 const REDIRECT_PORT = Number(process.env.HTTP_REDIRECT_PORT || 80);
 let serverStarted = false;
 
@@ -7146,12 +6741,11 @@ function logServerBanner(initializationFailed = false) {
 
 function startPrimaryServer(initializationFailed = false) {
   if (serverStarted) return;
-  listenerServer.listen(PORT, HOST, () => {
-    const hostLabel = HOST === '0.0.0.0' ? '0.0.0.0 (toutes interfaces)' : HOST;
+  listenerServer.listen(PORT, () => {
     if (useHttps) {
-      console.log(`[Server] ✓ Running in HTTPS mode on https://${hostLabel}:${PORT}`);
+      console.log(`[Server] ✓ Running in HTTPS mode on https://localhost:${PORT}`);
     } else {
-      console.log(`[Server] ✓ Running on http://${hostLabel}:${PORT}`);
+      console.log(`[Server] ✓ Running on http://localhost:${PORT}`);
     }
     logServerBanner(initializationFailed);
   });
@@ -7220,60 +6814,12 @@ app.get('/stripe-check', async (req, res) => {
 // ---------- Stripe Customer helpers ----------
 async function ensureStripeCustomerForUser(user) {
   if (!stripe) throw new Error('Stripe not configured');
-  if (!user) throw new Error('User is required');
   if (user.stripeCustomerId) return user.stripeCustomerId;
-
-  const username = (user.username || '').trim();
-  const email = (user.email || '').trim();
-
-  // Helper: search existing customer by email/username using Stripe Search API (covers large customer lists)
-  async function findExistingCustomer() {
-    try {
-      if (stripe.customers && stripe.customers.search) {
-        if (email) {
-          const byEmail = await stripe.customers.search({ query: `email:'${email}'`, limit: 20 });
-          const exactEmail = (byEmail.data || []).find(c => (c.email || '').toLowerCase() === email.toLowerCase());
-          if (exactEmail) return exactEmail;
-        }
-
-        if (username) {
-          const byUsername = await stripe.customers.search({ query: `metadata['username']:'${username}'`, limit: 20 });
-          const exactUser = (byUsername.data || []).find(c => (c.metadata && c.metadata.username || '').toLowerCase() === username.toLowerCase());
-          if (exactUser) return exactUser;
-        }
-      }
-    } catch (searchErr) {
-      console.warn('[Stripe] customer search fallback to list:', searchErr && searchErr.message ? searchErr.message : searchErr);
-    }
-
-    // Fallback: iterate through the first pages (auto-paging) to find a matching customer
-    try {
-      const iter = stripe.customers.list({ limit: 100 });
-      for await (const c of iter) {
-        const matchEmail = email && (c.email || '').toLowerCase() === email.toLowerCase();
-        const matchUsername = username && c.metadata && c.metadata.username && c.metadata.username.toLowerCase() === username.toLowerCase();
-        const matchName = username && (c.name || '').toLowerCase() === username.toLowerCase();
-        if (matchEmail || matchUsername || matchName) return c;
-      }
-    } catch (listErr) {
-      console.warn('[Stripe] customer list fallback failed:', listErr && listErr.message ? listErr.message : listErr);
-    }
-
-    return null;
-  }
-
-  // Try to re-link to an existing customer before creating a new one
-  const existing = await findExistingCustomer();
-  if (existing) {
-    user.stripeCustomerId = existing.id;
-    try { persistUser(user); } catch (e) { console.error('[users] save after stripe re-link failed:', e && e.message); }
-    return existing.id;
-  }
-
-  // Create a new Stripe customer for this user as a last resort
+  // Create a new Stripe customer for this user
   try {
-    const cust = await stripe.customers.create({ name: username || undefined, email: email || undefined, metadata: { username: username || undefined } });
+    const cust = await stripe.customers.create({ name: user.username || undefined, email: user.email || undefined, metadata: { username: user.username } });
     user.stripeCustomerId = cust.id;
+    // Persist Stripe customer ID via DB adapter if present
     try { persistUser(user); } catch (e) { console.error('[users] save after stripe create failed:', e && e.message); }
     return cust.id;
   } catch (e) {
@@ -7307,12 +6853,6 @@ app.get('/api/billing/invoices', authMiddleware, async (req, res) => {
       user = await db.getUserByUsername(req.user.username);
       if (user) {
         user.stripeCustomerId = user.stripeCustomerId || user.stripecustomerid || null;
-        // Apply email override if needed
-        const overrideEmail = EMAIL_OVERRIDE_MAP[user.username ? user.username.toLowerCase() : ''];
-        if (overrideEmail && user.email !== overrideEmail) {
-          user.email = overrideEmail;
-          persistUser(user);
-        }
         const idx = users.findIndex(u => u.username === user.username);
         if (idx >= 0) users[idx] = user; else users.push(user);
       }
@@ -7321,12 +6861,6 @@ app.get('/api/billing/invoices', authMiddleware, async (req, res) => {
     }
 
     if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
-
-    // Tenter de re-lier un client Stripe avant de conclure qu'il n'y en a pas
-    if (!user.stripeCustomerId && stripe) {
-      try { await ensureStripeCustomerForUser(user); } catch (e) { console.warn('[Stripe] ensure customer for invoices failed:', e && e.message ? e.message : e); }
-    }
-
     if (!user.stripeCustomerId) return res.json({ ok: true, invoices: [] });
     const invoices = await stripe.invoices.list({ customer: user.stripeCustomerId, limit: 30 });
     res.json({ ok: true, invoices: invoices.data });
@@ -7352,11 +6886,6 @@ app.get('/api/billing/subscriptions', authMiddleware, async (req, res) => {
     }
 
     if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
-
-    if (!user.stripeCustomerId && stripe) {
-      try { await ensureStripeCustomerForUser(user); } catch (e) { console.warn('[Stripe] ensure customer for subscriptions failed:', e && e.message ? e.message : e); }
-    }
-
     if (!user.stripeCustomerId) return res.json({ ok: true, subscriptions: [] });
     const subs = await stripe.subscriptions.list({ customer: user.stripeCustomerId, limit: 30 });
     res.json({ ok: true, subscriptions: subs.data });
@@ -7578,7 +7107,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 // --- Route de register / création de compte ---
 app.post('/api/register', async (req, res) => {
   const { username, password, email } = req.body || {};
-  if (!username || !password || !email) return res.status(400).json({ ok: false, error: 'username, password and email required' });
+  if (!username || !password) return res.status(400).json({ ok: false, error: 'username and password required' });
   try {
     // unique username/email (PostgreSQL vs fallback storage)
     if (USE_POSTGRES && db) {
@@ -7599,11 +7128,6 @@ app.post('/api/register', async (req, res) => {
       passwordHash, 
       role: 'user', 
       email: email || null, 
-      emailVerified: false,
-      emailVerifiedAt: null,
-      emailVerificationToken: null,
-      emailVerificationExpiresAt: null,
-      emailVerificationSentAt: null,
       stripeCustomerId: null,
       demoStartDate: new Date().toISOString() // Initialize demo start date
     };
@@ -7623,37 +7147,15 @@ app.post('/api/register', async (req, res) => {
     });
 
     // Envoyer l'email de confirmation de compte (best-effort)
-    const verificationEnforced = shouldEnforceEmailVerification(newUser);
-    let confirmationResult = null;
     try {
-      confirmationResult = await sendAccountConfirmationEmail(newUser, { req });
+      await sendAccountConfirmationEmail(newUser);
     } catch (mailErr) {
       console.error('[api/register] confirmation email error:', mailErr && mailErr.message ? mailErr.message : mailErr);
     }
-    if (verificationEnforced && (!confirmationResult || confirmationResult.success === false)) {
-      return res.status(500).json({ ok: false, error: 'Impossible d\'envoyer l\'email de vérification. Vérifiez la configuration SMTP.' });
-    }
-    const shouldAutoLogin = !verificationEnforced || AUTO_LOGIN_UNVERIFIED;
-    const emailVerifiedFlag = isEmailVerifiedOrBypassed(newUser);
-    let token = null;
-    if (shouldAutoLogin) {
-      token = jwt.sign({ username: newUser.username, role: newUser.role, emailVerified: emailVerifiedFlag }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-      res.cookie('vhr_token', token, buildAuthCookieOptions(req));
-    }
-    res.json({ 
-      ok: true, 
-      verificationRequired: verificationEnforced,
-      autoLogin: shouldAutoLogin,
-      token,
-      message: verificationEnforced
-        ? 'Compte créé. Un email de confirmation a été envoyé.'
-        : 'Compte créé et connecté.',
-      userId: newUser.id, 
-      username: newUser.username, 
-      role: newUser.role, 
-      email: newUser.email,
-      emailVerified: emailVerifiedFlag
-    });
+    // create token and set cookie
+    const token = jwt.sign({ username: newUser.username, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    res.cookie('vhr_token', token, buildAuthCookieOptions(req));
+    res.json({ ok: true, token, userId: newUser.id, username: newUser.username, role: newUser.role, email: newUser.email });
   } catch (e) {
     console.error('[api] register:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -8011,8 +7513,120 @@ app.post('/api/opentalkie/start-streaming', authMiddleware, async (req, res) => 
 
 // ===== WEBRTC AUDIO SIGNALING =====
 
-// Store active audio sessions (in-memory, single-instance server)
-const audioSessions = new Map();
+// TTL for audio signaling sessions (ms). Default: 5 minutes.
+const AUDIO_SESSION_TTL_MS = parseInt(process.env.AUDIO_SESSION_TTL_MS || '300000', 10);
+
+// Optional Redis-backed store for multi-instance persistence
+const audioSessionsMemory = new Map();
+const audioSessionTimeouts = new Map();
+let audioSessionStore = { type: 'memory', client: null };
+let audioSessionStoreReady = null;
+
+function audioSessionKey(id) {
+  return `audioSession:${id}`;
+}
+
+async function initAudioSessionStore() {
+  const redisUrl = process.env.REDIS_URL;
+  const redisHost = process.env.REDIS_HOST;
+
+  if (!redisUrl && !redisHost) {
+    console.log('[WebRTC] Using in-memory audio session store (no Redis config)');
+    return;
+  }
+
+  let redis;
+  try {
+    redis = require('redis');
+  } catch (e) {
+    console.warn('[WebRTC] redis package not installed, falling back to memory store');
+    return;
+  }
+
+  try {
+    const redisOpts = redisUrl
+      ? { url: redisUrl }
+      : {
+          socket: {
+            host: redisHost,
+            port: parseInt(process.env.REDIS_PORT || '6379', 10)
+          }
+        };
+    if (process.env.REDIS_PASSWORD) {
+      redisOpts.password = process.env.REDIS_PASSWORD;
+    }
+
+    const client = redis.createClient(redisOpts);
+    client.on('error', (err) => console.error('[Redis] Client error:', err.message));
+    await client.connect();
+    audioSessionStore = { type: 'redis', client };
+    console.log('[Redis] Audio session store enabled');
+  } catch (err) {
+    console.warn('[Redis] Connection failed, fallback to memory store:', err.message);
+  }
+}
+
+audioSessionStoreReady = initAudioSessionStore();
+
+function memorySetSession(session) {
+  audioSessionsMemory.set(session.id, session);
+  if (audioSessionTimeouts.has(session.id)) {
+    clearTimeout(audioSessionTimeouts.get(session.id));
+  }
+  const timer = setTimeout(() => {
+    if (audioSessionsMemory.has(session.id)) {
+      audioSessionsMemory.delete(session.id);
+      audioSessionTimeouts.delete(session.id);
+      console.log(`[WebRTC] Session ${session.id} expired (TTL ${AUDIO_SESSION_TTL_MS}ms)`);
+    }
+  }, AUDIO_SESSION_TTL_MS);
+  audioSessionTimeouts.set(session.id, timer);
+}
+
+function memoryTouchSession(sessionId) {
+  if (audioSessionsMemory.has(sessionId)) {
+    const session = audioSessionsMemory.get(sessionId);
+    memorySetSession(session); // resets TTL timer
+  }
+}
+
+async function saveSession(session) {
+  if (audioSessionStore.type === 'redis' && audioSessionStore.client) {
+    await audioSessionStore.client.set(audioSessionKey(session.id), JSON.stringify(session), {
+      PX: AUDIO_SESSION_TTL_MS
+    });
+  } else {
+    memorySetSession(session);
+  }
+}
+
+async function loadSession(sessionId) {
+  if (audioSessionStore.type === 'redis' && audioSessionStore.client) {
+    const raw = await audioSessionStore.client.get(audioSessionKey(sessionId));
+    return raw ? JSON.parse(raw) : null;
+  }
+  return audioSessionsMemory.get(sessionId) || null;
+}
+
+async function deleteSession(sessionId) {
+  if (audioSessionStore.type === 'redis' && audioSessionStore.client) {
+    await audioSessionStore.client.del(audioSessionKey(sessionId));
+  } else {
+    audioSessionsMemory.delete(sessionId);
+    if (audioSessionTimeouts.has(sessionId)) {
+      clearTimeout(audioSessionTimeouts.get(sessionId));
+      audioSessionTimeouts.delete(sessionId);
+    }
+  }
+}
+
+async function touchSession(sessionId) {
+  if (audioSessionStore.type === 'redis' && audioSessionStore.client) {
+    await audioSessionStore.client.pExpire(audioSessionKey(sessionId), AUDIO_SESSION_TTL_MS);
+  } else {
+    memoryTouchSession(sessionId);
+  }
+}
 
 /**
  * POST /api/audio/signal - WebRTC Signaling for audio streaming
@@ -8020,10 +7634,12 @@ const audioSessions = new Map();
  */
 app.post('/api/audio/signal', authMiddleware, async (req, res) => {
   try {
+    await audioSessionStoreReady;
+
     const { type, offer, answer, candidate, sessionId, initiator, targetSerial } = req.body;
     const username = req.user.username;
 
-    console.log(`[WebRTC] ${type} signal from ${username}`, { sessionId, initiator });
+    console.log(`[WebRTC] ${type} signal from ${username}`, { sessionId, initiator, store: audioSessionStore.type });
 
     if (type === 'offer') {
       // PC initiates call to headset
@@ -8036,15 +7652,7 @@ app.post('/api/audio/signal', authMiddleware, async (req, res) => {
         candidates: []
       };
 
-      audioSessions.set(sessionId, session);
-
-      // Store for 30 seconds waiting for answer
-      setTimeout(() => {
-        if (audioSessions.has(sessionId) && !audioSessions.get(sessionId).answer) {
-          audioSessions.delete(sessionId);
-          console.log(`[WebRTC] Session ${sessionId} expired (no answer)`);
-        }
-      }, 30000);
+      await saveSession(session);
 
       res.json({
         ok: true,
@@ -8054,7 +7662,7 @@ app.post('/api/audio/signal', authMiddleware, async (req, res) => {
 
     } else if (type === 'answer') {
       // Headset responds with answer
-      const session = audioSessions.get(sessionId);
+      const session = await loadSession(sessionId);
       if (!session) {
         return res.status(400).json({
           ok: false,
@@ -8064,6 +7672,7 @@ app.post('/api/audio/signal', authMiddleware, async (req, res) => {
 
       session.answer = answer;
       session.answeredAt = Date.now();
+      await saveSession(session);
 
       res.json({
         ok: true,
@@ -8073,10 +7682,11 @@ app.post('/api/audio/signal', authMiddleware, async (req, res) => {
 
     } else if (type === 'ice-candidate') {
       // Store ICE candidate
-      const session = audioSessions.get(sessionId);
+      const session = await loadSession(sessionId);
       if (session) {
         session.candidates = session.candidates || [];
         session.candidates.push(candidate);
+        await saveSession(session);
       }
 
       res.json({
@@ -8086,7 +7696,7 @@ app.post('/api/audio/signal', authMiddleware, async (req, res) => {
 
     } else if (type === 'close') {
       // Close session
-      audioSessions.delete(sessionId);
+      await deleteSession(sessionId);
       console.log(`[WebRTC] Session ${sessionId} closed`);
 
       res.json({
@@ -8114,9 +7724,11 @@ app.post('/api/audio/signal', authMiddleware, async (req, res) => {
  * GET /api/audio/session/:sessionId - Poll for remote signals
  * Used by client to retrieve offer/answer/candidates
  */
-app.get('/api/audio/session/:sessionId', authMiddleware, (req, res) => {
+app.get('/api/audio/session/:sessionId', authMiddleware, async (req, res) => {
   try {
-    const session = audioSessions.get(req.params.sessionId);
+    await audioSessionStoreReady;
+
+    const session = await loadSession(req.params.sessionId);
     
     if (!session) {
       return res.json({
@@ -8124,6 +7736,9 @@ app.get('/api/audio/session/:sessionId', authMiddleware, (req, res) => {
         error: 'Session not found'
       });
     }
+
+    // Refresh TTL on access
+    await touchSession(session.id);
 
     const elapsed = Date.now() - session.createdAt;
     const response = {
@@ -8143,6 +7758,67 @@ app.get('/api/audio/session/:sessionId', authMiddleware, (req, res) => {
       ok: false,
       error: error.message
     });
+  }
+});
+
+// ========== SCRCPY GUI LAUNCH ============
+function resolveScrcpyExecutable() {
+  const candidates = [
+    path.join(__dirname, 'scrcpy', 'scrcpy.exe'),
+    path.join(__dirname, 'scrcpy', 'scrcpy'),
+    'C:/ProgramData/chocolatey/lib/scrcpy/tools/scrcpy.exe',
+    'scrcpy'
+  ];
+  for (const exe of candidates) {
+    try {
+      if (fs.existsSync(exe)) return exe;
+    } catch (_) {}
+  }
+  return 'scrcpy';
+}
+
+app.post('/api/scrcpy-gui', async (req, res) => {
+  const { serial, audioOutput } = req.body || {};
+  if (!serial) return res.status(400).json({ ok: false, error: 'serial requis' });
+  try {
+    const scrcpyArgs = ['-s', serial, '--window-width', '640', '--window-height', '360'];
+
+    if (audioOutput === 'pc' || audioOutput === 'both') {
+      scrcpyArgs.push('--audio-codec=opus');
+      console.log('[scrcpy] Audio enabled: forwarding to PC');
+    } else {
+      scrcpyArgs.push('--no-audio');
+      console.log('[scrcpy] Audio disabled: stays on headset only');
+    }
+
+    const scrcpyExe = resolveScrcpyExecutable();
+    console.log('[scrcpy] Using executable:', scrcpyExe);
+    console.log('[scrcpy] Launching with args:', scrcpyArgs);
+
+    const proc = spawn(scrcpyExe, scrcpyArgs, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false
+    });
+
+    proc.unref();
+
+    const scrcpyPid = proc.pid;
+    if (scrcpyPid) {
+      console.log(`[scrcpy] Started with PID: ${scrcpyPid}`);
+      setTimeout(() => {
+        console.log(`[scrcpy] Session info: PID ${scrcpyPid} was started at ${new Date().toISOString()}`);
+      }, 100);
+    }
+
+    proc.on('error', (err) => {
+      console.error('[scrcpy] Process error:', err.message);
+    });
+
+    return res.json({ ok: true, audioOutput: audioOutput || 'headset', pid: scrcpyPid });
+  } catch (e) {
+    console.error('[api] scrcpy-gui:', e);
+    return res.status(500).json({ ok: false, error: e.message });
   }
 });
 

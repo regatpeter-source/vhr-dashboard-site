@@ -1,0 +1,235 @@
+/* Professional Neutral Palette */
+.centered {
+  text-align: center;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+a:focus, button:focus, .cta:focus, .cta-secondary:focus {
+  outline: 2px solid #333;
+  outline-offset: 2px;
+  background: #f0f0f0;
+  color: #000;
+}
+
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+  color: #333;
+  background: #ffffff;
+  text-align: center;
+  font-size: 1.1em;
+  font-weight: 400;
+  margin: 0;
+}
+
+header {
+  background: linear-gradient(120deg, #2196f3 0%, #43a047 100%);
+  color: #fff;
+  padding-bottom: 30px;
+  border-bottom: none;
+}
+
+nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 32px;
+  height: 64px;
+  background: rgba(24,28,36,0.95);
+  box-shadow: 0 2px 8px #0002;
+}
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  height: 48px;
+  padding-left: 66px;
+  background: url('assets/logo-vd.svg') no-repeat left center / 54px auto;
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  font-size: 1.05em;
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.28));
+  white-space: nowrap;
+  user-select: none;
+}
+
+nav ul {
+  list-style: none;
+  display: flex;
+  gap: 24px;
+  padding: 0;
+}
+
+nav ul li a {
+  color: #fff;
+  text-decoration: none;
+  font-size: 1.1em;
+  padding: 6px 14px;
+  border-radius: 4px;
+  transition: background .2s;
+  font-weight: 500;
+}
+
+nav ul li a.active,
+nav ul li a:hover {
+  background: #2196f3;
+  color: #fff;
+}
+
+nav ul li a.cta-nav {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  padding: 8px 16px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+nav ul li a.cta-nav:hover {
+  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+  transform: translateY(-1px);
+}
+
+.hero {
+  text-align: center;
+  padding: 60px 20px 30px 20px;
+}
+
+.hero h1 {
+  font-size: 2.5em;
+  margin-bottom: 18px;
+  color: #000;
+}
+
+/* Download/Demo section */
+.download-demo {
+  background: #f9f9f9;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  margin: 40px auto 0 auto;
+  max-width: 900px;
+  padding: 36px 28px 32px 28px;
+  text-align: center;
+}
+
+.download-demo-content {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+  justify-content: center;
+  margin: 32px 0 18px 0;
+}
+
+.download-block {
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  padding: 24px 18px;
+  width: 260px;
+  min-width: 200px;
+  max-width: 320px;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 0.9em;
+  padding: 4px 12px;
+  border-radius: 4px;
+  margin-top: 10px;
+  background: #f0f0f0;
+  color: #333;
+  font-weight: bold;
+  border: 1px solid #ddd;
+}
+
+.badge-demo {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.badge-support {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.badge-secu {
+  background: #f0f0f0;
+  color: #333;
+}
+
+/* Testimonials */
+.testimonials {
+  background: #f9f9f9;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  margin: 40px auto 0 auto;
+  max-width: 900px;
+  padding: 36px 28px 32px 28px;
+  text-align: center;
+}
+
+.testimonials-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+  justify-content: center;
+  margin: 32px 0 18px 0;
+}
+
+.testimonial {
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  padding: 24px 18px;
+  width: 260px;
+  min-width: 200px;
+  max-width: 320px;
+  font-style: italic;
+}
+
+.testimonial span {
+  display: block;
+  margin-top: 10px;
+  font-size: 0.95em;
+  color: #666;
+}
+
+.footer-content {
+  max-width: 900px;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 1em;
+  gap: 12px;
+}
+
+.footer-badges {
+  display: flex;
+  gap: 10px;
+}
+
+@media (max-width: 900px) {
+  .features-list,
+  .download-demo-content,
+  .testimonials-list,
+  .footer-content {
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+  }
+  .logo {
+    padding-left: 58px;
+    background-size: 46px auto;
+    font-size: 1em;
+  }
+  .feature,
+  .download-block,
+  .testimonial {
+    width: 95%;
+    max-width: 98vw;
+  }
+}

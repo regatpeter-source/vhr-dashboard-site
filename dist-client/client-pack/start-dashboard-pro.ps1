@@ -4,6 +4,11 @@ $env:QUIET_MODE = "1"
 $env:NODE_ENV = "production"
 $env:SUPPRESS_WARNINGS = "1"
 
+# Info rapide pour l'utilisateur final (drivers / pop-up ADB)
+Write-Host "[INFO] Si le casque n'apparait pas dans 'adb devices':" -ForegroundColor Cyan
+Write-Host "       1) Sur le casque, accepter 'Autoriser le débogage USB' et cocher 'Toujours autoriser'." -ForegroundColor Cyan
+Write-Host "       2) Si la liste reste vide, installer le driver Quest (app Meta Quest PC) ou le Google USB Driver." -ForegroundColor Cyan
+
 # Dossier racine attendu (au-dessus de client-pack)
 $root = Join-Path $PSScriptRoot ".."
 $server = Join-Path $root "server.js"
@@ -24,20 +29,6 @@ if (Test-Path (Join-Path $nodePortable "node.exe")) {
 	$env:PATH = "$nodePortable;$env:PATH"
 }
 
-# Ajouter ADB si les platform-tools sont présents (../platform-tools)
-$adbTools = Join-Path $root "platform-tools"
-if (Test-Path (Join-Path $adbTools "adb.exe")) {
-	$env:PATH = "$adbTools;$env:PATH"
-}
-
-# Vérifier que Node est disponible (portable ou installé)
-$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
-if (-not $nodeCmd) {
-	Write-Host "[ERREUR] Node.js introuvable.`nInstallez Node.js (v18+ LTS) ou placez le dossier 'node-portable' à la racine du pack." -ForegroundColor Red
-	Read-Host "Appuyez sur Entrée pour fermer"
-	exit 1
-}
-
 # Assurer la présence du .env local (copie depuis l'exemple si absent)
 $envTarget = Join-Path $root ".env"
 $envExample = Join-Path $PSScriptRoot ".env.client-example"
@@ -56,10 +47,4 @@ try {
 	exit 1
 }
 
-try {
-	node server.js
-} catch {
-	Write-Host "[ERREUR] Impossible de démarrer le serveur Node.js.`n$($_.Exception.Message)" -ForegroundColor Red
-	Read-Host "Appuyez sur Entrée pour fermer"
-	exit 1
-}
+node server.js

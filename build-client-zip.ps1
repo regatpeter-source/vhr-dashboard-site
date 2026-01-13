@@ -3,57 +3,36 @@
 # Prérequis: PowerShell 5+, 7zip ou Compress-Archive (inclus sur Windows 10+)
 
 param(
-  [string]$Output = "vhr-dashboard-pro-client.zip",
-  [switch]$IncludeNode,
-  [string]$NodePath = "",
-  [switch]$IncludeAdb,
-  [string]$AdbPath = ""
+  [string]$Output = "vhr-dashboard-pro-client-full-updated-new3.zip",
+  [string]$SourceDir = ""
 )
 
 $root = Split-Path -Parent $PSCommandPath
 Set-Location $root
+
+# Dossier source de référence (fixe) pour éviter toute confusion
+if (-not $SourceDir) {
+  $SourceDir = Join-Path $root "vhr-dashboard-pro-client-full-updated-new3-node-adb"
+}
+
+if (-not (Test-Path $SourceDir)) {
+  Write-Error "[pack] Source introuvable: $SourceDir"
+  exit 1
+}
 
 # Dossier de staging
 $staging = Join-Path $root "dist-client"
 if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
 New-Item -ItemType Directory -Path $staging | Out-Null
 
-# 1) Copier les sources nécessaires
-$include = @(
-  # Fichiers racine requis par les routes explicites (exposedTopFiles + admin + launch)
-  "index.html",
-  "pricing.html",
-  "features.html",
-  "contact.html",
-  "account.html",
-  "developer-setup.html",
-  "mentions.html",
-  "launch-dashboard.html",
-  "admin-dashboard.html",
-  "START-HERE.html",
+# 1) Copier l'intégralité du dossier source de référence
+Copy-Item (Join-Path $SourceDir "*") -Destination $staging -Recurse -Force
 
-  # Backend / assets
-  "server.js",
-  "public",
-  "config",
-  "services",
-  "data",
-  "client-pack",
-  "package.json",
-  "package-lock.json",
-  "db.js",
-  "names.json",
-  "games.json",
-  "favorites.json",
-  "tts-receiver-app"
-)
-
-foreach ($item in $include) {
-  if (Test-Path $item) {
-    Copy-Item $item -Destination $staging -Recurse -Force
-  } else {
-    Write-Warning "[pack] Element manquant, ignoré: $item"
-  }
+# Nettoyage post-copie: retirer les dossiers parasites éventuels
+$postCopyRemove = @(".git", ".github", ".vscode", "node_modules", "dist-client", "tmp", "temp", "logs", ".cache")
+foreach ($r in $postCopyRemove) {
+  $p = Join-Path $staging $r
+  if (Test-Path $p) { Remove-Item $p -Recurse -Force }
 }
 
 # 1b) Créer un local.properties placeholder dans tts-receiver-app si absent
@@ -66,20 +45,6 @@ if (-not (Test-Path $ttsLocalProps)) {
 Push-Location $staging
 npm ci --omit=dev
 Pop-Location
-
-# 3) Optionnel: embarquer Node portable
-if ($IncludeNode -and $NodePath) {
-  $nodeDest = Join-Path $staging "node-portable"
-  New-Item -ItemType Directory -Path $nodeDest | Out-Null
-  Copy-Item (Join-Path $NodePath "*") -Destination $nodeDest -Recurse -Force
-}
-
-# 3bis) Optionnel: embarquer les platform-tools ADB
-if ($IncludeAdb -and $AdbPath) {
-  $adbDest = Join-Path $staging "platform-tools"
-  New-Item -ItemType Directory -Path $adbDest | Out-Null
-  Copy-Item (Join-Path $AdbPath "*") -Destination $adbDest -Recurse -Force
-}
 
 # 4) Nettoyage: retirer caches/temp éventuels
 $toRemove = @("node_modules/.cache", "data/logs")
@@ -162,5 +127,3 @@ finally {
 
 Write-Host "✅ Pack client généré: $Output"
 Write-Host "➡️ Contenu: dist-client/ (avec node_modules prod)"
-if ($IncludeNode) { Write-Host "➡️ Node portable inclus depuis: $NodePath" }
-if ($IncludeAdb) { Write-Host "➡️ ADB (platform-tools) inclus depuis: $AdbPath" }

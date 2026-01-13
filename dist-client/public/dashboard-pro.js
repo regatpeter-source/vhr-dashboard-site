@@ -1,5 +1,5 @@
 // VHR DASHBOARD PRO - Version complète avec fond noir et vue tableau
-// Date: 2025-12-03
+// Date: 2026-01-09
 
 // ========== TAB/SESSION MANAGEMENT ==========
 // Unique ID for this browser tab to manage multiple connections
@@ -1044,7 +1044,7 @@ window.switchAccountTab = function(tab) {
 let activeAudioStream = null;  // Global audio stream instance
 let activeAudioSerial = null;  // Serial of device receiving audio
 
-console.log('[voice] dashboard-pro.js build stamp: 2025-12-29 18:55');
+console.log('[voice] dashboard-pro.js build stamp: 2026-01-09 22:00');
 
 // Keep panel always compact (no fullscreen overlay)
 function setAudioPanelMinimized() {
