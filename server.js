@@ -826,6 +826,83 @@ function getDemoRemainingDays(user) {
   return Math.max(0, remainingDays);
 }
 
+  function hasPerpetualLicense(user) {
+    if (!user) return false;
+    const license = findActiveLicenseByUsername(user.username);
+    return !!license;
+  }
+
+  async function buildDemoStatusForUser(user) {
+    const normalized = normalizeUserRecord(user);
+    const expirationDate = normalized.demoStartDate ? new Date(new Date(normalized.demoStartDate).getTime() + demoConfig.DEMO_DURATION_MS).toISOString() : null;
+    const demoExpired = isDemoExpired(normalized);
+    const remainingDays = getDemoRemainingDays(normalized);
+    const hasLicense = hasPerpetualLicense(normalized);
+
+    // Admins are always allowed
+    if (normalized.role === 'admin') {
+      return {
+        demoStartDate: normalized.demoStartDate || null,
+        demoExpired: false,
+        expired: false,
+        remainingDays: -1,
+        totalDays: demoConfig.DEMO_DAYS,
+        expirationDate,
+        hasValidSubscription: true,
+        subscriptionStatus: 'admin',
+        hasActiveLicense: true,
+        accessBlocked: false,
+        message: '✅ Accès administrateur illimité'
+      };
+    }
+
+    // Subscription status from local record
+    let hasValidSubscription = (normalized.subscriptionStatus || '').toLowerCase() === 'active';
+    let subscriptionStatus = normalized.subscriptionStatus || 'none';
+    let stripeError = null;
+
+    // If demo is expired and no active subscription recorded, double-check Stripe
+    if (demoExpired && !hasValidSubscription && normalized.stripeCustomerId && stripe) {
+      try {
+        const stripeSubs = await stripe.subscriptions.list({
+          customer: normalized.stripeCustomerId,
+          status: 'active',
+          limit: 1
+        });
+        if (stripeSubs.data && stripeSubs.data.length > 0) {
+          hasValidSubscription = stripeSubs.data.some(sub => sub.status === 'active');
+          subscriptionStatus = stripeSubs.data[0].status || 'active';
+        } else {
+          subscriptionStatus = 'none';
+        }
+      } catch (e) {
+        stripeError = e && e.message ? e.message : String(e || 'Stripe error');
+      }
+    }
+
+    const blockOnExpiration = demoConfig?.ACTIONS_ON_EXPIRATION?.blockAccess !== false;
+    const accessBlocked = demoExpired && blockOnExpiration && !hasValidSubscription && !hasLicense;
+
+    return {
+      demoStartDate: normalized.demoStartDate || null,
+      demoExpired,
+      expired: demoExpired,
+      remainingDays,
+      totalDays: demoConfig.DEMO_DAYS,
+      expirationDate,
+      hasValidSubscription,
+      subscriptionStatus,
+      stripeError,
+      hasActiveLicense: hasLicense,
+      accessBlocked,
+      message: accessBlocked
+        ? '❌ Essai expiré - Abonnement ou licence requis'
+        : demoExpired
+          ? '✅ Accès accordé via abonnement actif'
+          : `✅ Essai en cours - ${remainingDays} jour(s) restant(s)`
+    };
+  }
+
 const LICENSES_FILE = path.join(__dirname, 'data', 'licenses.json');
 
 // ========== EMAIL CONFIGURATION ==========
@@ -1713,6 +1790,15 @@ function normalizeUserRecord(user) {
   normalized.lastLogin = normalized.lastLogin || normalized.lastlogin || null;
   normalized.lastActivity = normalized.lastActivity || normalized.lastactivity || null;
 
+  // Normalize deletion/disable flags
+  normalized.status = (normalized.status || normalized.accountStatus || '').toString().toLowerCase() || null;
+  normalized.deletedAt = normalized.deletedAt || normalized.deleted_at || null;
+  normalized.disabledAt = normalized.disabledAt || normalized.disabled_at || null;
+  const deletedFlag = normalized.isDeleted ?? normalized.deleted ?? (normalized.status === 'deleted');
+  const disabledFlag = normalized.isDisabled ?? normalized.disabled ?? (normalized.status === 'disabled');
+  normalized.isDeleted = !!deletedFlag;
+  normalized.isDisabled = !!disabledFlag;
+
   return normalized;
 }
 
@@ -1738,7 +1824,12 @@ function saveUsers() {
       emailVerificationToken: u.emailVerificationToken || null,
       emailVerificationExpiresAt: u.emailVerificationExpiresAt || null,
       emailVerificationSentAt: u.emailVerificationSentAt || null,
-      emailVerifiedAt: u.emailVerifiedAt || null
+      emailVerifiedAt: u.emailVerifiedAt || null,
+      status: u.status || null,
+      isDeleted: !!u.isDeleted,
+      isDisabled: !!u.isDisabled,
+      deletedAt: u.deletedAt || null,
+      disabledAt: u.disabledAt || null
     }));
     fs.writeFileSync(USERS_FILE, JSON.stringify(toSave, null, 2), 'utf8');
     return true;
@@ -1746,6 +1837,17 @@ function saveUsers() {
     console.error('[users] save error', e && e.message);
     return false;
   }
+}
+
+function isUserDeletedOrDisabled(user) {
+  if (!user) return false;
+  const normalized = normalizeUserRecord(user);
+  const status = (normalized.status || '').toLowerCase();
+  return normalized.isDeleted === true
+    || normalized.isDisabled === true
+    || !!normalized.deletedAt
+    || status === 'deleted'
+    || status === 'disabled';
 }
 
 // ========== DEMO STATUS MANAGEMENT ========== 
@@ -2498,6 +2600,17 @@ function authMiddleware(req, res, next) {
     if (req.user && req.user.emailVerified === undefined) {
       req.user.emailVerified = true;
     }
+
+    // Block deleted/disabled accounts even if a stale token is presented
+    try {
+      const storedUser = getUserByUsername(decoded.username);
+      if (isUserDeletedOrDisabled(storedUser)) {
+        return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+      }
+    } catch (lookupErr) {
+      console.warn('[auth] user lookup failed during token check:', lookupErr && lookupErr.message ? lookupErr.message : lookupErr);
+    }
+
     updateUserActivity(req.user.username, { reason: 'activity' })
       .catch(e => console.warn('[auth] unable to record activity:', e && e.message ? e.message : e));
     next();
@@ -2527,6 +2640,10 @@ app.post('/api/login', async (req, res) => {
     return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
   }
 
+  if (isUserDeletedOrDisabled(user)) {
+    return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+  }
+
   const verificationEnforced = shouldEnforceEmailVerification(user);
   if (verificationEnforced && !isEmailVerified(user)) {
     return res.status(403).json({
@@ -2541,6 +2658,16 @@ app.post('/api/login', async (req, res) => {
   if (!valid) {
     console.log('[api/login] password mismatch');
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
+  }
+
+  const demoStatus = await buildDemoStatusForUser(user);
+  if (demoStatus.accessBlocked) {
+    return res.status(403).json({
+      ok: false,
+      error: 'Essai expiré - abonnement ou licence requis',
+      code: 'demo_expired',
+      demo: demoStatus
+    });
   }
   const emailVerifiedFlag = isEmailVerifiedOrBypassed(user);
   console.log('[api/login] login successful for:', username);
@@ -2628,10 +2755,19 @@ app.post('/api/dashboard/login', async (req, res) => {
   if (!user) {
     return res.status(401).json({ ok: false, error: 'Utilisateur non trouvé' });
   }
+
+  if (isUserDeletedOrDisabled(user)) {
+    return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+  }
   
   const valid = await bcrypt.compare(password, user.passwordhash || user.passwordHash);
   if (!valid) {
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
+  }
+
+  const demoStatus = await buildDemoStatusForUser(user);
+  if (demoStatus.accessBlocked) {
+    return res.status(403).json({ ok: false, error: 'Essai expiré - abonnement ou licence requis', code: 'demo_expired', demo: demoStatus });
   }
   
   const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
@@ -3237,6 +3373,10 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
   }
 
+  if (isUserDeletedOrDisabled(user)) {
+    return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+  }
+
   const verificationEnforced = shouldEnforceEmailVerification(user);
   if (verificationEnforced && !isEmailVerified(user)) {
     return res.status(403).json({
@@ -3252,6 +3392,11 @@ app.post('/api/auth/login', async (req, res) => {
   if (!valid) {
     console.log('[api/auth/login] password mismatch for:', user.username);
     return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
+  }
+
+  const demoStatus = await buildDemoStatusForUser(user);
+  if (demoStatus.accessBlocked) {
+    return res.status(403).json({ ok: false, error: 'Essai expiré - abonnement ou licence requis', code: 'demo_expired', demo: demoStatus });
   }
   
   const emailVerifiedFlag = isEmailVerifiedOrBypassed(user);
@@ -3605,103 +3750,13 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
       persistUser(user);
       ensureUserSubscription(user, { planName: 'auto-provision', status: 'trial' });
     }
-    
-    // ADMINS: Skip license/demo checks and grant full access
-    if (user.role === 'admin') {
-      console.log(`[demo/status] Admin user ${user.username} - unrestricted access`);
-      return res.json({
-        ok: true,
-        demo: {
-          demoStartDate: null,
-          demoExpired: false,
-          remainingDays: -1, // Unlimited
-          totalDays: demoConfig.DEMO_DAYS,
-          expirationDate: null,
-          hasValidSubscription: true,
-          subscriptionStatus: 'admin',
-          accessBlocked: false, // Never block admins
-          message: '✅ Accès administrateur illimité'
-        }
-      });
+
+    if (isUserDeletedOrDisabled(user)) {
+      return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
     }
-    
-    const demoExpired = isDemoExpired(user);
-    const remainingDays = getDemoRemainingDays(user);
-    const expirationDate = user.demoStartDate ? 
-      new Date(new Date(user.demoStartDate).getTime() + demoConfig.DEMO_DURATION_MS).toISOString() : 
-      null;
-    
-    // Check if demo is expired
-    if (demoExpired) {
-      // Demo is expired - check if user has ACTIVE subscription with Stripe
-      let hasValidSubscription = false;
-      let subscriptionStatus = 'none';
-      let stripeError = null;
-      
-      if (user.stripeCustomerId) {
-        try {
-          // Fetch latest subscription from Stripe for this customer
-          const stripeSubs = await stripe.subscriptions.list({
-            customer: user.stripeCustomerId,
-            status: 'active',
-            limit: 1
-          });
-          
-          if (stripeSubs.data && stripeSubs.data.length > 0) {
-            const activeSub = stripeSubs.data[0];
-            hasValidSubscription = activeSub.status === 'active';
-            subscriptionStatus = activeSub.status; // 'active', 'past_due', etc.
-            console.log(`[demo/status] User ${user.username} has Stripe subscription: ${subscriptionStatus}`);
-          } else {
-            // No active subscription
-            subscriptionStatus = 'none';
-            console.log(`[demo/status] User ${user.username} has no active Stripe subscription`);
-          }
-        } catch (e) {
-          console.error(`[demo/status] Error checking Stripe subscription for ${user.username}:`, e.message);
-          stripeError = e.message;
-        }
-      } else {
-        // No Stripe customer ID
-        subscriptionStatus = 'none';
-        console.log(`[demo/status] User ${user.username} has no Stripe customer ID`);
-      }
-      
-      // If demo expired AND no valid subscription = BLOCKED
-      res.json({
-        ok: true,
-        demo: {
-          demoStartDate: user.demoStartDate || null,
-          demoExpired: true,
-          remainingDays: 0,
-          totalDays: demoConfig.DEMO_DAYS,
-          expirationDate: expirationDate,
-          hasValidSubscription: hasValidSubscription,
-          subscriptionStatus: subscriptionStatus,
-          stripeError: stripeError,
-          accessBlocked: !hasValidSubscription, // KEY: Block access if no valid subscription
-          message: hasValidSubscription 
-            ? '✅ Accès accordé via abonnement actif'
-            : '❌ Essai expiré - Abonnement requis pour continuer'
-        }
-      });
-    } else {
-      // Demo is still valid - user can access
-      res.json({
-        ok: true,
-        demo: {
-          demoStartDate: user.demoStartDate || null,
-          demoExpired: false,
-          remainingDays: remainingDays,
-          totalDays: demoConfig.DEMO_DAYS,
-          expirationDate: expirationDate,
-          hasValidSubscription: user.subscriptionStatus === 'active',
-          subscriptionStatus: user.subscriptionStatus || 'none',
-          accessBlocked: false,
-          message: `✅ Essai en cours - ${remainingDays} jour(s) restant(s)`
-        }
-      });
-    }
+
+    const demo = await buildDemoStatusForUser(user);
+    return res.json({ ok: true, demo });
   } catch (e) {
     console.error('[demo] status error:', e);
     res.status(500).json({ ok: false, error: 'Server error', details: e.message });

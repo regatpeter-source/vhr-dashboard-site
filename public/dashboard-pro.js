@@ -1,5 +1,5 @@
 // VHR DASHBOARD PRO - Version complète avec fond noir et vue tableau
-// Date: 2025-12-03
+// Date: 2026-01-09
 
 // ========== TAB/SESSION MANAGEMENT ==========
 // Unique ID for this browser tab to manage multiple connections
@@ -1044,7 +1044,7 @@ window.switchAccountTab = function(tab) {
 let activeAudioStream = null;  // Global audio stream instance
 let activeAudioSerial = null;  // Serial of device receiving audio
 
-console.log('[voice] dashboard-pro.js build stamp: 2025-12-29 18:55');
+console.log('[voice] dashboard-pro.js build stamp: 2026-01-09 22:00');
 
 // Keep panel always compact (no fullscreen overlay)
 function setAudioPanelMinimized() {
@@ -3505,7 +3505,14 @@ async function checkLicense() {
 		if (!res || !res.ok) {
 			console.error('[license] demo status check failed');
 			// Bloquer l'accès par défaut si la vérification échoue (éviter l'accès sans abo)
-			showUnlockModal({ expired: true, accessBlocked: true, subscriptionStatus: 'unknown' });
+			showUnlockModal({ expired: true, accessBlocked: true, subscriptionStatus: res?.demo?.subscriptionStatus || 'unknown' });
+			return false;
+		}
+
+		if (res.code === 'account_deleted') {
+			showToast('❌ Ce compte a été supprimé ou désactivé', 'error');
+			saveAuthToken('');
+			showAuthModal('login');
 			return false;
 		}
 		
@@ -3525,7 +3532,8 @@ async function checkLicense() {
 			showUnlockModal({
 				expired: true,
 				accessBlocked: true,
-				subscriptionStatus: demoStatus.subscriptionStatus
+				subscriptionStatus: demoStatus.subscriptionStatus,
+				hasActiveLicense: demoStatus.hasActiveLicense
 			});
 			return false; // BLOCK ACCESS
 		} else {
@@ -3536,7 +3544,8 @@ async function checkLicense() {
 		}
 	} catch (e) {
 		console.error('[license] check failed:', e);
-		return true; // Allow access on error (fail-open for UX)
+		showUnlockModal({ expired: true, accessBlocked: true, subscriptionStatus: 'unknown' });
+		return false; // Fail closed to prevent accès sans licence
 	}
 }
 
@@ -3929,7 +3938,22 @@ window.loginUser = async function() {
 				});
 			}, 200);
 		} else {
-			showToast('❌ ' + (data.error || 'Connexion échouée'), 'error');
+			if (data && data.code === 'account_deleted') {
+				showToast('❌ Ce compte a été supprimé ou désactivé', 'error');
+				saveAuthToken('');
+				showAuthModal('login');
+				return;
+			}
+			if (data && data.code === 'demo_expired') {
+				showUnlockModal({
+					expired: true,
+					accessBlocked: true,
+					subscriptionStatus: data.demo?.subscriptionStatus,
+					hasActiveLicense: data.demo?.hasActiveLicense
+				});
+				return;
+			}
+			showToast('❌ ' + (data?.error || 'Connexion échouée'), 'error');
 		}
 	} catch (e) {
 		console.error('[auth] login error:', e);
