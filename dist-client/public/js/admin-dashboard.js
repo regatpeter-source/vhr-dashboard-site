@@ -64,16 +64,12 @@ async function loadUsers() {
       tbody.innerHTML = '';
       data.users.forEach(user => {
         const row = tbody.insertRow();
-        const isProtectedAdmin = user.role === 'admin' && user.username && user.username.toLowerCase() === 'vhr';
         row.innerHTML = `
           <td>${user.username}</td>
           <td>${user.email || 'N/A'}</td>
           <td><span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></td>
           <td>${new Date(user.createdAt).toLocaleDateString()}</td>
-          <td>
-            <button class="action-btn action-btn-view" onclick="viewUser('${user.username}')">View</button>
-            ${isProtectedAdmin ? '' : `<button class="action-btn action-btn-delete" onclick="deleteUserAccount('${user.username}')">Delete</button>`}
-          </td>
+          <td><button class="action-btn action-btn-view" onclick="viewUser('${user.username}')">View</button></td>
         `;
       });
     } else {
@@ -217,7 +213,6 @@ async function viewUser(username) {
       const modalBody = document.getElementById('messageModalBody');
       const createdDate = new Date(user.createdAt).toLocaleString();
       const updatedDate = new Date(user.updatedAt).toLocaleString();
-      const subStatusLabel = user.subscriptionStatus || 'None';
       
       modalBody.innerHTML = `
         <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
@@ -229,14 +224,8 @@ async function viewUser(username) {
         </div>
         <div style="padding: 15px; background: #fff; border-radius: 8px; border: 1px solid #e0e0e0;">
           <h4 style="margin-top: 0;">Subscription Info</h4>
-          <p style="margin: 0 0 5px 0;"><strong>Status:</strong> ${subStatusLabel}</p>
+          <p style="margin: 0 0 5px 0;"><strong>Status:</strong> ${user.subscriptionStatus || 'None'}</p>
           <p style="margin: 0;"><strong>Subscription ID:</strong> ${user.subscriptionId || 'N/A'}</p>
-        </div>
-        <div style="margin-top:16px; padding: 14px; background: #f9fafb; border: 1px dashed #cbd5e0; border-radius: 8px; display:flex; gap:8px; flex-wrap:wrap;">
-          <button class="action-btn action-btn-view" style="background:#c6f6d5;color:#22543d;" onclick="manageSubscription('${user.username}','free_month')">Offrir 1 mois gratuit</button>
-          <button class="action-btn action-btn-delete" style="background:#fed7d7;color:#742a2a;" onclick="manageSubscription('${user.username}','cancel')">Annuler l'abonnement</button>
-          <button class="action-btn action-btn-delete" style="background:#fbd38d;color:#7b341e;" onclick="manageSubscription('${user.username}','refund')">Rembourser</button>
-          <button class="action-btn action-btn-view" style="background:#bee3f8;color:#2c5282;" onclick="promptExtendTrial('${user.username}')">Ajouter des jours d'essai</button>
         </div>
       `;
       document.getElementById('messageModal').classList.add('active');
@@ -245,84 +234,6 @@ async function viewUser(username) {
     console.error('Error viewing user:', e);
     alert('Error loading user details');
   }
-}
-
-// Delete a user (admin only)
-async function deleteUserAccount(username) {
-  const normalized = String(username || '').trim();
-
-  if (!normalized) {
-    alert('Nom d\'utilisateur manquant');
-    return;
-  }
-
-  if (currentUser && currentUser.username && currentUser.username.toLowerCase() === normalized.toLowerCase()) {
-    alert('Vous ne pouvez pas supprimer votre propre compte depuis cette page.');
-    return;
-  }
-
-  const confirmed = confirm(`Supprimer l'utilisateur "${normalized}" ? Cette action est définitive.`);
-  if (!confirmed) return;
-
-  try {
-    const res = await authFetch(`${API_BASE}/admin/users/${encodeURIComponent(normalized)}`, { method: 'DELETE' });
-    const data = await res.json();
-
-    if (!res.ok || !data.ok) {
-      const message = (data && data.error) ? data.error : 'Erreur serveur';
-      alert('❌ ' + message);
-      return;
-    }
-
-    alert('✅ Utilisateur supprimé avec succès');
-    await loadUsers();
-    await loadStats();
-  } catch (e) {
-    console.error('[users] delete error:', e);
-    alert('❌ Erreur lors de la suppression: ' + e.message);
-  }
-}
-
-async function manageSubscription(username, action, days) {
-  const normalized = String(username || '').trim();
-  const actionLabel = {
-    cancel: "annuler l'abonnement",
-    refund: 'rembourser',
-    free_month: 'offrir 1 mois gratuit',
-    extend_trial: "ajouter des jours d'essai"
-  }[action] || action;
-
-  if (!normalized || !action) return alert('Paramètres manquants');
-
-  if (!confirm(`Confirmer: ${actionLabel} pour ${normalized} ?`)) return;
-
-  try {
-    const res = await authFetch(`${API_BASE}/admin/subscription/manage`, {
-      method: 'POST',
-      body: JSON.stringify({ username: normalized, action, days })
-    });
-
-    const data = await res.json();
-    if (!res.ok || !data.ok) {
-      const message = data && data.error ? data.error : 'Erreur serveur';
-      alert('❌ ' + message);
-      return;
-    }
-
-    alert('✅ Action effectuée');
-    await loadUsers();
-    await loadStats();
-  } catch (e) {
-    console.error('[subs] manage error:', e);
-    alert('❌ Erreur: ' + e.message);
-  }
-}
-
-function promptExtendTrial(username) {
-  const extra = prompt("Combien de jours d'essai supplémentaires ?", '7');
-  const days = Number(extra || 0);
-  if (Number.isNaN(days) || days <= 0) return alert('Nombre de jours invalide');
-  manageSubscription(username, 'extend_trial', days);
 }
 
 // View message detail

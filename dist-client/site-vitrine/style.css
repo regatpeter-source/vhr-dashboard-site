@@ -4,7 +4,7 @@
   margin-left: auto;
   margin-right: auto;
 }
-  background: url('/assets/logo-vd.svg') no-repeat left center / 54px auto;
+
 a:focus, button:focus, .cta:focus, .cta-secondary:focus {
   outline: 2px solid #333;
   outline-offset: 2px;
@@ -20,7 +20,7 @@ body {
   font-size: 1.1em;
   font-weight: 400;
   margin: 0;
-  background: url('/assets/logo-vd.svg') center center / contain no-repeat;
+}
 
 header {
   background: linear-gradient(120deg, #2196f3 0%, #43a047 100%);

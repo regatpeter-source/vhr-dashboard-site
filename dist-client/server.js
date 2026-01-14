@@ -93,6 +93,9 @@ const FORCE_HTTP = process.env.FORCE_HTTP === '1';
 const QUIET_MODE = process.env.QUIET_MODE === '1';
 const SUPPRESS_WARNINGS = process.env.SUPPRESS_WARNINGS === '1';
 const HTTPS_ENABLED = process.env.HTTPS_ENABLED === '1';
+const HTTPS_CERT_FILE = process.env.HTTPS_CERT_FILE || './cert.pem';
+const HTTPS_KEY_FILE = process.env.HTTPS_KEY_FILE || './key.pem';
+const HTTPS_CA_FILE = process.env.HTTPS_CA_FILE || process.env.HTTPS_CHAIN_FILE || '';
 
 let useHttps = false;
 let httpsOptions = {};
@@ -122,13 +125,30 @@ if (SUPPRESS_WARNINGS) {
 
 // HTTPS opt-in: only enabled if HTTPS_ENABLED=1 and certs are present
 try {
-  if (fs.existsSync('./cert.pem') && fs.existsSync('./key.pem')) {
+  const certPath = path.resolve(HTTPS_CERT_FILE);
+  const keyPath = path.resolve(HTTPS_KEY_FILE);
+  const caPath = HTTPS_CA_FILE ? path.resolve(HTTPS_CA_FILE) : null;
+
+  if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
     httpsOptions = {
-      cert: fs.readFileSync('./cert.pem'),
-      key: fs.readFileSync('./key.pem')
+      cert: fs.readFileSync(certPath),
+      key: fs.readFileSync(keyPath)
     };
+
+    if (caPath) {
+      if (fs.existsSync(caPath)) {
+        httpsOptions.ca = fs.readFileSync(caPath);
+        console.log(`[HTTPS] Chaîne intermédiaire chargée (${caPath}).`);
+      } else {
+        console.warn(`[HTTPS] HTTPS_CA_FILE défini mais introuvable: ${caPath}`);
+      }
+    }
+
     hasCert = true;
-    console.log('[HTTPS] Certificat SSL détecté.');
+    console.log(`[HTTPS] Certificat SSL détecté (${certPath}).`);
+  } else {
+    if (!fs.existsSync(certPath)) console.warn(`[HTTPS] Certificat manquant: ${certPath}`);
+    if (!fs.existsSync(keyPath)) console.warn(`[HTTPS] Clé privée manquante: ${keyPath}`);
   }
 } catch (e) {
   console.warn('[HTTPS] Erreur lors du chargement du certificat SSL:', e.message);
@@ -140,6 +160,9 @@ if (HTTPS_ENABLED && hasCert) {
   console.log('[HTTPS] HTTPS_ENABLED=1 - démarrage principal en HTTPS.');
 } else {
   console.log('[HTTPS] HTTPS désactivé - démarrage principal en HTTP.');
+  if (HTTPS_ENABLED && !hasCert) {
+    console.warn('[HTTPS] HTTPS_ENABLED=1 mais aucun certificat valide détecté. Vérifiez HTTPS_CERT_FILE / HTTPS_KEY_FILE / HTTPS_CA_FILE.');
+  }
 }
 
 if (useHttps && FORCE_HTTP) {
@@ -2226,6 +2249,13 @@ app.post('/api/logout', (req, res) => {
 // --- Route pour créer un utilisateur dashboard (simplifié, sans email) ---
 app.post('/api/dashboard/register', async (req, res) => {
   console.log('[api/dashboard/register] request received');
+  // Sécurisation : on refuse la création d'utilisateurs si aucune base persistante n'est configurée
+  // (ni Postgres, ni SQLite). Cela évite que l'archive client zip fonctionne en "mode démo" sans contrôle.
+  const hasPersistentStore = USE_POSTGRES || dbEnabled;
+  if (!hasPersistentStore) {
+    return res.status(403).json({ ok: false, error: 'Création désactivée : aucune base persistante configurée' });
+  }
+
   reloadUsers();
   const { username, password, role } = req.body;
   

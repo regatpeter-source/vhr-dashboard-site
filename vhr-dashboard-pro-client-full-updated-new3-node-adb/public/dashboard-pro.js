@@ -338,7 +338,7 @@ window.createNewUser = async function() {
 	}
 	
 	try {
-		const res = await fetch('/api/dashboard/register', {
+		const res = await fetch(resolveApiUrl('/api/dashboard/register'), {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ username, password, role })
@@ -420,7 +420,7 @@ window.loginUser = async function() {
 	}
 	
 	try {
-		const res = await fetch('/api/dashboard/login', {
+		const res = await fetch(resolveApiUrl('/api/dashboard/login'), {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ username, password })
@@ -1715,12 +1715,48 @@ const USE_MOCK_AUTH = (() => {
 	try { return localStorage.getItem('useMockAuth') === '1'; } catch (e) { return false; }
 })();
 
-// Par défaut on pointe vers l'API HTTPS de prod, sauf si override local/mock explicite.
-const AUTH_API_BASE = (FORCE_LOCAL_AUTH || USE_MOCK_AUTH) ? '' : 'https://www.vhr-dashboard-site.com';
+// Par défaut on pointe vers l'API HTTPS de prod, sauf override local/mock/env explicite.
+const PROD_API_BASE = 'https://www.vhr-dashboard-site.com';
+const ENV_API_BASE = (window.env && window.env.API_BASE_URL) ? window.env.API_BASE_URL.trim() : '';
+
+// Origin à utiliser pour les appels API (évite file:///api/... en mode Electron)
+const API_ORIGIN = (() => {
+	// 1) Priorité à une variable d'environnement si fournie
+	if (ENV_API_BASE) return ENV_API_BASE;
+	// 2) Mode local forcé ou mock => privilégier localhost si file://
+	if (FORCE_LOCAL_AUTH || USE_MOCK_AUTH) {
+		if (window.location.origin && window.location.origin.startsWith('http')) {
+			return window.location.origin;
+		}
+		return 'http://localhost:3000';
+	}
+	// 3) Si on est en file:// (Electron) et pas d'override, tenter localhost d'abord
+	if (window.location.protocol === 'file:') {
+		return 'http://localhost:3000';
+	}
+	// 4) Sinon prod
+	return PROD_API_BASE;
+})();
+
+const AUTH_API_BASE = (FORCE_LOCAL_AUTH || USE_MOCK_AUTH) ? API_ORIGIN : (ENV_API_BASE || PROD_API_BASE);
+const RESOLVED_AUTH_BASE = AUTH_API_BASE || API_ORIGIN || PROD_API_BASE;
+const resolveApiUrl = (p) => (p.startsWith('http://') || p.startsWith('https://')) ? p : `${API_ORIGIN}${p}`;
+
 // Secret partagé pour synchroniser les comptes prod vers le backend local (HTTP)
 const SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
-const API_BASE = '/api';
-const socket = io({
+
+const SOCKET_BASE = (() => {
+	if (ENV_API_BASE) return ENV_API_BASE;
+	if (FORCE_LOCAL_AUTH || USE_MOCK_AUTH) {
+		if (window.location.origin && window.location.origin.startsWith('http')) return window.location.origin;
+		return 'http://localhost:3000';
+	}
+	if (window.location.protocol === 'file:') return 'http://localhost:3000';
+	return PROD_API_BASE;
+})();
+
+const socket = io(SOCKET_BASE, {
+	path: '/socket.io',
 	reconnection: true,
 	reconnectionAttempts: 5,
 	reconnectionDelay: 1000,
@@ -2050,10 +2086,14 @@ async function api(path, opts = {}) {
 			};
 		}
 
+		const targetUrl = (path.startsWith('http://') || path.startsWith('https://'))
+			? path
+			: `${API_ORIGIN}${path}`;
+
 		// Timeout support
 		const controller = new AbortController();
 		const t = setTimeout(() => controller.abort(), opts.timeout || API_TIMEOUT_MS);
-		const res = await fetch(path, { ...opts, signal: controller.signal }).finally(() => clearTimeout(t));
+		const res = await fetch(targetUrl, { ...opts, signal: controller.signal }).finally(() => clearTimeout(t));
 		
 		// Check if response is JSON
 		const contentType = res.headers.get('content-type');
@@ -2118,13 +2158,18 @@ async function refreshDevicesList() {
 	}
 }
 
-async function loadDevices() {
+async function loadDevices(forceOrEvent = false) {
+	// Allow DOM onclick without explicit param to bypass the throttle
+	const isUserClick = (typeof Event !== 'undefined' && forceOrEvent instanceof Event)
+		|| (typeof window !== 'undefined' && window.event instanceof Event);
+	const force = forceOrEvent === true || isUserClick;
+
 	const now = Date.now();
 	if (isLoadingDevices) {
 		console.warn('[devices] Ignored loadDevices: already loading');
 		return;
 	}
-	if (now - lastDevicesLoadTs < MIN_LOAD_DEVICES_INTERVAL_MS) {
+	if (!force && now - lastDevicesLoadTs < MIN_LOAD_DEVICES_INTERVAL_MS) {
 		console.warn('[devices] Ignored loadDevices: throttled');
 		return;
 	}
@@ -2171,7 +2216,7 @@ function renderDevicesTable() {
 	if (devices.length === 0) {
 		container.innerHTML = `<div style='text-align:center;color:#fff;font-size:18px;padding:40px;'>
 			Aucun casque détecté 😢<br><br>
-			<button onclick="loadDevices()" style='background:#2ecc71;color:#000;border:none;padding:12px 24px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>🔄 Rafraîchir</button>
+			<button onclick="loadDevices(true)" style='background:#2ecc71;color:#000;border:none;padding:12px 24px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>🔄 Rafraîchir</button>
 		</div>`;
 		return;
 	}
@@ -2293,7 +2338,7 @@ function renderDevicesCards() {
 	if (devices.length === 0) {
 		grid.innerHTML = `<div style='text-align:center;color:#fff;grid-column:1/-1;padding:40px;'>
 			Aucun casque détecté 😢<br><br>
-			<button onclick="loadDevices()" style='background:#2ecc71;color:#000;border:none;padding:12px 24px;border-radius:8px;cursor:pointer;font-weight:bold;'>🔄 Rafraîchir</button>
+			<button onclick="loadDevices(true)" style='background:#2ecc71;color:#000;border:none;padding:12px 24px;border-radius:8px;cursor:pointer;font-weight:bold;'>🔄 Rafraîchir</button>
 		</div>`;
 		return;
 	}
@@ -2671,8 +2716,10 @@ window.initStreamPlayer = function(serial) {
 	}
 };
 
+
 window.connectStreamSocket = function(serial) {
-	const wsUrl = 'ws://' + window.location.host + '/api/stream/ws?serial=' + encodeURIComponent(serial);
+	const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+	const wsUrl = wsProtocol + window.location.host + '/api/stream/ws?serial=' + encodeURIComponent(serial);
 	const canvas = document.getElementById('streamCanvas');
 	
 	if (!canvas) {
@@ -3386,7 +3433,7 @@ window.uploadDevGameToHeadset = async function(serial, deviceName) {
 		
 		try {
 			showToast('📤 Envoi du fichier en cours...', 'info');
-			const res = await fetch('/api/upload-dev-game', {
+			const res = await fetch(resolveApiUrl('/api/upload-dev-game'), {
 				method: 'POST',
 				body: formData
 			});
@@ -3822,7 +3869,7 @@ window.loginUser = async function() {
 	try {
 		let res, data;
 		// 1) Auth prod par username
-		res = await fetch(`${AUTH_API_BASE}/api/login`, {
+		res = await fetch(`${RESOLVED_AUTH_BASE}/api/login`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			credentials: 'include',
@@ -3832,7 +3879,7 @@ window.loginUser = async function() {
 
 		// 2) Fallback prod par email
 		if (!(res.ok && data.ok)) {
-			res = await fetch(`${AUTH_API_BASE}/api/auth/login`, {
+			res = await fetch(`${RESOLVED_AUTH_BASE}/api/auth/login`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				credentials: 'include',
@@ -3846,7 +3893,7 @@ window.loginUser = async function() {
 			const syncedUsername = data.user?.username || data.user?.name || identifier;
 			const syncedEmail = data.user?.email || identifier;
 			try {
-				await fetch('/api/admin/sync-user', {
+				await fetch(resolveApiUrl('/api/admin/sync-user'), {
 					method: 'POST',
 					headers: {
 						'Content-Type': 'application/json',
@@ -3860,7 +3907,7 @@ window.loginUser = async function() {
 
 			// Obtenir un token local pour les requêtes HTTP/localhost
 			try {
-				const localRes = await fetch('/api/login', {
+				const localRes = await fetch(resolveApiUrl('/api/login'), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					credentials: 'include',
@@ -3879,7 +3926,7 @@ window.loginUser = async function() {
 		if (!(res.ok && data.ok)) {
 			try {
 				// Créer/synchroniser l'utilisateur en local avec le secret partagé
-				await fetch('/api/admin/sync-user', {
+				await fetch(resolveApiUrl('/api/admin/sync-user'), {
 					method: 'POST',
 					headers: {
 						'Content-Type': 'application/json',
@@ -3892,7 +3939,7 @@ window.loginUser = async function() {
 			}
 
 			try {
-				const localRes = await fetch('/api/login', {
+				const localRes = await fetch(resolveApiUrl('/api/login'), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					credentials: 'include',
@@ -3964,7 +4011,7 @@ window.registerUser = async function() {
 	showToast('📝 Création de compte...', 'info');
 	
 	try {
-		const res = await fetch(`${AUTH_API_BASE}/api/auth/register`, {
+		const res = await fetch(`${RESOLVED_AUTH_BASE}/api/auth/register`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			credentials: 'include', // Important: send cookies
@@ -4088,13 +4135,21 @@ function hideDashboardContent() {
 	}
 }
 
+// Sécurité UX : si l'appel /api/check-auth ne répond pas (réseau/SSL), on force l'affichage du login après un délai
+let authFallbackTimer = setTimeout(() => {
+	console.warn('[auth] Fallback timeout reached, showing login modal');
+	hideDashboardContent();
+	showAuthModal('login');
+}, 12000);
+
 // Check JWT authentication FIRST - this will show auth modal if needed
 checkJWTAuth().then(isAuth => {
+	clearTimeout(authFallbackTimer);
 	if (isAuth) {
 		// User is authenticated - always show dashboard content first
 		showDashboardContent();
 		createNavbar();
-		
+        
 		// Then check license/subscription status
 		checkLicense().then(hasAccess => {
 			if (hasAccess) {

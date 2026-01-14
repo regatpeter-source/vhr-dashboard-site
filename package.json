@@ -1,6 +1,6 @@
 {
   "name": "vhr-dashboard-site",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "description": "VHR Dashboard - Server and site-vitrine",
   "main": "server.js",
   "scripts": {

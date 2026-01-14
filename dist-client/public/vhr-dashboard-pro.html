@@ -7,8 +7,8 @@
   <title>VHR DASHBOARD PRO - Gestionnaire VR Multi-Casques</title>
   <script src="/force-http.js"></script>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥽</text></svg>">
-  <link rel="stylesheet" href="/dashboard-pro.css">
-  <script src="/socket.io/socket.io.js"></script>
+  <link rel="stylesheet" href="./dashboard-pro.css">
+  <script src="https://www.vhr-dashboard-site.com/socket.io/socket.io.js"></script>
 </head>
 <body>
   <!-- Écran de chargement / authentification -->
@@ -17,6 +17,10 @@
       <div style="font-size: 48px; margin-bottom: 20px;">🔐</div>
       <h2>Vérification de l'authentification...</h2>
       <p style="color: #999;">Veuillez patienter...</p>
+      <button id="forceLoginButton" style="margin-top:16px;padding:10px 18px;border:none;border-radius:8px;background:#2ecc71;color:#000;font-weight:bold;cursor:pointer;">
+        🔓 Forcer l'affichage du login
+      </button>
+      <p id="authFallbackHint" style="color:#888;font-size:12px;margin-top:10px;">Si rien ne se passe sous 10s, cliquez ou attendez le forçage automatique.</p>
     </div>
   </div>
   
@@ -26,9 +30,41 @@
   <div id="deviceGrid" style="opacity: 0; pointer-events: none;"></div>
   
   <!-- Modal container (créé dynamiquement) -->
+
+  <!-- Super-fallback : enlève l'overlay et affiche le login si check-auth reste bloqué -->
+  <script>
+    (function() {
+      const forceLogin = () => {
+        try {
+          if (typeof hideDashboardContent === 'function') hideDashboardContent();
+          if (typeof showAuthModal === 'function') {
+            showAuthModal('login');
+            return;
+          }
+        } catch (e) { /* ignore */ }
+        // Si les fonctions ne sont pas chargées, on cache au moins l'overlay
+        const ov = document.getElementById('authOverlay');
+        if (ov) ov.style.display = 'none';
+      };
+
+      const btn = document.getElementById('forceLoginButton');
+      if (btn) {
+        btn.addEventListener('click', forceLogin);
+      }
+
+      // Forçage automatique après 10s si l'overlay est toujours là
+      setTimeout(() => {
+        const ov = document.getElementById('authOverlay');
+        if (ov && ov.style.display !== 'none') {
+          console.warn('[auth] Super fallback: forcing login modal');
+          forceLogin();
+        }
+      }, 10000);
+    })();
+  </script>
   
-  <script src="/vhr-audio-stream.js"></script>
-  <script src="/dashboard-pro.js"></script>
-  <script src="/js/admin-installer.js"></script>
+  <script src="./vhr-audio-stream.js"></script>
+  <script src="./dashboard-pro.js"></script>
+  <script src="./js/admin-installer.js"></script>
 </body>
 </html>

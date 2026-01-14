@@ -1,15 +1,4 @@
 (function(){
-  // Force HTTP if the page was opened in HTTPS (avoids ERR_SSL_PROTOCOL_ERROR when server only serves HTTP)
-  if (window.location.protocol === 'https:') {
-    const httpUrl = 'http://' + window.location.host + window.location.pathname + window.location.search;
-    try {
-      window.location.replace(httpUrl);
-    } catch (e) {
-      window.location.href = httpUrl;
-    }
-    return;
-  }
-
   const statusEl = document.getElementById('status');
   const statusValueEl = document.getElementById('statusValue');
   const connectBtn = document.getElementById('connectBtn');

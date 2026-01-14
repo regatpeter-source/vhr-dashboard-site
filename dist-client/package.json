@@ -1,11 +1,13 @@
 {
   "name": "vhr-dashboard-site",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "description": "VHR Dashboard - Server and site-vitrine",
-  "main": "server.js",
+  "main": "electron-main.js",
   "scripts": {
     "start": "node server.js",
     "start:dev": "NO_ADB=1 node server.js",
+    "dev:electron": "cross-env API_BASE_URL=https://www.vhr-dashboard-site.com electron .",
+    "build:electron": "cross-env API_BASE_URL=https://www.vhr-dashboard-site.com electron-builder -w",
     "launch": "node launcher.js",
     "build:exe": "pkg launcher.js --target node18-win-x64 --output \"VHR Dashboard.exe\"",
     "fixenc": "node scripts/fix-encodings.js",
@@ -50,6 +52,27 @@
     "archiver": "^6.0.1",
     "fs-extra": "^11.1.1",
     "open": "^8.4.2",
-    "pkg": "^5.8.1"
+    "pkg": "^5.8.1",
+    "electron": "^29.3.0",
+    "electron-builder": "^24.9.1",
+    "cross-env": "^7.0.3"
+  },
+  "build": {
+    "appId": "com.vhr.dashboard",
+    "productName": "VHR Dashboard",
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    }
   }
 }

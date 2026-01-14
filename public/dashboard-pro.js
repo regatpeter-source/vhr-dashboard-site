@@ -2671,8 +2671,10 @@ window.initStreamPlayer = function(serial) {
 	}
 };
 
+
 window.connectStreamSocket = function(serial) {
-	const wsUrl = 'ws://' + window.location.host + '/api/stream/ws?serial=' + encodeURIComponent(serial);
+	const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+	const wsUrl = wsProtocol + window.location.host + '/api/stream/ws?serial=' + encodeURIComponent(serial);
 	const canvas = document.getElementById('streamCanvas');
 	
 	if (!canvas) {

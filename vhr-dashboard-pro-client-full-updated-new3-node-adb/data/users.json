@@ -58,12 +58,11 @@
     "username": "samsam44410",
     "passwordHash": "$2b$10$vL0AmczB9SJk5tjtoMDwCeaGLLsVgQwmPhIW4f1..ftKk3j/GBBV.",
     "role": "user",
-    "email": "",
+    "email": null,
     "stripeCustomerId": null,
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
     "subscriptionStatus": null,
-    "subscriptionId": null,
-    "demoStartDate": "2026-01-04T17:14:00.000Z"
+    "subscriptionId": null
   }
 ]
