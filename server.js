@@ -70,6 +70,8 @@ const ADMIN_ALLOWLIST = (process.env.ADMIN_ALLOWLIST || 'vhr')
   .split(',')
   .map(u => u.trim().toLowerCase())
   .filter(Boolean);
+const ADMIN_FALLBACK = ['vhr'];
+const EFFECTIVE_ADMIN_ALLOWLIST = ADMIN_ALLOWLIST.length ? ADMIN_ALLOWLIST : ADMIN_FALLBACK;
 const ADMIN_VERIFICATION_BYPASS_EMAIL = (process.env.ADMIN_VERIFICATION_BYPASS_EMAIL || 'admin@example.local').trim().toLowerCase();
 const ADMIN_INIT_SECRET = process.env.ADMIN_INIT_SECRET || null;
 // Shared secret used when syncing users from the prod auth API to the local pack.
@@ -91,7 +93,7 @@ const EMAIL_OVERRIDE_MAP = (() => {
 
 function isAllowedAdminUser(user) {
   const username = (typeof user === 'string' ? user : (user && user.username) || '').toLowerCase();
-  return !!username && ADMIN_ALLOWLIST.includes(username);
+  return !!username && EFFECTIVE_ADMIN_ALLOWLIST.includes(username);
 }
 
 function ensureAllowedAdmin(req, res) {
@@ -106,7 +108,7 @@ function ensureAllowedAdmin(req, res) {
 function elevateAdminIfAllowlisted(user) {
   if (!user || !user.username) return user;
   const uname = String(user.username).toLowerCase();
-  if (!ADMIN_ALLOWLIST.includes(uname)) return user;
+  if (!EFFECTIVE_ADMIN_ALLOWLIST.includes(uname)) return user;
   if (user.role !== 'admin') {
     user.role = 'admin';
     try {
