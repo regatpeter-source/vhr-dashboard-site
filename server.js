@@ -1352,6 +1352,12 @@ app.get('/launch-dashboard.html', (req, res) => {
   res.sendFile(path.join(__dirname, 'launch-dashboard.html'));
 });
 
+// Mise à disposition du guide mkcert pour HTTPS local sur casque
+app.get('/MKCERT_SETUP_FOR_QUEST.md', (req, res) => {
+  res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+  res.sendFile(path.join(__dirname, 'MKCERT_SETUP_FOR_QUEST.md'));
+});
+
 // Alias /dashboard-pro.html -> serve vhr-dashboard-pro.html (main dashboard)
 app.get(['/dashboard-pro.html', '/dashboard-pro'], (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');

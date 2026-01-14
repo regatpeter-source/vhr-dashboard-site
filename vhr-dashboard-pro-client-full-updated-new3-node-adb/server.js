@@ -1218,6 +1218,11 @@ app.get('/launch-dashboard.html', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.sendFile(path.join(__dirname, 'launch-dashboard.html'));
 });
+// Mise à disposition du guide mkcert pour HTTPS local sur casque
+app.get('/MKCERT_SETUP_FOR_QUEST.md', (req, res) => {
+  res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+  res.sendFile(path.join(__dirname, '..', 'MKCERT_SETUP_FOR_QUEST.md'));
+});
 
 // Redirect vhr-dashboard-app.html to vhr-dashboard-pro.html
 app.get('/vhr-dashboard-app.html', (req, res) => {
