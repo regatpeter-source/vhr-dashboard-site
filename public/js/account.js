@@ -600,6 +600,9 @@
     } else if (action === 'launch_required') {
       const msg = document.getElementById('loginMessage');
       msg.innerHTML = '<div style="background: #fff8e1; border: 1px solid #fbc02d; color: #7c4a00; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>🚀 Créez votre compte avant de lancer le dashboard</strong><br>Inscrivez-vous ou connectez-vous ici, puis vous serez redirigé automatiquement vers le lancement.</div>';
+    } else if (action === 'admin_required') {
+      const msg = document.getElementById('loginMessage');
+      msg.innerHTML = '<div style="background: #f3e5f5; border: 1px solid #9c27b0; color: #4a148c; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>🔑 Accès administrateur requis</strong><br>Connectez-vous avec un compte administrateur pour ouvrir le tableau de bord admin. Une fois connecté, vous serez automatiquement redirigé.</div>';
     }
   });
 

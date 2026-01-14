@@ -1416,9 +1416,12 @@ app.get('/admin-dashboard.html', authMiddleware, async (req, res) => {
     }
 
     if (!user || user.role !== 'admin') {
-      // For browsers, redirect to account page with a hint; for API clients, return 403 JSON
+      // For browsers, redirect to account page with a hint and a post-login redirect
+      // so the admin can come back automatically after s'authentifier.
       if (req.accepts('html')) {
-        return res.redirect(302, '/account.html?action=admin_required');
+        const target = '/admin-dashboard.html';
+        const loginUrl = `/account.html?action=admin_required&redirect=${encodeURIComponent(target)}`;
+        return res.redirect(302, loginUrl);
       }
       return res.status(403).json({ ok: false, error: 'Admin access required' });
     }
