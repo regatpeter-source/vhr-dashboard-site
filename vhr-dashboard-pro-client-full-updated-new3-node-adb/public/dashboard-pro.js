@@ -473,6 +473,8 @@ window.loginUser = async function() {
 			setUser(username);
 			document.getElementById('loginDialog').remove();
 			showToast(`✅ Bienvenue ${username}!`, 'success');
+			// Afficher la bannière mkcert après authentification
+			showMkcertBanner();
 		} else {
 			showToast(`❌ ${data.error || 'Identifiants incorrects'}`, 'error');
 		}
@@ -4004,6 +4006,7 @@ window.loginUser = async function() {
 			setTimeout(() => {
 				showDashboardContent();
 				createNavbar();
+				showMkcertBanner();
 				checkLicense().then(hasAccess => {
 					if (hasAccess) {
 						loadGamesCatalog().finally(() => loadDevices());
