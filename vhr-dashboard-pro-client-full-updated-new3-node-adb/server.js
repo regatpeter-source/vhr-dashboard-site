@@ -185,6 +185,14 @@ if (HTTPS_ENABLED && hasCert) {
   }
 }
 
+// Render force le HTTPS au niveau du proxy. Pour éviter un double TLS qui casse WebSocket/ADB,
+// on désactive systématiquement le HTTPS applicatif quand on détecte Render.
+const IS_RENDER = !!process.env.RENDER || !!process.env.RENDER_EXTERNAL_URL || !!process.env.RENDER_SERVICE_ID;
+if (IS_RENDER) {
+  useHttps = false;
+  console.log('[HTTPS] Environnement Render détecté: serveur forcé en HTTP derrière le proxy TLS.');
+}
+
 if (useHttps && FORCE_HTTP) {
   useHttps = false;
   console.log('[HTTPS] FORCE_HTTP=1 détecté - démarrage forcé en HTTP malgré certificat.');
