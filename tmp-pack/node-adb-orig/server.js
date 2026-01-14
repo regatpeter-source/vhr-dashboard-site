@@ -88,6 +88,26 @@ function ensureAllowedAdmin(req, res) {
   }
   return true;
 }
+
+// Force allowlisted users to remain admins even if their stored role was downgraded.
+function elevateAdminIfAllowlisted(user) {
+  if (!user || !user.username) return user;
+  const uname = String(user.username).toLowerCase();
+  if (!ADMIN_ALLOWLIST.includes(uname)) return user;
+  if (user.role !== 'admin') {
+    user.role = 'admin';
+    try {
+      const stored = getUserByUsername(user.username);
+      if (stored) {
+        stored.role = 'admin';
+        persistUser(stored);
+      } else {
+        persistUser(user);
+      }
+    } catch (e) { console.warn('[admin] elevate failed:', e?.message || e); }
+  }
+  return user;
+}
 // ========== HTTPS SUPPORT (PRODUCTION) ==========
 const FORCE_HTTP = process.env.FORCE_HTTP === '1';
 const QUIET_MODE = process.env.QUIET_MODE === '1';
@@ -2102,7 +2122,7 @@ function authMiddleware(req, res, next) {
   if (!token) return res.status(401).json({ ok: false, error: 'Token manquant' });
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
+    req.user = elevateAdminIfAllowlisted(decoded);
     next();
   } catch (e) {
     return res.status(401).json({ ok: false, error: 'Token invalide' });
@@ -2135,11 +2155,12 @@ app.post('/api/login', async (req, res) => {
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
   }
   console.log('[api/login] login successful for:', username);
-  const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+  const elevatedUser = elevateAdminIfAllowlisted(user);
+  const token = jwt.sign({ username: elevatedUser.username, role: elevatedUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
   const cookieOptions = buildAuthCookieOptions(req);
   res.cookie('vhr_token', token, cookieOptions);
   console.log('[api/login] cookie set with secure=' + cookieOptions.secure + ', sameSite=' + cookieOptions.sameSite + ', maxAge=' + cookieOptions.maxAge);
-  res.json({ ok: true, token, userId: user.id, username: user.username, role: user.role, email: user.email || null });
+  res.json({ ok: true, token, userId: elevatedUser.id, username: elevatedUser.username, role: elevatedUser.role, email: elevatedUser.email || null });
 });
 
 // --- Route de logout (optionnelle, côté client il suffit de supprimer le token) ---
