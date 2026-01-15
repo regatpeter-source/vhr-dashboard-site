@@ -208,6 +208,8 @@ const ADB_FILENAME = process.platform === 'win32' ? 'adb.exe' : 'adb';
 const BUNDLED_ADB_PATH = path.join(PLATFORM_TOOLS_DIR, ADB_FILENAME);
 const HAS_BUNDLED_ADB = fs.existsSync(BUNDLED_ADB_PATH);
 const ADB_BIN = HAS_BUNDLED_ADB ? BUNDLED_ADB_PATH : ADB_FILENAME;
+// Always use the resolved ADB binary (bundled or system) to avoid PATH issues
+const ADB_CMD = process.platform === 'win32' ? `"${ADB_BIN}"` : ADB_BIN;
 
 if (HAS_BUNDLED_ADB) {
   const adbDir = path.dirname(BUNDLED_ADB_PATH);
@@ -1217,6 +1219,12 @@ async function sendAccountConfirmationEmail(user) {
 app.get('/launch-dashboard.html', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.sendFile(path.join(__dirname, 'launch-dashboard.html'));
+});
+// Serve dashboard assets with no-cache to avoid stale builds
+app.get(['/dashboard-pro.js','/dashboard-pro.css','/vhr-audio-stream.js'], (req, res) => {
+  const file = req.path.replace('/', '');
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.sendFile(path.join(__dirname, 'public', file));
 });
 // Mise à disposition du guide mkcert pour HTTPS local sur casque
 app.get('/MKCERT_SETUP_FOR_QUEST.md', (req, res) => {
@@ -5016,7 +5024,7 @@ const runAdbCommand = (serial, args, timeout = 30000) => {
     const adbArgs = serial ? ['-s', serial, ...args] : args;
     let proc;
     try {
-      proc = spawn('adb', adbArgs);
+      proc = spawn(ADB_BIN, adbArgs);
     } catch (spawnError) {
       console.error('[ADB] Spawn error:', spawnError.message);
       return reject(new Error('Failed to spawn adb: ' + spawnError.message));
@@ -5075,9 +5083,11 @@ const parseAdbDevices = stdout => {
 const refreshDevices = async () => {
   try {
     const { exec } = require('child_process')
-    exec('adb devices -l', (err, stdout, stderr) => {
+    exec(`${ADB_CMD} devices -l`, (err, stdout, stderr) => {
       if (err) {
         console.error('ÔØî Failed to list ADB devices:', err)
+        // Try restarting the bundled ADB server once if listing fails
+        try { startBundledAdbServer(); } catch (e) {}
         return
       }
       const list = parseAdbDevices(stdout)
@@ -5092,6 +5102,10 @@ const refreshDevices = async () => {
         status: dev.status,
         model: dev.model
       }))
+      // If still empty, attempt a one-shot adb start-server to kick discovery
+      if (!devices.length) {
+        try { execSync(`${ADB_CMD} start-server`, { stdio: 'ignore' }) } catch (e) {}
+      }
       console.log('[DEBUG] Emission devices-update:', devices)
       io.emit('devices-update', devices)
     })
@@ -5212,7 +5226,7 @@ function startAdbTrack() {
   }
   
   try {
-    const track = spawn('adb', ['track-devices']);
+    const track = spawn(ADB_BIN, ['track-devices']);
     track.stdout.setEncoding('utf8');
     let buffer = '';
     track.stdout.on('data', data => {
@@ -5312,7 +5326,7 @@ async function startStream(serial, opts = {}) {
   ];
   
 
-  const adbProc = spawn('adb', adbArgs);
+  const adbProc = spawn(ADB_BIN, adbArgs);
   
   // Track the ADB process for cleanup
   trackProcess(adbProc, 'adb-screenrecord', serial);
@@ -7249,7 +7263,7 @@ app.get('/api/adb/devices', authMiddleware, async (req, res) => {
   try {
     // Essayer 'adb' puis 'adb.exe'
     let devices = [];
-    const commands = ['adb devices -l', 'adb.exe devices -l'];
+    const commands = [`${ADB_CMD} devices -l`];
     
     for (const cmd of commands) {
       try {

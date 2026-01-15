@@ -1351,6 +1351,12 @@ app.get('/launch-dashboard.html', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.sendFile(path.join(__dirname, 'launch-dashboard.html'));
 });
+// Serve dashboard assets with no-cache to avoid stale builds
+app.get(['/dashboard-pro.js','/dashboard-pro.css','/vhr-audio-stream.js'], (req, res) => {
+  const file = req.path.replace('/', '');
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.sendFile(path.join(__dirname, 'public', file));
+});
 
 // Mise à disposition du guide mkcert pour HTTPS local sur casque
 app.get('/MKCERT_SETUP_FOR_QUEST.md', (req, res) => {
