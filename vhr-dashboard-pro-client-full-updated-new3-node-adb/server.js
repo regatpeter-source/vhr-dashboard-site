@@ -1229,7 +1229,26 @@ app.get(['/dashboard-pro.js','/dashboard-pro.css','/vhr-audio-stream.js'], (req,
 // Mise à disposition du guide mkcert pour HTTPS local sur casque
 app.get('/MKCERT_SETUP_FOR_QUEST.md', (req, res) => {
   res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
-  res.sendFile(path.join(__dirname, '..', 'MKCERT_SETUP_FOR_QUEST.md'));
+
+  const candidatePaths = [
+    path.join(__dirname, '..', 'MKCERT_SETUP_FOR_QUEST.md'), // dev/pack root
+    path.join(__dirname, 'MKCERT_SETUP_FOR_QUEST.md'),       // same dir fallback
+    path.join(process.resourcesPath || '', 'MKCERT_SETUP_FOR_QUEST.md') // electron packaged
+  ].filter(Boolean);
+
+  const found = candidatePaths.find(p => {
+    try { return fs.existsSync(p); } catch (e) { return false; }
+  });
+
+  if (found) {
+    return res.sendFile(found);
+  }
+
+  res.status(404).json({
+    ok: false,
+    error: 'MKCERT guide introuvable',
+    tried: candidatePaths
+  });
 });
 
 // Redirect vhr-dashboard-app.html to vhr-dashboard-pro.html
