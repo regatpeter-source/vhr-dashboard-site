@@ -8,7 +8,7 @@
   <script src="/force-http.js"></script>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥽</text></svg>">
   <link rel="stylesheet" href="./dashboard-pro.css?v=20260115a">
-  <script src="https://www.vhr-dashboard-site.com/socket.io/socket.io.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
   <!-- Écran de chargement / authentification -->
@@ -31,37 +31,7 @@
   
   <!-- Modal container (créé dynamiquement) -->
 
-  <!-- Super-fallback : enlève l'overlay et affiche le login si check-auth reste bloqué -->
-  <script>
-    (function() {
-      const forceLogin = () => {
-        try {
-          if (typeof hideDashboardContent === 'function') hideDashboardContent();
-          if (typeof showAuthModal === 'function') {
-            showAuthModal('login');
-            return;
-          }
-        } catch (e) { /* ignore */ }
-        // Si les fonctions ne sont pas chargées, on cache au moins l'overlay
-        const ov = document.getElementById('authOverlay');
-        if (ov) ov.style.display = 'none';
-      };
-
-      const btn = document.getElementById('forceLoginButton');
-      if (btn) {
-        btn.addEventListener('click', forceLogin);
-      }
-
-      // Forçage automatique après 10s si l'overlay est toujours là
-      setTimeout(() => {
-        const ov = document.getElementById('authOverlay');
-        if (ov && ov.style.display !== 'none') {
-          console.warn('[auth] Super fallback: forcing login modal');
-          forceLogin();
-        }
-      }, 10000);
-    })();
-  </script>
+  <script src="./js/auth-fallback.js?v=20260115a"></script>
   
   <script src="./vhr-audio-stream.js?v=20260115a"></script>
   <script src="./dashboard-pro.js?v=20260115a"></script>
