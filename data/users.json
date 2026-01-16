@@ -1,7 +1,7 @@
 [
   {
     "username": "vhr",
-    "passwordHash": "$2b$10$OsByC/Gbxw/j5Dihx5hBce4S1XGxpCEKCn64GVlZn4m3hMEbYpZuW",
+    "passwordHash": "$2b$10$5RYFsF5AgUy.3Vmzsi/YmOh6RkO9TNekHp1P/iO5ETHW.5tTJTt.i",
     "role": "admin",
     "email": "vhr",
     "stripeCustomerId": null,
@@ -9,10 +9,10 @@
     "lastInvoicePaidAt": null,
     "subscriptionStatus": null,
     "subscriptionId": null,
-    "lastLogin": "2026-01-13T20:34:19.806Z",
-    "lastActivity": "2026-01-13T20:35:36.281Z",
+    "lastLogin": "2026-01-15T23:10:00.207Z",
+    "lastActivity": "2026-01-15T23:12:52.154Z",
     "createdAt": null,
-    "updatedAt": "2026-01-13T20:35:36.281Z",
+    "updatedAt": "2026-01-15T23:12:52.154Z",
     "emailVerified": true,
     "emailVerificationToken": null,
     "emailVerificationExpiresAt": null,

@@ -52,7 +52,7 @@ class TtsService : Service(), TextToSpeech.OnInitListener {
                 
                 // Configuration audio
                 tts.setSpeechRate(1.0f)  // Vitesse normale
-                tts.pitch = 1.0f         // Ton normal
+                tts.setPitch(1.0f)       // Ton normal
                 
                 true
             } catch (e: Exception) {

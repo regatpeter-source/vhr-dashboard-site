@@ -84,9 +84,6 @@ let userRoles = JSON.parse(localStorage.getItem('vhr_user_roles') || '{}');
 let licenseKey = localStorage.getItem('vhr_license_key') || '';
 let licenseStatus = { licensed: false, trial: false, expired: false };
 const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
-const MKCERT_BANNER_DISMISS_KEY = 'vhr_mkcert_banner_dismissed';
-const MKCERT_DOWNLOAD_URL = 'https://github.com/FiloSottile/mkcert/releases/latest/download/mkcert-v1.4.4-windows-amd64.exe';
-const MKCERT_GUIDE_URL = '/MKCERT_SETUP_FOR_QUEST.md';
 
 function readAuthToken() {
 	return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
@@ -226,38 +223,6 @@ function updateUserUI() {
 		if (name && name.trim()) setUser(name.trim());
 	};
 	document.getElementById('userMenuBtn').onclick = showUserMenu;
-}
-
-// Banner mkcert (HTTPS local pour casque)
-function showMkcertBanner() {
-	if (localStorage.getItem(MKCERT_BANNER_DISMISS_KEY) === '1') return;
-	let banner = document.getElementById('mkcertBanner');
-	if (!banner) {
-		banner = document.createElement('div');
-		banner.id = 'mkcertBanner';
-		banner.style = 'margin:10px auto 0 auto;max-width:1200px;background:linear-gradient(135deg,#0d1b2a,#16324f);color:#e8f1ff;border:2px solid #2ecc71;border-radius:10px;padding:12px 16px;box-shadow:0 4px 12px rgba(0,0,0,0.35);display:flex;align-items:center;gap:14px;font-size:14px;';
-		const target = document.getElementById('deviceGrid') || document.body;
-		target.parentNode.insertBefore(banner, target);
-	}
-	banner.innerHTML = `
-		<div style="font-size:20px">🔒 HTTPS local pour le casque</div>
-		<div style="flex:1;opacity:0.9;line-height:1.4;">
-			Pour une connexion sécurisée en LAN (wss://) avec ADB local, installe mkcert (Windows) et la racine sur le casque.
-		</div>
-		<div style="display:flex;gap:8px;flex-wrap:wrap;">
-			<a href="${MKCERT_DOWNLOAD_URL}" target="_blank" rel="noreferrer" style="background:#2ecc71;color:#0b1b2b;padding:8px 12px;border-radius:8px;font-weight:bold;text-decoration:none;">⬇️ Télécharger mkcert (Windows)</a>
-			<a href="${MKCERT_GUIDE_URL}" target="_blank" rel="noreferrer" style="background:#3498db;color:#fff;padding:8px 12px;border-radius:8px;font-weight:bold;text-decoration:none;">📘 Guide mkcert (Quest)</a>
-			<button id="dismissMkcertBanner" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.3);padding:8px 12px;border-radius:8px;cursor:pointer;">✖️ Masquer</button>
-		</div>
-	`;
-
-	const btn = document.getElementById('dismissMkcertBanner');
-	if (btn) {
-		btn.onclick = () => {
-			localStorage.setItem(MKCERT_BANNER_DISMISS_KEY, '1');
-			banner.remove();
-		};
-	}
 }
 
 function showUserMenu() {
@@ -473,8 +438,6 @@ window.loginUser = async function() {
 			setUser(username);
 			document.getElementById('loginDialog').remove();
 			showToast(`✅ Bienvenue ${username}!`, 'success');
-			// Afficher la bannière mkcert après authentification
-			showMkcertBanner();
 		} else {
 			showToast(`❌ ${data.error || 'Identifiants incorrects'}`, 'error');
 		}
@@ -4006,7 +3969,6 @@ window.loginUser = async function() {
 			setTimeout(() => {
 				showDashboardContent();
 				createNavbar();
-				showMkcertBanner();
 				checkLicense().then(hasAccess => {
 					if (hasAccess) {
 						loadGamesCatalog().finally(() => loadDevices());

@@ -1,17 +1,56 @@
 // Electron main process entry for VHR Dashboard
 // Boots the local Express server then opens a BrowserWindow on it.
 
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, session } = require('electron');
 const { fork } = require('child_process');
 const path = require('path');
 const http = require('http');
+const os = require('os');
+const { startRelayClient } = require('./services/relay-client');
 
 const PORT = process.env.PORT || 3000;
+
+function getLocalLanIp() {
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return 'localhost';
+}
 let serverProcess = null;
+let relayClient = null;
+
+function configurePermissions() {
+  // Allow only audio/video capture; deny everything else.
+  const allowed = new Set(['media', 'microphone', 'camera']);
+
+  if (session && session.defaultSession) {
+    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+      callback(allowed.has(permission));
+    });
+
+    session.defaultSession.setPermissionCheckHandler((wc, permission) => allowed.has(permission));
+  }
+}
 
 function startServer() {
   if (serverProcess) return;
-  const env = { ...process.env, PORT, ELECTRON_APP: '1', NO_ADB: process.env.NO_ADB || '1' };
+  // Allow ADB by default; users can still force relay-only mode by setting NO_ADB=1 externally.
+  const defaultRelayUrl = process.env.RELAY_URL || 'https://www.vhr-dashboard-site.com';
+  // Propagate defaults to child server AND current Electron process (for relay-client)
+  process.env.RELAY_URL = process.env.RELAY_URL || defaultRelayUrl;
+  process.env.RELAY_SESSION_ID = process.env.RELAY_SESSION_ID || 'default';
+  process.env.NO_ADB = process.env.NO_ADB ?? '0';
+
+  const env = {
+    ...process.env,
+    PORT,
+    ELECTRON_APP: '1',
+  };
   const serverPath = path.join(__dirname, 'server.js');
   serverProcess = fork(serverPath, { env, stdio: 'inherit' });
   serverProcess.on('exit', (code, signal) => {
@@ -67,7 +106,13 @@ async function createWindow() {
 }
 
 app.whenReady().then(() => {
+  configurePermissions();
   startServer();
+  relayClient = startRelayClient({
+    app: 'vhr-dashboard-electron',
+    version: app.getVersion && app.getVersion(),
+    sessionId: process.env.RELAY_SESSION_ID || undefined,
+  });
   createWindow();
 
   app.on('activate', () => {
@@ -84,4 +129,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   stopServer();
+  if (relayClient && relayClient.socket) {
+    try { relayClient.socket.disconnect(); } catch (e) {}
+  }
 });

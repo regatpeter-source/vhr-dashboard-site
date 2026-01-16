@@ -84,9 +84,6 @@ let userRoles = JSON.parse(localStorage.getItem('vhr_user_roles') || '{}');
 let licenseKey = localStorage.getItem('vhr_license_key') || '';
 let licenseStatus = { licensed: false, trial: false, expired: false };
 const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
-const MKCERT_BANNER_DISMISS_KEY = 'vhr_mkcert_banner_dismissed';
-const MKCERT_DOWNLOAD_URL = 'https://github.com/FiloSottile/mkcert/releases/latest/download/mkcert-v1.4.4-windows-amd64.exe';
-const MKCERT_GUIDE_URL = '/MKCERT_SETUP_FOR_QUEST.md';
 
 function readAuthToken() {
 	return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
@@ -226,38 +223,6 @@ function updateUserUI() {
 		if (name && name.trim()) setUser(name.trim());
 	};
 	document.getElementById('userMenuBtn').onclick = showUserMenu;
-}
-
-// Banner mkcert (HTTPS local pour casque)
-function showMkcertBanner() {
-	if (localStorage.getItem(MKCERT_BANNER_DISMISS_KEY) === '1') return;
-	let banner = document.getElementById('mkcertBanner');
-	if (!banner) {
-		banner = document.createElement('div');
-		banner.id = 'mkcertBanner';
-		banner.style = 'margin:10px auto 0 auto;max-width:1200px;background:linear-gradient(135deg,#0d1b2a,#16324f);color:#e8f1ff;border:2px solid #2ecc71;border-radius:10px;padding:12px 16px;box-shadow:0 4px 12px rgba(0,0,0,0.35);display:flex;align-items:center;gap:14px;font-size:14px;';
-		const target = document.getElementById('deviceGrid') || document.body;
-		target.parentNode.insertBefore(banner, target);
-	}
-	banner.innerHTML = `
-		<div style="font-size:20px">🔒 HTTPS local pour le casque</div>
-		<div style="flex:1;opacity:0.9;line-height:1.4;">
-			Pour une connexion sécurisée en LAN (wss://) avec ADB local, installe mkcert (Windows) et la racine sur le casque.
-		</div>
-		<div style="display:flex;gap:8px;flex-wrap:wrap;">
-			<a href="${MKCERT_DOWNLOAD_URL}" target="_blank" rel="noreferrer" style="background:#2ecc71;color:#0b1b2b;padding:8px 12px;border-radius:8px;font-weight:bold;text-decoration:none;">⬇️ Télécharger mkcert (Windows)</a>
-			<a href="${MKCERT_GUIDE_URL}" target="_blank" rel="noreferrer" style="background:#3498db;color:#fff;padding:8px 12px;border-radius:8px;font-weight:bold;text-decoration:none;">📘 Guide mkcert (Quest)</a>
-			<button id="dismissMkcertBanner" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.3);padding:8px 12px;border-radius:8px;cursor:pointer;">✖️ Masquer</button>
-		</div>
-	`;
-
-	const btn = document.getElementById('dismissMkcertBanner');
-	if (btn) {
-		btn.onclick = () => {
-			localStorage.setItem(MKCERT_BANNER_DISMISS_KEY, '1');
-			banner.remove();
-		};
-	}
 }
 
 function showUserMenu() {
@@ -473,8 +438,6 @@ window.loginUser = async function() {
 			setUser(username);
 			document.getElementById('loginDialog').remove();
 			showToast(`✅ Bienvenue ${username}!`, 'success');
-			// Afficher la bannière mkcert après authentification
-			showMkcertBanner();
 		} else {
 			showToast(`❌ ${data.error || 'Identifiants incorrects'}`, 'error');
 		}
@@ -2196,6 +2159,10 @@ async function loadDevices() {
 // Expose loadDevices globally for onclick handlers in HTML
 window.loadDevices = loadDevices;
 
+function isRelayDevice(dev) {
+	return !!dev && (dev.origin === 'relay' || dev.status === 'relay');
+}
+
 // ========== RENDER: TABLE VIEW ========== 
 function renderDevicesTable() {
 	const container = document.getElementById('deviceGrid');
@@ -2231,8 +2198,10 @@ function renderDevicesTable() {
 	
 	devices.forEach((d, idx) => {
 		const bgColor = idx % 2 === 0 ? '#1a1d24' : '#23272f';
-		const statusColor = d.status === 'device' ? '#2ecc71' : d.status === 'streaming' ? '#3498db' : '#e74c3c';
-		const statusIcon = d.status === 'device' ? '✅' : d.status === 'streaming' ? '🟢' : '❌';
+		const relay = isRelayDevice(d);
+		const statusColor = relay ? '#9b59b6' : d.status === 'device' ? '#2ecc71' : d.status === 'streaming' ? '#3498db' : '#e74c3c';
+		const statusIcon = relay ? '📡' : d.status === 'device' ? '✅' : d.status === 'streaming' ? '🟢' : '❌';
+		const statusLabel = relay ? 'relay (cloud)' : d.status;
 		const runningGamesList = runningApps[d.serial] || [];
 		const serialJson = JSON.stringify(d.serial);
 		const runningGameDisplay = runningGamesList.length > 0 ? runningGamesList.map(pkg => {
@@ -2259,53 +2228,83 @@ function renderDevicesTable() {
 		// Create safe ID for HTML (no colons, dots, or special chars)
 		const safeId = d.serial.replace(/[^a-zA-Z0-9]/g, '_');
 		
+		const batteryCell = relay 
+			? `<div style='font-size:14px;font-weight:bold;color:#bdc3c7;'>🔋 N/A (relais)</div>`
+			: `<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#95a5a6;'>🔋 Batterie...</div>`;
+
+		const streamingCell = relay
+			? `<div style='color:#bdc3c7;font-size:12px;max-width:160px;margin:0 auto;'>Actions locales désactivées en mode cloud. Connectez l'agent PC pour le contrôle ADB.</div>`
+			: (d.status !== 'streaming' ? `
+				<select id='profile_${safeId}' style='background:#34495e;color:#fff;border:1px solid #2ecc71;padding:6px;border-radius:4px;margin-bottom:4px;width:140px;'>
+					<option value='ultra-low'>Ultra Low</option>
+					<option value='low'>Low</option>
+					<option value='wifi'>WiFi</option>
+					<option value='default' selected>Default</option>
+					<option value='high'>High</option>
+					<option value='ultra'>Ultra</option>
+				</select><br>
+				<button onclick='startStreamFromTable(${JSON.stringify(d.serial)})' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>▶️ Scrcpy</button>
+			` : `
+				<button onclick='stopStreamFromTable(${JSON.stringify(d.serial)})' style='background:#e74c3c;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>⏹️ Stop</button>
+			`);
+
+		const wifiCell = relay
+			? `<span style='color:#95a5a6;'>-</span>`
+			: (!d.serial.includes(':') ? `
+				<button onclick='connectWifiAuto(${JSON.stringify(d.serial)})' style='background:#9b59b6;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📶 WiFi Auto</button>
+			` : `<span style='color:#95a5a6;'>-</span>`);
+
+		const appsCell = relay
+			? `<div style='color:#bdc3c7;font-size:12px;'>Apps/Favoris indisponibles en mode relais</div>`
+			: `
+			<button onclick='showAppsDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#f39c12;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📱 Apps</button>
+			<button onclick='showFavoritesDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#e67e22;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin-top:4px;'>⭐ Favoris</button>
+		`;
+
+		const voiceCell = relay
+			? `<div style='color:#bdc3c7;font-size:12px;'>Voix PC→Casque indisponible en mode relais</div>`
+			: `
+			<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='background:#16a085;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;'>🗣️ Voix LAN</button>
+			<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:11px;margin-left:4px;' title='Installer l’émetteur voix sur le casque'>📲 Émetteur</button>
+		`;
+
+		const actionsCell = relay
+			? `<div style='color:#bdc3c7;font-size:12px;'>Actions ADB désactivées (relais cloud)</div>`
+			: `
+			<button onclick='renameDevice({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>✏️</button>
+			<button onclick='showStorageDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>💾</button>
+		`;
+
 		table += `<tr style='background:${bgColor};border-bottom:1px solid #34495e;'>
 			<td style='padding:12px;'>
 				<div style='font-weight:bold;font-size:16px;color:#2ecc71;'>${d.name}</div>
 				<div style='font-size:11px;color:#95a5a6;margin-top:2px;'>${d.serial}</div>
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#95a5a6;'>🔋 Batterie...</div>
+				${batteryCell}
 			</td>
 			<td style='padding:12px;'>
-				<span style='background:${statusColor};color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:bold;'>
-					${statusIcon} ${d.status}
+				<span style='background:${statusColor};color:${relay ? '#fff' : '#fff'};padding:4px 10px;border-radius:6px;font-size:12px;font-weight:bold;'>
+					${statusIcon} ${statusLabel}
 				</span>
 			</td>
 			<td style='padding:12px;text-align:center;'>
 				${runningGameDisplay}
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				${d.status !== 'streaming' ? `
-					<select id='profile_${safeId}' style='background:#34495e;color:#fff;border:1px solid #2ecc71;padding:6px;border-radius:4px;margin-bottom:4px;width:140px;'>
-						<option value='ultra-low'>Ultra Low</option>
-						<option value='low'>Low</option>
-						<option value='wifi'>WiFi</option>
-						<option value='default' selected>Default</option>
-						<option value='high'>High</option>
-						<option value='ultra'>Ultra</option>
-					</select><br>
-					<button onclick='startStreamFromTable(${JSON.stringify(d.serial)})' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>▶️ Scrcpy</button>
-				` : `
-					<button onclick='stopStreamFromTable(${JSON.stringify(d.serial)})' style='background:#e74c3c;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>⏹️ Stop</button>
-				`}
+				${streamingCell}
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				${!d.serial.includes(':') ? `
-					<button onclick='connectWifiAuto(${JSON.stringify(d.serial)})' style='background:#9b59b6;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📶 WiFi Auto</button>
-				` : `<span style='color:#95a5a6;'>-</span>`}
+				${wifiCell}
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				<button onclick='showAppsDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#f39c12;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📱 Apps</button>
-				<button onclick='showFavoritesDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#e67e22;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin-top:4px;'>⭐ Favoris</button>
+				${appsCell}
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='background:#16a085;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;'>🗣️ Voix LAN</button>
-				<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:11px;margin-left:4px;' title='Installer l’émetteur voix sur le casque'>📲 Émetteur</button>
+				${voiceCell}
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				<button onclick='renameDevice({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>✏️</button>
-				<button onclick='showStorageDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>💾</button>
+				${actionsCell}
 			</td>
 		</tr>`;
 		
@@ -2339,7 +2338,8 @@ function renderDevicesCards() {
 		const card = document.createElement('div');
 		card.style = 'background:#1a1d24;border:2px solid #2ecc71;border-radius:12px;padding:18px;box-shadow:0 4px 16px #000;color:#fff;';
 		
-		const statusColor = d.status === 'device' ? '#2ecc71' : d.status === 'streaming' ? '#3498db' : '#e74c3c';
+		const relay = isRelayDevice(d);
+		const statusColor = relay ? '#9b59b6' : d.status === 'device' ? '#2ecc71' : d.status === 'streaming' ? '#3498db' : '#e74c3c';
 		const runningGamesList = runningApps[d.serial] || [];
 		const serialJson = JSON.stringify(d.serial);
 		const runningGameDisplay = runningGamesList.length > 0 ? runningGamesList.map(pkg => {
@@ -2366,48 +2366,72 @@ function renderDevicesCards() {
 		// Create safe ID for HTML (no colons, dots, or special chars)
 		const safeId = d.serial.replace(/[^a-zA-Z0-9]/g, '_');
 		
+		const batteryBlock = relay
+			? `<div style='font-size:14px;font-weight:bold;color:#bdc3c7;'>🔋 N/A (relais)</div>`
+			: `<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#95a5a6;'>🔋 Batterie...</div>`;
+
+		const streamingBlock = relay
+			? `<div style='color:#bdc3c7;font-size:12px;margin-bottom:10px;'>Actions locales désactivées en mode cloud. Ouvrez l'agent PC pour contrôler le casque.</div>`
+			: (d.status !== 'streaming' ? `
+			<select id='profile_card_${safeId}' style='width:100%;background:#34495e;color:#fff;border:1px solid #2ecc71;padding:8px;border-radius:6px;margin-bottom:6px;'>
+				<option value='ultra-low'>Ultra Low</option>
+				<option value='low'>Low</option>
+				<option value='wifi'>WiFi</option>
+				<option value='default' selected>Default</option>
+				<option value='high'>High</option>
+				<option value='ultra'>Ultra</option>
+			</select>
+			<button onclick='startStreamFromCard(${JSON.stringify(d.serial)})' style='width:100%;background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>▶️ Scrcpy</button>
+		` : `
+			<button onclick='stopStreamFromTable(${JSON.stringify(d.serial)})' style='width:100%;background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>⏹️ Stop Stream</button>
+		`);
+
+		const appsBlock = relay
+			? `<div style='color:#bdc3c7;font-size:12px;margin-bottom:10px;'>Apps/Favoris indisponibles en mode relais</div>`
+			: `<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;'>
+				<button onclick='showAppsDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#f39c12;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>📱 Apps</button>
+				<button onclick='showFavoritesDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#e67e22;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>⭐ Favoris</button>
+			</div>`;
+
+		const voiceBlock = relay
+			? `<div style='color:#bdc3c7;font-size:12px;margin-bottom:6px;'>Voix PC→Casque indisponible en mode relais</div>`
+			: `<div style='display:flex;gap:6px;margin-bottom:6px;'>
+				<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='flex:1;background:#16a085;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;'>🗣️ Voix LAN</button>
+				<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:10px 12px;border-radius:6px;cursor:pointer;' title='Installer l’émetteur voix sur le casque'>📲 Émetteur</button>
+			</div>`;
+
+		const wifiBlock = relay
+			? ''
+			: (!d.serial.includes(':') ? `
+				<button onclick='connectWifiAuto(${JSON.stringify(d.serial)})' style='width:100%;background:#9b59b6;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>📶 WiFi Auto</button>
+			` : '');
+
+		const actionsBlock = relay
+			? `<div style='color:#bdc3c7;font-size:12px;'>Actions ADB désactivées (relais cloud)</div>`
+			: `<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;'>
+				<button onclick='renameDevice({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>✏️ Renommer</button>
+				<button onclick='showStorageDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>💾 Stockage</button>
+			</div>`;
+
 		card.innerHTML = `
 			<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'>
 				<div style='font-weight:bold;font-size:18px;color:#2ecc71;'>${d.name}</div>
-				<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#95a5a6;'>🔋 Batterie...</div>
+				${batteryBlock}
 			</div>
 			<div style='font-size:11px;color:#95a5a6;margin-bottom:12px;'>${d.serial}</div>
 			<div style='margin-bottom:12px;'>
 				<span style='background:${statusColor};color:#fff;padding:4px 12px;border-radius:6px;font-size:12px;font-weight:bold;'>
-					${d.status === 'device' ? '✅' : d.status === 'streaming' ? '🟢' : '❌'} ${d.status}
+					${relay ? '📡 relay (cloud)' : (d.status === 'device' ? '✅ device' : d.status === 'streaming' ? '🟢 streaming' : `❌ ${d.status}`)}
 				</span>
 			</div>
 			${runningGameDisplay}
 			<div style='margin-bottom:10px;'>
-					${d.status !== 'streaming' ? `
-					<select id='profile_card_${safeId}' style='width:100%;background:#34495e;color:#fff;border:1px solid #2ecc71;padding:8px;border-radius:6px;margin-bottom:6px;'>
-						<option value='ultra-low'>Ultra Low</option>
-						<option value='low'>Low</option>
-						<option value='wifi'>WiFi</option>
-						<option value='default' selected>Default</option>
-						<option value='high'>High</option>
-						<option value='ultra'>Ultra</option>
-					</select>
-					<button onclick='startStreamFromCard(${JSON.stringify(d.serial)})' style='width:100%;background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>▶️ Scrcpy</button>
-				` : `
-					<button onclick='stopStreamFromTable(${JSON.stringify(d.serial)})' style='width:100%;background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>⏹️ Stop Stream</button>
-				`}
+				${streamingBlock}
 			</div>
-			<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;'>
-				<button onclick='showAppsDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#f39c12;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>📱 Apps</button>
-				<button onclick='showFavoritesDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#e67e22;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>⭐ Favoris</button>
-			</div>
-			<div style='display:flex;gap:6px;margin-bottom:6px;'>
-				<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='flex:1;background:#16a085;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;'>🗣️ Voix LAN</button>
-				<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:10px 12px;border-radius:6px;cursor:pointer;' title='Installer l’émetteur voix sur le casque'>📲 Émetteur</button>
-			</div>
-			${!d.serial.includes(':') ? `
-				<button onclick='connectWifiAuto(${JSON.stringify(d.serial)})' style='width:100%;background:#9b59b6;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>📶 WiFi Auto</button>
-			` : ''}
-			<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;'>
-				<button onclick='renameDevice({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>✏️ Renommer</button>
-				<button onclick='showStorageDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>💾 Stockage</button>
-			</div>
+			${appsBlock}
+			${voiceBlock}
+			${wifiBlock}
+			${actionsBlock}
 		`;
 		
 		grid.appendChild(card);
@@ -2419,6 +2443,8 @@ function renderDevicesCards() {
 // Fetch and update battery level for a device
 async function fetchBatteryLevel(serial) {
 	if (!serial) return;
+	const device = devices.find(d => d.serial === serial);
+	if (device && isRelayDevice(device)) return; // Pas de batterie en mode relais
 	const now = Date.now();
 	const nextAllowed = batteryBackoff[serial] || 0;
 	if (now < nextAllowed) return;
@@ -3970,7 +3996,6 @@ window.loginUser = async function() {
 			setTimeout(() => {
 				showDashboardContent();
 				createNavbar();
-				showMkcertBanner();
 				checkLicense().then(hasAccess => {
 					if (hasAccess) {
 						loadGamesCatalog().finally(() => loadDevices());

@@ -1,6 +1,6 @@
 [versions]
 # Android & Gradle
-androidGradlePlugin = "7.4.2"
+androidGradlePlugin = "8.1.4"
 kotlin = "1.9.22"
 
 # AndroidX & Core

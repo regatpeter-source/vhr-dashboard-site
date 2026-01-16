@@ -203,10 +203,24 @@ console.log(`[DB] Mode: ${USE_POSTGRES ? 'PostgreSQL' : 'JSON Files (Development
 
 // ========== ADB BINARY DISCOVERY & AUTO-PATH ==========
 const PROJECT_ROOT = __dirname;
-const PLATFORM_TOOLS_DIR = path.join(PROJECT_ROOT, 'platform-tools');
+const IS_PACKAGED = PROJECT_ROOT.includes('app.asar');
+const RESOURCES_ROOT = IS_PACKAGED
+  ? (process.resourcesPath || path.join(path.dirname(process.execPath), 'resources'))
+  : PROJECT_ROOT;
+
+// Robust lookup for platform-tools when packaged: try resources/, exe sibling, and project root
+const EXEC_DIR = path.dirname(process.execPath || __dirname);
+const PLATFORM_TOOLS_CANDIDATES = [
+  path.join(RESOURCES_ROOT, 'platform-tools'),
+  path.join(EXEC_DIR, 'platform-tools'),
+  path.join(path.dirname(RESOURCES_ROOT), 'platform-tools'),
+  path.join(PROJECT_ROOT, 'platform-tools')
+];
+const PLATFORM_TOOLS_DIR = PLATFORM_TOOLS_CANDIDATES.find(dir => fs.existsSync(dir));
+
 const ADB_FILENAME = process.platform === 'win32' ? 'adb.exe' : 'adb';
-const BUNDLED_ADB_PATH = path.join(PLATFORM_TOOLS_DIR, ADB_FILENAME);
-const HAS_BUNDLED_ADB = fs.existsSync(BUNDLED_ADB_PATH);
+const BUNDLED_ADB_PATH = PLATFORM_TOOLS_DIR ? path.join(PLATFORM_TOOLS_DIR, ADB_FILENAME) : '';
+const HAS_BUNDLED_ADB = BUNDLED_ADB_PATH && fs.existsSync(BUNDLED_ADB_PATH);
 const ADB_BIN = HAS_BUNDLED_ADB ? BUNDLED_ADB_PATH : ADB_FILENAME;
 // Always use the resolved ADB binary (bundled or system) to avoid PATH issues
 const ADB_CMD = process.platform === 'win32' ? `"${ADB_BIN}"` : ADB_BIN;
@@ -1226,31 +1240,6 @@ app.get(['/dashboard-pro.js','/dashboard-pro.css','/vhr-audio-stream.js'], (req,
   res.setHeader('Cache-Control', 'no-store, max-age=0');
   res.sendFile(path.join(__dirname, 'public', file));
 });
-// Mise à disposition du guide mkcert pour HTTPS local sur casque
-app.get('/MKCERT_SETUP_FOR_QUEST.md', (req, res) => {
-  res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
-
-  const candidatePaths = [
-    path.join(__dirname, '..', 'MKCERT_SETUP_FOR_QUEST.md'), // dev/pack root
-    path.join(__dirname, 'MKCERT_SETUP_FOR_QUEST.md'),       // same dir fallback
-    path.join(process.resourcesPath || '', 'MKCERT_SETUP_FOR_QUEST.md') // electron packaged
-  ].filter(Boolean);
-
-  const found = candidatePaths.find(p => {
-    try { return fs.existsSync(p); } catch (e) { return false; }
-  });
-
-  if (found) {
-    return res.sendFile(found);
-  }
-
-  res.status(404).json({
-    ok: false,
-    error: 'MKCERT guide introuvable',
-    tried: candidatePaths
-  });
-});
-
 // Redirect vhr-dashboard-app.html to vhr-dashboard-pro.html
 app.get('/vhr-dashboard-app.html', (req, res) => {
   console.log('[route] /vhr-dashboard-app.html requested, redirecting to /vhr-dashboard-pro.html');
@@ -5217,6 +5206,56 @@ appServer.headersTimeout = 66000; // Slightly higher than keepAliveTimeout
 const listenerServer = appServer;
 
 const io = new SocketIOServer(appServer, { cors: { origin: '*' } });
+
+// ---------- Relay namespace for headsets/PC via public WSS ----------
+// role: 'pc' or 'headset'
+// sessionId: logical room/token to pair PC <-> headset(s)
+const relay = io.of('/relay');
+const relaySessions = new Map(); // sessionId -> { pcs: Set<socket>, headsets: Set<socket> }
+
+function getSession(sessionId) {
+  let sess = relaySessions.get(sessionId);
+  if (!sess) {
+    sess = { pcs: new Set(), headsets: new Set() };
+    relaySessions.set(sessionId, sess);
+  }
+  return sess;
+}
+
+relay.on('connection', (socket) => {
+  const { role = 'pc', sessionId = 'default', authToken = '' } = socket.handshake.query || {};
+  const sid = String(sessionId || 'default');
+  const r = String(role || 'pc').toLowerCase() === 'headset' ? 'headset' : 'pc';
+
+  const sess = getSession(sid);
+  if (r === 'pc') sess.pcs.add(socket); else sess.headsets.add(socket);
+
+  const broadcastState = (payload, originRole) => {
+    const targets = originRole === 'pc' ? sess.headsets : sess.pcs;
+    for (const s of targets) {
+      if (s.connected) s.emit('state', { sessionId: sid, from: originRole, ...payload });
+    }
+  };
+
+  socket.on('state', (payload = {}) => {
+    broadcastState(payload, r);
+  });
+
+  socket.on('forward', ({ type, data } = {}) => {
+    const targets = r === 'pc' ? sess.headsets : sess.pcs;
+    for (const s of targets) {
+      if (s.connected) s.emit('forward', { type, data, from: r, sessionId: sid });
+    }
+  });
+
+  socket.on('disconnect', () => {
+    const sess = relaySessions.get(sid);
+    if (!sess) return;
+    sess.pcs.delete(socket);
+    sess.headsets.delete(socket);
+    if (!sess.pcs.size && !sess.headsets.size) relaySessions.delete(sid);
+  });
+});
 
 // ---------- State ----------
 

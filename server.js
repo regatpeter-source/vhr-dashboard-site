@@ -1358,27 +1358,6 @@ app.get(['/dashboard-pro.js','/dashboard-pro.css','/vhr-audio-stream.js'], (req,
   res.sendFile(path.join(__dirname, 'public', file));
 });
 
-// Mise à disposition du guide mkcert pour HTTPS local sur casque
-app.get('/MKCERT_SETUP_FOR_QUEST.md', (req, res) => {
-  res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
-
-  const candidatePaths = [
-    path.join(__dirname, 'MKCERT_SETUP_FOR_QUEST.md'),
-    path.join(__dirname, '..', 'MKCERT_SETUP_FOR_QUEST.md'),
-    path.join(process.resourcesPath || '', 'MKCERT_SETUP_FOR_QUEST.md')
-  ].filter(Boolean);
-
-  const found = candidatePaths.find(p => {
-    try { return fs.existsSync(p); } catch (e) { return false; }
-  });
-
-  if (found) {
-    return res.sendFile(found);
-  }
-
-  res.status(404).json({ ok: false, error: 'MKCERT guide introuvable', tried: candidatePaths });
-});
-
 // Alias /dashboard-pro.html -> serve vhr-dashboard-pro.html (main dashboard)
 app.get(['/dashboard-pro.html', '/dashboard-pro'], (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -6017,6 +5996,11 @@ const parseAdbDevices = stdout => {
 
 // Poll ADB, update devices array, emit update event
 const refreshDevices = async () => {
+  if (process.env.NO_ADB === '1') {
+    // In cloud/prod mode without local ADB, skip polling; rely on relay presence instead
+    publishDevices('adb-disabled');
+    return;
+  }
   try {
     const { exec } = require('child_process')
     exec('adb devices -l', (err, stdout, stderr) => {
@@ -6027,17 +6011,21 @@ const refreshDevices = async () => {
       const list = parseAdbDevices(stdout)
       // nameMap: { serial: customName }
       const fs = require('fs')
-      const nameMap = fs.existsSync('names.json')
+      const persistedNames = fs.existsSync('names.json')
         ? JSON.parse(fs.readFileSync('names.json', 'utf8'))
         : {}
-      devices = list.map(dev => ({
+      adbDevices = list.map(dev => ({
         serial: dev.serial,
-        name: nameMap[dev.serial] || dev.serial,
+        name: persistedNames[dev.serial] || dev.serial,
         status: dev.status,
-        model: dev.model
+        model: dev.model,
+        origin: 'adb'
       }))
-      console.log('[DEBUG] Emission devices-update:', devices)
-      io.emit('devices-update', devices)
+      // If still empty, try kicking ADB server once
+      if (!adbDevices.length) {
+        try { execSync('adb start-server', { stdio: 'ignore' }) } catch (e) {}
+      }
+      publishDevices('adb-refresh')
     })
   } catch (e) {
     console.error('ÔØî Error in refreshDevices:', e)
@@ -6129,10 +6117,125 @@ const listenerServer = appServer;
 
 const io = new SocketIOServer(appServer, { cors: { origin: '*' } });
 
+// ---------- Relay namespace for headsets/PC via public WSS ----------
+// role: 'pc' or 'headset'
+// sessionId: logical room/token to pair PC <-> headset(s)
+const relay = io.of('/relay');
+const relaySessions = new Map(); // sessionId -> { pcs: Set<socket>, headsets: Set<socket> }
+const relayDevices = new Map();  // socket.id -> device descriptor
+const RELAY_DEVICE_TTL_MS = 5 * 60 * 1000; // prune stale presences after 5min
+
+function getRelaySession(sessionId) {
+  let sess = relaySessions.get(sessionId);
+  if (!sess) {
+    sess = { pcs: new Set(), headsets: new Set() };
+    relaySessions.set(sessionId, sess);
+  }
+  return sess;
+}
+
+function upsertRelayDevice(socketId, { sessionId, role, info = {}, lastSeen = Date.now() }) {
+  const safeRole = role === 'headset' ? 'headset' : 'pc';
+  const baseSerial = info.serial || info.id || info.deviceSerial || `relay:${sessionId}:${safeRole}:${socketId.slice(-6)}`;
+  const serial = String(baseSerial);
+  const customName = nameMap[serial];
+  const fallbackName = safeRole === 'headset' ? 'Casque (relais)' : 'PC (relais)';
+  const name = customName || info.name || info.host || info.device || fallbackName;
+  const model = info.model || info.device || info.platform || info.arch || safeRole;
+  const device = {
+    serial,
+    name,
+    status: 'relay',
+    model,
+    origin: 'relay',
+    role: safeRole,
+    sessionId,
+    lastSeen
+  };
+  relayDevices.set(socketId, device);
+  publishDevices('relay-update');
+}
+
+function pruneRelayDevices() {
+  const now = Date.now();
+  let removed = false;
+  for (const [sid, dev] of relayDevices.entries()) {
+    if (now - (dev.lastSeen || 0) > RELAY_DEVICE_TTL_MS) {
+      relayDevices.delete(sid);
+      removed = true;
+    }
+  }
+  if (removed) publishDevices('relay-prune');
+}
+setInterval(pruneRelayDevices, 30000);
+
+relay.on('connection', (socket) => {
+  const { role = 'pc', sessionId = 'default' } = socket.handshake.query || {};
+  const sid = String(sessionId || 'default');
+  const r = String(role || 'pc').toLowerCase() === 'headset' ? 'headset' : 'pc';
+
+  const sess = getRelaySession(sid);
+  if (r === 'pc') sess.pcs.add(socket); else sess.headsets.add(socket);
+
+  const broadcastState = (payload, originRole) => {
+    const targets = originRole === 'pc' ? sess.headsets : sess.pcs;
+    for (const s of targets) {
+      if (s.connected) s.emit('state', { sessionId: sid, from: originRole, ...payload });
+    }
+  };
+
+  // Initial presence registration
+  upsertRelayDevice(socket.id, { sessionId: sid, role: r, info: { socketId: socket.id } });
+
+  socket.on('state', (payload = {}) => {
+    const info = typeof payload === 'object' ? payload.info || payload : {};
+    upsertRelayDevice(socket.id, { sessionId: sid, role: r, info, lastSeen: Date.now() });
+    broadcastState(payload, r);
+  });
+
+  socket.on('forward', ({ type, data } = {}) => {
+    const targets = r === 'pc' ? sess.headsets : sess.pcs;
+    for (const s of targets) {
+      if (s.connected) s.emit('forward', { type, data, from: r, sessionId: sid });
+    }
+  });
+
+  socket.on('disconnect', () => {
+    const sess = relaySessions.get(sid);
+    if (sess) {
+      sess.pcs.delete(socket);
+      sess.headsets.delete(socket);
+      if (!sess.pcs.size && !sess.headsets.size) relaySessions.delete(sid);
+    }
+    relayDevices.delete(socket.id);
+    publishDevices('relay-disconnect');
+  });
+});
+
 // ---------- State ----------
 
 let devices = [];
+let adbDevices = [];
 let streams = new Map();
+
+function publishDevices(reason = '') {
+  const now = Date.now();
+  const relayList = [];
+  for (const [sid, dev] of relayDevices.entries()) {
+    if (now - (dev.lastSeen || 0) > RELAY_DEVICE_TTL_MS) continue;
+    const custom = nameMap[dev.serial];
+    relayList.push(custom ? { ...dev, name: custom } : dev);
+  }
+
+  const merged = [...adbDevices];
+  for (const dev of relayList) {
+    const existing = merged.find(d => d.serial === dev.serial);
+    if (!existing) merged.push(dev);
+  }
+
+  devices = merged;
+  io.emit('devices-update', devices);
+}
 
 const wssMpeg1 = new WebSocket.Server({ noServer: true });
 
@@ -6147,6 +6250,10 @@ const AUDIO_BUFFER_SIZE = 2; // effectively ~0.5s max
 let adbTrackFallbackInterval = null;  // Prevent multiple intervals
 
 function startAdbTrack() {
+  if (process.env.NO_ADB === '1') {
+    console.log('[ADB] NO_ADB=1: suivi ADB désactivé, utilisation du relais pour la présence.');
+    return;
+  }
   let debounceTimer = null;
   
   // Clear any existing fallback interval
@@ -6861,6 +6968,10 @@ app.post('/api/devices/rename', (req, res) => {
   const { serial, name } = req.body || {};
   if (!serial || !name) {
     return res.status(400).json({ ok: false, error: 'serial and name required' });
+  }
+
+  if (String(serial).startsWith('relay:')) {
+    return res.status(400).json({ ok: false, error: 'Renommage indisponible pour les appareils relayés (mode cloud)' });
   }
 
   nameMap[serial] = name;

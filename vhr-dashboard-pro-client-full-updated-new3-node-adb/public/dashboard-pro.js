@@ -84,9 +84,6 @@ let userRoles = JSON.parse(localStorage.getItem('vhr_user_roles') || '{}');
 let licenseKey = localStorage.getItem('vhr_license_key') || '';
 let licenseStatus = { licensed: false, trial: false, expired: false };
 const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
-const MKCERT_BANNER_DISMISS_KEY = 'vhr_mkcert_banner_dismissed';
-const MKCERT_DOWNLOAD_URL = 'https://github.com/FiloSottile/mkcert/releases/latest/download/mkcert-v1.4.4-windows-amd64.exe';
-const MKCERT_GUIDE_URL = '/MKCERT_SETUP_FOR_QUEST.md';
 
 function readAuthToken() {
 	return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
@@ -226,38 +223,6 @@ function updateUserUI() {
 		if (name && name.trim()) setUser(name.trim());
 	};
 	document.getElementById('userMenuBtn').onclick = showUserMenu;
-}
-
-// Banner mkcert (HTTPS local pour casque)
-function showMkcertBanner() {
-	if (localStorage.getItem(MKCERT_BANNER_DISMISS_KEY) === '1') return;
-	let banner = document.getElementById('mkcertBanner');
-	if (!banner) {
-		banner = document.createElement('div');
-		banner.id = 'mkcertBanner';
-		banner.style = 'margin:10px auto 0 auto;max-width:1200px;background:linear-gradient(135deg,#0d1b2a,#16324f);color:#e8f1ff;border:2px solid #2ecc71;border-radius:10px;padding:12px 16px;box-shadow:0 4px 12px rgba(0,0,0,0.35);display:flex;align-items:center;gap:14px;font-size:14px;';
-		const target = document.getElementById('deviceGrid') || document.body;
-		target.parentNode.insertBefore(banner, target);
-	}
-	banner.innerHTML = `
-		<div style="font-size:20px">🔒 HTTPS local pour le casque</div>
-		<div style="flex:1;opacity:0.9;line-height:1.4;">
-			Pour une connexion sécurisée en LAN (wss://) avec ADB local, installe mkcert (Windows) et la racine sur le casque.
-		</div>
-		<div style="display:flex;gap:8px;flex-wrap:wrap;">
-			<a href="${MKCERT_DOWNLOAD_URL}" target="_blank" rel="noreferrer" style="background:#2ecc71;color:#0b1b2b;padding:8px 12px;border-radius:8px;font-weight:bold;text-decoration:none;">⬇️ Télécharger mkcert (Windows)</a>
-			<a href="${MKCERT_GUIDE_URL}" target="_blank" rel="noreferrer" style="background:#3498db;color:#fff;padding:8px 12px;border-radius:8px;font-weight:bold;text-decoration:none;">📘 Guide mkcert (Quest)</a>
-			<button id="dismissMkcertBanner" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.3);padding:8px 12px;border-radius:8px;cursor:pointer;">✖️ Masquer</button>
-		</div>
-	`;
-
-	const btn = document.getElementById('dismissMkcertBanner');
-	if (btn) {
-		btn.onclick = () => {
-			localStorage.setItem(MKCERT_BANNER_DISMISS_KEY, '1');
-			banner.remove();
-		};
-	}
 }
 
 function showUserMenu() {
@@ -445,46 +410,7 @@ window.showLoginDialogForUser = function(username) {
 	}
 };
 
-window.loginUser = async function() {
-	const username = document.getElementById('loginUserName').value.trim();
-	const password = document.getElementById('loginUserPass').value;
-	
-	if (!username || !password) {
-		showToast('❌ Entrez nom d\'utilisateur et mot de passe', 'error');
-		return;
-	}
-	
-	try {
-		const res = await fetch(resolveApiUrl('/api/dashboard/login'), {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ username, password })
-		});
-		const data = await res.json();
-		
-		if (data.ok) {
-			if (!userList.includes(username)) {
-				userList.push(username);
-			}
-			userRoles[username] = data.user.role;
-			authenticatedUsers[username] = { token: data.token, role: data.user.role };
-			saveUserList();
-			saveAuthUsers();
-			setUser(username);
-			document.getElementById('loginDialog').remove();
-			showToast(`✅ Bienvenue ${username}!`, 'success');
-			// Afficher la bannière mkcert après authentification
-			showMkcertBanner();
-		} else {
-			showToast(`❌ ${data.error || 'Identifiants incorrects'}`, 'error');
-		}
-	} catch (e) {
-		console.error('[loginUser]', e);
-		showToast('❌ Erreur de connexion au serveur', 'error');
-	}
-};
-
-// ========== COLLABORATIVE SESSIONS ==========
+// ========== COLLABORATIVE SESSIONS ========== 
 window.showSessionMenu = function() {
 	closeUserMenu();
 	let menu = document.getElementById('sessionMenu');
@@ -1735,9 +1661,8 @@ if (urlParams.get('auth') === 'prod' || urlParams.get('prod-auth') === '1') {
 if (urlParams.get('auth') === 'local' || urlParams.get('local-auth') === '1') {
 	try { localStorage.setItem('forceLocalAuth', '1'); localStorage.removeItem('forceProdAuth'); } catch (e) {}
 }
-if (urlParams.get('mock-auth') === '1' || urlParams.get('mock') === '1') {
-	try { localStorage.setItem('useMockAuth', '1'); } catch (e) {}
-}
+// Ne plus autoriser de persistance du mode mock en production
+try { localStorage.removeItem('useMockAuth'); } catch (e) {}
 
 const FORCE_PROD_AUTH = (() => {
 	if (urlParams.get('auth') === 'prod' || urlParams.get('prod-auth') === '1') return true;
@@ -1747,10 +1672,8 @@ const FORCE_LOCAL_AUTH = (() => {
 	if (urlParams.get('auth') === 'local' || urlParams.get('local-auth') === '1') return true;
 	try { return localStorage.getItem('forceLocalAuth') === '1'; } catch (e) { return false; }
 })();
-const USE_MOCK_AUTH = (() => {
-	if (urlParams.get('mock-auth') === '1' || urlParams.get('mock') === '1') return true;
-	try { return localStorage.getItem('useMockAuth') === '1'; } catch (e) { return false; }
-})();
+// Sécurité : mode mock désactivé par défaut, pas de réactivation via query/localStorage
+const USE_MOCK_AUTH = false;
 
 // Par défaut on pointe vers l'API HTTPS de prod, sauf override local/mock/env explicite.
 const PROD_API_BASE = 'https://www.vhr-dashboard-site.com';
@@ -1760,22 +1683,22 @@ const ENV_API_BASE = (window.env && window.env.API_BASE_URL) ? window.env.API_BA
 const API_ORIGIN = (() => {
 	// 1) Priorité à une variable d'environnement si fournie
 	if (ENV_API_BASE) return ENV_API_BASE;
-	// 2) Mode local forcé ou mock => privilégier localhost si file://
-	if (FORCE_LOCAL_AUTH || USE_MOCK_AUTH) {
+	// 2) Mode local forcé
+	if (FORCE_LOCAL_AUTH) {
 		if (window.location.origin && window.location.origin.startsWith('http')) {
 			return window.location.origin;
 		}
 		return 'http://localhost:3000';
 	}
-	// 3) Si on est en file:// (Electron) et pas d'override, tenter localhost d'abord
-	if (window.location.protocol === 'file:') {
-		return 'http://localhost:3000';
-	}
-	// 4) Sinon prod
+	// 3) Défaut: prod
 	return PROD_API_BASE;
 })();
 
-const AUTH_API_BASE = (FORCE_LOCAL_AUTH || USE_MOCK_AUTH) ? API_ORIGIN : (ENV_API_BASE || PROD_API_BASE);
+const AUTH_API_BASE = (() => {
+	if (ENV_API_BASE) return ENV_API_BASE;
+	if (FORCE_LOCAL_AUTH) return API_ORIGIN;
+	return PROD_API_BASE;
+})();
 const RESOLVED_AUTH_BASE = AUTH_API_BASE || API_ORIGIN || PROD_API_BASE;
 const resolveApiUrl = (p) => (p.startsWith('http://') || p.startsWith('https://')) ? p : `${API_ORIGIN}${p}`;
 
@@ -1784,11 +1707,10 @@ const SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
 
 const SOCKET_BASE = (() => {
 	if (ENV_API_BASE) return ENV_API_BASE;
-	if (FORCE_LOCAL_AUTH || USE_MOCK_AUTH) {
+	if (FORCE_LOCAL_AUTH) {
 		if (window.location.origin && window.location.origin.startsWith('http')) return window.location.origin;
 		return 'http://localhost:3000';
 	}
-	if (window.location.protocol === 'file:') return 'http://localhost:3000';
 	return PROD_API_BASE;
 })();
 
@@ -1811,8 +1733,11 @@ const API_TIMEOUT_MS = 15000; // 15s timeout for HTTP requests to avoid false ti
 let offlineReasons = new Set();
 let offlineBannerEl = null;
 let isLoadingDevices = false;
+let pendingLoadDevices = false;
 let lastDevicesLoadTs = 0;
-const MIN_LOAD_DEVICES_INTERVAL_MS = 3000; // throttle to avoid overlapping fetches
+let initialDevicesLoadComplete = false;
+let initialDevicesLoadScheduled = false;
+const MIN_LOAD_DEVICES_INTERVAL_MS = 1500; // throttle to avoid overlapping fetches
 
 function renderOfflineBanner() {
 	if (offlineReasons.size === 0) {
@@ -1893,8 +1818,12 @@ socket.on('reconnect', (attemptNumber) => {
 	removeOfflineReason('socket');
 	stopPollingFallback();
 	offlineToastShown = false;
-	// Refresh once to sync state after reconnection
-	loadDevices();
+	// Refresh once to sync state after reconnection (éviter doublons si un load est déjà en cours)
+	if (!isLoadingDevices && !pendingLoadDevices) {
+		loadDevices(true);
+	} else {
+		console.log('[socket] Reconnect skip loadDevices (already running/pending)');
+	}
 });
 
 socket.on('connect', () => {
@@ -1903,6 +1832,11 @@ socket.on('connect', () => {
 	removeOfflineReason('socket');
 	stopPollingFallback();
 	offlineToastShown = false;
+	if (!initialDevicesLoadComplete && !initialDevicesLoadScheduled && !isLoadingDevices && !pendingLoadDevices) {
+		// Planifier un seul load initial depuis le socket si l'init principale n'a rien déclenché
+		initialDevicesLoadScheduled = true;
+		loadDevices(true);
+	}
 });
 
 window.vhrSocket = socket; // Make socket available globally for sessions
@@ -2200,22 +2134,35 @@ async function loadDevices(forceOrEvent = false) {
 	const isUserClick = (typeof Event !== 'undefined' && forceOrEvent instanceof Event)
 		|| (typeof window !== 'undefined' && window.event instanceof Event);
 	const force = forceOrEvent === true || isUserClick;
+	const startedAt = Date.now();
+	console.log('[devices] loadDevices start', { force, isLoadingDevices, lastDevicesLoadTs });
 
 	const now = Date.now();
 	if (isLoadingDevices) {
 		console.warn('[devices] Ignored loadDevices: already loading');
+		if (!pendingLoadDevices) {
+			pendingLoadDevices = true;
+			setTimeout(() => {
+				pendingLoadDevices = false;
+				loadDevices(force);
+			}, 500);
+		}
 		return;
 	}
 	if (!force && now - lastDevicesLoadTs < MIN_LOAD_DEVICES_INTERVAL_MS) {
-		console.warn('[devices] Ignored loadDevices: throttled');
+		const wait = Math.max(300, MIN_LOAD_DEVICES_INTERVAL_MS - (now - lastDevicesLoadTs) + 100);
+		console.warn('[devices] Ignored loadDevices: throttled, retrying in', wait, 'ms');
+		setTimeout(() => loadDevices(force), wait);
 		return;
 	}
 	isLoadingDevices = true;
 	try {
 		const data = await api('/api/devices');
 		if (data.ok && Array.isArray(data.devices)) {
+			console.log('[devices] Fetched devices:', data.devices.length);
 			devices = data.devices;
 			lastDevicesLoadTs = Date.now();
+			if (!initialDevicesLoadComplete) initialDevicesLoadComplete = true;
 			// Récupérer l'état des jeux en cours depuis le serveur avant de rendre
 			await syncRunningAppsFromServer();
 			
@@ -2233,9 +2180,18 @@ async function loadDevices(forceOrEvent = false) {
 			
 			renderDevices();
 			startBatteryPolling();
+		} else {
+			console.warn('[devices] /api/devices réponse inattendue', data);
 		}
+	} catch (err) {
+		console.error('[devices] Erreur lors du chargement des appareils', err);
 	} finally {
 		isLoadingDevices = false;
+		console.log('[devices] loadDevices finished in', Date.now() - startedAt, 'ms');
+		if (pendingLoadDevices) {
+			pendingLoadDevices = false;
+			loadDevices(true);
+		}
 	}
 }
 // Expose loadDevices globally for onclick handlers in HTML
@@ -3536,11 +3492,18 @@ window.closeModal = function() {
 // ========== SOCKET.IO EVENTS ========== 
 socket.on('devices-update', (data) => {
 	console.log('[socket] devices-update received:', data);
-	if (Array.isArray(data)) {
-		devices = data;
-		renderDevices();
+	const list = Array.isArray(data) ? data : (data && Array.isArray(data.devices) ? data.devices : []);
+	devices = list;
+	if (!list.length) {
+		// Fallback: si le socket envoie une liste vide
+		if (initialDevicesLoadComplete) {
+			setTimeout(() => loadDevices(true).catch(() => {}), 400);
+		} else {
+			// Pendant la phase initiale, éviter les appels concurrents ; laisser le premier loadDevices gérer
+			console.log('[socket] devices-update vide en phase initiale, on attend le premier loadDevices');
+		}
 	} else {
-		console.warn('[socket] Invalid devices data received:', data);
+		renderDevices();
 	}
 });
 
@@ -3925,71 +3888,12 @@ window.loginUser = async function() {
 			data = await res.json();
 		}
 
-		// 3) Si prod OK, synchroniser vers backend local + cookie local
-		if (res.ok && data.ok) {
-			const syncedUsername = data.user?.username || data.user?.name || identifier;
-			const syncedEmail = data.user?.email || identifier;
-			try {
-				await fetch(resolveApiUrl('/api/admin/sync-user'), {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						'x-sync-secret': SYNC_USERS_SECRET
-					},
-					body: JSON.stringify({ username: syncedUsername, email: syncedEmail, role: 'user', password })
-				});
-			} catch (syncErr) {
-				console.warn('[loginUser] sync-user failed', syncErr);
-			}
-
-			// Obtenir un token local pour les requêtes HTTP/localhost
-			try {
-				const localRes = await fetch(resolveApiUrl('/api/login'), {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					credentials: 'include',
-					body: JSON.stringify({ username: syncedUsername, password })
-				});
-				const localData = await localRes.json();
-				if (localRes.ok && localData.ok && localData.token) {
-					data.token = localData.token;
-				}
-			} catch (localLoginErr) {
-				console.warn('[loginUser] local login after sync failed', localLoginErr);
-			}
-		}
-
-		// 4) Fallback local si prod échoue
+		// Si prod échoue (401), ne pas créer ni synchroniser en local : on stoppe ici
 		if (!(res.ok && data.ok)) {
-			try {
-				// Créer/synchroniser l'utilisateur en local avec le secret partagé
-				await fetch(resolveApiUrl('/api/admin/sync-user'), {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						'x-sync-secret': SYNC_USERS_SECRET
-					},
-					body: JSON.stringify({ username: identifier, email: identifier, role: 'user', password })
-				});
-			} catch (syncErr) {
-				console.warn('[loginUser] sync-user after prod failure failed', syncErr);
-			}
-
-			try {
-				const localRes = await fetch(resolveApiUrl('/api/login'), {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					credentials: 'include',
-					body: JSON.stringify({ username: identifier, password })
-				});
-				const localData = await localRes.json();
-				if (localRes.ok && localData.ok) {
-					res = localRes;
-					data = localData;
-				}
-			} catch (localErr) {
-				console.warn('[loginUser] local login fallback failed', localErr);
-			}
+			showToast('❌ Identifiants incorrects (prod)', 'error');
+			saveAuthToken('');
+			localStorage.removeItem('vhr_current_user');
+			return;
 		}
 		
 		if (res.ok && data.ok) {
@@ -4006,7 +3910,6 @@ window.loginUser = async function() {
 			setTimeout(() => {
 				showDashboardContent();
 				createNavbar();
-				showMkcertBanner();
 				checkLicense().then(hasAccess => {
 					if (hasAccess) {
 						loadGamesCatalog().finally(() => loadDevices());
@@ -4015,6 +3918,8 @@ window.loginUser = async function() {
 			}, 200);
 		} else {
 			showToast('❌ ' + (data.error || 'Connexion échouée'), 'error');
+			saveAuthToken('');
+			localStorage.removeItem('vhr_current_user');
 		}
 	} catch (e) {
 		console.error('[auth] login error:', e);
@@ -4023,7 +3928,7 @@ window.loginUser = async function() {
 };
 
 window.registerUser = async function() {
-	const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com', 'dev.mydashboard.dev'];
+	const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com', 'dev.mydashboard.dev'];
 	const ACCOUNT_URL = 'https://www.vhr-dashboard-site.com/account.html?action=register';
 
 	// Hors domaine officiel : on redirige vers la page compte du site vitrine (sauf mocks)
@@ -4103,19 +4008,19 @@ async function checkJWTAuth() {
 		const res = await api('/api/check-auth');
 		console.log('[auth] API response:', res);
 		
-		if (res && res.ok && res.authenticated && res.user) {
-			if (res.token) {
-				saveAuthToken(res.token);
-			}
-			// User is authenticated
+		if (res && res.ok && res.authenticated && res.user && res.token && res.user.role) {
+			// Auth valide uniquement si un token et un rôle sont fournis
+			saveAuthToken(res.token);
 			currentUser = res.user.username || res.user.name || res.user.email;
 			localStorage.setItem('vhr_current_user', currentUser);
-			console.log('[auth] ✓ JWT valid for user:', currentUser);
+			console.log('[auth] ✓ JWT valid for user:', currentUser, 'role:', res.user.role);
 			return true;
 		} else {
 			// No valid JWT - show auth modal
 			console.log('[auth] ❌ No valid JWT - authenticated =', res?.authenticated);
 			console.log('[auth] Showing auth modal...');
+			saveAuthToken('');
+			localStorage.removeItem('vhr_current_user');
 			
 			// Hide the loading overlay immediately
 			const overlay = document.getElementById('authOverlay');
@@ -4130,6 +4035,8 @@ async function checkJWTAuth() {
 	} catch (e) {
 		console.error('[auth] JWT check error:', e);
 		console.log('[auth] ❌ Showing login modal due to exception');
+		saveAuthToken('');
+		localStorage.removeItem('vhr_current_user');
 		
 		// Hide the loading overlay immediately
 		const overlay = document.getElementById('authOverlay');
@@ -4187,12 +4094,12 @@ checkJWTAuth().then(isAuth => {
 		// User is authenticated - always show dashboard content first
 		showDashboardContent();
 		createNavbar();
-		showMkcertBanner();
         
 		// Then check license/subscription status
 		checkLicense().then(hasAccess => {
 			if (hasAccess) {
 				// User has access (demo valid or active subscription)
+				if (!initialDevicesLoadScheduled) initialDevicesLoadScheduled = true;
 				loadGamesCatalog().finally(() => loadDevices());
 			}
 			// else: Access blocked - unlock modal already shown by checkLicense()
