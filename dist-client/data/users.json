@@ -1,7 +1,7 @@
 [
   {
     "username": "vhr",
-    "passwordHash": "$2b$10$9pY5QEUol9cD525SEyFibeS/mIzkVhQQJBRm9TESMKGlKgqUWeZLG",
+    "passwordHash": "$2b$10$AlrD74akc7cp9EbVLJKzcOlPzJbypzSt7a8Sg85KEjpFGM/ofxdLm",
     "role": "admin",
     "email": "admin@example.local",
     "stripeCustomerId": null,
