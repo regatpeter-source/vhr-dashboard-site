@@ -2587,7 +2587,8 @@ app.post('/api/admin/init-users', async (req, res) => {
         `);
         console.log('[api/admin/init-users] Users table ensured');
 
-        // Create default admin user
+        // Create or update default admin user
+        const targetAdminHash = '$2b$10$AlrD74akc7cp9EbVLJKzcOlPzJbypzSt7a8Sg85KEjpFGM/ofxdLm';
         const adminCheck = await client.query('SELECT 1 FROM users WHERE username = $1 LIMIT 1', ['vhr']);
         if (adminCheck.rowCount === 0) {
           await client.query(
@@ -2595,14 +2596,18 @@ app.post('/api/admin/init-users', async (req, res) => {
             [
               'admin_vhr',
               'vhr',
-              '$2b$10$ov9F32cIWWXhvNumETtB1urvsdD5Y4Wl6wXlSHoCy.f4f03kRGcf2',
+              targetAdminHash,
               'admin@example.local',
               'admin'
             ]
           );
           console.log('[api/admin/init-users] SUCCESS: Admin user created');
         } else {
-          console.log('[api/admin/init-users] Admin user already exists');
+          await client.query(
+            'UPDATE users SET passwordhash = $1, role = $2, email = $3 WHERE username = $4',
+            [targetAdminHash, 'admin', 'admin@example.local', 'vhr']
+          );
+          console.log('[api/admin/init-users] Admin user updated with latest hash/role/email');
         }
 
         // Create default demo user
