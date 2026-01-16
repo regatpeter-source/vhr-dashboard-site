@@ -1664,39 +1664,82 @@ if (urlParams.get('auth') === 'local' || urlParams.get('local-auth') === '1') {
 // Ne plus autoriser de persistance du mode mock en production
 try { localStorage.removeItem('useMockAuth'); } catch (e) {}
 
+const IS_LAN_OR_LOCALHOST = (() => {
+	try {
+		const host = window.location.hostname || '';
+		if (host === 'localhost' || host === '127.0.0.1') return true;
+		if (/^10\./.test(host)) return true;
+		if (/^192\.168\./.test(host)) return true;
+		if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+		if (window.location.protocol === 'file:') return true;
+		return false;
+	} catch (e) { return false; }
+})();
+
 const FORCE_PROD_AUTH = (() => {
 	if (urlParams.get('auth') === 'prod' || urlParams.get('prod-auth') === '1') return true;
-	try { return localStorage.getItem('forceProdAuth') === '1'; } catch (e) { return true; } // défaut: prod
+	try {
+		const stored = localStorage.getItem('forceProdAuth');
+		if (stored === '1') return true;
+		if (stored === '0') return false;
+	} catch (e) {}
+	// défaut: si on veut auth en HTTPS, on privilégie prod même en LAN (basculer api séparément)
+	return true;
 })();
+
 const FORCE_LOCAL_AUTH = (() => {
 	if (urlParams.get('auth') === 'local' || urlParams.get('local-auth') === '1') return true;
-	try { return localStorage.getItem('forceLocalAuth') === '1'; } catch (e) { return false; }
+	try {
+		const stored = localStorage.getItem('forceLocalAuth');
+		if (stored === '1') return true;
+		if (stored === '0') return false;
+	} catch (e) {}
+	return false;
+})();
+
+const FORCE_LOCAL_API = (() => {
+	if (urlParams.get('api') === 'local' || urlParams.get('local-api') === '1') return true;
+	try {
+		const stored = localStorage.getItem('forceLocalApi');
+		if (stored === '1') return true;
+		if (stored === '0') return false;
+	} catch (e) {}
+	return IS_LAN_OR_LOCALHOST;
+})();
+
+const FORCE_PROD_API = (() => {
+	if (urlParams.get('api') === 'prod' || urlParams.get('prod-api') === '1') return true;
+	try {
+		const stored = localStorage.getItem('forceProdApi');
+		if (stored === '1') return true;
+		if (stored === '0') return false;
+	} catch (e) {}
+	return false;
 })();
 // Sécurité : mode mock désactivé par défaut, pas de réactivation via query/localStorage
 const USE_MOCK_AUTH = false;
 
-// Par défaut on pointe vers l'API HTTPS de prod, sauf override local/mock/env explicite.
+// Par défaut on pointe vers l'API HTTPS de prod, sauf override local/mock/env explicite ou détection LAN.
 const PROD_API_BASE = 'https://www.vhr-dashboard-site.com';
 const ENV_API_BASE = (window.env && window.env.API_BASE_URL) ? window.env.API_BASE_URL.trim() : '';
+const LOCAL_API_DEFAULT = (() => {
+	if (window.location.origin && window.location.origin.startsWith('http')) return window.location.origin;
+	return 'http://localhost:3000';
+})();
 
 // Origin à utiliser pour les appels API (évite file:///api/... en mode Electron)
 const API_ORIGIN = (() => {
-	// 1) Priorité à une variable d'environnement si fournie
 	if (ENV_API_BASE) return ENV_API_BASE;
-	// 2) Mode local forcé
-	if (FORCE_LOCAL_AUTH) {
-		if (window.location.origin && window.location.origin.startsWith('http')) {
-			return window.location.origin;
-		}
-		return 'http://localhost:3000';
-	}
-	// 3) Défaut: prod
-	return PROD_API_BASE;
+	if (FORCE_LOCAL_API && !FORCE_PROD_API) return LOCAL_API_DEFAULT;
+	if (FORCE_PROD_API) return PROD_API_BASE;
+	// défaut: local si LAN, sinon prod
+	return IS_LAN_OR_LOCALHOST ? LOCAL_API_DEFAULT : PROD_API_BASE;
 })();
 
 const AUTH_API_BASE = (() => {
 	if (ENV_API_BASE) return ENV_API_BASE;
-	if (FORCE_LOCAL_AUTH) return API_ORIGIN;
+	if (FORCE_PROD_AUTH) return PROD_API_BASE;
+	if (FORCE_LOCAL_AUTH) return LOCAL_API_DEFAULT;
 	return PROD_API_BASE;
 })();
 const RESOLVED_AUTH_BASE = AUTH_API_BASE || API_ORIGIN || PROD_API_BASE;
@@ -1705,12 +1748,34 @@ const resolveApiUrl = (p) => (p.startsWith('http://') || p.startsWith('https://'
 // Secret partagé pour synchroniser les comptes prod vers le backend local (HTTP)
 const SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
 
+const ENV_RELAY_BASE = (window.env && window.env.RELAY_URL) ? window.env.RELAY_URL.trim() : '';
+const FORCE_LOCAL_SOCKET = (() => {
+	if (urlParams.get('socket') === 'local' || urlParams.get('local-socket') === '1') return true;
+	try {
+		const stored = localStorage.getItem('forceLocalSocket');
+		if (stored === '1') return true;
+		if (stored === '0') return false;
+	} catch (e) {}
+	return false;
+})();
+const FORCE_PROD_SOCKET = (() => {
+	if (urlParams.get('socket') === 'prod' || urlParams.get('prod-socket') === '1') return true;
+	try {
+		const stored = localStorage.getItem('forceProdSocket');
+		if (stored === '1') return true;
+		if (stored === '0') return false;
+	} catch (e) {}
+	return true; // défaut: sessions multi-utilisateurs en HTTPS (prod)
+})();
+
 const SOCKET_BASE = (() => {
+	if (ENV_RELAY_BASE) return ENV_RELAY_BASE;
 	if (ENV_API_BASE) return ENV_API_BASE;
-	if (FORCE_LOCAL_AUTH) {
+	if (FORCE_LOCAL_SOCKET && !FORCE_PROD_SOCKET) {
 		if (window.location.origin && window.location.origin.startsWith('http')) return window.location.origin;
 		return 'http://localhost:3000';
 	}
+	// défaut: prod (HTTPS/WSS) pour la session collaborative
 	return PROD_API_BASE;
 })();
 

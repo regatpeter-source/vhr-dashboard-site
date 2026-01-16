@@ -890,6 +890,7 @@ function getDemoRemainingDays(user) {
 }
 
 const LICENSES_FILE = path.join(__dirname, 'data', 'licenses.json');
+const DEMO_FILE = path.join(__dirname, 'data', 'demo.json');
 
 // ========== EMAIL CONFIGURATION ==========
 // Support both Brevo and Gmail configurations
@@ -1732,20 +1733,39 @@ function saveUsers() {
 }
 
 // ========== DEMO STATUS MANAGEMENT ========== 
+function loadDemoStart() {
+  try {
+    ensureDataDir();
+    if (fs.existsSync(DEMO_FILE)) {
+      const raw = fs.readFileSync(DEMO_FILE, 'utf8').trim();
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.startedAt) return parsed.startedAt;
+      }
+    }
+    const nowIso = new Date().toISOString();
+    fs.writeFileSync(DEMO_FILE, JSON.stringify({ startedAt: nowIso }, null, 2), 'utf8');
+    return nowIso;
+  } catch (e) {
+    console.warn('[demo] unable to load/save demo start, defaulting to now:', e && e.message);
+    return new Date().toISOString();
+  }
+}
+
 function getDemoStatus() {
-  const DEMO_START = new Date('2025-12-07T00:00:00Z').getTime();
-  const DEMO_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
-  const DEMO_END = DEMO_START + DEMO_DURATION;
-  
+  const startIso = loadDemoStart();
+  const startMs = new Date(startIso).getTime();
+  const endMs = startMs + demoConfig.DEMO_DURATION_MS;
+
   const now = Date.now();
-  const daysRemaining = Math.ceil((DEMO_END - now) / (24 * 60 * 60 * 1000));
-  const isExpired = now > DEMO_END;
-  
+  const daysRemaining = Math.ceil((endMs - now) / (24 * 60 * 60 * 1000));
+  const isExpired = now > endMs;
+
   return {
     isExpired,
     daysRemaining: Math.max(0, daysRemaining),
-    expiresAt: new Date(DEMO_END).toISOString(),
-    message: isExpired ? 'Demo expiré' : `Essai gratuit - ${Math.max(0, daysRemaining)} jour(s) restant(s)`
+    expiresAt: new Date(endMs).toISOString(),
+    message: isExpired ? 'Période d\'essai expirée - Veuillez vous abonner' : `Essai gratuit - ${Math.max(0, daysRemaining)} jour(s) restant(s)`
   };
 }
 
@@ -1793,7 +1813,20 @@ function loadUsers() {
   return [{ id: 'admin', username: 'vhr', passwordHash: '$2b$10$AlrD74akc7cp9EbVLJKzcOlPzJbypzSt7a8Sg85KEjpFGM/ofxdLm', role: 'admin', email: 'admin@example.local', stripeCustomerId: null }];
 }
 
-let users = loadUsers();
+function ensureAdminsUnlimited(list) {
+  return (list || []).map(u => {
+    if (u && u.role === 'admin') {
+      return {
+        ...u,
+        subscriptionStatus: 'active',
+        subscriptionId: u.subscriptionId || 'admin-unlimited'
+      };
+    }
+    return u;
+  });
+}
+
+let users = ensureAdminsUnlimited(loadUsers());
 
 // In PostgreSQL mode, hydrate in-memory cache from DB for quick lookups
 if (USE_POSTGRES && db && db.getUsers) {
@@ -1801,7 +1834,7 @@ if (USE_POSTGRES && db && db.getUsers) {
     try {
       const dbUsers = await db.getUsers();
       if (Array.isArray(dbUsers)) {
-        users = dbUsers.map(u => ({
+        users = ensureAdminsUnlimited(dbUsers.map(u => ({
           id: u.id || `user_${u.username}`,
           username: u.username,
           passwordHash: u.passwordhash || u.passwordHash || null,
@@ -1812,7 +1845,7 @@ if (USE_POSTGRES && db && db.getUsers) {
           subscriptionId: u.subscriptionid || u.subscriptionId || null,
           createdAt: u.createdat || u.createdAt || null,
           updatedAt: u.updatedat || u.updatedAt || null
-        }));
+        })));
         console.log(`[users] Hydrated ${users.length} user(s) from PostgreSQL`);
       }
     } catch (e) {
