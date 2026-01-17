@@ -6091,14 +6091,10 @@ const refreshDevices = async () => {
         return
       }
       const list = parseAdbDevices(stdout)
-      // nameMap: { serial: customName }
-      const fs = require('fs')
-      const persistedNames = fs.existsSync('names.json')
-        ? JSON.parse(fs.readFileSync('names.json', 'utf8'))
-        : {}
+      const mappedNames = nameMap || {}
       adbDevices = list.map(dev => ({
         serial: dev.serial,
-        name: persistedNames[dev.serial] || dev.serial,
+        name: mappedNames[dev.serial] || dev.serial,
         status: dev.status,
         model: dev.model,
         origin: 'adb'

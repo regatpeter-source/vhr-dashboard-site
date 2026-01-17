@@ -5120,14 +5120,10 @@ const refreshDevices = async () => {
         return
       }
       const list = parseAdbDevices(stdout)
-      // nameMap: { serial: customName }
-      const fs = require('fs')
-      const nameMap = fs.existsSync('names.json')
-        ? JSON.parse(fs.readFileSync('names.json', 'utf8'))
-        : {}
+      const mappedNames = nameMap || {}
       devices = list.map(dev => ({
         serial: dev.serial,
-        name: nameMap[dev.serial] || dev.serial,
+        name: mappedNames[dev.serial] || dev.serial,
         status: dev.status,
         model: dev.model
       }))
