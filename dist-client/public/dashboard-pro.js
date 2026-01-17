@@ -1234,9 +1234,41 @@ window.sendVoiceToHeadset = async function(serial) {
 					showToast('📱 App VHR Voice lancée sur le casque', 'success');
 				} else {
 					console.warn('[voice] Voice app launch failed:', startRes?.error);
+					// Fallback: ouvrir le récepteur web via ADB pour garantir le lien émetteur/récepteur
+					try {
+						const openRes = await api('/api/device/open-audio-receiver', {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({ serial, server: resolvedServerUrl })
+						});
+						if (openRes && openRes.ok) {
+							console.log('[voice] Fallback receiver lancé (web)');
+							showToast('🔊 Récepteur voix ouvert en fallback', 'info');
+						} else {
+							console.warn('[voice] Fallback receiver non lancé:', openRes?.error);
+						}
+					} catch (fallbackOpenErr) {
+						console.warn('[voice] Erreur ouverture fallback receiver:', fallbackOpenErr);
+					}
 				}
 			} catch (adbLaunchErr) {
 				console.warn('[voice] ADB launch voice app error:', adbLaunchErr);
+				// Second fallback si l'appel ADB échoue directement
+				try {
+					const openRes = await api('/api/device/open-audio-receiver', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ serial, server: resolvedServerUrl })
+					});
+					if (openRes && openRes.ok) {
+						console.log('[voice] Fallback receiver lancé (web) après échec ADB');
+						showToast('🔊 Récepteur voix ouvert (fallback)', 'info');
+					} else {
+						console.warn('[voice] Fallback receiver non lancé:', openRes?.error);
+					}
+				} catch (fallbackOpenErr) {
+					console.warn('[voice] Erreur ouverture fallback receiver (post-ADB):', fallbackOpenErr);
+				}
 			}
 
 			// Ne pas forcer l'ouverture via ADB pour éviter qu'une page prenne le focus dans le casque
@@ -3612,9 +3644,10 @@ window.openOfficialBillingPage = function() {
 async function checkLicense() {
 	try {
 		// Admin = accès illimité (bypass paywall/licence)
+		// Exigence : vhr avec mot de passe doit être toujours connecté en illimité,
+		// même si le JWT n'est pas présent/valide côté client (ex: cookie expiré).
 		const uname = (currentUser || '').toLowerCase();
-		const vhrAuth = authenticatedUsers['vhr'] || authenticatedUsers[currentUser];
-		if (uname === 'vhr' && vhrAuth && vhrAuth.token) {
+		if (uname === 'vhr') {
 			licenseStatus.licensed = true;
 			licenseStatus.expired = false;
 			showTrialBanner(0);

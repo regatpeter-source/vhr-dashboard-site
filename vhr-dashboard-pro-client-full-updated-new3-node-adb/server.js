@@ -1597,6 +1597,8 @@ app.use(['/api/adb', '/api/adb/*', '/api/stream', '/api/stream/*', '/api/apps', 
 function cleanEnvValue(v) { if (!v) return v; return v.replace(/^['"]|['"]$/g, '').trim(); }
 const stripeKeyRaw = process.env.STRIPE_SECRET_KEY || '';
 const stripeKey = cleanEnvValue(stripeKeyRaw);
+const STRIPE_DEFAULT_PRICE_ID = cleanEnvValue(process.env.STRIPE_SUBSCRIPTION_PRICE_ID || '');
+const STRIPE_TRIAL_DAYS = parseInt(process.env.STRIPE_TRIAL_DAYS || '7', 10);
 if (!stripeKey) {
   console.warn('[Stripe] STRIPE_SECRET_KEY not set. Set STRIPE_SECRET_KEY to your secret key (sk_live_...).');
 } else if (stripeKey.startsWith('pk_')) {
@@ -2396,47 +2398,47 @@ app.post('/api/dashboard/register', async (req, res) => {
 });
 
 // --- Route pour vérifier un utilisateur dashboard ---
-app.post('/api/dashboard/login', async (req, res) => {
-  console.log('[api/dashboard/login] request received');
-  const { username, password } = req.body;
-  
-  if (!username || !password) {
-    return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur et mot de passe requis' });
+app.post('/api/tts/send', async (req, res) => {
+  const { serial, text } = req.body || {};
+  if (!serial || !text) {
+    return res.status(400).json({ ok: false, error: 'serial et text requis' });
   }
-  
-  reloadUsers();
-  const user = getUserByUsername(username);
-  
-  if (!user) {
-    return res.status(401).json({ ok: false, error: 'Utilisateur non trouvé' });
+
+  try {
+    const utteranceId = 'vhr_' + Date.now();
+
+    // 1) Notification visuelle (fallback)
+    const notifCmd = ['shell', 'cmd', 'notification', 'post', '-S', 'bigtext', '-t', 'VHR Dashboard', 'Tag', text];
+    try {
+      await runAdbCommand(serial, notifCmd);
+    } catch (e) {
+      console.log('[tts] notification failed:', e.message);
+    }
+
+    // 2) Broadcast compatible avec l'app VHR TTS Receiver
+    try {
+      const ttsIntent = [
+        'shell', 'am', 'broadcast',
+        '-a', 'com.vhr.dashboard.TTS_MESSAGE',
+        '--es', 'text', text,
+        '--es', 'utteranceId', utteranceId
+      ];
+      await runAdbCommand(serial, ttsIntent);
+      console.log('[tts] broadcast sent via com.vhr.dashboard.TTS_MESSAGE');
+    } catch (e) {
+      console.log('[tts] broadcast failed:', e.message);
+    }
+
+    console.log(`[tts] Texte envoyé au casque ${serial}: "${text}"`);
+    res.json({ ok: true, message: 'TTS envoyé (broadcast + notification). Assurez-vous que l\'app VHR TTS Receiver est installée.' });
+  } catch (e) {
+    console.error('[tts] error:', e);
+    res.status(500).json({ ok: false, error: String(e) });
   }
-  
-  const valid = await bcrypt.compare(password, user.passwordhash || user.passwordHash);
-  if (!valid) {
-    return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
-  }
-  
-  const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-  
-  res.json({ 
-    ok: true, 
-    token,
-    user: { username: user.username, role: user.role, email: user.email }
-  });
 });
 
-// --- Ping endpoint for VHR Voice app auto-discovery ---
-app.get('/api/ping', (req, res) => {
-  res.json({ 
-    ok: true, 
-    service: 'VHR Dashboard',
-    version: '1.0',
-    timestamp: Date.now()
-  });
-});
-
-// --- Create desktop shortcut ---
-app.post('/api/create-desktop-shortcut', authMiddleware, async (req, res) => {
+// Créer un raccourci Desktop pour lancer le dashboard local
+app.post('/api/create-desktop-shortcut', async (req, res) => {
   try {
     // Disponibilité uniquement en environnement Windows local
     if (process.platform !== 'win32') {
@@ -2998,26 +3000,27 @@ app.get('/api/feature/android-tts/access', authMiddleware, (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
   console.log('[api/auth/login] request received');
   reloadUsers(); // Reload users from file in case they were modified externally
-  const { email, password } = req.body;
+  const { email, username, password } = req.body;
+  const identifier = email || username;
   
-  if (!email || !password) {
-    return res.status(400).json({ ok: false, error: 'Email et mot de passe requis' });
+  if (!identifier || !password) {
+    return res.status(400).json({ ok: false, error: 'Email ou username et mot de passe requis' });
   }
   
-  console.log('[api/auth/login] attempting login for email:', email);
+  console.log('[api/auth/login] attempting login for identifier:', identifier);
   
-  // Find user by email
+  // Find user by email OR username
   let user = null;
   if (USE_POSTGRES && db) {
     try {
-      const resUser = await db.pool.query('SELECT * FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [email]);
+      const resUser = await db.pool.query('SELECT * FROM users WHERE LOWER(email)=LOWER($1) OR LOWER(username)=LOWER($1) LIMIT 1', [identifier]);
       if (resUser.rows && resUser.rows[0]) user = resUser.rows[0];
     } catch (e) {
-      console.error('[api/auth/login] Postgres email lookup failed:', e && e.message);
+      console.error('[api/auth/login] Postgres identifier lookup failed:', e && e.message);
     }
   }
   if (!user) {
-    user = getUserByEmail(email);
+    user = getUserByEmail(identifier) || getUserByUsername(identifier);
   }
 
   if (!user) {
@@ -3194,6 +3197,59 @@ app.post('/api/admin/grant-subscription', authMiddleware, async (req, res) => {
 });
 
 /**
+ * POST /api/admin/grant-stripe-trial - Crée une subscription Stripe avec période d'essai
+ * Requiert un admin allowlisté et une STRIPE_SUBSCRIPTION_PRICE_ID configurée côté serveur
+ */
+app.post('/api/admin/grant-stripe-trial', authMiddleware, async (req, res) => {
+  const { targetUsername, trialDays } = req.body || {};
+  if (!ensureAllowedAdmin(req, res)) return;
+  if (!targetUsername) return res.status(400).json({ ok: false, error: 'targetUsername required' });
+  if (!stripeKey) return res.status(400).json({ ok: false, error: 'Stripe not configured on server' });
+
+  const priceId = STRIPE_DEFAULT_PRICE_ID;
+  if (!priceId) return res.status(400).json({ ok: false, error: 'STRIPE_SUBSCRIPTION_PRICE_ID is not set on server' });
+
+  try {
+    const targetUser = getUserByUsername(targetUsername);
+    if (!targetUser) return res.status(404).json({ ok: false, error: `User '${targetUsername}' not found` });
+
+    // S'assurer d'un customer Stripe
+    const customerId = await ensureStripeCustomerForUser(targetUser);
+
+    const effectiveTrialDays = Number.isFinite(parseInt(trialDays, 10)) ? Math.max(0, parseInt(trialDays, 10)) : STRIPE_TRIAL_DAYS;
+
+    const sub = await stripe.subscriptions.create({
+      customer: customerId,
+      items: [{ price: priceId }],
+      trial_period_days: effectiveTrialDays,
+      metadata: {
+        username: targetUser.username || '',
+        source: 'admin-grant-trial'
+      }
+    });
+
+    // Mettre à jour l'utilisateur localement
+    targetUser.subscriptionId = sub.id;
+    targetUser.subscriptionStatus = sub.status; // 'trialing' attendu
+    targetUser.latestInvoiceId = sub.latest_invoice || targetUser.latestInvoiceId || null;
+    targetUser.lastInvoicePaidAt = targetUser.lastInvoicePaidAt || null;
+    targetUser.stripeCustomerId = customerId;
+    persistUser(targetUser);
+
+    res.json({
+      ok: true,
+      message: `✅ Trial Stripe démarré pour ${targetUsername}`,
+      subscriptionId: sub.id,
+      status: sub.status,
+      trialEndsAt: sub.trial_end ? new Date(sub.trial_end * 1000).toISOString() : null
+    });
+  } catch (e) {
+    console.error('[admin] grant-stripe-trial error:', e && e.message);
+    res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+/**
  * POST /api/admin/revoke-subscription - Revoke a user's subscription
  * Admin only - requires authentication
  */
@@ -3304,22 +3360,34 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
       
       if (user.stripeCustomerId) {
         try {
-          // Fetch latest subscription from Stripe for this customer
+          // Fetch latest subscription (active or trialing) from Stripe for this customer
           const stripeSubs = await stripe.subscriptions.list({
             customer: user.stripeCustomerId,
-            status: 'active',
-            limit: 1
+            status: 'all',
+            limit: 5
           });
-          
+
           if (stripeSubs.data && stripeSubs.data.length > 0) {
-            const activeSub = stripeSubs.data[0];
-            hasValidSubscription = activeSub.status === 'active';
-            subscriptionStatus = activeSub.status; // 'active', 'past_due', etc.
-            console.log(`[demo/status] User ${user.username} has Stripe subscription: ${subscriptionStatus}`);
+            const activeOrTrial = stripeSubs.data.find(s => s.status === 'active' || s.status === 'trialing');
+            if (activeOrTrial) {
+              const nowSec = Math.floor(Date.now() / 1000);
+              const isTrialValid = activeOrTrial.status === 'trialing' && activeOrTrial.trial_end && activeOrTrial.trial_end > nowSec;
+              const isActive = activeOrTrial.status === 'active';
+              hasValidSubscription = isActive || isTrialValid;
+              subscriptionStatus = activeOrTrial.status;
+              console.log(`[demo/status] User ${user.username} has Stripe subscription: ${subscriptionStatus}${isTrialValid ? ' (trial valid)' : ''}`);
+              // If trialing, propagate trial end info
+              if (isTrialValid && activeOrTrial.trial_end) {
+                expirationDate = new Date(activeOrTrial.trial_end * 1000).toISOString();
+              }
+            } else {
+              subscriptionStatus = 'none';
+              console.log(`[demo/status] User ${user.username} has no active/trialing Stripe subscription`);
+            }
           } else {
-            // No active subscription
+            // No subscription
             subscriptionStatus = 'none';
-            console.log(`[demo/status] User ${user.username} has no active Stripe subscription`);
+            console.log(`[demo/status] User ${user.username} has no Stripe subscription`);
           }
         } catch (e) {
           console.error(`[demo/status] Error checking Stripe subscription for ${user.username}:`, e.message);
@@ -3387,15 +3455,23 @@ app.post('/api/download/vhr-app', authMiddleware, async (req, res) => {
     let hasValidSubscription = false;
     
     if (demoExpired) {
-      // Demo expired - check subscription
+      // Demo expired - check subscription (active or trialing non expiré)
       if (user.stripeCustomerId) {
         try {
           const stripeSubs = await stripe.subscriptions.list({
             customer: user.stripeCustomerId,
-            status: 'active',
-            limit: 1
+            status: 'all',
+            limit: 5
           });
-          hasValidSubscription = stripeSubs.data && stripeSubs.data.length > 0;
+          if (stripeSubs.data && stripeSubs.data.length > 0) {
+            const activeOrTrial = stripeSubs.data.find(s => s.status === 'active' || s.status === 'trialing');
+            if (activeOrTrial) {
+              const nowSec = Math.floor(Date.now() / 1000);
+              const isTrialValid = activeOrTrial.status === 'trialing' && activeOrTrial.trial_end && activeOrTrial.trial_end > nowSec;
+              const isActive = activeOrTrial.status === 'active';
+              hasValidSubscription = isActive || isTrialValid;
+            }
+          }
         } catch (e) {
           console.error('[download] Stripe check error:', e.message);
         }
@@ -5165,9 +5241,16 @@ const refreshDevices = async () => {
 
 
 // ---------- Persistence ----------
-const NAMES_FILE = path.join(__dirname, 'names.json');
-const GAMES_FILE = path.join(__dirname, 'games.json');
-const FAVORITES_FILE = path.join(__dirname, 'favorites.json');
+// Placer les fichiers persistants dans un dossier en écriture (évite l'échec en binaire/asar)
+const DATA_DIR = process.env.VHR_DATA_DIR || path.join(os.homedir(), '.vhr-dashboard');
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
+const NAMES_FILE = path.join(DATA_DIR, 'names.json');
+const GAMES_FILE = path.join(DATA_DIR, 'games.json');
+const FAVORITES_FILE = path.join(DATA_DIR, 'favorites.json');
+// Fichiers legacy (dans le repo/asar) pour migration
+const LEGACY_NAMES_FILE = path.join(__dirname, 'names.json');
+const LEGACY_GAMES_FILE = path.join(__dirname, 'games.json');
+const LEGACY_FAVORITES_FILE = path.join(__dirname, 'favorites.json');
 let nameMap = {};
 let gamesList = [];
 let favoritesList = [];
@@ -5215,6 +5298,17 @@ function resolveLanIpForClient(req) {
 }
 
 try {
+  // Migrer les fichiers legacy si présents et pas encore copiés
+  if (!fs.existsSync(NAMES_FILE) && fs.existsSync(LEGACY_NAMES_FILE)) {
+    try { fs.copyFileSync(LEGACY_NAMES_FILE, NAMES_FILE); } catch (e) {}
+  }
+  if (!fs.existsSync(GAMES_FILE) && fs.existsSync(LEGACY_GAMES_FILE)) {
+    try { fs.copyFileSync(LEGACY_GAMES_FILE, GAMES_FILE); } catch (e) {}
+  }
+  if (!fs.existsSync(FAVORITES_FILE) && fs.existsSync(LEGACY_FAVORITES_FILE)) {
+    try { fs.copyFileSync(LEGACY_FAVORITES_FILE, FAVORITES_FILE); } catch (e) {}
+  }
+
   if (fs.existsSync(NAMES_FILE)) nameMap = JSON.parse(fs.readFileSync(NAMES_FILE, 'utf8') || '{}');
   else fs.writeFileSync(NAMES_FILE, JSON.stringify({}, null, 2));
   if (fs.existsSync(GAMES_FILE)) gamesList = JSON.parse(fs.readFileSync(GAMES_FILE, 'utf8') || '[]');
