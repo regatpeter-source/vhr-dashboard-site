@@ -3330,9 +3330,18 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
       ensureUserSubscription(user, { planName: 'auto-provision', status: 'trial' });
     }
     
+    // Allowlist bypass (demo) configurable via env DEMO_BYPASS_USERS (default vhrdashboard)
+    const DEMO_BYPASS_USERNAMES = new Set(
+      (process.env.DEMO_BYPASS_USERS || 'vhrdashboard')
+        .split(',')
+        .map(u => u.trim().toLowerCase())
+        .filter(Boolean)
+    );
+
     // ADMINS: Skip license/demo checks and grant full access
-    if (user.role === 'admin') {
-      console.log(`[demo/status] Admin user ${user.username} - unrestricted access`);
+    if (user.role === 'admin' || DEMO_BYPASS_USERNAMES.has((user.username || '').toLowerCase())) {
+      const isBypass = DEMO_BYPASS_USERNAMES.has((user.username || '').toLowerCase());
+      console.log(`[demo/status] ${isBypass ? 'Bypass allowlist' : 'Admin'} user ${user.username} - unrestricted access`);
       return res.json({
         ok: true,
         demo: {
@@ -3342,9 +3351,9 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
           totalDays: demoConfig.DEMO_DAYS,
           expirationDate: null,
           hasValidSubscription: true,
-          subscriptionStatus: 'admin',
-          accessBlocked: false, // Never block admins
-          message: '✅ Accès administrateur illimité'
+          subscriptionStatus: isBypass ? 'bypass' : 'admin',
+          accessBlocked: false, // Never block admins/allowlist
+          message: isBypass ? '✅ Accès démo bypass (allowlist)' : '✅ Accès administrateur illimité'
         }
       });
     }
