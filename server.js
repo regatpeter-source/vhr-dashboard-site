@@ -891,13 +891,6 @@ function getDemoRemainingDays(user) {
     return !!license;
   }
 
-  const DEMO_BYPASS_USERNAMES = new Set(
-    (process.env.DEMO_BYPASS_USERS || 'vhrdashboard')
-      .split(',')
-      .map(u => u.trim().toLowerCase())
-      .filter(Boolean)
-  );
-
   async function buildDemoStatusForUser(user) {
     const normalized = normalizeUserRecord(user);
     const expirationDate = normalized.demoStartDate ? new Date(new Date(normalized.demoStartDate).getTime() + demoConfig.DEMO_DURATION_MS).toISOString() : null;
@@ -922,22 +915,7 @@ function getDemoRemainingDays(user) {
       };
     }
 
-    // Allowlist de contournement demo (ex: compte support/démo)
-    if (DEMO_BYPASS_USERNAMES.has((normalized.username || '').toLowerCase())) {
-      return {
-        demoStartDate: normalized.demoStartDate || null,
-        demoExpired: false,
-        expired: false,
-        remainingDays: -1,
-        totalDays: demoConfig.DEMO_DAYS,
-        expirationDate,
-        hasValidSubscription: true,
-        subscriptionStatus: 'bypass',
-        hasActiveLicense: true,
-        accessBlocked: false,
-        message: '✅ Accès démo bypass (allowlist)'
-      };
-    }
+    // Aucun bypass pour les démos expirées en dehors des admins
 
     // Subscription status from local record
     let hasValidSubscription = (normalized.subscriptionStatus || '').toLowerCase() === 'active';
