@@ -1565,6 +1565,8 @@ app.use(['/api/adb', '/api/adb/*', '/api/stream', '/api/stream/*', '/api/apps', 
 function cleanEnvValue(v) { if (!v) return v; return v.replace(/^['"]|['"]$/g, '').trim(); }
 const stripeKeyRaw = process.env.STRIPE_SECRET_KEY || '';
 const stripeKey = cleanEnvValue(stripeKeyRaw);
+const STRIPE_DEFAULT_PRICE_ID = cleanEnvValue(process.env.STRIPE_SUBSCRIPTION_PRICE_ID || '');
+const STRIPE_TRIAL_DAYS = parseInt(process.env.STRIPE_TRIAL_DAYS || '7', 10);
 if (!stripeKey) {
   console.warn('[Stripe] STRIPE_SECRET_KEY not set. Set STRIPE_SECRET_KEY to your secret key (sk_live_...).');
 } else if (stripeKey.startsWith('pk_')) {
@@ -3126,6 +3128,56 @@ app.post('/api/admin/grant-subscription', authMiddleware, async (req, res) => {
   } catch (e) {
     console.error('[admin] grant-subscription error:', e);
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/**
+ * POST /api/admin/grant-stripe-trial - Crée une subscription Stripe avec période d'essai
+ * Requiert un admin allowlisté et une STRIPE_SUBSCRIPTION_PRICE_ID configurée côté serveur
+ */
+app.post('/api/admin/grant-stripe-trial', authMiddleware, async (req, res) => {
+  const { targetUsername, trialDays } = req.body || {};
+  if (!ensureAllowedAdmin(req, res)) return;
+  if (!targetUsername) return res.status(400).json({ ok: false, error: 'targetUsername required' });
+  if (!stripeKey) return res.status(400).json({ ok: false, error: 'Stripe not configured on server' });
+
+  const priceId = STRIPE_DEFAULT_PRICE_ID;
+  if (!priceId) return res.status(400).json({ ok: false, error: 'STRIPE_SUBSCRIPTION_PRICE_ID is not set on server' });
+
+  try {
+    const targetUser = getUserByUsername(targetUsername);
+    if (!targetUser) return res.status(404).json({ ok: false, error: `User '${targetUsername}' not found` });
+
+    const customerId = await ensureStripeCustomerForUser(targetUser);
+    const effectiveTrialDays = Number.isFinite(parseInt(trialDays, 10)) ? Math.max(0, parseInt(trialDays, 10)) : STRIPE_TRIAL_DAYS;
+
+    const sub = await stripe.subscriptions.create({
+      customer: customerId,
+      items: [{ price: priceId }],
+      trial_period_days: effectiveTrialDays,
+      metadata: {
+        username: targetUser.username || '',
+        source: 'admin-grant-trial'
+      }
+    });
+
+    targetUser.subscriptionId = sub.id;
+    targetUser.subscriptionStatus = sub.status;
+    targetUser.latestInvoiceId = sub.latest_invoice || targetUser.latestInvoiceId || null;
+    targetUser.lastInvoicePaidAt = targetUser.lastInvoicePaidAt || null;
+    targetUser.stripeCustomerId = customerId;
+    persistUser(targetUser);
+
+    res.json({
+      ok: true,
+      message: `✅ Trial Stripe démarré pour ${targetUsername}`,
+      subscriptionId: sub.id,
+      status: sub.status,
+      trialEndsAt: sub.trial_end ? new Date(sub.trial_end * 1000).toISOString() : null
+    });
+  } catch (e) {
+    console.error('[admin] grant-stripe-trial error:', e && e.message);
+    res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
   }
 });
 
