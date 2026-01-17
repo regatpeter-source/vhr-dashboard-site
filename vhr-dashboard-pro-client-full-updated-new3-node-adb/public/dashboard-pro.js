@@ -3614,7 +3614,7 @@ async function checkLicense() {
 		// Admin = accès illimité (bypass paywall/licence)
 		const role = userRoles[currentUser] || 'user';
 		const uname = (currentUser || '').toLowerCase();
-		if (role === 'admin' || uname === 'vhr' || uname === 'admin') {
+		if (uname === 'vhr') {
 			licenseStatus.licensed = true;
 			licenseStatus.expired = false;
 			showTrialBanner(0);
