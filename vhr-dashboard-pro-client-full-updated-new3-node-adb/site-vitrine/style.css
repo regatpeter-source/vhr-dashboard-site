@@ -16,7 +16,6 @@ body {
   font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
   color: #333;
   background: #ffffff;
-  text-align: center;
   font-size: 1.1em;
   font-weight: 400;
   margin: 0;
@@ -44,7 +43,7 @@ nav {
   align-items: center;
   height: 48px;
   padding-left: 66px;
-  background: url('assets/logo-vd.svg') no-repeat left center / 54px auto;
+  background: url('assets/logo-vd.png') no-repeat left center / 54px auto;
   color: #fff;
   font-weight: 800;
   letter-spacing: 0.8px;
