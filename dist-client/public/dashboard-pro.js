@@ -1044,7 +1044,7 @@ window.switchAccountTab = function(tab) {
 let activeAudioStream = null;  // Global audio stream instance
 let activeAudioSerial = null;  // Serial of device receiving audio
 
-console.log('[voice] dashboard-pro.js build stamp: 2026-01-15 12:00');
+console.log('[voice] dashboard-pro.js build stamp: 2026-01-17 22:00');
 
 // Keep panel always compact (no fullscreen overlay)
 function setAudioPanelMinimized() {
