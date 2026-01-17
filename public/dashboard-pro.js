@@ -3564,6 +3564,16 @@ window.openOfficialBillingPage = function() {
 
 async function checkLicense() {
 	try {
+		// Admin = accès illimité (bypass paywall/licence)
+		const role = userRoles[currentUser] || 'user';
+		const uname = (currentUser || '').toLowerCase();
+		if (role === 'admin' || uname === 'vhr' || uname === 'admin') {
+			licenseStatus.licensed = true;
+			licenseStatus.expired = false;
+			showTrialBanner(0);
+			return true;
+		}
+
 		// Check demo/trial status with Stripe subscription verification
 		const res = await api('/api/demo/status');
 		
