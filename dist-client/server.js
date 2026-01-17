@@ -2984,24 +2984,28 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // POST /api/auth/register - Register with username + email + password
-app.post('/api/auth/register', async (req, res) => {
-  console.log('[api/auth/register] request received');
+app.post('/api/auth/login', async (req, res) => {
+  console.log('[api/auth/login] request received');
   reloadUsers(); // Reload users from file in case they were modified externally
-  const { username, email, password } = req.body;
+  const { email, password } = req.body;
   
-  if (!username || !email || !password) {
-    return res.status(400).json({ ok: false, error: 'Tous les champs sont requis' });
+  if (!email || !password) {
+    return res.status(400).json({ ok: false, error: 'Email et mot de passe requis' });
   }
   
-  if (password.length < 6) {
-    return res.status(400).json({ ok: false, error: 'Le mot de passe doit contenir au moins 6 caractères' });
-  }
+  const loginIdentifier = String(email).trim();
+  console.log('[api/auth/login] attempting login for identifier:', loginIdentifier);
   
-  // Check duplicates (PostgreSQL vs fallback storage)
-  try {
-    if (USE_POSTGRES && db) {
-      const existingUser = await db.getUserByUsername(username);
-      if (existingUser) {
+  // Find user by email, or fallback to username (UI allows both)
+  let user = await findUserByEmailAsync(loginIdentifier);
+  if (!user) {
+    user = await findUserByUsernameAsync(loginIdentifier);
+  }
+
+  if (!user) {
+    console.log('[api/auth/login] user not found by email or username');
+    return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
+  }
         return res.status(400).json({ ok: false, error: 'Le nom d\'utilisateur existe déjà' });
       }
       const emailCheck = await db.pool.query('SELECT 1 FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [email]);

@@ -3539,13 +3539,17 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Email et mot de passe requis' });
   }
   
-  console.log('[api/auth/login] attempting login for email:', email);
+  const loginIdentifier = String(email).trim();
+  console.log('[api/auth/login] attempting login for identifier:', loginIdentifier);
   
-  // Find user by email
-  const user = await findUserByEmailAsync(email);
+  // Trouver l'utilisateur par email, sinon par username (le champ UI accepte les deux)
+  let user = await findUserByEmailAsync(loginIdentifier);
+  if (!user) {
+    user = await findUserByUsernameAsync(loginIdentifier);
+  }
 
   if (!user) {
-    console.log('[api/auth/login] user not found by email');
+    console.log('[api/auth/login] user not found by email or username');
     return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
   }
 
