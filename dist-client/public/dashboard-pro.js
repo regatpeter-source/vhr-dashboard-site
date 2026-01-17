@@ -3612,9 +3612,9 @@ window.openOfficialBillingPage = function() {
 async function checkLicense() {
 	try {
 		// Admin = accès illimité (bypass paywall/licence)
-		const role = userRoles[currentUser] || 'user';
 		const uname = (currentUser || '').toLowerCase();
-		if (uname === 'vhr') {
+		const vhrAuth = authenticatedUsers['vhr'] || authenticatedUsers[currentUser];
+		if (uname === 'vhr' && vhrAuth && vhrAuth.token) {
 			licenseStatus.licensed = true;
 			licenseStatus.expired = false;
 			showTrialBanner(0);
