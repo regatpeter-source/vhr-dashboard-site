@@ -925,6 +925,28 @@ async function buildDemoStatusForUser(user, { skipStripe = false } = {}) {
 
   ensureUserDemoStartDate(user);
 
+  // Try remote trial sync (cloud API) if configured, to honor admin extensions without local DB secrets
+  let remoteTrial = null;
+  if (TRIAL_SYNC_URL) {
+    try {
+      const resp = await fetch(TRIAL_SYNC_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(TRIAL_SYNC_TOKEN ? { Authorization: `Bearer ${TRIAL_SYNC_TOKEN}` } : {})
+        },
+        body: JSON.stringify({ username: user.username, email: user.email })
+      });
+      if (resp.ok) {
+        remoteTrial = await resp.json();
+      } else {
+        console.warn('[trial sync] remote responded with status', resp.status);
+      }
+    } catch (e) {
+      console.warn('[trial sync] remote fetch failed:', e && e.message ? e.message : e);
+    }
+  }
+
   const expirationDate = user.demoStartDate
     ? new Date(new Date(user.demoStartDate).getTime() + demoConfig.DEMO_DURATION_MS).toISOString()
     : null;
@@ -958,7 +980,52 @@ async function buildDemoStatusForUser(user, { skipStripe = false } = {}) {
   }
 
   const hasActiveLicense = !!findActiveLicenseByUsername(user.username);
-  const accessBlocked = demoExpired && !hasValidSubscription && !hasActiveLicense;
+  let accessBlocked = demoExpired && !hasValidSubscription && !hasActiveLicense;
+
+  // If remote trial data exists, prefer fresher info (e.g., admin extension)
+  if (remoteTrial && typeof remoteTrial === 'object') {
+    const r = remoteTrial;
+    const rRemaining = typeof r.remainingDays === 'number' ? r.remainingDays : remainingDays;
+    const rDemoExpired = typeof r.demoExpired === 'boolean' ? r.demoExpired : demoExpired;
+    const rHasSub = typeof r.hasValidSubscription === 'boolean' ? r.hasValidSubscription : hasValidSubscription;
+    const rHasLic = typeof r.hasActiveLicense === 'boolean' ? r.hasActiveLicense : hasActiveLicense;
+    const rAccessBlocked = typeof r.accessBlocked === 'boolean'
+      ? r.accessBlocked
+      : (rDemoExpired && !rHasSub && !rHasLic);
+
+    // If remote shows more remaining days or not expired, trust it
+    const useRemote = (!rDemoExpired && demoExpired) || rRemaining > remainingDays;
+
+    if (useRemote) {
+      if (r.demoStartDate) {
+        user.demoStartDate = r.demoStartDate;
+        try { persistUser(user); } catch (e) { /* ignore */ }
+      }
+    }
+
+    // Override computed flags with remote if present
+    const mergedExpiration = r.expirationDate || expirationDate;
+    const mergedMessage = r.message || (rAccessBlocked
+      ? '❌ Essai expiré - Abonnement ou licence requis'
+      : rDemoExpired
+        ? '✅ Accès accordé via abonnement/licence actif'
+        : `✅ Essai en cours - ${rRemaining} jour(s) restant(s)`);
+
+    return {
+      demoStartDate: user.demoStartDate || null,
+      demoExpired: rDemoExpired,
+      remainingDays: rRemaining,
+      totalDays: r.totalDays || demoConfig.DEMO_DAYS,
+      expirationDate: mergedExpiration,
+      hasValidSubscription: rHasSub,
+      subscriptionStatus: r.subscriptionStatus || subscriptionStatus,
+      stripeError,
+      hasActiveLicense: rHasLic,
+      accessBlocked: rAccessBlocked,
+      message: mergedMessage,
+      remote: true
+    };
+  }
 
   return {
     demoStartDate: user.demoStartDate || null,
@@ -1689,6 +1756,10 @@ if (!stripeKey) {
   throw new Error('Stripe secret key required: STRIPE_SECRET_KEY must be an sk_ key.');
 }
 const stripe = require('stripe')(stripeKey);
+
+// Optional remote trial sync (cloud API) to avoid embedding DB secrets in the pack
+const TRIAL_SYNC_URL = process.env.TRIAL_SYNC_URL || '';
+const TRIAL_SYNC_TOKEN = process.env.TRIAL_SYNC_TOKEN || '';
 
 // Verify the Stripe secret key early at startup (fail fast on invalid / publishable key)
 async function verifyStripeKeyAtStartup() {
