@@ -1363,33 +1363,23 @@ app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
 // Route pour le pack complet (Dashboard + Voix) - SANS RESTRICTION
 // Permet d'éviter les 404 GitHub en servant le binaire/zip directement depuis le serveur
 app.get('/download/client-full', (req, res) => {
-  const candidates = [
-    path.join(__dirname, 'VHR.Dashboard.Setup.1.0.1.exe'),
-    path.join(__dirname, 'vhr-dashboard-pro-client-full-updated-new3-node-adb.zip'),
-    path.join(__dirname, 'vhr-dashboard-pro-client-full-updated-new3.zip'),
-    path.join(__dirname, 'vhr-dashboard-pro-client-full-updated-new.zip'),
-    path.join(__dirname, 'vhr-dashboard-pro-client-full-updated.zip'),
-    path.join(__dirname, 'vhr-dashboard-pro-client-full.zip'),
-    path.join(__dirname, 'vhr-dashboard-pro-client-full-restore.zip')
-  ];
+  const installerPath = path.join(__dirname, 'VHR.Dashboard.Setup.1.0.1.exe');
 
-  const existing = candidates.find(fs.existsSync);
-  if (!existing) {
-    return res.status(404).json({ ok: false, error: 'Client pack not found on server' });
+  if (!fs.existsSync(installerPath)) {
+    return res.status(404).json({ ok: false, error: 'Installer not found on server' });
   }
 
   try {
-    const stats = fs.statSync(existing);
-    const filename = path.basename(existing);
-    const isExe = filename.toLowerCase().endsWith('.exe');
-    res.setHeader('Content-Type', isExe ? 'application/octet-stream' : 'application/zip');
+    const stats = fs.statSync(installerPath);
+    const filename = path.basename(installerPath);
+    res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Length', stats.size);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Cache-Control', 'public, max-age=3600');
-    return res.sendFile(existing);
+    return res.sendFile(installerPath);
   } catch (e) {
     console.error('[download/client-full] error:', e);
-    return res.status(500).json({ ok: false, error: 'Server error while serving client pack' });
+    return res.status(500).json({ ok: false, error: 'Server error while serving installer' });
   }
 });
 
