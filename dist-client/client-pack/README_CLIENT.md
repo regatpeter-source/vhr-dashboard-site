@@ -17,8 +17,9 @@ Ce pack permet à chaque abonné de lancer le Dashboard Pro **en local** sur son
 1. Télécharger le ZIP fourni.
 2. Décompresser dans un dossier (ex: `C:\VHR-Dashboard-Pro`).
 3. Double-cliquer sur `start-dashboard-pro.bat` (ou `start-dashboard-pro.ps1`).
-4. Le navigateur s’ouvrira sur `http://localhost:3000/vhr-dashboard-pro.html`.
-5. Brancher le casque (USB) ou via réseau local (ADB over WiFi) pour la détection/streaming.
+4. ⚠️ Windows SmartScreen : si la fenêtre d’avertissement apparaît, cliquer sur **« Informations complémentaires »** puis **« Exécuter quand même »** pour lancer le dashboard.
+5. Le navigateur s’ouvrira sur `http://localhost:3000/vhr-dashboard-pro.html`.
+6. Brancher le casque (USB) ou via réseau local (ADB over WiFi) pour la détection/streaming.
 
 ## Authentification / Démo 7 jours
 - Aucun changement : le système d’auth et la démo 7 jours restent identiques.
