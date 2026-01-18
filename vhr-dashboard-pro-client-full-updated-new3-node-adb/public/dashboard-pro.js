@@ -3871,6 +3871,11 @@ window.resetMyTrial = async function() {
 			await checkLicense();
 			return;
 		}
+		if (res && (res._status === 401 || (res.error && res.error.toLowerCase().includes('token')))) {
+			showToast('Veuillez vous reconnecter pour relancer l\'essai', 'warning');
+			showAuthModal('login');
+			return;
+		}
 		showToast(res && res.error ? res.error : 'Impossible de réinitialiser l\'essai', 'error');
 	} catch (e) {
 		console.error('[trial] resetMyTrial failed', e);
