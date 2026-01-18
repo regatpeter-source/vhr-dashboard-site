@@ -3782,6 +3782,15 @@ window.showUnlockModal = function(status = licenseStatus) {
 					</button>
 				</div>
 			</div>
+
+			<!-- Reset trial (self-service) -->
+			<div style="background:#34495e;padding:16px;border-radius:12px;margin:12px 0;border:1px dashed #f39c12;">
+				<h4 style="color:#f39c12;margin:0 0 6px 0;">🔄 Réinitialiser l'essai</h4>
+				<p style="color:#ecf0f1;margin:0 0 10px 0;font-size:13px;">En cas de blocage anormal, relancez votre essai gratuit (si disponible) et rafraîchissez le statut.</p>
+				<button onclick="resetMyTrial()" style="width:100%;background:#f39c12;color:#000;border:none;padding:10px;border-radius:8px;cursor:pointer;font-weight:bold;">
+					♻️ Relancer mon essai
+				</button>
+			</div>
 			
 			<!-- Option 2: Achat définitif -->
 			<div style="background:#2c3e50;padding:24px;border-radius:12px;margin:20px 0;border:2px solid #2ecc71;">
@@ -3848,6 +3857,24 @@ window.startStripeCheckoutFromApp = async function() {
 	} catch (e) {
 		console.error('[stripe] checkout error', e);
 		showToast('Erreur lors de la création de la session Stripe', 'error');
+	}
+};
+
+window.resetMyTrial = async function() {
+	try {
+		const res = await api('/api/demo/reset-self', { method: 'POST' });
+		if (res && res.ok && res.demo) {
+			const demo = res.demo;
+			showToast(`✅ Essai réinitialisé : ${demo.remainingDays} jour(s) restant(s)`, 'success');
+			closeUnlockModal();
+			showTrialBanner(demo.remainingDays);
+			await checkLicense();
+			return;
+		}
+		showToast(res && res.error ? res.error : 'Impossible de réinitialiser l\'essai', 'error');
+	} catch (e) {
+		console.error('[trial] resetMyTrial failed', e);
+		showToast('Erreur lors de la réinitialisation de l\'essai', 'error');
 	}
 };
 

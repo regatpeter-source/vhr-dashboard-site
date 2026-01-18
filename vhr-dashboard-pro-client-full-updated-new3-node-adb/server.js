@@ -4370,6 +4370,25 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
   }
 });
 
+// Reset demo/trial for the authenticated user (admin/self-service recovery)
+app.post('/api/demo/reset-self', authMiddleware, async (req, res) => {
+  try {
+    const user = getUserByUsername(req.user.username);
+    if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+
+    const now = Date.now();
+    user.demoStartDate = now;
+    user.subscriptionStatus = user.subscriptionStatus === 'active' ? user.subscriptionStatus : 'trial';
+    persistUser(user);
+
+    const demoStatus = await buildDemoStatusForUser(user);
+    return res.json({ ok: true, demo: demoStatus, message: 'Essai réinitialisé pour cet utilisateur.' });
+  } catch (e) {
+    console.error('[demo] reset-self error:', e);
+    return res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
 // Get user's purchases history
 app.get('/api/purchases/history', authMiddleware, (req, res) => {
   try {
