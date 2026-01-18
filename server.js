@@ -1957,19 +1957,20 @@ function isUserDeletedOrDisabled(user) {
 }
 
 // ========== DEMO STATUS MANAGEMENT ========== 
+// Fallback server-wide demo window (used only when no user context is available)
+const SERVER_DEMO_START_MS = Date.now();
 function getDemoStatus() {
-  const DEMO_START = new Date('2025-12-07T00:00:00Z').getTime();
-  const DEMO_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
-  const DEMO_END = DEMO_START + DEMO_DURATION;
-  
+  const duration = demoConfig.DEMO_DURATION_MS || (demoConfig.DEMO_DAYS * 24 * 60 * 60 * 1000);
+  const demoEndMs = SERVER_DEMO_START_MS + duration;
+
   const now = Date.now();
-  const daysRemaining = Math.ceil((DEMO_END - now) / (24 * 60 * 60 * 1000));
-  const isExpired = now > DEMO_END;
+  const daysRemaining = Math.ceil((demoEndMs - now) / (24 * 60 * 60 * 1000));
+  const isExpired = now > demoEndMs;
   
   return {
     isExpired,
     daysRemaining: Math.max(0, daysRemaining),
-    expiresAt: new Date(DEMO_END).toISOString(),
+    expiresAt: new Date(demoEndMs).toISOString(),
     message: isExpired ? 'Demo expiré' : `Essai gratuit - ${Math.max(0, daysRemaining)} jour(s) restant(s)`
   };
 }
@@ -4631,34 +4632,57 @@ app.post('/api/license/check', async (req, res) => {
             });
           }
 
-          // Perpetual license linked to the user (no key required client side)
+          const demoStatus = await buildDemoStatusForUser(user);
           const userLicense = findActiveLicenseByUsername(user.username);
+
           if (userLicense) {
             return res.json({
               ok: true,
               licensed: true,
               type: 'perpetual',
               licenseKey: userLicense.key,
+              demo: demoStatus,
               message: 'Licence perpétuelle détectée - Accès complet'
             });
           }
 
-          // Active subscription grants access
-          if (user.subscriptionStatus === 'active') {
+          if (demoStatus.hasValidSubscription) {
             return res.json({
               ok: true,
               licensed: true,
               type: 'subscription',
+              demo: demoStatus,
               message: 'Abonnement actif - Accès complet'
             });
           }
+
+          if (!demoStatus.demoExpired) {
+            return res.json({
+              ok: true,
+              licensed: false,
+              trial: true,
+              daysRemaining: demoStatus.remainingDays,
+              expiresAt: demoStatus.expirationDate,
+              demo: demoStatus,
+              message: demoStatus.message
+            });
+          }
+
+          return res.json({
+            ok: true,
+            licensed: false,
+            trial: false,
+            expired: true,
+            demo: demoStatus,
+            message: demoStatus.message
+          });
         }
       } catch (tokenError) {
         console.warn('[license] auth token verification failed:', tokenError && tokenError.message ? tokenError.message : tokenError);
       }
     }
 
-    // Check demo status
+    // Fallback when no user context is available
     const demoStatus = getDemoStatus();
     if (!demoStatus.isExpired) {
       return res.json({
@@ -4671,7 +4695,6 @@ app.post('/api/license/check', async (req, res) => {
       });
     }
 
-    // Demo expired, no license
     return res.json({
       ok: true,
       licensed: false,
@@ -4768,178 +4791,6 @@ app.get('/api/test/email-config', async (req, res) => {
       error: e.message,
       message: 'Email configured but connection failed. Check credentials.' 
     });
-  }
-});
-
-// Check license or demo status at dashboard startup
-app.post('/api/license/check', async (req, res) => {
-  try {
-    const { licenseKey } = req.body || {};
-    
-    // If license key provided, validate it
-    if (licenseKey) {
-      const isValid = validateLicenseKey(licenseKey);
-      if (isValid) {
-        return res.json({ 
-          ok: true, 
-          licensed: true, 
-          type: 'perpetual',
-          message: 'Licence valide - Accès complet' 
-        });
-      }
-    }
-    
-    // Check if user has active subscription (requires auth)
-    if (req.cookies && req.cookies.token) {
-      try {
-        const decoded = jwt.verify(req.cookies.token, JWT_SECRET);
-        const user = getUserByUsername(decoded.username);
-        if (user && user.subscriptionStatus === 'active') {
-          return res.json({ 
-            ok: true, 
-            licensed: true, 
-            type: 'subscription',
-            message: 'Abonnement actif - Accès complet' 
-          });
-        }
-      } catch (e) {
-        // Token invalid or expired
-      }
-    }
-    
-    // Check demo status
-    const demoStatus = getDemoStatus();
-    if (!demoStatus.isExpired) {
-      return res.json({ 
-        ok: true, 
-        licensed: false, 
-        trial: true,
-        daysRemaining: demoStatus.daysRemaining,
-        expiresAt: demoStatus.expiresAt,
-        message: `Essai gratuit - ${demoStatus.daysRemaining} jour(s) restant(s)` 
-      });
-    }
-    
-    // Demo expired, no license
-    return res.json({ 
-      ok: true, 
-      licensed: false, 
-      trial: false,
-      expired: true,
-      message: 'Période d\'essai expirée - Veuillez vous abonner ou acheter une licence' 
-    });
-  } catch (e) {
-    console.error('[license] check error:', e);
-    res.status(500).json({ ok: false, error: 'Server error' });
-  }
-});
-
-// Activate license key
-app.post('/api/license/activate', async (req, res) => {
-  try {
-    const { licenseKey } = req.body || {};
-    if (!licenseKey) return res.status(400).json({ ok: false, error: 'License key required' });
-    
-    const isValid = validateLicenseKey(licenseKey);
-    if (!isValid) {
-      return res.status(400).json({ ok: false, error: 'Clé de licence invalide' });
-    }
-    
-    res.json({ 
-      ok: true, 
-      message: 'Licence activée avec succès !',
-      licensed: true 
-    });
-  } catch (e) {
-    console.error('[license] activate error:', e);
-    res.status(500).json({ ok: false, error: 'Server error' });
-  }
-});
-
-// ========== LICENSE VERIFICATION API ==========
-
-// Check license or demo status at dashboard startup
-app.post('/api/license/check', async (req, res) => {
-  try {
-    const { licenseKey } = req.body || {};
-    
-    // If license key provided, validate it
-    if (licenseKey) {
-      const isValid = validateLicenseKey(licenseKey);
-      if (isValid) {
-        return res.json({ 
-          ok: true, 
-          licensed: true, 
-          type: 'perpetual',
-          message: 'Licence valide - Accès complet' 
-        });
-      }
-    }
-    
-    // Check if user has active subscription (requires auth)
-    if (req.cookies && req.cookies.token) {
-      try {
-        const decoded = jwt.verify(req.cookies.token, JWT_SECRET);
-        const user = getUserByUsername(decoded.username);
-        if (user && user.subscriptionStatus === 'active') {
-          return res.json({ 
-            ok: true, 
-            licensed: true, 
-            type: 'subscription',
-            message: 'Abonnement actif - Accès complet' 
-          });
-        }
-      } catch (e) {
-        // Token invalid or expired
-      }
-    }
-    
-    // Check demo status
-    const demoStatus = getDemoStatus();
-    if (!demoStatus.isExpired) {
-      return res.json({ 
-        ok: true, 
-        licensed: false, 
-        trial: true,
-        daysRemaining: demoStatus.daysRemaining,
-        expiresAt: demoStatus.expiresAt,
-        message: `Essai gratuit - ${demoStatus.daysRemaining} jour(s) restant(s)` 
-      });
-    }
-    
-    // Demo expired, no license
-    return res.json({ 
-      ok: true, 
-      licensed: false, 
-      trial: false,
-      expired: true,
-      message: 'Période d\'essai expirée - Veuillez vous abonner ou acheter une licence' 
-    });
-  } catch (e) {
-    console.error('[license] check error:', e);
-    res.status(500).json({ ok: false, error: 'Server error' });
-  }
-});
-
-// Activate license key
-app.post('/api/license/activate', async (req, res) => {
-  try {
-    const { licenseKey } = req.body || {};
-    if (!licenseKey) return res.status(400).json({ ok: false, error: 'License key required' });
-    
-    const isValid = validateLicenseKey(licenseKey);
-    if (!isValid) {
-      return res.status(400).json({ ok: false, error: 'Clé de licence invalide' });
-    }
-    
-    res.json({ 
-      ok: true, 
-      message: 'Licence activée avec succès !',
-      licensed: true 
-    });
-  } catch (e) {
-    console.error('[license] activate error:', e);
-    res.status(500).json({ ok: false, error: 'Server error' });
   }
 });
 

@@ -889,6 +889,96 @@ function getDemoRemainingDays(user) {
   return Math.max(0, remainingDays);
 }
 
+// Ensure each user has an individual trial start date (persisted when possible)
+function ensureUserDemoStartDate(user, { persist = true } = {}) {
+  if (!user) return null;
+  if (!user.demoStartDate && demoConfig.MODE === 'database') {
+    user.demoStartDate = new Date().toISOString();
+    if (persist) {
+      try {
+        persistUser(user);
+      } catch (e) {
+        console.warn('[demo] unable to persist demoStartDate for', user.username, e && e.message ? e.message : e);
+      }
+    }
+  }
+  return user.demoStartDate || null;
+}
+
+// Build a user-scoped demo status (avoids machine-wide expiry)
+async function buildDemoStatusForUser(user, { skipStripe = false } = {}) {
+  if (!user) {
+    return {
+      demoStartDate: null,
+      demoExpired: true,
+      remainingDays: 0,
+      totalDays: demoConfig.DEMO_DAYS,
+      expirationDate: null,
+      hasValidSubscription: false,
+      subscriptionStatus: 'none',
+      stripeError: null,
+      hasActiveLicense: false,
+      accessBlocked: true,
+      message: 'Utilisateur introuvable'
+    };
+  }
+
+  ensureUserDemoStartDate(user);
+
+  const expirationDate = user.demoStartDate
+    ? new Date(new Date(user.demoStartDate).getTime() + demoConfig.DEMO_DURATION_MS).toISOString()
+    : null;
+  const demoExpired = isDemoExpired(user);
+  const remainingDays = getDemoRemainingDays(user);
+
+  let hasValidSubscription = (user.subscriptionStatus || '').toLowerCase() === 'active';
+  let subscriptionStatus = user.subscriptionStatus || 'none';
+  let stripeError = null;
+
+  // If the local record says expired, double-check Stripe for an active/trialing sub
+  if (demoExpired && !hasValidSubscription && user.stripeCustomerId && stripe && !skipStripe) {
+    try {
+      const stripeSubs = await stripe.subscriptions.list({
+        customer: user.stripeCustomerId,
+        status: 'all',
+        limit: 5
+      });
+      if (stripeSubs.data && stripeSubs.data.length > 0) {
+        const activeOrTrial = stripeSubs.data.find(s => s.status === 'active' || s.status === 'trialing');
+        if (activeOrTrial) {
+          const nowSec = Math.floor(Date.now() / 1000);
+          const trialValid = activeOrTrial.status === 'trialing' && activeOrTrial.trial_end && activeOrTrial.trial_end > nowSec;
+          hasValidSubscription = activeOrTrial.status === 'active' || trialValid;
+          subscriptionStatus = activeOrTrial.status;
+        }
+      }
+    } catch (e) {
+      stripeError = e && e.message ? e.message : String(e || 'Stripe error');
+    }
+  }
+
+  const hasActiveLicense = !!findActiveLicenseByUsername(user.username);
+  const accessBlocked = demoExpired && !hasValidSubscription && !hasActiveLicense;
+
+  return {
+    demoStartDate: user.demoStartDate || null,
+    demoExpired,
+    remainingDays,
+    totalDays: demoConfig.DEMO_DAYS,
+    expirationDate,
+    hasValidSubscription,
+    subscriptionStatus,
+    stripeError,
+    hasActiveLicense,
+    accessBlocked,
+    message: accessBlocked
+      ? '❌ Essai expiré - Abonnement ou licence requis'
+      : demoExpired
+        ? '✅ Accès accordé via abonnement/licence actif'
+        : `✅ Essai en cours - ${remainingDays} jour(s) restant(s)`
+  };
+}
+
 const LICENSES_FILE = path.join(__dirname, 'data', 'licenses.json');
 const DEMO_FILE = path.join(__dirname, 'data', 'demo.json');
 
@@ -1716,6 +1806,7 @@ function saveUsers() {
       stripeCustomerId: u.stripeCustomerId || null,
       latestInvoiceId: u.latestInvoiceId || null,
       lastInvoicePaidAt: u.lastInvoicePaidAt || null,
+      demoStartDate: u.demoStartDate || null,
       subscriptionStatus: u.subscriptionStatus || null,
       subscriptionId: u.subscriptionId || null
     }));
@@ -3225,6 +3316,9 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
       persistUser(user);
       ensureUserSubscription(user, { planName: 'auto-provision', status: 'trial' });
     }
+
+    // Guarantee a per-user demo start date (persisted once)
+    ensureUserDemoStartDate(user);
     
     // ADMINS: Skip license/demo checks and grant full access
     if (user.role === 'admin') {
@@ -3997,45 +4091,72 @@ app.post('/api/license/check', async (req, res) => {
 
           // Perpetual license linked to the user (no key required client side)
           const userLicense = findActiveLicenseByUsername(user.username);
+
+          const demoStatus = await buildDemoStatusForUser(user);
+
           if (userLicense) {
             return res.json({
               ok: true,
               licensed: true,
               type: 'perpetual',
               licenseKey: userLicense.key,
+              demo: demoStatus,
               message: 'Licence perpétuelle détectée - Accès complet'
             });
           }
 
           // Active subscription grants access
-          if (user.subscriptionStatus === 'active') {
+          if (demoStatus.hasValidSubscription) {
             return res.json({
               ok: true,
               licensed: true,
               type: 'subscription',
+              demo: demoStatus,
               message: 'Abonnement actif - Accès complet'
             });
           }
+
+          // Demo still valid
+          if (!demoStatus.demoExpired) {
+            return res.json({
+              ok: true,
+              licensed: false,
+              trial: true,
+              daysRemaining: demoStatus.remainingDays,
+              expiresAt: demoStatus.expirationDate,
+              demo: demoStatus,
+              message: demoStatus.message
+            });
+          }
+
+          // Demo expired with no subscription/licence
+          return res.json({
+            ok: true,
+            licensed: false,
+            trial: false,
+            expired: true,
+            demo: demoStatus,
+            message: demoStatus.message
+          });
         }
       } catch (tokenError) {
         console.warn('[license] auth token verification failed:', tokenError && tokenError.message ? tokenError.message : tokenError);
       }
     }
 
-    // Check demo status
-    const demoStatus = getDemoStatus();
-    if (!demoStatus.isExpired) {
+    // Fallback for unauthenticated requests: use machine-wide demo timer
+    const fallbackDemo = getDemoStatus();
+    if (!fallbackDemo.isExpired) {
       return res.json({
         ok: true,
         licensed: false,
         trial: true,
-        daysRemaining: demoStatus.daysRemaining,
-        expiresAt: demoStatus.expiresAt,
-        message: `Essai gratuit - ${demoStatus.daysRemaining} jour(s) restant(s)`
+        daysRemaining: fallbackDemo.daysRemaining,
+        expiresAt: fallbackDemo.expiresAt,
+        message: `Essai gratuit - ${fallbackDemo.daysRemaining} jour(s) restant(s)`
       });
     }
 
-    // Demo expired, no license
     return res.json({
       ok: true,
       licensed: false,
@@ -4135,177 +4256,7 @@ app.get('/api/test/email-config', async (req, res) => {
   }
 });
 
-// Check license or demo status at dashboard startup
-app.post('/api/license/check', async (req, res) => {
-  try {
-    const { licenseKey } = req.body || {};
-    
-    // If license key provided, validate it
-    if (licenseKey) {
-      const isValid = validateLicenseKey(licenseKey);
-      if (isValid) {
-        return res.json({ 
-          ok: true, 
-          licensed: true, 
-          type: 'perpetual',
-          message: 'Licence valide - Accès complet' 
-        });
-      }
-    }
-    
-    // Check if user has active subscription (requires auth)
-    if (req.cookies && req.cookies.token) {
-      try {
-        const decoded = jwt.verify(req.cookies.token, JWT_SECRET);
-        const user = getUserByUsername(decoded.username);
-        if (user && user.subscriptionStatus === 'active') {
-          return res.json({ 
-            ok: true, 
-            licensed: true, 
-            type: 'subscription',
-            message: 'Abonnement actif - Accès complet' 
-          });
-        }
-      } catch (e) {
-        // Token invalid or expired
-      }
-    }
-    
-    // Check demo status
-    const demoStatus = getDemoStatus();
-    if (!demoStatus.isExpired) {
-      return res.json({ 
-        ok: true, 
-        licensed: false, 
-        trial: true,
-        daysRemaining: demoStatus.daysRemaining,
-        expiresAt: demoStatus.expiresAt,
-        message: `Essai gratuit - ${demoStatus.daysRemaining} jour(s) restant(s)` 
-      });
-    }
-    
-    // Demo expired, no license
-    return res.json({ 
-      ok: true, 
-      licensed: false, 
-      trial: false,
-      expired: true,
-      message: 'Période d\'essai expirée - Veuillez vous abonner ou acheter une licence' 
-    });
-  } catch (e) {
-    console.error('[license] check error:', e);
-    res.status(500).json({ ok: false, error: 'Server error' });
-  }
-});
-
-// Activate license key
-app.post('/api/license/activate', async (req, res) => {
-  try {
-    const { licenseKey } = req.body || {};
-    if (!licenseKey) return res.status(400).json({ ok: false, error: 'License key required' });
-    
-    const isValid = validateLicenseKey(licenseKey);
-    if (!isValid) {
-      return res.status(400).json({ ok: false, error: 'Clé de licence invalide' });
-    }
-    
-    res.json({ 
-      ok: true, 
-      message: 'Licence activée avec succès !',
-      licensed: true 
-    });
-  } catch (e) {
-    console.error('[license] activate error:', e);
-    res.status(500).json({ ok: false, error: 'Server error' });
-  }
-});
-
 // ========== LICENSE VERIFICATION API ==========
-
-// Check license or demo status at dashboard startup
-app.post('/api/license/check', async (req, res) => {
-  try {
-    const { licenseKey } = req.body || {};
-    
-    // If license key provided, validate it
-    if (licenseKey) {
-      const isValid = validateLicenseKey(licenseKey);
-      if (isValid) {
-        return res.json({ 
-          ok: true, 
-          licensed: true, 
-          type: 'perpetual',
-          message: 'Licence valide - Accès complet' 
-        });
-      }
-    }
-    
-    // Check if user has active subscription (requires auth)
-    if (req.cookies && req.cookies.token) {
-      try {
-        const decoded = jwt.verify(req.cookies.token, JWT_SECRET);
-        const user = getUserByUsername(decoded.username);
-        if (user && user.subscriptionStatus === 'active') {
-          return res.json({ 
-            ok: true, 
-            licensed: true, 
-            type: 'subscription',
-            message: 'Abonnement actif - Accès complet' 
-          });
-        }
-      } catch (e) {
-        // Token invalid or expired
-      }
-    }
-    
-    // Check demo status
-    const demoStatus = getDemoStatus();
-    if (!demoStatus.isExpired) {
-      return res.json({ 
-        ok: true, 
-        licensed: false, 
-        trial: true,
-        daysRemaining: demoStatus.daysRemaining,
-        expiresAt: demoStatus.expiresAt,
-        message: `Essai gratuit - ${demoStatus.daysRemaining} jour(s) restant(s)` 
-      });
-    }
-    
-    // Demo expired, no license
-    return res.json({ 
-      ok: true, 
-      licensed: false, 
-      trial: false,
-      expired: true,
-      message: 'Période d\'essai expirée - Veuillez vous abonner ou acheter une licence' 
-    });
-  } catch (e) {
-    console.error('[license] check error:', e);
-    res.status(500).json({ ok: false, error: 'Server error' });
-  }
-});
-
-// Activate license key
-app.post('/api/license/activate', async (req, res) => {
-  try {
-    const { licenseKey } = req.body || {};
-    if (!licenseKey) return res.status(400).json({ ok: false, error: 'License key required' });
-    
-    const isValid = validateLicenseKey(licenseKey);
-    if (!isValid) {
-      return res.status(400).json({ ok: false, error: 'Clé de licence invalide' });
-    }
-    
-    res.json({ 
-      ok: true, 
-      message: 'Licence activée avec succès !',
-      licensed: true 
-    });
-  } catch (e) {
-    console.error('[license] activate error:', e);
-    res.status(500).json({ ok: false, error: 'Server error' });
-  }
-});
 
 // ========== PURCHASE/ONE-TIME PAYMENT MANAGEMENT ==========
 
