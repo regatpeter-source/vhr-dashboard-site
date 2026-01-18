@@ -2,7 +2,7 @@
 // Now downloads the full client pack (Dashboard + Voix)
 
 // Lien direct vers le release GitHub du pack client
-const ZIP_URL_FULL = 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.0-client/vhr-dashboard-pro-client-full-updated-new3.zip';
+const ZIP_URL_FULL = 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.0-client/VHR.Dashboard.Setup.1.0.1.exe';
 
 function launchDashboard() {
     const btn = document.getElementById('launchBtn');
