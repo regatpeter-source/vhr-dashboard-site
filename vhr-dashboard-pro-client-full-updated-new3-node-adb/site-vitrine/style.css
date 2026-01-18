@@ -131,6 +131,13 @@ nav ul li a.cta-nav:hover {
   max-width: 320px;
 }
 
+.update-note {
+  margin: 10px 0 6px 0;
+  font-size: 0.95em;
+  color: #2b2b2b;
+  font-weight: 600;
+}
+
 .badge {
   display: inline-block;
   font-size: 0.9em;
