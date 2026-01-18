@@ -296,12 +296,11 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
       </div>
       
       <h2 style="color: #3498db; margin-top: 30px;">🚀 Accès Instantané</h2>
-      <p>Votre accès est activé. Voici comment lancer le Dashboard Pro (sans installation, tout est déjà inclus : Node portable, ADB, dépendances) :</p>
+      <p>Votre accès est activé. Voici comment lancer le Dashboard Pro (installateur Windows 64 bits) :</p>
       <ol style="padding-left: 18px; color: #333; line-height: 1.5;">
-        <li>Téléchargez <strong>vhr-dashboard-pro-client-full-updated-new3.zip</strong> depuis votre espace client ou depuis le lien fourni après achat.</li>
-        <li>Décompressez l’archive dans un dossier de votre choix (ex. <code>C:\\VHR</code>).</li>
-        <li>Dans le dossier extrait, double-cliquez sur <strong>Start Dashboard Pro</strong> (ou <code>start-dashboard-pro.bat</code>).</li>
-        <li>Patientez le démarrage (Node portable + ADB se lancent automatiquement), puis ouvrez l’URL indiquée dans la console si elle ne s’ouvre pas automatiquement.</li>
+        <li>Téléchargez l’installateur <strong>VHR.Dashboard.Setup.1.0.1.exe</strong> depuis votre espace client (ou le lien direct fourni après achat).</li>
+        <li>Lancez le fichier <code>VHR.Dashboard.Setup.1.0.1.exe</code> puis suivez l’assistant (Next → Install → Finish). Un raccourci “VHR Dashboard Pro” est créé sur le Bureau/Start.</li>
+        <li>Ouvrez “VHR Dashboard Pro”. Le serveur embarqué démarre et ouvre automatiquement le Dashboard (http://localhost:3000). Si ce n’est pas le cas, ouvrez manuellement cette URL.</li>
         <li>Connectez-vous avec vos identifiants ci-dessus.</li>
       </ol>
       
