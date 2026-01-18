@@ -75,7 +75,7 @@
       "platform-tools/**"
     ],
     "win": {
-      "icon": "build/icon_1024_master.png",
+      "icon": "build/icon_256.png",
       "target": [
         "nsis"
       ]
