@@ -1839,6 +1839,11 @@ app.post('/create-checkout-session', async (req, res) => {
         },
       ],
       mode: mode, // 'subscription' ou 'payment'
+      ...(mode === 'subscription' ? {
+        subscription_data: {
+          trial_period_days: STRIPE_TRIAL_DAYS || subscriptionConfig?.BILLING_OPTIONS?.MONTHLY?.trialDays || 0
+        }
+      } : {}),
       success_url: returnUrl || `${origin}/pricing.html?success=1`,
       cancel_url: cancelUrl || `${origin}/pricing.html?canceled=1`,
       metadata: metadata, // Store user registration data in metadata
@@ -4369,6 +4374,8 @@ app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) 
     const successUrl = returnUrl || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/vhr-dashboard-pro.html?subscription=success`;
     const canceledUrl = cancelUrl || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/vhr-dashboard-pro.html?subscription=canceled`;
 
+    const trialDays = subscriptionConfig?.BILLING_OPTIONS?.MONTHLY?.trialDays || STRIPE_TRIAL_DAYS || 0;
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [
@@ -4380,6 +4387,7 @@ app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) 
       mode: 'subscription',
       customer: customerId,
       customer_email: undefined, // force the known customer to avoid name drift from cardholder input
+      subscription_data: trialDays > 0 ? { trial_period_days: trialDays } : undefined,
       success_url: successUrl,
       cancel_url: canceledUrl,
       metadata: {
