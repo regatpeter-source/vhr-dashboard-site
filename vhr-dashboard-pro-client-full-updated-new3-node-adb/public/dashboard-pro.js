@@ -3761,7 +3761,7 @@ window.showUnlockModal = function(status = licenseStatus) {
 			${headerMessage}
 			${bodyMessage}
 			
-			<!-- Option 1: Abonnement mensuel -->
+			<!-- Option 1: Abonnement mensuel (Stripe) -->
 			<div style="background:#2c3e50;padding:24px;border-radius:12px;margin:20px 0;border:2px solid #3498db;">
 				<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
 					<h3 style="color:#3498db;margin:0;">💳 Abonnement Mensuel</h3>
@@ -3773,9 +3773,14 @@ window.showUnlockModal = function(status = licenseStatus) {
 					<li>✅ Support prioritaire</li>
 					<li>✅ Annulation à tout moment</li>
 				</ul>
-				<button onclick="openOfficialBillingPage()" style="width:100%;background:#3498db;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
-					📱 S'abonner maintenant
-				</button>
+				<div style="display:flex;flex-direction:column;gap:10px;">
+					<button onclick="startStripeCheckoutFromApp()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
+						⚡ S'abonner (paiement sécurisé Stripe)
+					</button>
+					<button onclick="openOfficialBillingPage()" style="width:100%;background:#3498db;color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;">
+						🌐 Voir la page d'abonnement en ligne
+					</button>
+				</div>
 			</div>
 			
 			<!-- Option 2: Achat définitif -->
@@ -3823,6 +3828,27 @@ window.subscribePro = function() {
 
 window.purchasePro = function() {
 	openOfficialBillingPage();
+};
+
+window.startStripeCheckoutFromApp = async function() {
+	try {
+		const returnUrl = `${window.location.origin}/vhr-dashboard-pro.html?subscription=success`;
+		const cancelUrl = `${window.location.origin}/vhr-dashboard-pro.html?subscription=canceled`;
+		const res = await api('/api/subscriptions/create-checkout', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ planId: 'STANDARD', returnUrl, cancelUrl })
+		});
+		if (res && res.ok && res.url) {
+			showToast('Redirection vers Stripe…', 'info');
+			window.location.href = res.url;
+			return;
+		}
+		showToast(res && res.error ? res.error : 'Impossible de créer la session Stripe', 'error');
+	} catch (e) {
+		console.error('[stripe] checkout error', e);
+		showToast('Erreur lors de la création de la session Stripe', 'error');
+	}
 };
 
 window.startTrialNow = async function() {

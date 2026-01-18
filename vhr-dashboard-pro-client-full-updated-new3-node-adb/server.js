@@ -1724,7 +1724,7 @@ function maskKey(k) {
 }
 
 app.post('/create-checkout-session', async (req, res) => {
-  const { priceId, mode, username, userEmail, password } = req.body || {};
+  const { priceId, mode, username, userEmail, password, returnUrl, cancelUrl } = req.body || {};
   const origin = req.headers.origin || `http://localhost:${process.env.PORT || 3000}`;
   if (!priceId || !mode) return res.status(400).json({ error: 'priceId et mode sont requis' });
   
@@ -1768,8 +1768,8 @@ app.post('/create-checkout-session', async (req, res) => {
         },
       ],
       mode: mode, // 'subscription' ou 'payment'
-      success_url: `${origin}/pricing.html?success=1`,
-      cancel_url: `${origin}/pricing.html?canceled=1`,
+      success_url: returnUrl || `${origin}/pricing.html?success=1`,
+      cancel_url: cancelUrl || `${origin}/pricing.html?canceled=1`,
       metadata: metadata, // Store user registration data in metadata
       customer_email: userEmail || undefined, // Pre-fill customer email in Stripe
     });
@@ -4284,7 +4284,7 @@ app.get('/api/purchases/options', (req, res) => {
 // Create checkout session for subscription (requires authentication)
 app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) => {
   try {
-    const { planId } = req.body || {};
+    const { planId, returnUrl, cancelUrl } = req.body || {};
     if (!planId) return res.status(400).json({ ok: false, error: 'planId required' });
 
     const plan = subscriptionConfig.PLANS[planId];
@@ -4294,6 +4294,9 @@ app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) 
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
 
     const customerId = await ensureStripeCustomerForUser(user);
+
+    const successUrl = returnUrl || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/vhr-dashboard-pro.html?subscription=success`;
+    const canceledUrl = cancelUrl || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/vhr-dashboard-pro.html?subscription=canceled`;
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -4306,8 +4309,8 @@ app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) 
       mode: 'subscription',
       customer: customerId,
       customer_email: undefined, // force the known customer to avoid name drift from cardholder input
-      success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/vhr-dashboard-pro.html?subscription=success`,
-      cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/vhr-dashboard-pro.html?subscription=canceled`,
+      success_url: successUrl,
+      cancel_url: canceledUrl,
       metadata: {
         userId: user.id || user.username,
         username: user.username,
