@@ -2661,6 +2661,14 @@ window.showStreamViewer = function(serial) {
 		<div style='width:90%;max-width:960px;background:#1a1d24;border-radius:12px;overflow:hidden;box-shadow:0 8px 32px #000;'>
 			<div style='background:#23272f;padding:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;'>
 				<h2 style='color:#2ecc71;margin:0;'>📹 Stream - ${deviceName}</h2>
+
+			<div style="background:#2c3e50;padding:18px;border-radius:12px;margin:12px 0 24px 0;border:2px dashed #f39c12;">
+				<h3 style="color:#f39c12;margin:0 0 8px 0;">🎁 Bénéficier de l'essai gratuit 7 jours</h3>
+				<p style="color:#ecf0f1;margin:0 0 12px 0;font-size:13px;">Active immédiatement votre période d'essai (si elle n'a jamais été démarrée) et relance la vérification côté serveur/Stripe.</p>
+				<button onclick="startTrialNow()" style="width:100%;background:#f39c12;color:#000;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:15px;">
+					🚀 Lancer l'essai gratuit
+				</button>
+			</div>
 				<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;'>
 					<label style='color:#fff;font-size:12px;display:flex;align-items:center;gap:6px;'>
 						🔊 Son:
@@ -3815,6 +3823,37 @@ window.subscribePro = function() {
 
 window.purchasePro = function() {
 	openOfficialBillingPage();
+};
+
+window.startTrialNow = async function() {
+	try {
+		const res = await api('/api/demo/status');
+		if (res && res.ok && res.demo) {
+			const demo = res.demo;
+			if (!demo.demoExpired) {
+				showToast(`✅ Essai activé : ${demo.remainingDays} jour(s) restant(s)`, 'success');
+				closeUnlockModal();
+				showTrialBanner(demo.remainingDays);
+				await checkLicense();
+				return;
+			}
+			if (demo.accessBlocked) {
+				showToast('❌ Essai indisponible : abonnement requis', 'error');
+				return;
+			}
+			if (demo.hasValidSubscription) {
+				showToast('✅ Abonnement actif détecté', 'success');
+				closeUnlockModal();
+				showTrialBanner(0);
+				await checkLicense();
+				return;
+			}
+		}
+		showToast('❌ Impossible d\'activer l\'essai pour le moment', 'error');
+	} catch (e) {
+		console.error('[trial] startTrialNow failed', e);
+		showToast('❌ Erreur lors de l\'activation de l\'essai', 'error');
+	}
 };
 
 window.activateLicense = async function() {
