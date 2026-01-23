@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">VHR WebRTC Receiver</string>
-    <string name="status_listening">Écouteur - Prêt</string>
-    <string name="status_speaking">En cours de parole...</string>
-    <string name="status_idle">Inactif</string>
-    <string name="message_empty">Aucun message pour l\'instant</string>
-    <string name="clear_history">Effacer l\'historique</string>
-</resources>

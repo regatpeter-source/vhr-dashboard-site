@@ -1,2 +1,0 @@
-rootProject.name = "vhr-voice"
-include(":app")
