@@ -78,6 +78,18 @@ const ADMIN_INIT_SECRET = process.env.ADMIN_INIT_SECRET || null;
 // Fallbacks to the same value embedded in dashboard-pro.js to avoid 403 if the
 // environment variable is missing on local installs.
 const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
+const SYNC_TARGET_URLS_RAW = process.env.SYNC_TARGET_URLS || process.env.DASHBOARD_SYNC_TARGETS || '';
+const SYNC_TARGET_BASE_URLS = SYNC_TARGET_URLS_RAW
+  .split(/[,;\s]+/)
+  .map(url => url.trim())
+  .filter(Boolean)
+  .map(url => url.replace(/\/+$/g, ''));
+const SYNC_USER_ENDPOINT_RAW = process.env.SYNC_USER_ENDPOINT || '/api/admin/sync-user';
+const SYNC_USER_ENDPOINT = SYNC_USER_ENDPOINT_RAW.startsWith('/')
+  ? SYNC_USER_ENDPOINT_RAW
+  : '/' + SYNC_USER_ENDPOINT_RAW;
+const SYNC_TARGET_TIMEOUT_MS = Math.max(2000, Number.parseInt(process.env.SYNC_TARGET_TIMEOUT_MS || '6000', 10) || 6000);
+const HAS_SYNC_TARGETS = SYNC_TARGET_BASE_URLS.length > 0;
 
 // Manual email overrides to re-link Stripe customers when the stored email is missing/incorrect.
 // Can be provided via JSON in env USER_EMAIL_OVERRIDES_JSON, e.g. {"pitou":"vhrealityone@gmail.com"}
@@ -102,6 +114,70 @@ function ensureAllowedAdmin(req, res) {
     return false;
   }
   return true;
+}
+
+function buildSyncHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    'x-sync-secret': SYNC_USERS_SECRET
+  };
+}
+
+async function syncUserToDashboardTargets(user) {
+  if (!HAS_SYNC_TARGETS || !user || !user.username) return;
+
+  const passwordHash = user.passwordHash || user.passwordhash || null;
+  if (!passwordHash) {
+    console.warn('[sync] Skipping user sync because passwordHash is missing for', user.username);
+    return;
+  }
+
+  const payload = {
+    username: user.username,
+    email: user.email || user.normalizedEmail || null,
+    role: user.role || 'user',
+    passwordHash,
+    demoStartDate: user.demoStartDate || null,
+    subscriptionStatus: user.subscriptionStatus || null,
+    subscriptionId: user.subscriptionId || null,
+    stripeCustomerId: user.stripeCustomerId || null,
+    source: 'site-register'
+  };
+
+  const headers = buildSyncHeaders();
+  const controllerSupported = typeof AbortController === 'function';
+  const tasks = SYNC_TARGET_BASE_URLS.map(async (baseUrl) => {
+    const targetUrl = `${baseUrl}${SYNC_USER_ENDPOINT}`;
+    const controller = controllerSupported ? new AbortController() : null;
+    const signal = controller ? controller.signal : undefined;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), SYNC_TARGET_TIMEOUT_MS) : null;
+    try {
+      const res = await fetch(targetUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+        signal
+      });
+      if (!res.ok) {
+        console.warn(`[sync] ${targetUrl} responded ${res.status}`);
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        console.warn(`[sync] ${targetUrl} timed out after ${SYNC_TARGET_TIMEOUT_MS}ms`);
+      } else {
+        console.error('[sync] Failed to sync user to', targetUrl, err && err.message ? err.message : err);
+      }
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  });
+
+  await Promise.all(tasks);
+}
+
+function triggerUserSync(user) {
+  if (!HAS_SYNC_TARGETS) return;
+  syncUserToDashboardTargets(user).catch(err => console.error('[sync] Internal error while syncing user:', err && err.message ? err.message : err));
 }
 
 // Force the allowlisted admin users to stay admins (even if a stale role=user exists).
@@ -1872,6 +1948,20 @@ function isUsernameDeleted(username) {
   return list.some(e => String(e.username || '').toLowerCase() === uname);
 }
 
+function normalizeEmailValue(rawEmail) {
+  if (rawEmail === undefined || rawEmail === null) return null;
+  if (typeof rawEmail !== 'string') {
+    try {
+      rawEmail = String(rawEmail);
+    } catch (e) {
+      return null;
+    }
+  }
+  const trimmed = rawEmail.trim();
+  if (!trimmed) return null;
+  return trimmed.toLowerCase();
+}
+
 function normalizeUserRecord(user) {
   if (!user) return null;
   const normalized = { ...user };
@@ -1881,6 +1971,7 @@ function normalizeUserRecord(user) {
   if (overrideEmail && normalized.email !== overrideEmail) {
     normalized.email = overrideEmail;
   }
+  normalized.email = normalizeEmailValue(normalized.email);
 
   // Normalize verification fields with legacy compatibility
   const verifiedFlag = normalized.emailVerified ?? normalized.emailverified;
@@ -2358,7 +2449,9 @@ function getUserByEmail(email) {
     const u = require('./db').findUserByEmail?.(email);
     return normalizeUserRecord(u) || null;
   }
-  const found = users.find(u => u.email === email);
+  const normalizedEmail = normalizeEmailValue(email);
+  if (!normalizedEmail) return null;
+  const found = users.find(u => normalizeEmailValue(u.email) === normalizedEmail);
   return normalizeUserRecord(found) || null;
 }
 
@@ -2368,6 +2461,9 @@ function persistUser(user) {
   const overrideEmail = EMAIL_OVERRIDE_MAP[user.username?.toLowerCase()];
   if (overrideEmail && user.email !== overrideEmail) {
     user.email = overrideEmail;
+  }
+  if (user && user.email) {
+    user.email = normalizeEmailValue(user.email);
   }
   if (USE_POSTGRES) {
     // Keep in-memory cache in sync to avoid duplicate creation within same runtime
@@ -2504,7 +2600,8 @@ function isEmailVerifiedOrBypassed(user) {
 
 async function findUserByEmailAsync(email) {
   if (!email) return null;
-  const lookupEmail = String(email).trim();
+  const lookupEmail = normalizeEmailValue(email);
+  if (!lookupEmail) return null;
   if (USE_POSTGRES && db) {
     try {
       const resUser = await db.pool.query('SELECT * FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [lookupEmail]);
@@ -3252,6 +3349,9 @@ app.post('/api/admin/sync-user', async (req, res) => {
     return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
   }
 
+  const emailProvided = Object.prototype.hasOwnProperty.call(req.body || {}, 'email');
+  const normalizedEmail = normalizeEmailValue(email);
+
   try {
     let finalHash = passwordHash || null;
     if (!finalHash && password) {
@@ -3286,7 +3386,7 @@ app.post('/api/admin/sync-user', async (req, res) => {
     let user = getUserByUsername(username);
     if (user) {
       user.passwordHash = finalHash;
-      if (email !== undefined) user.email = email;
+      if (emailProvided) user.email = normalizedEmail;
       if (role) user.role = role;
       if (stripeCustomerId !== undefined) user.stripeCustomerId = stripeCustomerId;
       if (subscriptionStatus !== undefined) user.subscriptionStatus = subscriptionStatus;
@@ -3295,7 +3395,7 @@ app.post('/api/admin/sync-user', async (req, res) => {
         id: `user_${username}`,
         username,
         passwordHash: finalHash,
-        email: email || null,
+        email: normalizedEmail || null,
         role: role || 'user',
         stripeCustomerId: stripeCustomerId || null,
         subscriptionStatus: subscriptionStatus || null,
@@ -3603,6 +3703,11 @@ app.post('/api/auth/register', async (req, res) => {
   if (!username || !email || !password) {
     return res.status(400).json({ ok: false, error: 'Tous les champs sont requis' });
   }
+
+  const normalizedEmail = normalizeEmailValue(email);
+  if (!normalizedEmail) {
+    return res.status(400).json({ ok: false, error: 'Email invalide' });
+  }
   
   if (password.length < 6) {
     return res.status(400).json({ ok: false, error: 'Le mot de passe doit contenir au moins 6 caractères' });
@@ -3623,7 +3728,7 @@ app.post('/api/auth/register', async (req, res) => {
       if (getUserByUsername(username)) {
         return res.status(400).json({ ok: false, error: 'Le nom d\'utilisateur existe déjà' });
       }
-      if (getUserByEmail(email)) {
+      if (getUserByEmail(normalizedEmail)) {
         return res.status(400).json({ ok: false, error: 'Cet email est déjà utilisé' });
       }
     }
@@ -3642,7 +3747,7 @@ app.post('/api/auth/register', async (req, res) => {
     const newUser = {
       id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       username,
-      email,
+      email: normalizedEmail,
       passwordHash,
       role: 'user',
       emailVerified: false,
@@ -3668,6 +3773,9 @@ app.post('/api/auth/register', async (req, res) => {
       planName: 'signup-free',
       status: 'trial'
     });
+
+    // Propager vers les apps Dashboard connectées
+    triggerUserSync(newUser);
 
     // Envoyer l'email de confirmation de compte (best-effort)
     const verificationEnforced = shouldEnforceEmailVerification(newUser);
@@ -8260,18 +8368,20 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 app.post('/api/register', async (req, res) => {
   const { username, password, email } = req.body || {};
   if (!username || !password || !email) return res.status(400).json({ ok: false, error: 'username, password and email required' });
+  const normalizedEmail = normalizeEmailValue(email);
+  if (!normalizedEmail) return res.status(400).json({ ok: false, error: 'Email invalide' });
   try {
     // unique username/email (PostgreSQL vs fallback storage)
     if (USE_POSTGRES && db) {
       const existingUser = await db.getUserByUsername(username);
       if (existingUser) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
-      if (email) {
-        const emailCheck = await db.pool.query('SELECT 1 FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [email]);
+      if (normalizedEmail) {
+        const emailCheck = await db.pool.query('SELECT 1 FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [normalizedEmail]);
         if (emailCheck.rowCount > 0) return res.status(400).json({ ok: false, error: 'Cet email est déjà utilisé' });
       }
     } else {
       if (getUserByUsername(username)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
-      if (email && getUserByEmail(email)) return res.status(400).json({ ok: false, error: 'Cet email est déjà utilisé' });
+      if (getUserByEmail(normalizedEmail)) return res.status(400).json({ ok: false, error: 'Cet email est déjà utilisé' });
     }
     const passwordHash = await bcrypt.hash(password, 10);
     const newUser = { 
@@ -8279,7 +8389,7 @@ app.post('/api/register', async (req, res) => {
       username, 
       passwordHash, 
       role: 'user', 
-      email: email || null, 
+      email: normalizedEmail, 
       emailVerified: false,
       emailVerifiedAt: null,
       emailVerificationToken: null,

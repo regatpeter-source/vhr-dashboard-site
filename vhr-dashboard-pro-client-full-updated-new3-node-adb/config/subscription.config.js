@@ -14,7 +14,8 @@ module.exports = {
       price: 29.00, // EUR TTC par mois
       currency: 'EUR',
       billingPeriod: 'month',
-      stripePriceId: process.env.STRIPE_PRICE_ID_STANDARD || 'price_1Qa0ZZXXXXXXXXXXXXXXXX', // À remplacer par votre ID réel Stripe
+      // Préférence pour STRIPE_SUBSCRIPTION_PRICE_ID (nouveau prix Stripe dédié), fallback sur STRIPE_PRICE_ID_STANDARD
+      stripePriceId: process.env.STRIPE_SUBSCRIPTION_PRICE_ID || process.env.STRIPE_PRICE_ID_STANDARD || 'price_1Qa0ZZXXXXXXXXXXXXXXXX',
       features: [
         'Accès complet à VHR Dashboard',
         'Gestion de casques VR',

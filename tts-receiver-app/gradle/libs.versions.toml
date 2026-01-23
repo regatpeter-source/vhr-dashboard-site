@@ -1,6 +1,6 @@
 [versions]
 # Android & Gradle
-androidGradlePlugin = "7.4.2"
+androidGradlePlugin = "8.2.2"
 kotlin = "1.9.22"
 
 # AndroidX & Core
@@ -11,7 +11,7 @@ material3 = "1.0.2"
 
 # Lifecycle & Compose
 lifecycle = "2.6.2"
-activityCompose = "1.8.0"
+activityCompose = "1.8.2"
 composeBom = "2023.10.00"
 composeCompiler = "1.5.3"
 

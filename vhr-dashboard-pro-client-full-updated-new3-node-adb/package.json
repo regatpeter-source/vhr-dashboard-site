@@ -65,14 +65,35 @@
       "buildResources": "build",
       "output": "dist"
     },
-    "extraResources": [
-      {
-        "from": "platform-tools",
-        "to": "platform-tools"
-      }
+    "files": [
+      "**/*",
+      "!dist{,/**}",
+      "!dist-client{,/**}",
+      "!dist-fresh{,/**}",
+      "!dist-new{,/**}",
+      "!dist-new2{,/**}",
+      "!dist-new3{,/**}",
+      "!dist-new4{,/**}",
+      "!dist-new*{,/**}",
+      "!dist-old{,/**}",
+      "!backups{,/**}",
+      "!backup-stable{,/**}",
+      "!tmp-pack{,/**}",
+      "!node-portable{,/**}",
+      "!client-pack{,/**}",
+      "!tts-receiver-app{,/**}",
+      "!OpenSSL-Win64{,/**}",
+      "!android-*{,/**}",
+      "!sample-android{,/**}",
+      "!vhr-dashboard-pro-client-full-updated-new3.zip",
+      "!**/*.log",
+      "!**/*.tmp",
+      "!**/*.bak"
     ],
     "asarUnpack": [
-      "platform-tools/**"
+      "platform-tools/**",
+      "scrcpy/**",
+      "public/downloads/**"
     ],
     "win": {
       "icon": "build/icon_256.png",
@@ -81,8 +102,12 @@
       ]
     },
     "nsis": {
-      "oneClick": true,
-      "perMachine": false
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "allowElevation": true
     }
   }
 }

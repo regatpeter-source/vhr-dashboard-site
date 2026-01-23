@@ -85,6 +85,14 @@ let licenseKey = localStorage.getItem('vhr_license_key') || '';
 let licenseStatus = { licensed: false, trial: false, expired: false };
 const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
 
+function normalizeSerialKeyClient(serial = '') {
+	try {
+		return String(serial || '').replace(/:\d+$/, '');
+	} catch (_) {
+		return String(serial || '');
+	}
+}
+
 function readAuthToken() {
 	return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
 }
@@ -1043,8 +1051,69 @@ window.switchAccountTab = function(tab) {
 // ========== AUDIO STREAMING (WebRTC) ==========
 let activeAudioStream = null;  // Global audio stream instance
 let activeAudioSerial = null;  // Serial of device receiving audio
+let audioVizRaf = null;        // requestAnimationFrame handle for visualizer
 
 console.log('[voice] dashboard-pro.js build stamp: 2026-01-17 22:00');
+
+// Audio visualizer driven by analyser data when disponible, sinon fallback
+window.animateAudioVisualizer = function() {
+	// Stop previous loop if any
+	if (audioVizRaf) {
+		cancelAnimationFrame(audioVizRaf);
+		audioVizRaf = null;
+	}
+
+	const container = document.getElementById('audioVizContainer');
+	if (!container) return; // no panel yet
+
+	const bars = Array.from(container.children || []);
+	let t = 0;
+
+	const tick = () => {
+		t += 0.04;
+
+		let spectrum = null;
+		// Use real mic spectrum if available
+		if (activeAudioStream && activeAudioStream.analyser) {
+			const analyser = activeAudioStream.analyser;
+			const binCount = analyser.frequencyBinCount;
+			spectrum = new Uint8Array(binCount);
+			analyser.getByteFrequencyData(spectrum);
+		}
+
+		bars.forEach((bar, idx) => {
+			let height;
+			if (spectrum) {
+				const bin = Math.floor((idx / Math.max(1, bars.length - 1)) * (spectrum.length - 1));
+				const v = spectrum[bin] || 0;
+				height = Math.min(180, Math.max(6, (v / 255) * 180));
+			} else {
+				const phase = t * 2 + idx * 0.35;
+				const base = 12 + 28 * Math.sin(phase) ** 2;
+				const jitter = Math.random() * 18;
+				height = Math.min(180, Math.max(6, base + jitter));
+			}
+			bar.style.height = height + 'px';
+		});
+
+		audioVizRaf = requestAnimationFrame(tick);
+	};
+
+	tick();
+};
+
+window.stopAudioVisualizer = function() {
+	if (audioVizRaf) {
+		cancelAnimationFrame(audioVizRaf);
+		audioVizRaf = null;
+	}
+	const container = document.getElementById('audioVizContainer');
+	if (container) {
+		Array.from(container.children || []).forEach(bar => {
+			bar.style.height = '6px';
+		});
+	}
+};
 
 // Keep panel always compact (no fullscreen overlay)
 function setAudioPanelMinimized() {
@@ -1376,110 +1445,36 @@ window.toggleLocalVoiceMonitor = function() {
 	showToast(!isMonitoring ? '🎧 Écoute locale activée' : '🔇 Écoute locale désactivée', 'info');
 };
 
-window.animateAudioVisualizer = function() {
-	// Stop animation if stream is closed or panel is gone
-	if (!activeAudioStream || !document.getElementById('audioVizContainer')) {
-		return; // Don't call requestAnimationFrame - stop the loop
-	}
-	
-	const bars = document.querySelectorAll('#audioVizContainer > div');
-	
-	try {
-		const freqData = activeAudioStream.getFrequencyData();
-		
-		if (freqData && bars.length > 0) {
-			const barCount = bars.length;
-			for (let i = 0; i < barCount; i++) {
-				const idx = Math.floor((i / barCount) * freqData.length);
-				const height = Math.max(4, (freqData[idx] / 255) * 100);
-				bars[i].style.height = height + '%';
-			}
-		}
-	} catch (e) {
-		// If there's an error getting frequency data, just skip this frame
-		console.warn('[animateAudioVisualizer] Error:', e.message);
-	}
-	
-	requestAnimationFrame(window.animateAudioVisualizer);
+window.showStreamAudioDialog = function(serial) {
+	// Remplacé par WebRTC : ouvrir directement la page de test avec le serial comme room
+	return launchWebrtcStream(serial);
 };
 
-window.closeAccountPanel = function() {
-	const panel = document.getElementById('accountPanel');
-	if (panel) panel.remove();
+window.launchStreamWithAudio = function(serial) {
+	// Alias rétrocompatibilité : redirige vers WebRTC
+	return launchWebrtcStream(serial);
 };
 
+// Panneau de gestion du stockage local
 window.showStoragePanel = function() {
-	let panel = document.getElementById('storagePanel');
-	if (panel) panel.remove();
-	
-	const localStorageSize = Object.keys(localStorage).reduce((total, key) => {
-		return total + localStorage.getItem(key).length;
-	}, 0);
-	
-	const localStorageSizeKB = (localStorageSize / 1024).toFixed(2);
-	const localStorageSizeMB = (localStorageSize / (1024 * 1024)).toFixed(4);
-	
-	const storageItems = Object.keys(localStorage).filter(key => key.startsWith('vhr_')).map(key => {
-		const size = (localStorage.getItem(key).length / 1024).toFixed(2);
-		return `
-			<tr style='border-bottom:1px solid #2ecc71;'>
-				<td style='padding:12px;font-size:13px;'>${key}</td>
-				<td style='padding:12px;font-size:13px;text-align:right;'>${size} KB</td>
-				<td style='padding:12px;text-align:center;'>
-					<button onclick="localStorage.removeItem('${key}'); window.showStoragePanel();" style='background:#e74c3c;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:bold;'>Supprimer</button>
-				</td>
-			</tr>
-		`;
-	}).join('');
-	
-	panel = document.createElement('div');
+	const existing = document.getElementById('storagePanel');
+	if (existing) existing.remove();
+
+	const panel = document.createElement('div');
 	panel.id = 'storagePanel';
-	panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:2000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
-	panel.onclick = (e) => { if (e.target === panel) window.closeStoragePanel(); };
-	
+	panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:4000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
 	panel.innerHTML = `
-		<div style='background:#1a1d24;border:3px solid #e74c3c;border-radius:16px;padding:0;max-width:800px;width:90%;max-height:85vh;overflow-y:auto;box-shadow:0 8px 32px #000;color:#fff;'>
-			<!-- Header -->
-			<div style='background:linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);padding:24px;border-radius:13px 13px 0 0;position:relative;'>
-				<button onclick='window.closeStoragePanel()' style='position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;font-weight:bold;'>✕</button>
-				<div style='display:flex;align-items:center;gap:16px;'>
-					<div style='font-size:40px;'>💾</div>
-					<div>
-						<h2 style='margin:0;font-size:28px;color:#fff;'>Gestion du Stockage</h2>
-						<p style='margin:6px 0 0 0;font-size:13px;opacity:0.9;'>Taille totale: <strong>${localStorageSizeMB} MB</strong> (${localStorageSizeKB} KB)</p>
-					</div>
-				</div>
+		<div style='background:#1a1d24;border:2px solid #2ecc71;border-radius:12px;padding:24px;max-width:520px;width:92%;color:#ecf0f1;box-shadow:0 10px 30px rgba(0,0,0,0.45);'>
+			<h3 style='margin:0 0 12px 0;color:#2ecc71;'>🗄️ Gestion du stockage local</h3>
+			<p style='margin:0 0 16px 0;font-size:13px;color:#bdc3c7;'>Inspectez ou videz le localStorage utilisé par le tableau de bord.</p>
+			<div style='margin-top:8px;padding:16px;background:#2c3e50;border-radius:8px;border-left:4px solid #e74c3c;'>
+				<p style='margin:0;font-size:12px;color:#ecf0f1;'>
+					<strong>Note :</strong> le localStorage du navigateur est limité (≈5-10 MB). Supprimez des éléments pour libérer de l'espace.
+				</p>
 			</div>
-			
-			<!-- Content -->
-			<div style='padding:24px;'>
-				<h3 style='margin-top:0;color:#2ecc71;margin-bottom:16px;'>Fichiers stockés:</h3>
-				<div style='overflow-x:auto;'>
-					<table style='width:100%;border-collapse:collapse;font-size:13px;'>
-						<thead>
-							<tr style='background:#2ecc71;color:#000;font-weight:bold;'>
-								<th style='padding:12px;text-align:left;'>Clé de stockage</th>
-								<th style='padding:12px;text-align:right;'>Taille</th>
-								<th style='padding:12px;text-align:center;'>Action</th>
-							</tr>
-						</thead>
-						<tbody>
-							${storageItems || '<tr><td colspan="3" style="padding:12px;text-align:center;color:#95a5a6;">Aucun stockage VHR détecté</td></tr>'}
-						</tbody>
-					</table>
-				</div>
-				
-				<div style='margin-top:24px;padding:16px;background:#2c3e50;border-radius:8px;border-left:4px solid #e74c3c;'>
-					<p style='margin:0;font-size:12px;color:#ecf0f1;'>
-						<strong>Note:</strong> Le localStorage du navigateur peut stocker jusqu'à 5-10 MB selon votre navigateur. 
-						Vous pouvez supprimer des éléments individuellement pour libérer de l'espace.
-					</p>
-				</div>
-				
-				<div style='margin-top:24px;display:flex;gap:12px;justify-content:center;'>
-					<button onclick='window.closeStoragePanel()' style='background:#3498db;color:#fff;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-weight:bold;'>Fermer</button>
-					<button onclick='localStorage.clear(); alert("Stockage vidé!"); window.showStoragePanel();' style='background:#e74c3c;color:#fff;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-weight:bold;'>Vider tout</button>
-				</div>
+			<div style='margin-top:18px;display:flex;gap:12px;justify-content:center;'>
+				<button onclick='window.closeStoragePanel()' style='background:#3498db;color:#fff;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-weight:bold;'>Fermer</button>
+				<button onclick='localStorage.clear(); alert("Stockage vidé!"); window.showStoragePanel();' style='background:#e74c3c;color:#fff;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-weight:bold;'>Vider tout</button>
 			</div>
 		</div>
 	`;
@@ -1970,6 +1965,11 @@ let devices = [];
 let games = [];
 let favorites = [];
 let runningApps = {}; // Track running apps: { serial: [pkg1, pkg2, ...] }
+// Scrcpy state (toggle ON/OFF)
+window.scrcpyLaunching = window.scrcpyLaunching || {};
+const scrcpyLaunchRequests = new Map(); // serialKey -> ongoing promise
+const scrcpyRunning = new Set(); // obsolète (scrcpy remplacé par WebRTC)
+const scrcpyToggleLocks = new Map(); // serialKey -> timestamp
 let gameMetaMap = {}; // Map packageId -> { name, icon }
 const DEFAULT_GAME_ICON = 'https://cdn-icons-png.flaticon.com/512/1005/1005141.png';
 let serverInfoCache = null; // { lanIp, port, host }
@@ -2278,6 +2278,7 @@ async function loadDevices(forceOrEvent = false) {
 			lastDevicesLoadTs = Date.now();
 			// Récupérer l'état des jeux en cours depuis le serveur avant de rendre
 			await syncRunningAppsFromServer();
+			await syncScrcpyStatus();
 			
 			// Mettre à jour le nombre de casques gérés
 			if (devices.length > 0) {
@@ -2340,6 +2341,7 @@ function renderDevicesTable() {
 		const statusIcon = d.status === 'device' ? '✅' : d.status === 'streaming' ? '🟢' : '❌';
 		const runningGamesList = runningApps[d.serial] || [];
 		const serialJson = JSON.stringify(d.serial);
+		// scrcpy supprimé : WebRTC prend le relais
 		const runningGameDisplay = runningGamesList.length > 0 ? runningGamesList.map(pkg => {
 			const meta = getGameMeta(pkg);
 			const safeName = meta.name.replace(/"/g, '&quot;');
@@ -2381,19 +2383,16 @@ function renderDevicesTable() {
 				${runningGameDisplay}
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				${d.status !== 'streaming' ? `
-					<select id='profile_${safeId}' style='background:#34495e;color:#fff;border:1px solid #2ecc71;padding:6px;border-radius:4px;margin-bottom:4px;width:140px;'>
-						<option value='ultra-low'>Ultra Low</option>
-						<option value='low'>Low</option>
-						<option value='wifi'>WiFi</option>
-						<option value='default' selected>Default</option>
-						<option value='high'>High</option>
-						<option value='ultra'>Ultra</option>
-					</select><br>
-					<button onclick='startStreamFromTable(${JSON.stringify(d.serial)})' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>▶️ Scrcpy</button>
-				` : `
-					<button onclick='stopStreamFromTable(${JSON.stringify(d.serial)})' style='background:#e74c3c;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>⏹️ Stop</button>
-				`}
+				<select id='profile_${safeId}' style='background:#34495e;color:#fff;border:1px solid #2ecc71;padding:6px;border-radius:4px;margin-bottom:4px;width:140px;'>
+					<option value='ultra-low'>Ultra Low</option>
+					<option value='low'>Low</option>
+					<option value='wifi'>WiFi</option>
+					<option value='default' selected>Default</option>
+					<option value='high'>High</option>
+					<option value='ultra'>Ultra</option>
+				</select><br>
+				<button data-webrtc-launch=${serialJson} onclick='launchWebrtcStream(${serialJson})' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>▶️ WebRTC</button>
+				<button onclick='installWebrtcReceiver(${serialJson})' style='background:#27ae60;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📲 Installer WebRTC</button>
 			</td>
 			<td style='padding:12px;text-align:center;'>
 				${!d.serial.includes(':') ? `
@@ -2484,19 +2483,16 @@ function renderDevicesCards() {
 			</div>
 			${runningGameDisplay}
 			<div style='margin-bottom:10px;'>
-					${d.status !== 'streaming' ? `
-					<select id='profile_card_${safeId}' style='width:100%;background:#34495e;color:#fff;border:1px solid #2ecc71;padding:8px;border-radius:6px;margin-bottom:6px;'>
-						<option value='ultra-low'>Ultra Low</option>
-						<option value='low'>Low</option>
-						<option value='wifi'>WiFi</option>
-						<option value='default' selected>Default</option>
-						<option value='high'>High</option>
-						<option value='ultra'>Ultra</option>
-					</select>
-					<button onclick='startStreamFromCard(${JSON.stringify(d.serial)})' style='width:100%;background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>▶️ Scrcpy</button>
-				` : `
-					<button onclick='stopStreamFromTable(${JSON.stringify(d.serial)})' style='width:100%;background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>⏹️ Stop Stream</button>
-				`}
+				<select id='profile_card_${safeId}' style='width:100%;background:#34495e;color:#fff;border:1px solid #2ecc71;padding:8px;border-radius:6px;margin-bottom:6px;'>
+					<option value='ultra-low'>Ultra Low</option>
+					<option value='low'>Low</option>
+					<option value='wifi'>WiFi</option>
+					<option value='default' selected>Default</option>
+					<option value='high'>High</option>
+					<option value='ultra'>Ultra</option>
+				</select>
+				<button data-webrtc-launch=${serialJson} onclick='launchWebrtcStream(${serialJson})' style='width:100%;background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>▶️ WebRTC</button>
+				<button onclick='installWebrtcReceiver(${serialJson})' style='width:100%;background:#27ae60;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>📲 Installer WebRTC</button>
 			</div>
 			<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;'>
 				<button onclick='showAppsDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#f39c12;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>📱 Apps</button>
@@ -2586,13 +2582,13 @@ window.showStreamAudioDialog = function(serial, callback) {
 			<p style='color:#95a5a6;margin:0 0 20px 0;font-size:12px;'>${serial}</p>
 			<p style='color:#bdc3c7;margin-bottom:20px;font-size:14px;'>🔊 Où voulez-vous entendre le son ?</p>
 			<div style='display:flex;flex-direction:column;gap:10px;'>
-				<button onclick='window.launchStreamWithAudio("${serial}", "headset")' style='background:linear-gradient(135deg, #3498db 0%, #2980b9 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
+				<button data-scrcpy-btn="${serial}" onclick='window.launchStreamWithAudio("${serial}", "headset")' style='background:linear-gradient(135deg, #3498db 0%, #2980b9 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
 					📱 Casque uniquement
 				</button>
-				<button onclick='window.launchStreamWithAudio("${serial}", "pc")' style='background:linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
+				<button data-scrcpy-btn="${serial}" onclick='window.launchStreamWithAudio("${serial}", "pc")' style='background:linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
 					💻 PC uniquement
 				</button>
-				<button onclick='window.launchStreamWithAudio("${serial}", "both")' style='background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
+				<button data-scrcpy-btn="${serial}" onclick='window.launchStreamWithAudio("${serial}", "both")' style='background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
 					🔊 Casque + PC (recommandé)
 				</button>
 			</div>
@@ -2603,36 +2599,72 @@ window.showStreamAudioDialog = function(serial, callback) {
 };
 
 window.launchStreamWithAudio = async function(serial, audioOutput) {
+	const serialKey = normalizeSerialKeyClient(serial);
+	if (scrcpyLaunchRequests.has(serialKey)) {
+		showToast('Scrcpy déjà en lancement pour ce casque', 'info');
+		return scrcpyLaunchRequests.get(serialKey);
+	}
+	if (window.scrcpyLaunching[serialKey]) {
+		showToast('Scrcpy déjà en cours pour ce casque', 'info');
+		return;
+	}
+	window.scrcpyLaunching[serialKey] = true;
+
+	const buttons = Array.from(document.querySelectorAll(`[data-scrcpy-btn="${serial}"]`));
+	buttons.forEach(btn => { btn.disabled = true; btn.style.opacity = '0.6'; btn.style.pointerEvents = 'none'; });
 	// Close dialog
 	const dialog = document.getElementById('streamAudioDialog');
 	if (dialog) dialog.remove();
 	
 	showToast('🎮 Lancement Scrcpy...', 'info');
-	
-	const res = await api('/api/scrcpy-gui', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ serial, audioOutput })
-	});
-	
-	if (res.ok) {
-		const audioMsg = audioOutput === 'headset' ? '(son sur casque)' : audioOutput === 'pc' ? '(son sur PC)' : '(son sur casque + PC)';
-		showToast(`🎮 Scrcpy lancé ! ${audioMsg}`, 'success');
-		incrementStat('totalSessions');
-	} else {
-		showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
-	}
-	setTimeout(loadDevices, 500);
+
+	const launchPromise = (async () => {
+		try {
+			const prep = await api('/api/scrcpy/prepare', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ serial })
+			});
+			if (!prep.ok || !prep.token) {
+				showToast('❌ Scrcpy: autorisation manquante', 'error');
+				return;
+			}
+
+			const res = await api('/api/scrcpy-gui', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ serial, audioOutput, token: prep.token })
+			});
+			
+			if (res.ok) {
+				setScrcpyState(serial, true);
+				const audioMsg = audioOutput === 'headset' ? '(son sur casque)' : audioOutput === 'pc' ? '(son sur PC)' : '(son sur casque + PC)';
+				showToast(`🎮 Scrcpy lancé ! ${audioMsg}`, 'success');
+				incrementStat('totalSessions');
+			} else if (res.alreadyRunning || res.debounced || res.inflight) {
+				setScrcpyState(serial, true);
+				showToast('Scrcpy déjà lancé pour ce casque', 'info');
+			} else {
+				showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
+			}
+		} finally {
+			setTimeout(() => { delete window.scrcpyLaunching[serialKey]; }, 10000);
+			scrcpyLaunchRequests.delete(serialKey);
+			buttons.forEach(btn => { btn.disabled = false; btn.style.opacity = '1'; btn.style.pointerEvents = 'auto'; });
+			setTimeout(loadDevices, 500);
+		}
+	})();
+
+	scrcpyLaunchRequests.set(serialKey, launchPromise);
+	return launchPromise;
 };
 
 window.startStreamFromTable = async function(serial) {
-	// Show audio output selection dialog
-	window.showStreamAudioDialog(serial);
+	window.toggleScrcpy(serial);
 };
 
 window.startStreamFromCard = async function(serial) {
-	// Show audio output selection dialog  
-	window.showStreamAudioDialog(serial);
+	window.toggleScrcpy(serial);
 };
 
 window.startStreamJSMpeg = async function(serial) {
@@ -2646,6 +2678,93 @@ window.startStreamJSMpeg = async function(serial) {
 		setTimeout(() => showStreamViewer(serial), 500);
 	}
 	else showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
+};
+
+function updateScrcpyButtons(serial) {
+	const buttons = document.querySelectorAll(`[data-scrcpy-toggle="${serial}"]`);
+	const isOn = scrcpyRunning.has(normalizeSerialKeyClient(serial));
+	buttons.forEach(btn => {
+		btn.textContent = isOn ? '⏹️ Scrcpy OFF' : '▶️ Scrcpy ON';
+		btn.style.background = isOn ? '#e74c3c' : '#3498db';
+		btn.style.color = '#fff';
+		btn.style.opacity = '1';
+		btn.style.pointerEvents = 'auto';
+		btn.disabled = false;
+	});
+}
+
+function setScrcpyState(serial, running) {
+	if (!serial) return;
+	const key = normalizeSerialKeyClient(serial);
+	if (running) scrcpyRunning.add(key);
+	else scrcpyRunning.delete(key);
+	updateScrcpyButtons(serial);
+}
+
+async function syncScrcpyStatus() {
+	try {
+		const res = await api('/api/scrcpy/status');
+		if (res.ok && Array.isArray(res.running)) {
+			scrcpyRunning.clear();
+			res.running.forEach(item => { if (item && item.serial) scrcpyRunning.add(normalizeSerialKeyClient(item.serial)); });
+		}
+	} catch (e) {
+		console.warn('[scrcpy] sync status failed', e?.message || e);
+	}
+}
+
+window.stopScrcpy = async function(serial) {
+	if (!serial) return;
+	try {
+		const res = await api('/api/scrcpy/stop', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ serial })
+		});
+		if (res.ok) {
+			setScrcpyState(serial, false);
+			showToast(res.killed > 0 ? '⏹️ Scrcpy arrêté' : 'ℹ️ Pas de session scrcpy active', res.killed > 0 ? 'success' : 'info');
+		} else {
+			showToast('❌ Arrêt scrcpy: ' + (res.error || 'inconnu'), 'error');
+		}
+	} catch (e) {
+		showToast('❌ Arrêt scrcpy: ' + (e?.message || e), 'error');
+	} finally {
+		updateScrcpyButtons(serial);
+		setTimeout(loadDevices, 500);
+	}
+};
+
+window.toggleScrcpy = function(serial) {
+	return launchWebrtcStream(serial);
+};
+
+window.launchWebrtcStream = async function(serial) {
+	const roomKey = normalizeSerialKeyClient(serial || 'test');
+	const room = encodeURIComponent(roomKey);
+	const url = `/webrtc-test.html?room=${room}&role=sender&autostart=1`;
+	const isElectron = !!(window?.process?.versions?.electron) || /Electron/i.test(navigator.userAgent || '');
+
+	// 1) Try to auto-open the receiver on the headset (native broadcast only; no browser fallback)
+	try {
+		const res = await api('/api/webrtc/open-receiver', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ serial, room: roomKey, noBrowserFallback: true })
+		});
+		if (!res.ok) {
+			const detail = [res.stderr, res.stdout].filter(Boolean).join('\n').trim();
+			throw new Error((res.error || 'Impossible d\'ouvrir le récepteur') + (detail ? ('\n' + detail) : ''));
+		}
+		showToast('📡 Récepteur lancé sur le casque', 'success');
+	} catch (e) {
+		console.warn('[webrtc] open-receiver failed:', e);
+		showToast('⚠️ Récepteur non démarré automatiquement: ' + (e?.message || e), 'warning');
+	}
+
+	// 2) Ne plus ouvrir automatiquement la page WebRTC côté PC (Electron ou navigateur)
+	console.log('[webrtc] Aucun onglet ouvert automatiquement pour la room', roomKey);
+	showToast('▶️ WebRTC prêt (aucune page PC ouverte)', 'info');
 };
 
 window.showStreamViewer = function(serial) {
@@ -2894,6 +3013,9 @@ window.connectWifiAuto = async function(serial) {
 
 // ========== VOICE TO HEADSET (TTS) ========== 
 window.closeAudioStream = async function(silent = false) {
+	// Stop visualizer loop immediately
+	window.stopAudioVisualizer();
+
 	// ALWAYS remove the panel first to ensure UI is responsive
 	const panel = document.getElementById('audioStreamPanel');
 	if (panel) {
@@ -3105,6 +3227,79 @@ window.installVoiceApp = async function(serial) {
 		return false;
 	}
 };
+
+	// Installer l'APK WebRTC Receiver sur le casque (similaire à l'install voix)
+	window.installWebrtcReceiver = async function(serial) {
+		// Fermer toute modale précédente et afficher la progression
+		closeModal();
+
+		const progressHtml = `
+			<div style="background:#0f1724;color:#fff;padding:24px;border-radius:12px;width:420px;max-width:90vw;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.45);">
+				<h2 style="margin:0 0 12px 0;">📲 Installation WebRTC Receiver</h2>
+				<p style="color:#95a5a6;margin:0 0 16px 0;">Transfert et installation de l'APK sur le casque...</p>
+				<div style="position:relative;height:12px;background:#162032;border-radius:6px;overflow:hidden;">
+					<div id="webrtcInstallProgressBar" style="height:100%;width:10%;background:linear-gradient(90deg,#2ecc71,#27ae60);"></div>
+				</div>
+				<p id="webrtcInstallProgressText" style="color:#95a5a6;margin-top:12px;font-size:14px;">Préparation...</p>
+				<p style="color:#7f8c8d;font-size:12px;">Casque: ${serial || ''}</p>
+			</div>
+		`;
+
+		showModal(progressHtml);
+
+		const updateProgress = (percent, text) => {
+			const bar = document.getElementById('webrtcInstallProgressBar');
+			const textEl = document.getElementById('webrtcInstallProgressText');
+			if (bar) bar.style.width = percent + '%';
+			if (textEl) textEl.textContent = text;
+		};
+
+		try {
+			updateProgress(20, 'Connexion ADB...');
+			await new Promise(r => setTimeout(r, 300));
+
+			updateProgress(50, 'Transfert de l\'APK...');
+			const res = await api('/api/webrtc/install-receiver', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ serial })
+			});
+
+			updateProgress(85, 'Finalisation...');
+			await new Promise(r => setTimeout(r, 300));
+
+			if (res && res.ok) {
+				updateProgress(100, 'Installation terminée !');
+				const successHtml = `
+					<div style="background:#0f1724;color:#fff;padding:24px;border-radius:12px;width:420px;max-width:90vw;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.45);">
+						<div style="font-size:72px;margin-bottom:12px;">✅</div>
+						<h2 style="margin:0 0 12px 0;color:#2ecc71;">APK installée</h2>
+						<p style="color:#bdc3c7;margin:0 0 16px 0;">Le récepteur WebRTC est prêt sur le casque.</p>
+						<button onclick="closeModal()" style="background:linear-gradient(135deg,#2ecc71,#27ae60);color:#fff;border:none;padding:12px 24px;border-radius:8px;font-weight:bold;cursor:pointer;">Fermer</button>
+					</div>
+				`;
+				showModal(successHtml);
+				showToast('✅ Récepteur WebRTC installé !', 'success');
+				return;
+			}
+
+			const serverErr = res?.error || 'Installation échouée';
+			const extra = [res?.stderr, res?.stdout].filter(Boolean).join('\n').trim();
+			throw new Error(extra ? `${serverErr}\n${extra}` : serverErr);
+		} catch (e) {
+			console.error('[installWebrtcReceiver] Error:', e);
+			const errHtml = `
+				<div style="background:#0f1724;color:#fff;padding:24px;border-radius:12px;width:420px;max-width:90vw;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.45);">
+					<div style="font-size:64px;margin-bottom:12px;">❌</div>
+					<h2 style="margin:0 0 12px 0;color:#e74c3c;">Installation échouée</h2>
+					<p style="color:#bdc3c7;margin:0 0 16px 0;white-space:pre-line;">${(e && e.message) || 'Erreur inconnue'}</p>
+					<button onclick="closeModal()" style="background:#e74c3c;color:#fff;border:none;padding:12px 24px;border-radius:8px;font-weight:bold;cursor:pointer;">Fermer</button>
+				</div>
+			`;
+			showModal(errHtml);
+			showToast('❌ Erreur installation WebRTC: ' + ((e && e.message) || 'inconnue'), 'error');
+		}
+	};
 
 // Bouton de téléchargement de la voix désactivé (supprimé)
 window.downloadVoiceApk = function() {
@@ -4070,6 +4265,8 @@ window.loginUser = async function() {
 			showToast('✅ Connecté avec succès !', 'success');
 			currentUser = data.user?.name || data.user?.username || data.user?.email || identifier;
 			localStorage.setItem('vhr_current_user', currentUser);
+			setUser(currentUser);
+			setUserRole(currentUser, data.user?.role || 'user');
 			
 			const modal = document.getElementById('authModal');
 			if (modal) modal.remove();
@@ -4129,8 +4326,39 @@ window.registerUser = async function() {
 		const data = await res.json();
 		
 		if (res.ok && data.ok) {
-			if (data.token) {
-				saveAuthToken(data.token);
+			const syncedUsername = data.user?.username || data.user?.name || username;
+			const syncedEmail = data.user?.email || email;
+			let effectiveToken = data.token || '';
+			try {
+				await fetch(resolveApiUrl('/api/admin/sync-user'), {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						'x-sync-secret': SYNC_USERS_SECRET
+					},
+					body: JSON.stringify({ username: syncedUsername, email: syncedEmail, role: 'user', password })
+				});
+			} catch (syncErr) {
+				console.warn('[registerUser] sync-user failed', syncErr);
+			}
+
+			try {
+				const localRes = await fetch(resolveApiUrl('/api/login'), {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					credentials: 'include',
+					body: JSON.stringify({ username: syncedUsername, password })
+				});
+				const localData = await localRes.json();
+				if (localRes.ok && localData.ok && localData.token) {
+					effectiveToken = localData.token;
+				}
+			} catch (localLoginErr) {
+				console.warn('[registerUser] local login after register failed', localLoginErr);
+			}
+
+			if (effectiveToken) {
+				saveAuthToken(effectiveToken);
 			}
 			// JWT token is now in httpOnly cookie
 			// Trial period starts now (set by server)

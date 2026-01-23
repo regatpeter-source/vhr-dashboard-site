@@ -1,8 +1,12 @@
-// ...existing code...
+﻿// ...existing code...
 // ...existing code...
 // ========== IMPORTS & INIT ========== 
 
 require('dotenv').config();
+// Allow local dev to bypass Postgres even if DATABASE_URL is set in .env
+if (process.env.SKIP_PG === '1') {
+  process.env.DATABASE_URL = '';
+}
 const express = require('express');
 const http = require('http');
 const { spawn, execSync } = require('child_process');
@@ -63,15 +67,27 @@ const os = require('os');
 
 // PostgreSQL database module
 
-const db = process.env.DATABASE_URL ? require('./db-postgres') : null;
-const USE_POSTGRES = !!process.env.DATABASE_URL;
+const SKIP_PG = process.env.SKIP_PG === '1';
+const RAW_DATABASE_URL = process.env.DATABASE_URL || '';
+const isPlaceholderDbUrl = /<.*?>/.test(RAW_DATABASE_URL);
+let USE_POSTGRES = !!RAW_DATABASE_URL && !SKIP_PG && !isPlaceholderDbUrl;
+let db = null;
+if (USE_POSTGRES) {
+  try {
+    new URL(RAW_DATABASE_URL); // validate format
+    db = require('./db-postgres');
+  } catch (e) {
+    console.warn('[DB] DATABASE_URL invalide, fallback JSON/SQLite:', e?.message || e);
+    USE_POSTGRES = false;
+  }
+} else if (isPlaceholderDbUrl) {
+  console.warn('[DB] DATABASE_URL contient un placeholder, fallback JSON/SQLite');
+}
 // Admin allowlist (only these usernames are allowed to access admin endpoints)
 const ADMIN_ALLOWLIST = (process.env.ADMIN_ALLOWLIST || 'vhr')
   .split(',')
   .map(u => u.trim().toLowerCase())
   .filter(Boolean);
-const ADMIN_FALLBACK = ['vhr'];
-const EFFECTIVE_ADMIN_ALLOWLIST = ADMIN_ALLOWLIST.length ? ADMIN_ALLOWLIST : ADMIN_FALLBACK;
 const ADMIN_INIT_SECRET = process.env.ADMIN_INIT_SECRET || null;
 // Shared secret used when syncing users from the prod auth API to the local pack.
 // Fallbacks to the same value embedded in dashboard-pro.js to avoid 403 if the
@@ -80,7 +96,7 @@ const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || 
 
 function isAllowedAdminUser(user) {
   const username = (typeof user === 'string' ? user : (user && user.username) || '').toLowerCase();
-  return !!username && EFFECTIVE_ADMIN_ALLOWLIST.includes(username);
+  return !!username && ADMIN_ALLOWLIST.includes(username);
 }
 
 function ensureAllowedAdmin(req, res) {
@@ -95,7 +111,7 @@ function ensureAllowedAdmin(req, res) {
 function elevateAdminIfAllowlisted(user) {
   if (!user || !user.username) return user;
   const uname = String(user.username).toLowerCase();
-  if (!EFFECTIVE_ADMIN_ALLOWLIST.includes(uname)) return user;
+  if (!ADMIN_ALLOWLIST.includes(uname)) return user;
   if (user.role !== 'admin') {
     user.role = 'admin';
     try {
@@ -187,14 +203,6 @@ if (HTTPS_ENABLED && hasCert) {
   }
 }
 
-// Render force le HTTPS au niveau du proxy. Pour éviter un double TLS qui casse WebSocket/ADB,
-// on désactive systématiquement le HTTPS applicatif quand on détecte Render.
-const IS_RENDER = !!process.env.RENDER || !!process.env.RENDER_EXTERNAL_URL || !!process.env.RENDER_SERVICE_ID;
-if (IS_RENDER) {
-  useHttps = false;
-  console.log('[HTTPS] Environnement Render détecté: serveur forcé en HTTP derrière le proxy TLS.');
-}
-
 if (useHttps && FORCE_HTTP) {
   useHttps = false;
   console.log('[HTTPS] FORCE_HTTP=1 détecté - démarrage forcé en HTTP malgré certificat.');
@@ -203,27 +211,86 @@ console.log(`[DB] Mode: ${USE_POSTGRES ? 'PostgreSQL' : 'JSON Files (Development
 
 // ========== ADB BINARY DISCOVERY & AUTO-PATH ==========
 const PROJECT_ROOT = __dirname;
-const IS_PACKAGED = PROJECT_ROOT.includes('app.asar');
-const RESOURCES_ROOT = IS_PACKAGED
-  ? (process.resourcesPath || path.join(path.dirname(process.execPath), 'resources'))
-  : PROJECT_ROOT;
-
-// Robust lookup for platform-tools when packaged: try resources/, exe sibling, and project root
-const EXEC_DIR = path.dirname(process.execPath || __dirname);
-const PLATFORM_TOOLS_CANDIDATES = [
-  path.join(RESOURCES_ROOT, 'platform-tools'),
-  path.join(EXEC_DIR, 'platform-tools'),
-  path.join(path.dirname(RESOURCES_ROOT), 'platform-tools'),
-  path.join(PROJECT_ROOT, 'platform-tools')
-];
-const PLATFORM_TOOLS_DIR = PLATFORM_TOOLS_CANDIDATES.find(dir => fs.existsSync(dir));
-
+const PLATFORM_TOOLS_DIR = path.join(PROJECT_ROOT, 'platform-tools');
 const ADB_FILENAME = process.platform === 'win32' ? 'adb.exe' : 'adb';
-const BUNDLED_ADB_PATH = PLATFORM_TOOLS_DIR ? path.join(PLATFORM_TOOLS_DIR, ADB_FILENAME) : '';
-const HAS_BUNDLED_ADB = BUNDLED_ADB_PATH && fs.existsSync(BUNDLED_ADB_PATH);
+const BUNDLED_ADB_PATH = path.join(PLATFORM_TOOLS_DIR, ADB_FILENAME);
+const HAS_BUNDLED_ADB = fs.existsSync(BUNDLED_ADB_PATH);
 const ADB_BIN = HAS_BUNDLED_ADB ? BUNDLED_ADB_PATH : ADB_FILENAME;
-// Always use the resolved ADB binary (bundled or system) to avoid PATH issues
-const ADB_CMD = process.platform === 'win32' ? `"${ADB_BIN}"` : ADB_BIN;
+
+// Anti-rafale scrcpy
+const SCRCPY_LAUNCH_DEBOUNCE_MS = Number(process.env.SCRCPY_LAUNCH_DEBOUNCE_MS || 10000);
+const SCRCPY_GLOBAL_LOCK_MS = Number(process.env.SCRCPY_GLOBAL_LOCK_MS || 5000);
+const scrcpyLaunchLocks = new Map(); // serialKey -> last launch timestamp
+let scrcpyGlobalLockUntil = 0;
+
+const normalizeSerialKey = (serial) => String(serial || '').trim().toLowerCase();
+
+const scrcpyLaunchTokens = new Map(); // key -> { token, expiresAt }
+const SCRCPY_TOKEN_TTL_MS = Number(process.env.SCRCPY_TOKEN_TTL_MS || 5000);
+
+function isProcessAlive(procOrPid) {
+  const pid = typeof procOrPid === 'number' ? procOrPid : (procOrPid && procOrPid.pid);
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function stopScrcpyProcesses(serial = null) {
+  const normalized = serial ? normalizeSerialKey(serial) : null;
+  let killed = 0;
+
+  for (const [pid, info] of Array.from(trackedProcesses.entries())) {
+    if (info.type !== 'scrcpy') continue;
+    if (normalized && normalizeSerialKey(info.serial) !== normalized) continue;
+
+    try {
+      if (isProcessAlive(pid)) {
+        if (process.platform === 'win32') {
+          spawn('taskkill', ['/F', '/T', '/PID', pid.toString()]);
+        } else {
+          try { process.kill(pid, 'SIGTERM'); } catch (_) { process.kill(pid, 'SIGKILL'); }
+        }
+        killed += 1;
+      }
+    } catch (e) {
+      console.warn('[scrcpy] stop error for PID', pid, e && e.message ? e.message : e);
+    }
+
+    trackedProcesses.delete(pid);
+  }
+
+  if (normalized) {
+    scrcpyLaunchLocks.delete(normalized);
+  } else {
+    scrcpyLaunchLocks.clear();
+  }
+
+  return killed;
+}
+
+function scrcpyTokenKey(serialKey, ip = '') {
+  return `${serialKey}::${ip || 'unknown'}`;
+}
+
+function issueScrcpyToken(serialKey, ip = '') {
+  const token = crypto.randomBytes(16).toString('hex');
+  const key = scrcpyTokenKey(serialKey, ip);
+  scrcpyLaunchTokens.set(key, { token, expiresAt: Date.now() + SCRCPY_TOKEN_TTL_MS });
+  return token;
+}
+
+function consumeScrcpyToken(serialKey, ip = '', token = '') {
+  const key = scrcpyTokenKey(serialKey, ip);
+  const entry = scrcpyLaunchTokens.get(key);
+  if (!entry) return false;
+  const valid = entry.token === token && Date.now() <= entry.expiresAt;
+  scrcpyLaunchTokens.delete(key);
+  return valid;
+}
 
 if (HAS_BUNDLED_ADB) {
   const adbDir = path.dirname(BUNDLED_ADB_PATH);
@@ -783,7 +850,7 @@ app.use(helmet({
       scriptSrc: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com', 'https://*.gstatic.com', 'https://cdn.jsdelivr.net'],
       scriptSrcAttr: ["'unsafe-inline'"],
       // CSP Level 3: script/style element-specific directives
-      scriptSrcElem: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com', 'https://*.gstatic.com', 'https://cdn.jsdelivr.net'],
+      scriptSrcElem: ["'self'", "'unsafe-inline'", 'https://cdn.botpress.cloud', 'https://js.stripe.com', 'https://*.gstatic.com', 'https://cdn.jsdelivr.net'],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://*.gstatic.com', 'https://*.google.com'],
       styleSrcElem: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://*.gstatic.com', 'https://*.google.com'],
       // Allow loading remote fonts (Google Fonts)
@@ -889,165 +956,7 @@ function getDemoRemainingDays(user) {
   return Math.max(0, remainingDays);
 }
 
-// Ensure each user has an individual trial start date (persisted when possible)
-function ensureUserDemoStartDate(user, { persist = true } = {}) {
-  if (!user) return null;
-  if (!user.demoStartDate && demoConfig.MODE === 'database') {
-    user.demoStartDate = new Date().toISOString();
-    if (persist) {
-      try {
-        persistUser(user);
-      } catch (e) {
-        console.warn('[demo] unable to persist demoStartDate for', user.username, e && e.message ? e.message : e);
-      }
-    }
-  }
-  return user.demoStartDate || null;
-}
-
-// Build a user-scoped demo status (avoids machine-wide expiry)
-async function buildDemoStatusForUser(user, { skipStripe = false } = {}) {
-  if (!user) {
-    return {
-      demoStartDate: null,
-      demoExpired: true,
-      remainingDays: 0,
-      totalDays: demoConfig.DEMO_DAYS,
-      expirationDate: null,
-      hasValidSubscription: false,
-      subscriptionStatus: 'none',
-      stripeError: null,
-      hasActiveLicense: false,
-      accessBlocked: true,
-      message: 'Utilisateur introuvable'
-    };
-  }
-
-  ensureUserDemoStartDate(user);
-
-  // Try remote trial sync (cloud API) if configured, to honor admin extensions without local DB secrets
-  let remoteTrial = null;
-  if (TRIAL_SYNC_URL) {
-    try {
-      const resp = await fetch(TRIAL_SYNC_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(TRIAL_SYNC_TOKEN ? { Authorization: `Bearer ${TRIAL_SYNC_TOKEN}` } : {})
-        },
-        body: JSON.stringify({ username: user.username, email: user.email })
-      });
-      if (resp.ok) {
-        remoteTrial = await resp.json();
-      } else {
-        console.warn('[trial sync] remote responded with status', resp.status);
-      }
-    } catch (e) {
-      console.warn('[trial sync] remote fetch failed:', e && e.message ? e.message : e);
-    }
-  }
-
-  const expirationDate = user.demoStartDate
-    ? new Date(new Date(user.demoStartDate).getTime() + demoConfig.DEMO_DURATION_MS).toISOString()
-    : null;
-  const demoExpired = isDemoExpired(user);
-  const remainingDays = getDemoRemainingDays(user);
-
-  let hasValidSubscription = (user.subscriptionStatus || '').toLowerCase() === 'active';
-  let subscriptionStatus = user.subscriptionStatus || 'none';
-  let stripeError = null;
-
-  // If the local record says expired, double-check Stripe for an active/trialing sub
-  if (demoExpired && !hasValidSubscription && user.stripeCustomerId && stripe && !skipStripe) {
-    try {
-      const stripeSubs = await stripe.subscriptions.list({
-        customer: user.stripeCustomerId,
-        status: 'all',
-        limit: 5
-      });
-      if (stripeSubs.data && stripeSubs.data.length > 0) {
-        const activeOrTrial = stripeSubs.data.find(s => s.status === 'active' || s.status === 'trialing');
-        if (activeOrTrial) {
-          const nowSec = Math.floor(Date.now() / 1000);
-          const trialValid = activeOrTrial.status === 'trialing' && activeOrTrial.trial_end && activeOrTrial.trial_end > nowSec;
-          hasValidSubscription = activeOrTrial.status === 'active' || trialValid;
-          subscriptionStatus = activeOrTrial.status;
-        }
-      }
-    } catch (e) {
-      stripeError = e && e.message ? e.message : String(e || 'Stripe error');
-    }
-  }
-
-  const hasActiveLicense = !!findActiveLicenseByUsername(user.username);
-  let accessBlocked = demoExpired && !hasValidSubscription && !hasActiveLicense;
-
-  // If remote trial data exists, prefer fresher info (e.g., admin extension)
-  if (remoteTrial && typeof remoteTrial === 'object') {
-    const r = remoteTrial;
-    const rRemaining = typeof r.remainingDays === 'number' ? r.remainingDays : remainingDays;
-    const rDemoExpired = typeof r.demoExpired === 'boolean' ? r.demoExpired : demoExpired;
-    const rHasSub = typeof r.hasValidSubscription === 'boolean' ? r.hasValidSubscription : hasValidSubscription;
-    const rHasLic = typeof r.hasActiveLicense === 'boolean' ? r.hasActiveLicense : hasActiveLicense;
-    const rAccessBlocked = typeof r.accessBlocked === 'boolean'
-      ? r.accessBlocked
-      : (rDemoExpired && !rHasSub && !rHasLic);
-
-    // If remote shows more remaining days or not expired, trust it
-    const useRemote = (!rDemoExpired && demoExpired) || rRemaining > remainingDays;
-
-    if (useRemote) {
-      if (r.demoStartDate) {
-        user.demoStartDate = r.demoStartDate;
-        try { persistUser(user); } catch (e) { /* ignore */ }
-      }
-    }
-
-    // Override computed flags with remote if present
-    const mergedExpiration = r.expirationDate || expirationDate;
-    const mergedMessage = r.message || (rAccessBlocked
-      ? '❌ Essai expiré - Abonnement ou licence requis'
-      : rDemoExpired
-        ? '✅ Accès accordé via abonnement/licence actif'
-        : `✅ Essai en cours - ${rRemaining} jour(s) restant(s)`);
-
-    return {
-      demoStartDate: user.demoStartDate || null,
-      demoExpired: rDemoExpired,
-      remainingDays: rRemaining,
-      totalDays: r.totalDays || demoConfig.DEMO_DAYS,
-      expirationDate: mergedExpiration,
-      hasValidSubscription: rHasSub,
-      subscriptionStatus: r.subscriptionStatus || subscriptionStatus,
-      stripeError,
-      hasActiveLicense: rHasLic,
-      accessBlocked: rAccessBlocked,
-      message: mergedMessage,
-      remote: true
-    };
-  }
-
-  return {
-    demoStartDate: user.demoStartDate || null,
-    demoExpired,
-    remainingDays,
-    totalDays: demoConfig.DEMO_DAYS,
-    expirationDate,
-    hasValidSubscription,
-    subscriptionStatus,
-    stripeError,
-    hasActiveLicense,
-    accessBlocked,
-    message: accessBlocked
-      ? '❌ Essai expiré - Abonnement ou licence requis'
-      : demoExpired
-        ? '✅ Accès accordé via abonnement/licence actif'
-        : `✅ Essai en cours - ${remainingDays} jour(s) restant(s)`
-  };
-}
-
 const LICENSES_FILE = path.join(__dirname, 'data', 'licenses.json');
-const DEMO_FILE = path.join(__dirname, 'data', 'demo.json');
 
 // ========== EMAIL CONFIGURATION ==========
 // Support both Brevo and Gmail configurations
@@ -1392,12 +1301,7 @@ app.get('/launch-dashboard.html', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.sendFile(path.join(__dirname, 'launch-dashboard.html'));
 });
-// Serve dashboard assets with no-cache to avoid stale builds
-app.get(['/dashboard-pro.js','/dashboard-pro.css','/vhr-audio-stream.js'], (req, res) => {
-  const file = req.path.replace('/', '');
-  res.setHeader('Cache-Control', 'no-store, max-age=0');
-  res.sendFile(path.join(__dirname, 'public', file));
-});
+
 // Redirect vhr-dashboard-app.html to vhr-dashboard-pro.html
 app.get('/vhr-dashboard-app.html', (req, res) => {
   console.log('[route] /vhr-dashboard-app.html requested, redirecting to /vhr-dashboard-pro.html');
@@ -1550,7 +1454,7 @@ app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
 });
 
 // Route pour le pack complet (Dashboard + Voix) - SANS RESTRICTION
-// Permet d'éviter les 404 GitHub en servant le ZIP directement depuis le serveur
+// Permet d'éviter les 404 GitHub en servant le binaire/zip directement depuis le serveur
 app.get('/download/client-full', (req, res) => {
   const installerPath = path.join(__dirname, 'VHR.Dashboard.Setup.1.0.1.exe');
 
@@ -1574,10 +1478,17 @@ app.get('/download/client-full', (req, res) => {
 
 // Download VHR Voice APK for Quest background audio
 app.get('/download/vhr-voice-apk', (req, res) => {
-  const apkPath = path.join(__dirname, 'public', 'downloads', 'vhr-voice.apk');
-  
+  const apkCandidates = [
+    path.join(__dirname, 'public', 'downloads', 'vhr-voice.apk'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'public', 'downloads', 'vhr-voice.apk'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'dist-client', 'public', 'downloads', 'vhr-voice.apk'),
+    path.join(process.resourcesPath || '', 'public', 'downloads', 'vhr-voice.apk')
+  ];
+
+  const apkPath = apkCandidates.find(p => p && fs.existsSync(p));
+
   try {
-    if (!fs.existsSync(apkPath)) {
+    if (!apkPath) {
       return res.status(404).json({ 
         ok: false, 
         error: 'VHR Voice APK not found' 
@@ -1601,9 +1512,18 @@ app.post('/api/device/install-voice-app', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'serial required' });
   }
 
-  const apkPath = path.join(__dirname, 'public', 'downloads', 'vhr-voice.apk');
+  const baseUnpacked = __dirname.replace(/app\.asar([/\\]?)/, 'app.asar.unpacked$1');
+
+  const apkCandidates = [
+    path.join(baseUnpacked, 'public', 'downloads', 'vhr-voice.apk'),
+    path.join(__dirname, 'public', 'downloads', 'vhr-voice.apk'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'public', 'downloads', 'vhr-voice.apk'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'dist-client', 'public', 'downloads', 'vhr-voice.apk'),
+    path.join(process.resourcesPath || '', 'public', 'downloads', 'vhr-voice.apk')
+  ];
+  const apkPath = apkCandidates.find(p => p && fs.existsSync(p));
   
-  if (!fs.existsSync(apkPath)) {
+  if (!apkPath) {
     return res.status(404).json({ ok: false, error: 'VHR Voice APK not found on server' });
   }
 
@@ -1757,10 +1677,6 @@ if (!stripeKey) {
 }
 const stripe = require('stripe')(stripeKey);
 
-// Optional remote trial sync (cloud API) to avoid embedding DB secrets in the pack
-const TRIAL_SYNC_URL = process.env.TRIAL_SYNC_URL || '';
-const TRIAL_SYNC_TOKEN = process.env.TRIAL_SYNC_TOKEN || '';
-
 // Verify the Stripe secret key early at startup (fail fast on invalid / publishable key)
 async function verifyStripeKeyAtStartup() {
   if (!stripeKey) {
@@ -1795,7 +1711,7 @@ function maskKey(k) {
 }
 
 app.post('/create-checkout-session', async (req, res) => {
-  const { priceId, mode, username, userEmail, password, returnUrl, cancelUrl } = req.body || {};
+  const { priceId, mode, username, userEmail, password } = req.body || {};
   const origin = req.headers.origin || `http://localhost:${process.env.PORT || 3000}`;
   if (!priceId || !mode) return res.status(400).json({ error: 'priceId et mode sont requis' });
   
@@ -1839,13 +1755,8 @@ app.post('/create-checkout-session', async (req, res) => {
         },
       ],
       mode: mode, // 'subscription' ou 'payment'
-      ...(mode === 'subscription' ? {
-        subscription_data: {
-          trial_period_days: STRIPE_TRIAL_DAYS || subscriptionConfig?.BILLING_OPTIONS?.MONTHLY?.trialDays || 0
-        }
-      } : {}),
-      success_url: returnUrl || `${origin}/pricing.html?success=1`,
-      cancel_url: cancelUrl || `${origin}/pricing.html?canceled=1`,
+      success_url: `${origin}/pricing.html?success=1`,
+      cancel_url: `${origin}/pricing.html?canceled=1`,
       metadata: metadata, // Store user registration data in metadata
       customer_email: userEmail || undefined, // Pre-fill customer email in Stripe
     });
@@ -1882,7 +1793,6 @@ function saveUsers() {
       stripeCustomerId: u.stripeCustomerId || null,
       latestInvoiceId: u.latestInvoiceId || null,
       lastInvoicePaidAt: u.lastInvoicePaidAt || null,
-      demoStartDate: u.demoStartDate || null,
       subscriptionStatus: u.subscriptionStatus || null,
       subscriptionId: u.subscriptionId || null
     }));
@@ -1895,39 +1805,20 @@ function saveUsers() {
 }
 
 // ========== DEMO STATUS MANAGEMENT ========== 
-function loadDemoStart() {
-  try {
-    ensureDataDir();
-    if (fs.existsSync(DEMO_FILE)) {
-      const raw = fs.readFileSync(DEMO_FILE, 'utf8').trim();
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && parsed.startedAt) return parsed.startedAt;
-      }
-    }
-    const nowIso = new Date().toISOString();
-    fs.writeFileSync(DEMO_FILE, JSON.stringify({ startedAt: nowIso }, null, 2), 'utf8');
-    return nowIso;
-  } catch (e) {
-    console.warn('[demo] unable to load/save demo start, defaulting to now:', e && e.message);
-    return new Date().toISOString();
-  }
-}
-
 function getDemoStatus() {
-  const startIso = loadDemoStart();
-  const startMs = new Date(startIso).getTime();
-  const endMs = startMs + demoConfig.DEMO_DURATION_MS;
-
+  const DEMO_START = new Date('2025-12-07T00:00:00Z').getTime();
+  const DEMO_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+  const DEMO_END = DEMO_START + DEMO_DURATION;
+  
   const now = Date.now();
-  const daysRemaining = Math.ceil((endMs - now) / (24 * 60 * 60 * 1000));
-  const isExpired = now > endMs;
-
+  const daysRemaining = Math.ceil((DEMO_END - now) / (24 * 60 * 60 * 1000));
+  const isExpired = now > DEMO_END;
+  
   return {
     isExpired,
     daysRemaining: Math.max(0, daysRemaining),
-    expiresAt: new Date(endMs).toISOString(),
-    message: isExpired ? 'Période d\'essai expirée - Veuillez vous abonner' : `Essai gratuit - ${Math.max(0, daysRemaining)} jour(s) restant(s)`
+    expiresAt: new Date(DEMO_END).toISOString(),
+    message: isExpired ? 'Demo expiré' : `Essai gratuit - ${Math.max(0, daysRemaining)} jour(s) restant(s)`
   };
 }
 
@@ -1975,20 +1866,7 @@ function loadUsers() {
   return [{ id: 'admin', username: 'vhr', passwordHash: '$2b$10$AlrD74akc7cp9EbVLJKzcOlPzJbypzSt7a8Sg85KEjpFGM/ofxdLm', role: 'admin', email: 'admin@example.local', stripeCustomerId: null }];
 }
 
-function ensureAdminsUnlimited(list) {
-  return (list || []).map(u => {
-    if (u && u.role === 'admin') {
-      return {
-        ...u,
-        subscriptionStatus: 'active',
-        subscriptionId: u.subscriptionId || 'admin-unlimited'
-      };
-    }
-    return u;
-  });
-}
-
-let users = ensureAdminsUnlimited(loadUsers());
+let users = loadUsers();
 
 // In PostgreSQL mode, hydrate in-memory cache from DB for quick lookups
 if (USE_POSTGRES && db && db.getUsers) {
@@ -1996,7 +1874,7 @@ if (USE_POSTGRES && db && db.getUsers) {
     try {
       const dbUsers = await db.getUsers();
       if (Array.isArray(dbUsers)) {
-        users = ensureAdminsUnlimited(dbUsers.map(u => ({
+        users = dbUsers.map(u => ({
           id: u.id || `user_${u.username}`,
           username: u.username,
           passwordHash: u.passwordhash || u.passwordHash || null,
@@ -2007,7 +1885,7 @@ if (USE_POSTGRES && db && db.getUsers) {
           subscriptionId: u.subscriptionid || u.subscriptionId || null,
           createdAt: u.createdat || u.createdAt || null,
           updatedAt: u.updatedat || u.updatedAt || null
-        })));
+        }));
         console.log(`[users] Hydrated ${users.length} user(s) from PostgreSQL`);
       }
     } catch (e) {
@@ -2597,8 +2475,7 @@ app.post('/api/tts/send', async (req, res) => {
   }
 });
 
-// Créer un raccourci Desktop pour lancer le dashboard local
-app.post('/api/create-desktop-shortcut', async (req, res) => {
+app.post('/api/create-desktop-shortcut', (req, res) => {
   try {
     // Disponibilité uniquement en environnement Windows local
     if (process.platform !== 'win32') {
@@ -3160,27 +3037,26 @@ app.get('/api/feature/android-tts/access', authMiddleware, (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
   console.log('[api/auth/login] request received');
   reloadUsers(); // Reload users from file in case they were modified externally
-  const { email, username, password } = req.body;
-  const identifier = email || username;
+  const { email, password } = req.body;
   
-  if (!identifier || !password) {
-    return res.status(400).json({ ok: false, error: 'Email ou username et mot de passe requis' });
+  if (!email || !password) {
+    return res.status(400).json({ ok: false, error: 'Email et mot de passe requis' });
   }
   
-  console.log('[api/auth/login] attempting login for identifier:', identifier);
+  console.log('[api/auth/login] attempting login for email:', email);
   
-  // Find user by email OR username
+  // Find user by email
   let user = null;
   if (USE_POSTGRES && db) {
     try {
-      const resUser = await db.pool.query('SELECT * FROM users WHERE LOWER(email)=LOWER($1) OR LOWER(username)=LOWER($1) LIMIT 1', [identifier]);
+      const resUser = await db.pool.query('SELECT * FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [email]);
       if (resUser.rows && resUser.rows[0]) user = resUser.rows[0];
     } catch (e) {
-      console.error('[api/auth/login] Postgres identifier lookup failed:', e && e.message);
+      console.error('[api/auth/login] Postgres email lookup failed:', e && e.message);
     }
   }
   if (!user) {
-    user = getUserByEmail(identifier) || getUserByUsername(identifier);
+    user = getUserByEmail(email);
   }
 
   if (!user) {
@@ -3280,9 +3156,7 @@ app.post('/api/admin/grant-stripe-trial', authMiddleware, async (req, res) => {
     const targetUser = getUserByUsername(targetUsername);
     if (!targetUser) return res.status(404).json({ ok: false, error: `User '${targetUsername}' not found` });
 
-    // S'assurer d'un customer Stripe
     const customerId = await ensureStripeCustomerForUser(targetUser);
-
     const effectiveTrialDays = Number.isFinite(parseInt(trialDays, 10)) ? Math.max(0, parseInt(trialDays, 10)) : STRIPE_TRIAL_DAYS;
 
     const sub = await stripe.subscriptions.create({
@@ -3295,9 +3169,8 @@ app.post('/api/admin/grant-stripe-trial', authMiddleware, async (req, res) => {
       }
     });
 
-    // Mettre à jour l'utilisateur localement
     targetUser.subscriptionId = sub.id;
-    targetUser.subscriptionStatus = sub.status; // 'trialing' attendu
+    targetUser.subscriptionStatus = sub.status;
     targetUser.latestInvoiceId = sub.latest_invoice || targetUser.latestInvoiceId || null;
     targetUser.lastInvoicePaidAt = targetUser.lastInvoicePaidAt || null;
     targetUser.stripeCustomerId = customerId;
@@ -3392,9 +3265,6 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
       persistUser(user);
       ensureUserSubscription(user, { planName: 'auto-provision', status: 'trial' });
     }
-
-    // Guarantee a per-user demo start date (persisted once)
-    ensureUserDemoStartDate(user);
     
     // ADMINS: Skip license/demo checks and grant full access
     if (user.role === 'admin') {
@@ -3430,34 +3300,22 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
       
       if (user.stripeCustomerId) {
         try {
-          // Fetch latest subscription (active or trialing) from Stripe for this customer
+          // Fetch latest subscription from Stripe for this customer
           const stripeSubs = await stripe.subscriptions.list({
             customer: user.stripeCustomerId,
-            status: 'all',
-            limit: 5
+            status: 'active',
+            limit: 1
           });
-
+          
           if (stripeSubs.data && stripeSubs.data.length > 0) {
-            const activeOrTrial = stripeSubs.data.find(s => s.status === 'active' || s.status === 'trialing');
-            if (activeOrTrial) {
-              const nowSec = Math.floor(Date.now() / 1000);
-              const isTrialValid = activeOrTrial.status === 'trialing' && activeOrTrial.trial_end && activeOrTrial.trial_end > nowSec;
-              const isActive = activeOrTrial.status === 'active';
-              hasValidSubscription = isActive || isTrialValid;
-              subscriptionStatus = activeOrTrial.status;
-              console.log(`[demo/status] User ${user.username} has Stripe subscription: ${subscriptionStatus}${isTrialValid ? ' (trial valid)' : ''}`);
-              // If trialing, propagate trial end info
-              if (isTrialValid && activeOrTrial.trial_end) {
-                expirationDate = new Date(activeOrTrial.trial_end * 1000).toISOString();
-              }
-            } else {
-              subscriptionStatus = 'none';
-              console.log(`[demo/status] User ${user.username} has no active/trialing Stripe subscription`);
-            }
+            const activeSub = stripeSubs.data[0];
+            hasValidSubscription = activeSub.status === 'active';
+            subscriptionStatus = activeSub.status; // 'active', 'past_due', etc.
+            console.log(`[demo/status] User ${user.username} has Stripe subscription: ${subscriptionStatus}`);
           } else {
-            // No subscription
+            // No active subscription
             subscriptionStatus = 'none';
-            console.log(`[demo/status] User ${user.username} has no Stripe subscription`);
+            console.log(`[demo/status] User ${user.username} has no active Stripe subscription`);
           }
         } catch (e) {
           console.error(`[demo/status] Error checking Stripe subscription for ${user.username}:`, e.message);
@@ -3525,23 +3383,15 @@ app.post('/api/download/vhr-app', authMiddleware, async (req, res) => {
     let hasValidSubscription = false;
     
     if (demoExpired) {
-      // Demo expired - check subscription (active or trialing non expiré)
+      // Demo expired - check subscription
       if (user.stripeCustomerId) {
         try {
           const stripeSubs = await stripe.subscriptions.list({
             customer: user.stripeCustomerId,
-            status: 'all',
-            limit: 5
+            status: 'active',
+            limit: 1
           });
-          if (stripeSubs.data && stripeSubs.data.length > 0) {
-            const activeOrTrial = stripeSubs.data.find(s => s.status === 'active' || s.status === 'trialing');
-            if (activeOrTrial) {
-              const nowSec = Math.floor(Date.now() / 1000);
-              const isTrialValid = activeOrTrial.status === 'trialing' && activeOrTrial.trial_end && activeOrTrial.trial_end > nowSec;
-              const isActive = activeOrTrial.status === 'active';
-              hasValidSubscription = isActive || isTrialValid;
-            }
-          }
+          hasValidSubscription = stripeSubs.data && stripeSubs.data.length > 0;
         } catch (e) {
           console.error('[download] Stripe check error:', e.message);
         }
@@ -4167,72 +4017,45 @@ app.post('/api/license/check', async (req, res) => {
 
           // Perpetual license linked to the user (no key required client side)
           const userLicense = findActiveLicenseByUsername(user.username);
-
-          const demoStatus = await buildDemoStatusForUser(user);
-
           if (userLicense) {
             return res.json({
               ok: true,
               licensed: true,
               type: 'perpetual',
               licenseKey: userLicense.key,
-              demo: demoStatus,
               message: 'Licence perpétuelle détectée - Accès complet'
             });
           }
 
           // Active subscription grants access
-          if (demoStatus.hasValidSubscription) {
+          if (user.subscriptionStatus === 'active') {
             return res.json({
               ok: true,
               licensed: true,
               type: 'subscription',
-              demo: demoStatus,
               message: 'Abonnement actif - Accès complet'
             });
           }
-
-          // Demo still valid
-          if (!demoStatus.demoExpired) {
-            return res.json({
-              ok: true,
-              licensed: false,
-              trial: true,
-              daysRemaining: demoStatus.remainingDays,
-              expiresAt: demoStatus.expirationDate,
-              demo: demoStatus,
-              message: demoStatus.message
-            });
-          }
-
-          // Demo expired with no subscription/licence
-          return res.json({
-            ok: true,
-            licensed: false,
-            trial: false,
-            expired: true,
-            demo: demoStatus,
-            message: demoStatus.message
-          });
         }
       } catch (tokenError) {
         console.warn('[license] auth token verification failed:', tokenError && tokenError.message ? tokenError.message : tokenError);
       }
     }
 
-    // Fallback for unauthenticated requests: use machine-wide demo timer
-    const fallbackDemo = getDemoStatus();
-    if (!fallbackDemo.isExpired) {
+    // Check demo status
+    const demoStatus = getDemoStatus();
+    if (!demoStatus.isExpired) {
       return res.json({
         ok: true,
         licensed: false,
         trial: true,
-        daysRemaining: fallbackDemo.daysRemaining,
-        expiresAt: fallbackDemo.expiresAt,
-        message: `Essai gratuit - ${fallbackDemo.daysRemaining} jour(s) restant(s)`
+        daysRemaining: demoStatus.daysRemaining,
+        expiresAt: demoStatus.expiresAt,
+        message: `Essai gratuit - ${demoStatus.daysRemaining} jour(s) restant(s)`
       });
     }
 
+    // Demo expired, no license
     return res.json({
       ok: true,
       licensed: false,
@@ -4332,7 +4155,177 @@ app.get('/api/test/email-config', async (req, res) => {
   }
 });
 
+// Check license or demo status at dashboard startup
+app.post('/api/license/check', async (req, res) => {
+  try {
+    const { licenseKey } = req.body || {};
+    
+    // If license key provided, validate it
+    if (licenseKey) {
+      const isValid = validateLicenseKey(licenseKey);
+      if (isValid) {
+        return res.json({ 
+          ok: true, 
+          licensed: true, 
+          type: 'perpetual',
+          message: 'Licence valide - Accès complet' 
+        });
+      }
+    }
+    
+    // Check if user has active subscription (requires auth)
+    if (req.cookies && req.cookies.token) {
+      try {
+        const decoded = jwt.verify(req.cookies.token, JWT_SECRET);
+        const user = getUserByUsername(decoded.username);
+        if (user && user.subscriptionStatus === 'active') {
+          return res.json({ 
+            ok: true, 
+            licensed: true, 
+            type: 'subscription',
+            message: 'Abonnement actif - Accès complet' 
+          });
+        }
+      } catch (e) {
+        // Token invalid or expired
+      }
+    }
+    
+    // Check demo status
+    const demoStatus = getDemoStatus();
+    if (!demoStatus.isExpired) {
+      return res.json({ 
+        ok: true, 
+        licensed: false, 
+        trial: true,
+        daysRemaining: demoStatus.daysRemaining,
+        expiresAt: demoStatus.expiresAt,
+        message: `Essai gratuit - ${demoStatus.daysRemaining} jour(s) restant(s)` 
+      });
+    }
+    
+    // Demo expired, no license
+    return res.json({ 
+      ok: true, 
+      licensed: false, 
+      trial: false,
+      expired: true,
+      message: 'Période d\'essai expirée - Veuillez vous abonner ou acheter une licence' 
+    });
+  } catch (e) {
+    console.error('[license] check error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+// Activate license key
+app.post('/api/license/activate', async (req, res) => {
+  try {
+    const { licenseKey } = req.body || {};
+    if (!licenseKey) return res.status(400).json({ ok: false, error: 'License key required' });
+    
+    const isValid = validateLicenseKey(licenseKey);
+    if (!isValid) {
+      return res.status(400).json({ ok: false, error: 'Clé de licence invalide' });
+    }
+    
+    res.json({ 
+      ok: true, 
+      message: 'Licence activée avec succès !',
+      licensed: true 
+    });
+  } catch (e) {
+    console.error('[license] activate error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
 // ========== LICENSE VERIFICATION API ==========
+
+// Check license or demo status at dashboard startup
+app.post('/api/license/check', async (req, res) => {
+  try {
+    const { licenseKey } = req.body || {};
+    
+    // If license key provided, validate it
+    if (licenseKey) {
+      const isValid = validateLicenseKey(licenseKey);
+      if (isValid) {
+        return res.json({ 
+          ok: true, 
+          licensed: true, 
+          type: 'perpetual',
+          message: 'Licence valide - Accès complet' 
+        });
+      }
+    }
+    
+    // Check if user has active subscription (requires auth)
+    if (req.cookies && req.cookies.token) {
+      try {
+        const decoded = jwt.verify(req.cookies.token, JWT_SECRET);
+        const user = getUserByUsername(decoded.username);
+        if (user && user.subscriptionStatus === 'active') {
+          return res.json({ 
+            ok: true, 
+            licensed: true, 
+            type: 'subscription',
+            message: 'Abonnement actif - Accès complet' 
+          });
+        }
+      } catch (e) {
+        // Token invalid or expired
+      }
+    }
+    
+    // Check demo status
+    const demoStatus = getDemoStatus();
+    if (!demoStatus.isExpired) {
+      return res.json({ 
+        ok: true, 
+        licensed: false, 
+        trial: true,
+        daysRemaining: demoStatus.daysRemaining,
+        expiresAt: demoStatus.expiresAt,
+        message: `Essai gratuit - ${demoStatus.daysRemaining} jour(s) restant(s)` 
+      });
+    }
+    
+    // Demo expired, no license
+    return res.json({ 
+      ok: true, 
+      licensed: false, 
+      trial: false,
+      expired: true,
+      message: 'Période d\'essai expirée - Veuillez vous abonner ou acheter une licence' 
+    });
+  } catch (e) {
+    console.error('[license] check error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
+
+// Activate license key
+app.post('/api/license/activate', async (req, res) => {
+  try {
+    const { licenseKey } = req.body || {};
+    if (!licenseKey) return res.status(400).json({ ok: false, error: 'License key required' });
+    
+    const isValid = validateLicenseKey(licenseKey);
+    if (!isValid) {
+      return res.status(400).json({ ok: false, error: 'Clé de licence invalide' });
+    }
+    
+    res.json({ 
+      ok: true, 
+      message: 'Licence activée avec succès !',
+      licensed: true 
+    });
+  } catch (e) {
+    console.error('[license] activate error:', e);
+    res.status(500).json({ ok: false, error: 'Server error' });
+  }
+});
 
 // ========== PURCHASE/ONE-TIME PAYMENT MANAGEMENT ==========
 
@@ -4360,7 +4353,7 @@ app.get('/api/purchases/options', (req, res) => {
 // Create checkout session for subscription (requires authentication)
 app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) => {
   try {
-    const { planId, returnUrl, cancelUrl } = req.body || {};
+    const { planId } = req.body || {};
     if (!planId) return res.status(400).json({ ok: false, error: 'planId required' });
 
     const plan = subscriptionConfig.PLANS[planId];
@@ -4370,11 +4363,6 @@ app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) 
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
 
     const customerId = await ensureStripeCustomerForUser(user);
-
-    const successUrl = returnUrl || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/vhr-dashboard-pro.html?subscription=success`;
-    const canceledUrl = cancelUrl || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/vhr-dashboard-pro.html?subscription=canceled`;
-
-    const trialDays = subscriptionConfig?.BILLING_OPTIONS?.MONTHLY?.trialDays || STRIPE_TRIAL_DAYS || 0;
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -4387,9 +4375,8 @@ app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) 
       mode: 'subscription',
       customer: customerId,
       customer_email: undefined, // force the known customer to avoid name drift from cardholder input
-      subscription_data: trialDays > 0 ? { trial_period_days: trialDays } : undefined,
-      success_url: successUrl,
-      cancel_url: canceledUrl,
+      success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/vhr-dashboard-pro.html?subscription=success`,
+      cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/vhr-dashboard-pro.html?subscription=canceled`,
       metadata: {
         userId: user.id || user.username,
         username: user.username,
@@ -4446,25 +4433,6 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
   } catch (e) {
     console.error('[purchases] create-checkout error:', e);
     res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-// Reset demo/trial for the authenticated user (admin/self-service recovery)
-app.post('/api/demo/reset-self', authMiddleware, async (req, res) => {
-  try {
-    const user = getUserByUsername(req.user.username);
-    if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
-
-    const now = Date.now();
-    user.demoStartDate = now;
-    user.subscriptionStatus = user.subscriptionStatus === 'active' ? user.subscriptionStatus : 'trial';
-    persistUser(user);
-
-    const demoStatus = await buildDemoStatusForUser(user);
-    return res.json({ ok: true, demo: demoStatus, message: 'Essai réinitialisé pour cet utilisateur.' });
-  } catch (e) {
-    console.error('[demo] reset-self error:', e);
-    return res.status(500).json({ ok: false, error: 'Server error' });
   }
 });
 
@@ -4993,60 +4961,6 @@ app.post('/api/contact', async (req, res) => {
   }
 });
 
-// ========== SCRCPY GUI LAUNCH ============ 
-app.post('/api/scrcpy-gui', async (req, res) => {
-  const { serial, audioOutput } = req.body || {};
-  if (!serial) return res.status(400).json({ ok: false, error: 'serial requis' });
-  try {
-    // Lancer scrcpy en mode GUI natif (pas de redirection stdout)
-    // Taille de fenêtre réduite (ex: 640x360)
-    // audioOutput: 'headset' = audio reste sur casque, 'pc' ou 'both' = audio sur PC aussi
-    const scrcpyArgs = ['-s', serial, '--window-width', '640', '--window-height', '360'];
-    
-    // Add audio forwarding if requested (PC or both)
-    if (audioOutput === 'pc' || audioOutput === 'both') {
-      // Enable audio forwarding to PC
-      // scrcpy 2.0+ supports --audio-codec=opus
-      scrcpyArgs.push('--audio-codec=opus');
-      console.log(`[scrcpy] Audio enabled: forwarding to PC`);
-    } else {
-      // No audio forwarding (audio stays on headset)
-      scrcpyArgs.push('--no-audio');
-      console.log(`[scrcpy] Audio disabled: stays on headset only`);
-    }
-    
-    console.log(`[scrcpy] Launching with args:`, scrcpyArgs);
-    const proc = spawn('scrcpy', scrcpyArgs, {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: false
-    });
-    
-    // Important: unref BEFORE tracking to fully detach from Node.js event loop
-    proc.unref();
-    
-    // Track scrcpy process PID only (not the process object) for cleanup info
-    const scrcpyPid = proc.pid;
-    if (scrcpyPid) {
-      console.log(`[scrcpy] Started with PID: ${scrcpyPid}`);
-      // Don't track the process object to avoid keeping references that could affect the event loop
-      setTimeout(() => {
-        console.log(`[scrcpy] Session info: PID ${scrcpyPid} was started at ${new Date().toISOString()}`);
-      }, 100);
-    }
-    
-    // Handle process error without crashing server
-    proc.on('error', (err) => {
-      console.error(`[scrcpy] Process error:`, err.message);
-    });
-    
-    return res.json({ ok: true, audioOutput: audioOutput || 'headset', pid: scrcpyPid });
-  } catch (e) {
-    console.error('[api] scrcpy-gui:', e);
-    return res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
 // ========== PACKAGE DASHBOARD (génération à la demande) ============
 app.post('/api/package-dashboard', async (req, res) => {
   try {
@@ -5098,7 +5012,7 @@ const runAdbCommand = (serial, args, timeout = 30000) => {
     const adbArgs = serial ? ['-s', serial, ...args] : args;
     let proc;
     try {
-      proc = spawn(ADB_BIN, adbArgs);
+      proc = spawn('adb', adbArgs);
     } catch (spawnError) {
       console.error('[ADB] Spawn error:', spawnError.message);
       return reject(new Error('Failed to spawn adb: ' + spawnError.message));
@@ -5157,11 +5071,9 @@ const parseAdbDevices = stdout => {
 const refreshDevices = async () => {
   try {
     const { exec } = require('child_process')
-    exec(`${ADB_CMD} devices -l`, (err, stdout, stderr) => {
+    exec('adb devices -l', (err, stdout, stderr) => {
       if (err) {
         console.error('ÔØî Failed to list ADB devices:', err)
-        // Try restarting the bundled ADB server once if listing fails
-        try { startBundledAdbServer(); } catch (e) {}
         return
       }
       const list = parseAdbDevices(stdout)
@@ -5172,10 +5084,6 @@ const refreshDevices = async () => {
         status: dev.status,
         model: dev.model
       }))
-      // If still empty, attempt a one-shot adb start-server to kick discovery
-      if (!devices.length) {
-        try { execSync(`${ADB_CMD} start-server`, { stdio: 'ignore' }) } catch (e) {}
-      }
       console.log('[DEBUG] Emission devices-update:', devices)
       io.emit('devices-update', devices)
     })
@@ -5287,56 +5195,6 @@ const listenerServer = appServer;
 
 const io = new SocketIOServer(appServer, { cors: { origin: '*' } });
 
-// ---------- Relay namespace for headsets/PC via public WSS ----------
-// role: 'pc' or 'headset'
-// sessionId: logical room/token to pair PC <-> headset(s)
-const relay = io.of('/relay');
-const relaySessions = new Map(); // sessionId -> { pcs: Set<socket>, headsets: Set<socket> }
-
-function getSession(sessionId) {
-  let sess = relaySessions.get(sessionId);
-  if (!sess) {
-    sess = { pcs: new Set(), headsets: new Set() };
-    relaySessions.set(sessionId, sess);
-  }
-  return sess;
-}
-
-relay.on('connection', (socket) => {
-  const { role = 'pc', sessionId = 'default', authToken = '' } = socket.handshake.query || {};
-  const sid = String(sessionId || 'default');
-  const r = String(role || 'pc').toLowerCase() === 'headset' ? 'headset' : 'pc';
-
-  const sess = getSession(sid);
-  if (r === 'pc') sess.pcs.add(socket); else sess.headsets.add(socket);
-
-  const broadcastState = (payload, originRole) => {
-    const targets = originRole === 'pc' ? sess.headsets : sess.pcs;
-    for (const s of targets) {
-      if (s.connected) s.emit('state', { sessionId: sid, from: originRole, ...payload });
-    }
-  };
-
-  socket.on('state', (payload = {}) => {
-    broadcastState(payload, r);
-  });
-
-  socket.on('forward', ({ type, data } = {}) => {
-    const targets = r === 'pc' ? sess.headsets : sess.pcs;
-    for (const s of targets) {
-      if (s.connected) s.emit('forward', { type, data, from: r, sessionId: sid });
-    }
-  });
-
-  socket.on('disconnect', () => {
-    const sess = relaySessions.get(sid);
-    if (!sess) return;
-    sess.pcs.delete(socket);
-    sess.headsets.delete(socket);
-    if (!sess.pcs.size && !sess.headsets.size) relaySessions.delete(sid);
-  });
-});
-
 // ---------- State ----------
 
 let devices = [];
@@ -5364,7 +5222,7 @@ function startAdbTrack() {
   }
   
   try {
-    const track = spawn(ADB_BIN, ['track-devices']);
+    const track = spawn('adb', ['track-devices']);
     track.stdout.setEncoding('utf8');
     let buffer = '';
     track.stdout.on('data', data => {
@@ -5464,7 +5322,7 @@ async function startStream(serial, opts = {}) {
   ];
   
 
-  const adbProc = spawn(ADB_BIN, adbArgs);
+  const adbProc = spawn('adb', adbArgs);
   
   // Track the ADB process for cleanup
   trackProcess(adbProc, 'adb-screenrecord', serial);
@@ -5481,12 +5339,14 @@ async function startStream(serial, opts = {}) {
   
   // ---------- Video Stabilization Buffer ----------
   // Prevent flickering by buffering and smoothly distributing frames
-  // This adds ~200-300ms latency but ensures smooth playback without visual glitches
+  // This adds extra latency (~500-800ms) but keeps the image stable
   entry.frameBuffer = [];
-  entry.maxBufferSize = 15; // Buffer up to 15 frames (at ~30fps = ~500ms buffer)
+  entry.maxBufferSize = 30; // Buffer up to 30 frames (~1s at 30fps)
+  entry.minBufferedFrames = 6; // Wait for at least this many frames before streaming
   entry.sendInterval = null;
-  entry.targetFPS = 30; // Target playback rate (33ms between frames)
+  entry.targetFPS = 20; // Target rate (~50ms between frames)
   entry.lastSendTime = Date.now();
+  entry.lastSentChunk = null;
   
   streams.set(serial, entry);
 
@@ -5505,22 +5365,28 @@ async function startStream(serial, opts = {}) {
       }
     }
 
-    // Start steady transmission if not already running
-    if (!entry.sendInterval) {
+    // Start steady transmission only once enough frames buffered
+    if (!entry.sendInterval && entry.frameBuffer.length >= entry.minBufferedFrames) {
       entry.sendInterval = setInterval(() => {
+        let chunk = null;
         if (entry.frameBuffer.length > 0) {
-          const chunk = entry.frameBuffer.shift();
-          
-          // Send to all H264 clients with stable timing
-          for (const ws of entry.h264Clients || []) {
-            if (ws.readyState === 1) {
-              try { ws.send(chunk) } catch {}
-            }
-          }
-          
-          entry.lastSendTime = Date.now();
+          chunk = entry.frameBuffer.shift();
+          entry.lastSentChunk = chunk;
+        } else if (entry.lastSentChunk) {
+          chunk = entry.lastSentChunk; // repeat last frame to avoid blank flicker
         }
-      }, entry.targetFPS); // Send at ~30 FPS (33ms intervals)
+
+        if (!chunk) return;
+
+        // Send to all H264 clients with stable timing
+        for (const ws of entry.h264Clients || []) {
+          if (ws.readyState === 1) {
+            try { ws.send(chunk) } catch {}
+          }
+        }
+
+        entry.lastSendTime = Date.now();
+      }, entry.targetFPS);
     }
   });
 
@@ -5849,6 +5715,42 @@ appServer.on('upgrade', (req, res, head) => {
 
 // ---------- API Endpoints ----------
 app.get('/api/devices', (req, res) => res.json({ ok: true, devices }));
+
+// Scrcpy état courant (processus actifs)
+app.get('/api/scrcpy/status', (req, res) => {
+  try {
+    const running = [];
+    for (const [pid, info] of trackedProcesses) {
+      if (info.type === 'scrcpy' && isProcessAlive(pid)) {
+        running.push({ serial: info.serial || null, pid });
+      }
+    }
+    return res.json({ ok: true, running });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Préparation scrcpy (token anti-rafale, valide quelques secondes)
+app.post('/api/scrcpy/prepare', (req, res) => {
+  const { serial } = req.body || {};
+  if (!serial) return res.status(400).json({ ok: false, error: 'serial requis' });
+  const serialKey = normalizeSerialKey(serial);
+  const clientIp = (req.headers['x-forwarded-for'] || '').toString().split(',')[0].trim() || req.ip || '';
+  const token = issueScrcpyToken(serialKey, clientIp);
+  return res.json({ ok: true, token, ttlMs: SCRCPY_TOKEN_TTL_MS });
+});
+
+// Arrêt scrcpy (par casque ou global)
+app.post('/api/scrcpy/stop', (req, res) => {
+  try {
+    const { serial } = req.body || {};
+    const killed = stopScrcpyProcesses(serial || null);
+    return res.json({ ok: true, killed });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
 
 // Diagnostic endpoint for health checks and deploy status
 app.get('/_status', async (req, res) => {
@@ -6314,6 +6216,239 @@ app.get('/api/server-info', (req, res) => {
   res.json({ ok: true, host: hostHeader, lanIp, port, publicUrl });
 });
 
+// Open WebRTC receiver page on the headset (Quest browser) so PC sender can auto-connect
+app.post('/api/webrtc/open-receiver', authMiddleware, async (req, res) => {
+  if (process.env.NO_ADB === '1') {
+    return res.status(501).json({ ok: false, error: 'ADB disabled on this host via NO_ADB=1' });
+  }
+
+  const { serial, room, serverUrl, noBrowserFallback } = req.body || {};
+  if (!serial) {
+    return res.status(400).json({ ok: false, error: 'serial required' });
+  }
+
+  // Normalize room similarly to the client helper (strip :port)
+  let roomId = room || serial;
+  try {
+    roomId = String(roomId || '').replace(/:\d+$/, '') || 'test';
+  } catch (_) {
+    roomId = 'test';
+  }
+
+  // Ensure the headset uses a reachable LAN URL (avoid localhost)
+  let base = (serverUrl || '').trim();
+  const needsLan = !base || base.includes('localhost') || base.includes('127.0.0.1');
+  if (needsLan) {
+    const lanIp = resolveLanIpForClient(req);
+    const hostHeader = (req.headers.host || '').split(':')[0];
+    const portFromHeader = (() => {
+      const match = (req.headers.host || '').match(/:(\d+)/);
+      return match ? Number(match[1]) : null;
+    })();
+    const port = portFromHeader || PORT || 3000;
+
+    if (lanIp) {
+      base = `http://${lanIp}:${port}`;
+      console.log(`[WebRTC] Using LAN IP for receiver: ${base}`);
+    } else if (hostHeader && hostHeader !== 'localhost' && hostHeader !== '127.0.0.1') {
+      base = `http://${hostHeader}:${port}`;
+      console.log(`[WebRTC] Using host header for receiver: ${base}`);
+    } else {
+      base = `http://localhost:${port}`;
+      console.warn('[WebRTC] No LAN IP detected, falling back to localhost for receiver URL');
+    }
+  }
+
+  if (!base.startsWith('http://') && !base.startsWith('https://')) {
+    base = `http://${base.replace(/^\/+/, '')}`;
+  }
+
+  const receiverUrl = `${base.replace(/\/$/, '')}/webrtc-test.html?room=${encodeURIComponent(roomId)}&role=receiver&autostart=1`;
+
+  try {
+    console.log(`[WebRTC] Opening receiver on ${serial}: ${receiverUrl}`);
+
+    // 1) Try native broadcast to hidden receiver app (if installed)
+    let method = 'browser';
+    let result = await runAdbCommand(serial, [
+      'shell', 'am', 'broadcast',
+      '-a', 'com.vhr.webrtc.START',
+      '--es', 'room', roomId,
+      '--es', 'serverUrl', base.replace(/\/$/, '')
+    ]);
+
+    const broadcastSuccess = (result.code === 0) || /result=0/i.test(result.stdout || '') || /Broadcast completed: result=0/i.test(result.stdout || '');
+
+    if (broadcastSuccess) {
+      method = 'broadcast';
+      return res.json({ ok: true, url: receiverUrl, method, stdout: result.stdout, stderr: result.stderr });
+    }
+
+    // 2) Fallback interne : démarrer directement l'activité de l'app native (sans navigateur)
+    try {
+      const startResult = await runAdbCommand(serial, [
+        'shell', 'am', 'start',
+        '-n', 'com.vhr.dashboard/.WebRtcReceiverActivity',
+        '--es', 'room', roomId,
+        '--es', 'serverUrl', base.replace(/\/$/, '')
+      ]);
+
+      const startOk = startResult.code === 0 || /starting: intent/i.test(startResult.stdout || '');
+      if (startOk) {
+        method = 'activity';
+        return res.json({ ok: true, url: receiverUrl, method, stdout: startResult.stdout, stderr: startResult.stderr });
+      }
+
+      // If activity start failed and fallback browser is disabled, stop here
+      if (noBrowserFallback) {
+        console.warn('[WebRTC] Broadcast et démarrage activité échoués, pas de fallback navigateur', {
+          broadcast: { code: result.code, stdout: result.stdout, stderr: result.stderr },
+          activity: { code: startResult.code, stdout: startResult.stdout, stderr: startResult.stderr }
+        });
+        return res.status(500).json({
+          ok: false,
+          error: 'Receiver app non démarrée (fallback navigateur désactivé)',
+          stdout: (result.stdout || '') + (startResult.stdout || ''),
+          stderr: (result.stderr || '') + (startResult.stderr || ''),
+          url: receiverUrl
+        });
+      }
+
+      // Continue to browser fallback if allowed
+      result = startResult;
+    } catch (activityErr) {
+      console.warn('[WebRTC] Démarrage activité WebRTC échoué', activityErr?.message || activityErr);
+      if (noBrowserFallback) {
+        return res.status(500).json({
+          ok: false,
+          error: 'Receiver app non démarrée (fallback navigateur désactivé)',
+          stdout: result.stdout,
+          stderr: result.stderr,
+          url: receiverUrl
+        });
+      }
+    }
+
+    // 3) Fallback navigateur (si autorisé)
+    result = await runAdbCommand(serial, [
+      'shell', 'am', 'start',
+      '-a', 'android.intent.action.VIEW',
+      '-d', receiverUrl
+    ]);
+
+    const ok = result.code === 0;
+    if (!ok) {
+      console.warn('[WebRTC] Fallback navigateur échoué', {
+        code: result.code,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        url: receiverUrl
+      });
+      return res.status(500).json({
+        ok: false,
+        error: 'Failed to open receiver',
+        stdout: result.stdout,
+        stderr: result.stderr,
+        url: receiverUrl
+      });
+    }
+
+    res.json({ ok: true, url: receiverUrl, method, stdout: result.stdout, stderr: result.stderr });
+  } catch (e) {
+    console.error('[WebRTC] Error opening receiver:', e.message);
+    res.status(500).json({ ok: false, error: e.message, url: receiverUrl });
+  }
+});
+
+// Install the bundled WebRTC receiver APK onto the headset
+app.post('/api/webrtc/install-receiver', authMiddleware, async (req, res) => {
+  if (process.env.NO_ADB === '1') {
+    return res.status(501).json({ ok: false, error: 'ADB disabled on this host via NO_ADB=1' });
+  }
+
+  const { serial } = req.body || {};
+  if (!serial) {
+    return res.status(400).json({ ok: false, error: 'serial required' });
+  }
+
+  // Robust resolution for packaged app: try asar-unpacked and resources/public fallbacks
+  const baseUnpacked = __dirname.replace(/app\.asar([/\\]?)/, 'app.asar.unpacked$1');
+
+  const apkCandidates = [
+    path.join(baseUnpacked, 'public', 'vhr-webrtc-receiver.apk'),
+    path.join(__dirname, 'public', 'vhr-webrtc-receiver.apk'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'public', 'vhr-webrtc-receiver.apk'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'dist-client', 'public', 'vhr-webrtc-receiver.apk'),
+    path.join(process.resourcesPath || '', 'public', 'vhr-webrtc-receiver.apk')
+  ];
+
+  const apkPath = apkCandidates.find(p => p && fs.existsSync(p));
+  if (!apkPath) {
+    return res.status(500).json({ ok: false, error: 'APK manquante sur le serveur' });
+  }
+
+  try {
+    console.log(`[WebRTC] Installing receiver APK on ${serial} from ${apkPath}`);
+    // Always attempt uninstall of potential old packages first to avoid signature mismatch
+    const packagesToRemove = [
+      'com.vhr.dashboard',
+      'com.vhr.webrtc',
+      'com.vhr.webrtc.receiver',
+      'com.vhr.webrtcreceiver',
+      'com.vhr.webrtc.receiverapp'
+    ];
+    const uninstallPackage = async (pkg, label) => {
+      try {
+        const u1 = await runAdbCommand(serial, ['uninstall', pkg]);
+        console.log(`[WebRTC] ${label} uninstall ${pkg}: code=${u1.code} stdout=${u1.stdout || ''} stderr=${u1.stderr || ''}`);
+      } catch (e) {
+        console.warn(`[WebRTC] ${label} uninstall ${pkg} failed (ignored):`, e.message);
+      }
+      try {
+        const u2 = await runAdbCommand(serial, ['shell', 'pm', 'uninstall', '--user', '0', pkg]);
+        console.log(`[WebRTC] ${label} pm uninstall ${pkg}: code=${u2.code} stdout=${u2.stdout || ''} stderr=${u2.stderr || ''}`);
+      } catch (e) {
+        console.warn(`[WebRTC] ${label} pm uninstall ${pkg} failed (ignored):`, e.message);
+      }
+    };
+
+    for (const pkg of packagesToRemove) {
+      await uninstallPackage(pkg, 'pre');
+    }
+
+    let result = await runAdbCommand(serial, ['install', '-r', '-d', '-g', apkPath]);
+
+    const stderrLower = (result.stderr || '').toLowerCase();
+    const stdoutLower = (result.stdout || '').toLowerCase();
+    const needsUninstall = stderrLower.includes('install_failed_update_incompatible')
+      || stderrLower.includes('signatures do not match')
+      || stdoutLower.includes('install_failed_update_incompatible')
+      || stdoutLower.includes('signatures do not match');
+
+    if (needsUninstall) {
+      console.warn('[WebRTC] Signature mismatch detected after install attempt, retrying');
+      for (const pkg of packagesToRemove) {
+        await uninstallPackage(pkg, 'retry');
+      }
+      result = await runAdbCommand(serial, ['install', '-r', '-d', '-g', apkPath]);
+    }
+
+    const combined = `${result.stdout || ''}\n${result.stderr || ''}`.toLowerCase();
+    const hasSuccess = combined.includes('success');
+    const hasFailure = combined.includes('failure');
+    const ok = (result.code === 0 || hasSuccess) && !(hasFailure && !hasSuccess);
+
+    if (!ok) {
+      const details = (result.stderr || result.stdout || '').trim();
+      return res.status(500).json({ ok: false, error: `Install failed${details ? ': ' + details : ''}`, stdout: result.stdout, stderr: result.stderr, code: result.code });
+    }
+    res.json({ ok: true, stdout: result.stdout, stderr: result.stderr });
+  } catch (e) {
+    console.error('[WebRTC] Install receiver error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.post('/api/favorites/add', (req, res) => {
   const { name, packageId, icon } = req.body || {};
   if (!name || !packageId) {
@@ -6730,6 +6865,38 @@ io.on('connection', socket => {
   socket.emit('devices-update', devices);
   socket.emit('games-update', gamesList);
   socket.emit('favorites-update', favoritesList);
+
+  // === Simple WebRTC test signaling (screen stream) ===
+  // roomId is a short string; messages are relayed to peers in the same room.
+  socket.on('webrtc-test-join', (roomIdRaw) => {
+    const roomId = (roomIdRaw || 'test').toString().slice(0, 64);
+    socket.join(`webrtc-test-${roomId}`);
+    socket.webrtcTestRoom = roomId;
+    console.log(`[WebRTC-Test] ${socket.id} joined room ${roomId}`);
+  });
+
+  socket.on('webrtc-test-leave', () => {
+    if (socket.webrtcTestRoom) {
+      socket.leave(`webrtc-test-${socket.webrtcTestRoom}`);
+      console.log(`[WebRTC-Test] ${socket.id} left room ${socket.webrtcTestRoom}`);
+      socket.webrtcTestRoom = null;
+    }
+  });
+
+  socket.on('webrtc-test-offer', ({ roomId, sdp }) => {
+    if (!roomId || !sdp) return;
+    socket.to(`webrtc-test-${roomId}`).emit('webrtc-test-offer', { sdp });
+  });
+
+  socket.on('webrtc-test-answer', ({ roomId, sdp }) => {
+    if (!roomId || !sdp) return;
+    socket.to(`webrtc-test-${roomId}`).emit('webrtc-test-answer', { sdp });
+  });
+
+  socket.on('webrtc-test-candidate', ({ roomId, candidate }) => {
+    if (!roomId || !candidate) return;
+    socket.to(`webrtc-test-${roomId}`).emit('webrtc-test-candidate', { candidate });
+  });
   
   // === Collaborative Session Events ===
   
@@ -7401,7 +7568,7 @@ app.get('/api/adb/devices', authMiddleware, async (req, res) => {
   try {
     // Essayer 'adb' puis 'adb.exe'
     let devices = [];
-    const commands = [`${ADB_CMD} devices -l`];
+    const commands = ['adb devices -l', 'adb.exe devices -l'];
     
     for (const cmd of commands) {
       try {
@@ -7984,25 +8151,75 @@ app.get('/api/audio/session/:sessionId', authMiddleware, async (req, res) => {
 
 // ========== SCRCPY GUI LAUNCH ============
 function resolveScrcpyExecutable() {
+  const resourcesPath = (process && process.resourcesPath) ? process.resourcesPath : null;
+  const exeDir = path.dirname(process.execPath || '');
+  const resourcesAppUnpacked = resourcesPath ? path.join(resourcesPath, 'app.asar.unpacked') : null;
+  const exeResourcesUnpacked = exeDir ? path.join(exeDir, 'resources', 'app.asar.unpacked') : null;
+
   const candidates = [
+    resourcesAppUnpacked ? path.join(resourcesAppUnpacked, 'scrcpy', 'scrcpy-noconsole.exe') : null,
+    resourcesAppUnpacked ? path.join(resourcesAppUnpacked, 'scrcpy', 'scrcpy.exe') : null,
+    resourcesAppUnpacked ? path.join(resourcesAppUnpacked, 'scrcpy', 'scrcpy') : null,
+    exeResourcesUnpacked ? path.join(exeResourcesUnpacked, 'scrcpy', 'scrcpy-noconsole.exe') : null,
+    exeResourcesUnpacked ? path.join(exeResourcesUnpacked, 'scrcpy', 'scrcpy.exe') : null,
+    exeResourcesUnpacked ? path.join(exeResourcesUnpacked, 'scrcpy', 'scrcpy') : null,
+    path.join(__dirname, 'scrcpy', 'scrcpy-noconsole.exe'),
     path.join(__dirname, 'scrcpy', 'scrcpy.exe'),
     path.join(__dirname, 'scrcpy', 'scrcpy'),
+    'C:/ProgramData/chocolatey/lib/scrcpy/tools/scrcpy-noconsole.exe',
     'C:/ProgramData/chocolatey/lib/scrcpy/tools/scrcpy.exe',
     'scrcpy'
-  ];
+  ].filter(Boolean);
+
   for (const exe of candidates) {
     try {
       if (fs.existsSync(exe)) return exe;
     } catch (_) {}
   }
+
   return 'scrcpy';
 }
 
 app.post('/api/scrcpy-gui', async (req, res) => {
-  const { serial, audioOutput } = req.body || {};
+  const { serial, audioOutput, quality } = req.body || {};
   if (!serial) return res.status(400).json({ ok: false, error: 'serial requis' });
+
+  const serialKey = normalizeSerialKey(serial);
+  const now = Date.now();
+
+  if (now < scrcpyGlobalLockUntil) {
+    return res.json({ ok: true, alreadyRunning: true, globalLock: true });
+  }
+
+  const last = scrcpyLaunchLocks.get(serialKey) || 0;
+  if (now - last < SCRCPY_LAUNCH_DEBOUNCE_MS) {
+    return res.json({ ok: true, alreadyRunning: true, debounced: true });
+  }
+
+  scrcpyLaunchLocks.set(serialKey, now);
+  scrcpyGlobalLockUntil = now + SCRCPY_GLOBAL_LOCK_MS;
+  const releaseLockLater = () => setTimeout(() => scrcpyLaunchLocks.delete(serialKey), SCRCPY_LAUNCH_DEBOUNCE_MS);
+  setTimeout(() => { if (Date.now() >= scrcpyGlobalLockUntil) scrcpyGlobalLockUntil = 0; }, SCRCPY_GLOBAL_LOCK_MS + 250);
+
   try {
-    const scrcpyArgs = ['-s', serial, '--window-width', '640', '--window-height', '360'];
+    // Stop any lingering scrcpy process for this serial before launching a new one (avoid hidden zombies)
+    stopScrcpyProcesses(serial);
+
+    const scrcpyExe = resolveScrcpyExecutable();
+    // Positionner la fenêtre pour éviter qu'elle s'ouvre hors écran (ex. second écran déconnecté)
+    const scrcpyArgs = ['-s', serial, '--window-width', '640', '--window-height', '360', '--window-x', '100', '--window-y', '100'];
+
+    // Qualité vidéo
+    const profiles = {
+      'ultra-low': { maxSize: '800',  bitRate: '2M'  },
+      low:         { maxSize: '960',  bitRate: '4M'  },
+      balanced:    { maxSize: '1280', bitRate: '8M'  },
+      high:        { maxSize: '1920', bitRate: '12M' },
+      ultra:       { maxSize: '2160', bitRate: '20M' },
+      max:         { maxSize: '2880', bitRate: '25M' }
+    };
+    const chosen = profiles[quality] || profiles.balanced;
+    scrcpyArgs.push('--max-size', chosen.maxSize, '--video-bit-rate', chosen.bitRate);
 
     if (audioOutput === 'pc' || audioOutput === 'both') {
       scrcpyArgs.push('--audio-codec=opus');
@@ -8012,14 +8229,40 @@ app.post('/api/scrcpy-gui', async (req, res) => {
       console.log('[scrcpy] Audio disabled: stays on headset only');
     }
 
-    const scrcpyExe = resolveScrcpyExecutable();
+    const scrcpyDir = path.dirname(scrcpyExe);
+    const envPath = scrcpyDir ? `${scrcpyDir}${path.delimiter}${process.env.PATH || ''}` : process.env.PATH;
+
     console.log('[scrcpy] Using executable:', scrcpyExe);
     console.log('[scrcpy] Launching with args:', scrcpyArgs);
 
     const proc = spawn(scrcpyExe, scrcpyArgs, {
       detached: true,
-      stdio: 'ignore',
-      windowsHide: false
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: false,
+      env: { ...process.env, PATH: envPath },
+      cwd: scrcpyDir || process.cwd()
+    });
+
+    releaseLockLater();
+
+    proc.stdout && proc.stdout.on('data', (chunk) => {
+      const msg = chunk && chunk.toString ? chunk.toString().trim() : '';
+      if (msg) console.log('[scrcpy] stdout:', msg);
+    });
+
+    proc.stderr && proc.stderr.on('data', (chunk) => {
+      const msg = chunk && chunk.toString ? chunk.toString().trim() : '';
+      if (msg) console.warn('[scrcpy] stderr:', msg);
+    });
+
+    proc.on('error', (err) => {
+      scrcpyLaunchLocks.delete(serialKey);
+      console.error('[scrcpy] Process error:', err && err.message ? err.message : err);
+    });
+
+    proc.on('exit', (code, signal) => {
+      releaseLockLater();
+      console.warn(`[scrcpy] Exit code=${code} signal=${signal || 'null'}`);
     });
 
     proc.unref();
@@ -8032,14 +8275,12 @@ app.post('/api/scrcpy-gui', async (req, res) => {
       }, 100);
     }
 
-    proc.on('error', (err) => {
-      console.error('[scrcpy] Process error:', err.message);
-    });
-
     return res.json({ ok: true, audioOutput: audioOutput || 'headset', pid: scrcpyPid });
   } catch (e) {
+    scrcpyLaunchLocks.delete(serialKey);
+    scrcpyGlobalLockUntil = Date.now();
     console.error('[api] scrcpy-gui:', e);
-    return res.status(500).json({ ok: false, error: e.message });
+    return res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
   }
 });
 
@@ -8079,3 +8320,4 @@ app.use((err, req, res, next) => {
 // 1. User downloads APK + Voice via /api/download/vhr-app (authenticated)
 // 2. User executes: git push origin main
 // 3. GitHub Actions compiles automatically on Linux (avoids Windows Gradle issues)
+

@@ -3,6 +3,10 @@
 // ========== IMPORTS & INIT ========== 
 
 require('dotenv').config();
+// Allow local dev to bypass Postgres even if DATABASE_URL is set in .env
+if (process.env.SKIP_PG === '1') {
+  process.env.DATABASE_URL = '';
+}
 const express = require('express');
 const http = require('http');
 const { spawn, execSync } = require('child_process');
@@ -12,6 +16,10 @@ const path = require('path');
 const fs = require('fs');
 const { Server: SocketIOServer } = require('socket.io');
 const WebSocket = require('ws');
+
+// Global guard: ensure ffmpegProc symbol always exists to avoid ReferenceError in legacy paths
+globalThis.ffmpegProc = globalThis.ffmpegProc || null;
+var ffmpegProc = globalThis.ffmpegProc;
 const helmet = require('helmet');
 const cors = require('cors');
 const net = require('net');
@@ -63,8 +71,22 @@ const os = require('os');
 
 // PostgreSQL database module
 
-const db = process.env.DATABASE_URL ? require('./db-postgres') : null;
-const USE_POSTGRES = !!process.env.DATABASE_URL;
+const SKIP_PG = process.env.SKIP_PG === '1';
+const RAW_DATABASE_URL = process.env.DATABASE_URL || '';
+const isPlaceholderDbUrl = /<.*?>/.test(RAW_DATABASE_URL);
+let USE_POSTGRES = !!RAW_DATABASE_URL && !SKIP_PG && !isPlaceholderDbUrl;
+let db = null;
+if (USE_POSTGRES) {
+  try {
+    new URL(RAW_DATABASE_URL); // validate format
+    db = require('./db-postgres');
+  } catch (e) {
+    console.warn('[DB] DATABASE_URL invalide, fallback JSON/SQLite:', e?.message || e);
+    USE_POSTGRES = false;
+  }
+} else if (isPlaceholderDbUrl) {
+  console.warn('[DB] DATABASE_URL contient un placeholder, fallback JSON/SQLite');
+}
 // Admin allowlist (only these usernames are allowed to access admin endpoints)
 const ADMIN_ALLOWLIST = (process.env.ADMIN_ALLOWLIST || 'vhr')
   .split(',')
@@ -198,6 +220,81 @@ const ADB_FILENAME = process.platform === 'win32' ? 'adb.exe' : 'adb';
 const BUNDLED_ADB_PATH = path.join(PLATFORM_TOOLS_DIR, ADB_FILENAME);
 const HAS_BUNDLED_ADB = fs.existsSync(BUNDLED_ADB_PATH);
 const ADB_BIN = HAS_BUNDLED_ADB ? BUNDLED_ADB_PATH : ADB_FILENAME;
+
+// Anti-rafale scrcpy
+const SCRCPY_LAUNCH_DEBOUNCE_MS = Number(process.env.SCRCPY_LAUNCH_DEBOUNCE_MS || 10000);
+const SCRCPY_GLOBAL_LOCK_MS = Number(process.env.SCRCPY_GLOBAL_LOCK_MS || 5000);
+const scrcpyLaunchLocks = new Map(); // serialKey -> last launch timestamp
+let scrcpyGlobalLockUntil = 0;
+
+const normalizeSerialKey = (serial) => String(serial || '').trim().toLowerCase();
+
+const scrcpyLaunchTokens = new Map(); // key -> { token, expiresAt }
+const SCRCPY_TOKEN_TTL_MS = Number(process.env.SCRCPY_TOKEN_TTL_MS || 5000);
+
+function isProcessAlive(procOrPid) {
+  const pid = typeof procOrPid === 'number' ? procOrPid : (procOrPid && procOrPid.pid);
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function stopScrcpyProcesses(serial = null) {
+  const normalized = serial ? normalizeSerialKey(serial) : null;
+  let killed = 0;
+
+  for (const [pid, info] of Array.from(trackedProcesses.entries())) {
+    if (info.type !== 'scrcpy') continue;
+    if (normalized && normalizeSerialKey(info.serial) !== normalized) continue;
+
+    try {
+      if (isProcessAlive(pid)) {
+        if (process.platform === 'win32') {
+          spawn('taskkill', ['/F', '/T', '/PID', pid.toString()]);
+        } else {
+          try { process.kill(pid, 'SIGTERM'); } catch (_) { process.kill(pid, 'SIGKILL'); }
+        }
+        killed += 1;
+      }
+    } catch (e) {
+      console.warn('[scrcpy] stop error for PID', pid, e && e.message ? e.message : e);
+    }
+
+    trackedProcesses.delete(pid);
+  }
+
+  if (normalized) {
+    scrcpyLaunchLocks.delete(normalized);
+  } else {
+    scrcpyLaunchLocks.clear();
+  }
+
+  return killed;
+}
+
+function scrcpyTokenKey(serialKey, ip = '') {
+  return `${serialKey}::${ip || 'unknown'}`;
+}
+
+function issueScrcpyToken(serialKey, ip = '') {
+  const token = crypto.randomBytes(16).toString('hex');
+  const key = scrcpyTokenKey(serialKey, ip);
+  scrcpyLaunchTokens.set(key, { token, expiresAt: Date.now() + SCRCPY_TOKEN_TTL_MS });
+  return token;
+}
+
+function consumeScrcpyToken(serialKey, ip = '', token = '') {
+  const key = scrcpyTokenKey(serialKey, ip);
+  const entry = scrcpyLaunchTokens.get(key);
+  if (!entry) return false;
+  const valid = entry.token === token && Date.now() <= entry.expiresAt;
+  scrcpyLaunchTokens.delete(key);
+  return valid;
+}
 
 if (HAS_BUNDLED_ADB) {
   const adbDir = path.dirname(BUNDLED_ADB_PATH);
@@ -757,7 +854,7 @@ app.use(helmet({
       scriptSrc: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com', 'https://*.gstatic.com', 'https://cdn.jsdelivr.net'],
       scriptSrcAttr: ["'unsafe-inline'"],
       // CSP Level 3: script/style element-specific directives
-      scriptSrcElem: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com', 'https://*.gstatic.com', 'https://cdn.jsdelivr.net'],
+      scriptSrcElem: ["'self'", "'unsafe-inline'", 'https://cdn.botpress.cloud', 'https://js.stripe.com', 'https://*.gstatic.com', 'https://cdn.jsdelivr.net'],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://*.gstatic.com', 'https://*.google.com'],
       styleSrcElem: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://*.gstatic.com', 'https://*.google.com'],
       // Allow loading remote fonts (Google Fonts)
@@ -1201,6 +1298,20 @@ async function sendAccountConfirmationEmail(user) {
   }
 }
 
+// Scrcpy downloads
+app.get('/download/scrcpy-windows', (req, res) => {
+  res.redirect(302, 'https://github.com/Genymobile/scrcpy/releases/download/v3.3.1/scrcpy-win64-v3.3.1.zip');
+});
+
+app.get('/download/scrcpy-apk', (req, res) => {
+  const apkPath = path.join(__dirname, 'assets', 'scrcpy', 'scrcpy-android.apk');
+  if (fs.existsSync(apkPath)) {
+    res.download(apkPath, 'scrcpy-android.apk');
+  } else {
+    res.status(404).send('scrcpy-android.apk manquant dans assets/scrcpy/. Placez le fichier pour activer le téléchargement.');
+  }
+});
+
 // ========== EXPLICIT ROUTES (must come BEFORE express.static middleware) ==========
 
 // Serve launch-dashboard.html for 1-click launcher
@@ -1385,10 +1496,17 @@ app.get('/download/client-full', (req, res) => {
 
 // Download VHR Voice APK for Quest background audio
 app.get('/download/vhr-voice-apk', (req, res) => {
-  const apkPath = path.join(__dirname, 'public', 'downloads', 'vhr-voice.apk');
-  
+  const apkCandidates = [
+    path.join(__dirname, 'public', 'downloads', 'vhr-voice.apk'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'public', 'downloads', 'vhr-voice.apk'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'dist-client', 'public', 'downloads', 'vhr-voice.apk'),
+    path.join(process.resourcesPath || '', 'public', 'downloads', 'vhr-voice.apk')
+  ];
+
+  const apkPath = apkCandidates.find(p => p && fs.existsSync(p));
+
   try {
-    if (!fs.existsSync(apkPath)) {
+    if (!apkPath) {
       return res.status(404).json({ 
         ok: false, 
         error: 'VHR Voice APK not found' 
@@ -1412,9 +1530,18 @@ app.post('/api/device/install-voice-app', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'serial required' });
   }
 
-  const apkPath = path.join(__dirname, 'public', 'downloads', 'vhr-voice.apk');
+  const baseUnpacked = __dirname.replace(/app\.asar([/\\]?)/, 'app.asar.unpacked$1');
+
+  const apkCandidates = [
+    path.join(baseUnpacked, 'public', 'downloads', 'vhr-voice.apk'),
+    path.join(__dirname, 'public', 'downloads', 'vhr-voice.apk'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'public', 'downloads', 'vhr-voice.apk'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'dist-client', 'public', 'downloads', 'vhr-voice.apk'),
+    path.join(process.resourcesPath || '', 'public', 'downloads', 'vhr-voice.apk')
+  ];
+  const apkPath = apkCandidates.find(p => p && fs.existsSync(p));
   
-  if (!fs.existsSync(apkPath)) {
+  if (!apkPath) {
     return res.status(404).json({ ok: false, error: 'VHR Voice APK not found on server' });
   }
 
@@ -2228,29 +2355,37 @@ function authMiddleware(req, res, next) {
 // --- Route de login ---
 app.post('/api/login', async (req, res) => {
   console.log('[api/login] request received:', req.body);
-  const { username, password } = req.body;
-  console.log('[api/login] attempting login for:', username);
-  
-  let user;
-  if (USE_POSTGRES) {
-    user = await db.getUserByUsername(username);
-    console.log('[api/login] user from PostgreSQL:', user ? 'found' : 'not found');
-  } else {
-    reloadUsers(); // Reload users from file in case they were modified externally
-    user = getUserByUsername(username);
-    console.log('[api/login] user from memory:', user ? 'found' : 'not found');
+  const identifier = String(req.body?.username || req.body?.email || '').trim();
+  const password = req.body?.password;
+  if (!identifier || !password) {
+    return res.status(400).json({ ok: false, error: 'Identifiant et mot de passe requis' });
   }
-  
+
+  console.log('[api/login] attempting login for identifier:', identifier);
+  if (!USE_POSTGRES) {
+    reloadUsers();
+  }
+
+  let user = getUserByUsername(identifier);
+  if (!user) {
+    user = getUserByEmail(identifier);
+    if (user) {
+      console.log('[api/login] user found by email instead of username');
+    }
+  }
+
   if (!user) {
     console.log('[api/login] user not found');
     return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
   }
-  const valid = await bcrypt.compare(password, user.passwordhash || user.passwordHash);
+
+  const valid = await bcrypt.compare(password, user.passwordHash || user.passwordhash);
   if (!valid) {
     console.log('[api/login] password mismatch');
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
   }
-  console.log('[api/login] login successful for:', username);
+
+  console.log('[api/login] login successful for:', user.username);
   const elevatedUser = elevateAdminIfAllowlisted(user);
   const token = jwt.sign({ username: elevatedUser.username, role: elevatedUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
   const cookieOptions = buildAuthCookieOptions(req);
@@ -2365,6 +2500,8 @@ app.post('/api/tts/send', async (req, res) => {
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
+app.post('/api/create-desktop-shortcut', (req, res) => {
   try {
     // Disponibilité uniquement en environnement Windows local
     if (process.platform !== 'win32') {
@@ -4850,60 +4987,6 @@ app.post('/api/contact', async (req, res) => {
   }
 });
 
-// ========== SCRCPY GUI LAUNCH ============ 
-app.post('/api/scrcpy-gui', async (req, res) => {
-  const { serial, audioOutput } = req.body || {};
-  if (!serial) return res.status(400).json({ ok: false, error: 'serial requis' });
-  try {
-    // Lancer scrcpy en mode GUI natif (pas de redirection stdout)
-    // Taille de fenêtre réduite (ex: 640x360)
-    // audioOutput: 'headset' = audio reste sur casque, 'pc' ou 'both' = audio sur PC aussi
-    const scrcpyArgs = ['-s', serial, '--window-width', '640', '--window-height', '360'];
-    
-    // Add audio forwarding if requested (PC or both)
-    if (audioOutput === 'pc' || audioOutput === 'both') {
-      // Enable audio forwarding to PC
-      // scrcpy 2.0+ supports --audio-codec=opus
-      scrcpyArgs.push('--audio-codec=opus');
-      console.log(`[scrcpy] Audio enabled: forwarding to PC`);
-    } else {
-      // No audio forwarding (audio stays on headset)
-      scrcpyArgs.push('--no-audio');
-      console.log(`[scrcpy] Audio disabled: stays on headset only`);
-    }
-    
-    console.log(`[scrcpy] Launching with args:`, scrcpyArgs);
-    const proc = spawn('scrcpy', scrcpyArgs, {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: false
-    });
-    
-    // Important: unref BEFORE tracking to fully detach from Node.js event loop
-    proc.unref();
-    
-    // Track scrcpy process PID only (not the process object) for cleanup info
-    const scrcpyPid = proc.pid;
-    if (scrcpyPid) {
-      console.log(`[scrcpy] Started with PID: ${scrcpyPid}`);
-      // Don't track the process object to avoid keeping references that could affect the event loop
-      setTimeout(() => {
-        console.log(`[scrcpy] Session info: PID ${scrcpyPid} was started at ${new Date().toISOString()}`);
-      }, 100);
-    }
-    
-    // Handle process error without crashing server
-    proc.on('error', (err) => {
-      console.error(`[scrcpy] Process error:`, err.message);
-    });
-    
-    return res.json({ ok: true, audioOutput: audioOutput || 'headset', pid: scrcpyPid });
-  } catch (e) {
-    console.error('[api] scrcpy-gui:', e);
-    return res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
 // ========== PACKAGE DASHBOARD (génération à la demande) ============
 app.post('/api/package-dashboard', async (req, res) => {
   try {
@@ -5207,17 +5290,29 @@ function broadcastToSerial(serial, chunk) {
   }
 }
 
-// ---------- ADB screenrecord ÔåÆ FFmpeg player (plus stable que scrcpy) ----------
+// ---------- ADB screenrecord (H264 direct) ----------
 async function startStream(serial, opts = {}) {
-  // ...existing code...
-    function cleanup() {
-      try { if (entry.adbProc && entry.adbProc.pid) spawn('taskkill', ['/F', '/T', '/PID', entry.adbProc.pid.toString()]) } catch {}
-      try { if (entry.ffplayProc && entry.ffplayProc.pid) spawn('taskkill', ['/F', '/T', '/PID', entry.ffplayProc.pid.toString()]) } catch {}
-      for (const ws of entry.clients || []) { try { ws.close() } catch {} }
-      streams.delete(serial)
+  // Compat: variable ffmpegProc définie même si non utilisée (pipeline MPEG1 désactivée)
+  let ffmpegProc = null;
+  function cleanup() {
+    const ent = streams.get(serial) || entry;
+    try { if (ent && ent.adbProc && ent.adbProc.pid) spawn('taskkill', ['/F', '/T', '/PID', ent.adbProc.pid.toString()]) } catch {}
+    try { if (ent && ent.ffplayProc && ent.ffplayProc.pid) spawn('taskkill', ['/F', '/T', '/PID', ent.ffplayProc.pid.toString()]) } catch {}
+    for (const ws of (ent && ent.clients) || []) { try { ws.close() } catch {} }
+    streams.delete(serial)
+  }
+  if (streams.has(serial)) {
+    const existing = streams.get(serial);
+    const alive = existing && existing.adbProc && isProcessAlive(existing.adbProc.pid);
+    if (alive) {
+      console.log(`[stream] already streaming on ${serial}, reusing existing session`);
+      existing.shouldRun = true;
+      existing.autoReconnect = Boolean(opts.autoReconnect);
+      streams.set(serial, existing);
+      return true;
     }
-  if (streams.has(serial) && streams.get(serial).adbProc) {
-    throw new Error('already streaming');
+    try { stopStream(serial); } catch (_) {}
+    streams.delete(serial);
   }
 
   // Profils stables : résolution et bitrate
@@ -5265,7 +5360,7 @@ async function startStream(serial, opts = {}) {
   ];
   
 
-  const adbProc = spawn('adb', adbArgs);
+  const adbProc = spawn(ADB_BIN, adbArgs);
   
   // Track the ADB process for cleanup
   trackProcess(adbProc, 'adb-screenrecord', serial);
@@ -5325,48 +5420,7 @@ async function startStream(serial, opts = {}) {
     }
   });
 
-  // Keep the old MPEG1 pipeline commented for reference
-  // If we ever need MPEG1 again, just uncomment and spawn ffmpeg
-  /*
-  // ---------- Pipeline JSMpeg (MPEG1) ultra-low-latency ----------
-  // ffmpeg: H264 (adb) -> MPEG1-TS (JSMpeg) avec tous les flags de faible latence
-  const ffmpegArgs = [
-    '-fflags', 'nobuffer',
-    '-flags', 'low_delay',
-    '-probesize', '32',
-    '-analyzeduration', '0',
-    '-flush_packets', '1',
-    '-i', 'pipe:0',
-    '-f', 'mpegts',
-    '-codec:v', 'mpeg1video',
-    '-b:v', '2000k',
-    '-vf', 'fps=25,scale=640:368',
-    '-pix_fmt', 'yuv420p',
-    '-bf', '0',
-    '-muxdelay', '0.001',
-    'pipe:1'
-  ];
-
-  const ffmpegProc = spawn('ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
-  entry.ffmpegProc = ffmpegProc;
-  ffmpegProc.stderr && ffmpegProc.stderr.on('data', d => {
-    console.error('[ffmpeg stderr]', d.toString());
-  });
-  adbProc.stdout.pipe(ffmpegProc.stdin);
-  ffmpegProc.stdin.on('error', err => {
-    if (err.code !== 'EPIPE') console.error('[ffmpeg stdin]', err)
-    // EPIPE = fermeture normale, on ignore
-  });
-
-  // Gestion des viewers JSMpeg (MPEG1)
-  ffmpegProc.stdout.on('data', chunk => {
-    for (const ws of entry.mpeg1Clients || []) {
-      if (ws.readyState === 1) {
-        try { ws.send(chunk) } catch {}
-      }
-    }
-  });
-  */
+  // MPEG1 / ffmpeg pipeline désactivée (supprimée)
 
   adbProc.on('exit', code => {
     console.log(`[adb] EXIT code=${code}`);
@@ -5386,10 +5440,7 @@ async function startStream(serial, opts = {}) {
     }
   });
 
-  ffmpegProc.on('exit', code => {
-    console.log(`[ffmpeg] EXIT code=${code}`);
-    cleanup();
-  });
+  // ffmpeg désactivé: pas d'écouteur exit
 
   io.emit('stream-event', { type: 'start', serial, config: { size, bitrate } });
   return true;
@@ -5650,6 +5701,42 @@ appServer.on('upgrade', (req, res, head) => {
 
 // ---------- API Endpoints ----------
 app.get('/api/devices', (req, res) => res.json({ ok: true, devices }));
+
+// Scrcpy état courant (processus actifs)
+app.get('/api/scrcpy/status', (req, res) => {
+  try {
+    const running = [];
+    for (const [pid, info] of trackedProcesses) {
+      if (info.type === 'scrcpy' && isProcessAlive(pid)) {
+        running.push({ serial: info.serial || null, pid });
+      }
+    }
+    return res.json({ ok: true, running });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Préparation scrcpy (token anti-rafale, valide quelques secondes)
+app.post('/api/scrcpy/prepare', (req, res) => {
+  const { serial } = req.body || {};
+  if (!serial) return res.status(400).json({ ok: false, error: 'serial requis' });
+  const serialKey = normalizeSerialKey(serial);
+  const clientIp = (req.headers['x-forwarded-for'] || '').toString().split(',')[0].trim() || req.ip || '';
+  const token = issueScrcpyToken(serialKey, clientIp);
+  return res.json({ ok: true, token, ttlMs: SCRCPY_TOKEN_TTL_MS });
+});
+
+// Arrêt scrcpy (par casque ou global)
+app.post('/api/scrcpy/stop', (req, res) => {
+  try {
+    const { serial } = req.body || {};
+    const killed = stopScrcpyProcesses(serial || null);
+    return res.json({ ok: true, killed });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
 
 // Diagnostic endpoint for health checks and deploy status
 app.get('/_status', async (req, res) => {
@@ -6115,6 +6202,239 @@ app.get('/api/server-info', (req, res) => {
   res.json({ ok: true, host: hostHeader, lanIp, port, publicUrl });
 });
 
+// Open WebRTC receiver page on the headset (Quest browser) so PC sender can auto-connect
+app.post('/api/webrtc/open-receiver', authMiddleware, async (req, res) => {
+  if (process.env.NO_ADB === '1') {
+    return res.status(501).json({ ok: false, error: 'ADB disabled on this host via NO_ADB=1' });
+  }
+
+  const { serial, room, serverUrl, noBrowserFallback } = req.body || {};
+  if (!serial) {
+    return res.status(400).json({ ok: false, error: 'serial required' });
+  }
+
+  // Normalize room similarly to the client helper (strip :port)
+  let roomId = room || serial;
+  try {
+    roomId = String(roomId || '').replace(/:\d+$/, '') || 'test';
+  } catch (_) {
+    roomId = 'test';
+  }
+
+  // Ensure the headset uses a reachable LAN URL (avoid localhost)
+  let base = (serverUrl || '').trim();
+  const needsLan = !base || base.includes('localhost') || base.includes('127.0.0.1');
+  if (needsLan) {
+    const lanIp = resolveLanIpForClient(req);
+    const hostHeader = (req.headers.host || '').split(':')[0];
+    const portFromHeader = (() => {
+      const match = (req.headers.host || '').match(/:(\d+)/);
+      return match ? Number(match[1]) : null;
+    })();
+    const port = portFromHeader || PORT || 3000;
+
+    if (lanIp) {
+      base = `http://${lanIp}:${port}`;
+      console.log(`[WebRTC] Using LAN IP for receiver: ${base}`);
+    } else if (hostHeader && hostHeader !== 'localhost' && hostHeader !== '127.0.0.1') {
+      base = `http://${hostHeader}:${port}`;
+      console.log(`[WebRTC] Using host header for receiver: ${base}`);
+    } else {
+      base = `http://localhost:${port}`;
+      console.warn('[WebRTC] No LAN IP detected, falling back to localhost for receiver URL');
+    }
+  }
+
+  if (!base.startsWith('http://') && !base.startsWith('https://')) {
+    base = `http://${base.replace(/^\/+/, '')}`;
+  }
+
+  const receiverUrl = `${base.replace(/\/$/, '')}/webrtc-test.html?room=${encodeURIComponent(roomId)}&role=receiver&autostart=1`;
+
+  try {
+    console.log(`[WebRTC] Opening receiver on ${serial}: ${receiverUrl}`);
+
+    // 1) Try native broadcast to hidden receiver app (if installed)
+    let method = 'browser';
+    let result = await runAdbCommand(serial, [
+      'shell', 'am', 'broadcast',
+      '-a', 'com.vhr.webrtc.START',
+      '--es', 'room', roomId,
+      '--es', 'serverUrl', base.replace(/\/$/, '')
+    ]);
+
+    const broadcastSuccess = (result.code === 0) || /result=0/i.test(result.stdout || '') || /Broadcast completed: result=0/i.test(result.stdout || '');
+
+    if (broadcastSuccess) {
+      method = 'broadcast';
+      return res.json({ ok: true, url: receiverUrl, method, stdout: result.stdout, stderr: result.stderr });
+    }
+
+    // 2) Fallback interne : démarrer directement l'activité de l'app native (sans navigateur)
+    try {
+      const startResult = await runAdbCommand(serial, [
+        'shell', 'am', 'start',
+        '-n', 'com.vhr.dashboard/.WebRtcReceiverActivity',
+        '--es', 'room', roomId,
+        '--es', 'serverUrl', base.replace(/\/$/, '')
+      ]);
+
+      const startOk = startResult.code === 0 || /starting: intent/i.test(startResult.stdout || '');
+      if (startOk) {
+        method = 'activity';
+        return res.json({ ok: true, url: receiverUrl, method, stdout: startResult.stdout, stderr: startResult.stderr });
+      }
+
+      // If activity start failed and fallback browser is disabled, stop here
+      if (noBrowserFallback) {
+        console.warn('[WebRTC] Broadcast et démarrage activité échoués, pas de fallback navigateur', {
+          broadcast: { code: result.code, stdout: result.stdout, stderr: result.stderr },
+          activity: { code: startResult.code, stdout: startResult.stdout, stderr: startResult.stderr }
+        });
+        return res.status(500).json({
+          ok: false,
+          error: 'Receiver app non démarrée (fallback navigateur désactivé)',
+          stdout: (result.stdout || '') + (startResult.stdout || ''),
+          stderr: (result.stderr || '') + (startResult.stderr || ''),
+          url: receiverUrl
+        });
+      }
+
+      // Continue to browser fallback if allowed
+      result = startResult;
+    } catch (activityErr) {
+      console.warn('[WebRTC] Démarrage activité WebRTC échoué', activityErr?.message || activityErr);
+      if (noBrowserFallback) {
+        return res.status(500).json({
+          ok: false,
+          error: 'Receiver app non démarrée (fallback navigateur désactivé)',
+          stdout: result.stdout,
+          stderr: result.stderr,
+          url: receiverUrl
+        });
+      }
+    }
+
+    // 3) Fallback navigateur (si autorisé)
+    result = await runAdbCommand(serial, [
+      'shell', 'am', 'start',
+      '-a', 'android.intent.action.VIEW',
+      '-d', receiverUrl
+    ]);
+
+    const ok = result.code === 0;
+    if (!ok) {
+      console.warn('[WebRTC] Fallback navigateur échoué', {
+        code: result.code,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        url: receiverUrl
+      });
+      return res.status(500).json({
+        ok: false,
+        error: 'Failed to open receiver',
+        stdout: result.stdout,
+        stderr: result.stderr,
+        url: receiverUrl
+      });
+    }
+
+    res.json({ ok: true, url: receiverUrl, method, stdout: result.stdout, stderr: result.stderr });
+  } catch (e) {
+    console.error('[WebRTC] Error opening receiver:', e.message);
+    res.status(500).json({ ok: false, error: e.message, url: receiverUrl });
+  }
+});
+
+// Install the bundled WebRTC receiver APK onto the headset
+app.post('/api/webrtc/install-receiver', authMiddleware, async (req, res) => {
+  if (process.env.NO_ADB === '1') {
+    return res.status(501).json({ ok: false, error: 'ADB disabled on this host via NO_ADB=1' });
+  }
+
+  const { serial } = req.body || {};
+  if (!serial) {
+    return res.status(400).json({ ok: false, error: 'serial required' });
+  }
+
+  // Robust resolution for packaged app: try asar-unpacked and resources/public fallbacks
+  const baseUnpacked = __dirname.replace(/app\.asar([/\\]?)/, 'app.asar.unpacked$1');
+
+  const apkCandidates = [
+    path.join(baseUnpacked, 'public', 'vhr-webrtc-receiver.apk'),
+    path.join(__dirname, 'public', 'vhr-webrtc-receiver.apk'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'public', 'vhr-webrtc-receiver.apk'),
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'dist-client', 'public', 'vhr-webrtc-receiver.apk'),
+    path.join(process.resourcesPath || '', 'public', 'vhr-webrtc-receiver.apk')
+  ];
+
+  const apkPath = apkCandidates.find(p => p && fs.existsSync(p));
+  if (!apkPath) {
+    return res.status(500).json({ ok: false, error: 'APK manquante sur le serveur' });
+  }
+
+  try {
+    console.log(`[WebRTC] Installing receiver APK on ${serial} from ${apkPath}`);
+    // Always attempt uninstall of potential old packages first to avoid signature mismatch
+    const packagesToRemove = [
+      'com.vhr.dashboard',
+      'com.vhr.webrtc',
+      'com.vhr.webrtc.receiver',
+      'com.vhr.webrtcreceiver',
+      'com.vhr.webrtc.receiverapp'
+    ];
+    const uninstallPackage = async (pkg, label) => {
+      try {
+        const u1 = await runAdbCommand(serial, ['uninstall', pkg]);
+        console.log(`[WebRTC] ${label} uninstall ${pkg}: code=${u1.code} stdout=${u1.stdout || ''} stderr=${u1.stderr || ''}`);
+      } catch (e) {
+        console.warn(`[WebRTC] ${label} uninstall ${pkg} failed (ignored):`, e.message);
+      }
+      try {
+        const u2 = await runAdbCommand(serial, ['shell', 'pm', 'uninstall', '--user', '0', pkg]);
+        console.log(`[WebRTC] ${label} pm uninstall ${pkg}: code=${u2.code} stdout=${u2.stdout || ''} stderr=${u2.stderr || ''}`);
+      } catch (e) {
+        console.warn(`[WebRTC] ${label} pm uninstall ${pkg} failed (ignored):`, e.message);
+      }
+    };
+
+    for (const pkg of packagesToRemove) {
+      await uninstallPackage(pkg, 'pre');
+    }
+
+    let result = await runAdbCommand(serial, ['install', '-r', '-d', '-g', apkPath]);
+
+    const stderrLower = (result.stderr || '').toLowerCase();
+    const stdoutLower = (result.stdout || '').toLowerCase();
+    const needsUninstall = stderrLower.includes('install_failed_update_incompatible')
+      || stderrLower.includes('signatures do not match')
+      || stdoutLower.includes('install_failed_update_incompatible')
+      || stdoutLower.includes('signatures do not match');
+
+    if (needsUninstall) {
+      console.warn('[WebRTC] Signature mismatch detected after install attempt, retrying');
+      for (const pkg of packagesToRemove) {
+        await uninstallPackage(pkg, 'retry');
+      }
+      result = await runAdbCommand(serial, ['install', '-r', '-d', '-g', apkPath]);
+    }
+
+    const combined = `${result.stdout || ''}\n${result.stderr || ''}`.toLowerCase();
+    const hasSuccess = combined.includes('success');
+    const hasFailure = combined.includes('failure');
+    const ok = (result.code === 0 || hasSuccess) && !(hasFailure && !hasSuccess);
+
+    if (!ok) {
+      const details = (result.stderr || result.stdout || '').trim();
+      return res.status(500).json({ ok: false, error: `Install failed${details ? ': ' + details : ''}`, stdout: result.stdout, stderr: result.stderr, code: result.code });
+    }
+    res.json({ ok: true, stdout: result.stdout, stderr: result.stderr });
+  } catch (e) {
+    console.error('[WebRTC] Install receiver error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.post('/api/favorites/add', (req, res) => {
   const { name, packageId, icon } = req.body || {};
   if (!name || !packageId) {
@@ -6531,6 +6851,38 @@ io.on('connection', socket => {
   socket.emit('devices-update', devices);
   socket.emit('games-update', gamesList);
   socket.emit('favorites-update', favoritesList);
+
+  // === Simple WebRTC test signaling (screen stream) ===
+  // roomId is a short string; messages are relayed to peers in the same room.
+  socket.on('webrtc-test-join', (roomIdRaw) => {
+    const roomId = (roomIdRaw || 'test').toString().slice(0, 64);
+    socket.join(`webrtc-test-${roomId}`);
+    socket.webrtcTestRoom = roomId;
+    console.log(`[WebRTC-Test] ${socket.id} joined room ${roomId}`);
+  });
+
+  socket.on('webrtc-test-leave', () => {
+    if (socket.webrtcTestRoom) {
+      socket.leave(`webrtc-test-${socket.webrtcTestRoom}`);
+      console.log(`[WebRTC-Test] ${socket.id} left room ${socket.webrtcTestRoom}`);
+      socket.webrtcTestRoom = null;
+    }
+  });
+
+  socket.on('webrtc-test-offer', ({ roomId, sdp }) => {
+    if (!roomId || !sdp) return;
+    socket.to(`webrtc-test-${roomId}`).emit('webrtc-test-offer', { sdp });
+  });
+
+  socket.on('webrtc-test-answer', ({ roomId, sdp }) => {
+    if (!roomId || !sdp) return;
+    socket.to(`webrtc-test-${roomId}`).emit('webrtc-test-answer', { sdp });
+  });
+
+  socket.on('webrtc-test-candidate', ({ roomId, candidate }) => {
+    if (!roomId || !candidate) return;
+    socket.to(`webrtc-test-${roomId}`).emit('webrtc-test-candidate', { candidate });
+  });
   
   // === Collaborative Session Events ===
   
@@ -7785,24 +8137,58 @@ app.get('/api/audio/session/:sessionId', authMiddleware, async (req, res) => {
 
 // ========== SCRCPY GUI LAUNCH ============
 function resolveScrcpyExecutable() {
+  const resourcesPath = (process && process.resourcesPath) ? process.resourcesPath : null;
+  const exeDir = path.dirname(process.execPath || '');
+  const resourcesAppUnpacked = resourcesPath ? path.join(resourcesPath, 'app.asar.unpacked') : null;
+  const exeResourcesUnpacked = exeDir ? path.join(exeDir, 'resources', 'app.asar.unpacked') : null;
+
   const candidates = [
+    resourcesAppUnpacked ? path.join(resourcesAppUnpacked, 'scrcpy', 'scrcpy-noconsole.exe') : null,
+    resourcesAppUnpacked ? path.join(resourcesAppUnpacked, 'scrcpy', 'scrcpy.exe') : null,
+    resourcesAppUnpacked ? path.join(resourcesAppUnpacked, 'scrcpy', 'scrcpy') : null,
+    exeResourcesUnpacked ? path.join(exeResourcesUnpacked, 'scrcpy', 'scrcpy-noconsole.exe') : null,
+    exeResourcesUnpacked ? path.join(exeResourcesUnpacked, 'scrcpy', 'scrcpy.exe') : null,
+    exeResourcesUnpacked ? path.join(exeResourcesUnpacked, 'scrcpy', 'scrcpy') : null,
+    path.join(__dirname, 'scrcpy', 'scrcpy-noconsole.exe'),
     path.join(__dirname, 'scrcpy', 'scrcpy.exe'),
     path.join(__dirname, 'scrcpy', 'scrcpy'),
+    'C:/ProgramData/chocolatey/lib/scrcpy/tools/scrcpy-noconsole.exe',
     'C:/ProgramData/chocolatey/lib/scrcpy/tools/scrcpy.exe',
     'scrcpy'
-  ];
+  ].filter(Boolean);
+
   for (const exe of candidates) {
     try {
       if (fs.existsSync(exe)) return exe;
     } catch (_) {}
   }
+
   return 'scrcpy';
 }
 
 app.post('/api/scrcpy-gui', async (req, res) => {
   const { serial, audioOutput } = req.body || {};
   if (!serial) return res.status(400).json({ ok: false, error: 'serial requis' });
+
+  const serialKey = normalizeSerialKey(serial);
+  const now = Date.now();
+
+  if (now < scrcpyGlobalLockUntil) {
+    return res.json({ ok: true, alreadyRunning: true, globalLock: true });
+  }
+
+  const last = scrcpyLaunchLocks.get(serialKey) || 0;
+  if (now - last < SCRCPY_LAUNCH_DEBOUNCE_MS) {
+    return res.json({ ok: true, alreadyRunning: true, debounced: true });
+  }
+
+  scrcpyLaunchLocks.set(serialKey, now);
+  scrcpyGlobalLockUntil = now + SCRCPY_GLOBAL_LOCK_MS;
+  const releaseLockLater = () => setTimeout(() => scrcpyLaunchLocks.delete(serialKey), SCRCPY_LAUNCH_DEBOUNCE_MS);
+  setTimeout(() => { if (Date.now() >= scrcpyGlobalLockUntil) scrcpyGlobalLockUntil = 0; }, SCRCPY_GLOBAL_LOCK_MS + 250);
+
   try {
+    const scrcpyExe = resolveScrcpyExecutable();
     const scrcpyArgs = ['-s', serial, '--window-width', '640', '--window-height', '360'];
 
     if (audioOutput === 'pc' || audioOutput === 'both') {
@@ -7813,14 +8199,37 @@ app.post('/api/scrcpy-gui', async (req, res) => {
       console.log('[scrcpy] Audio disabled: stays on headset only');
     }
 
-    const scrcpyExe = resolveScrcpyExecutable();
+    const scrcpyDir = path.dirname(scrcpyExe);
+    const envPath = scrcpyDir ? `${scrcpyDir}${path.delimiter}${process.env.PATH || ''}` : process.env.PATH;
+
     console.log('[scrcpy] Using executable:', scrcpyExe);
     console.log('[scrcpy] Launching with args:', scrcpyArgs);
 
     const proc = spawn(scrcpyExe, scrcpyArgs, {
       detached: true,
-      stdio: 'ignore',
-      windowsHide: false
+      stdio: ['ignore', 'ignore', 'pipe'],
+      windowsHide: true,
+      env: { ...process.env, PATH: envPath },
+      cwd: scrcpyDir || process.cwd()
+    });
+
+    releaseLockLater();
+
+    proc.stderr && proc.stderr.on('data', (chunk) => {
+      const msg = chunk && chunk.toString ? chunk.toString().trim() : '';
+      if (msg) console.warn('[scrcpy] stderr:', msg);
+    });
+
+    proc.on('error', (err) => {
+      scrcpyLaunchLocks.delete(serialKey);
+      console.error('[scrcpy] Process error:', err && err.message ? err.message : err);
+    });
+
+    proc.on('exit', (code, signal) => {
+      releaseLockLater();
+      if (code && code !== 0) {
+        console.warn(`[scrcpy] Exit code=${code} signal=${signal || 'null'}`);
+      }
     });
 
     proc.unref();
@@ -7833,14 +8242,12 @@ app.post('/api/scrcpy-gui', async (req, res) => {
       }, 100);
     }
 
-    proc.on('error', (err) => {
-      console.error('[scrcpy] Process error:', err.message);
-    });
-
     return res.json({ ok: true, audioOutput: audioOutput || 'headset', pid: scrcpyPid });
   } catch (e) {
+    scrcpyLaunchLocks.delete(serialKey);
+    scrcpyGlobalLockUntil = Date.now();
     console.error('[api] scrcpy-gui:', e);
-    return res.status(500).json({ ok: false, error: e.message });
+    return res.status(500).json({ ok: false, error: e && e.message ? e.message : String(e) });
   }
 });
 

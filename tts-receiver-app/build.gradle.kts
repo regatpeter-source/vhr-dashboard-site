@@ -7,12 +7,21 @@ plugins {
 
 android {
     namespace = "com.vhr.dashboard"
-    compileSdk = 32
+    compileSdk = 34
+
+    signingConfigs {
+        create("release") {
+            storeFile = file("keystore/vhr-release.keystore")
+            storePassword = "VhrKeystore2026!"
+            keyAlias = "vhrapp"
+            keyPassword = "VhrKeystore2026!"
+        }
+    }
 
     defaultConfig {
         applicationId = "com.vhr.dashboard"
         minSdk = 26
-        targetSdk = 32
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
 
@@ -29,6 +38,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -64,6 +74,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.lifecycle.livedata.ktx)
+
+    // WebView helpers for WebRTC receiver
+    implementation("androidx.webkit:webkit:1.7.0")
 
     // Jetpack Compose
     implementation(platform(libs.androidx.compose.bom))

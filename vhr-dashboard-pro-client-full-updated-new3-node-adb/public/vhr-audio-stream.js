@@ -6,6 +6,7 @@
 
 class VHRAudioStream {
   constructor(config = {}) {
+    this.VOICE_LAN_OVERRIDE_KEY = 'vhr_voice_lan_ip_override';
     this.config = {
       signalingServer: config.signalingServer || window.location.origin,
       signalingPath: '/api/audio/signal',
@@ -426,19 +427,31 @@ class VHRAudioStream {
    * Private: Send signal to server
    */
   async _sendSignal(data) {
-    try {
-      const token = this.config.authToken || localStorage.getItem('vhr_auth_token') || '';
+    const doFetch = async (omitToken = false) => {
+      const token = omitToken ? '' : (this.config.authToken || localStorage.getItem('vhr_auth_token') || '');
       const response = await fetch(this.config.signalingServer + this.config.signalingPath, {
         method: 'POST',
+        credentials: 'include', // send httpOnly trial cookie too
         headers: {
           'Content-Type': 'application/json',
           'Authorization': token ? ('Bearer ' + token) : ''
         },
         body: JSON.stringify(data)
       });
+      return response;
+    };
+
+    try {
+      let response = await doFetch(false);
+
+      // If the stored token is stale, drop it and retry once to let auto-trial auth mint a fresh one
+      if (response.status === 401) {
+        try { localStorage.removeItem('vhr_auth_token'); } catch (_) { /* ignore */ }
+        response = await doFetch(true);
+      }
 
       if (!response.ok) {
-        throw new Error('Signaling server error: ' + response.statusText);
+        throw new Error('Signaling server error: ' + response.status + ' ' + response.statusText);
       }
 
       return await response.json();
@@ -446,6 +459,37 @@ class VHRAudioStream {
       this._log('Signaling error: ' + error.message);
       throw error;
     }
+  }
+
+  async _resolveRelayBase() {
+    const defaultPort = window.location.port || 3000;
+    const proto = 'http:'; // toujours HTTP pour éviter TLS inutile en LAN
+
+    // 1) Override manuel utilisé pour la voix dans le dashboard
+    const manual = localStorage.getItem(this.VOICE_LAN_OVERRIDE_KEY) || '';
+    if (manual) {
+      if (manual.startsWith('http://') || manual.startsWith('https://')) {
+        return manual.replace(/^https:/, 'http:').replace(/\/$/, '');
+      }
+      return `${proto}//${manual}:${defaultPort}`;
+    }
+
+    // 2) Tenter de récupérer l'IP LAN du serveur pour éviter wss://www... inaccessible en local
+    try {
+      const res = await fetch('/api/server-info', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        const lanIp = data && data.lanIp;
+        const port = (data && data.port) || defaultPort;
+        if (lanIp) {
+          return `${proto}//${lanIp}:${port}`;
+        }
+      }
+    } catch (_) {}
+
+    // 3) Fallback sur l'host courant (localhost ou hostname)
+    const host = window.location.hostname || 'localhost';
+    return `${proto}//${host}:${defaultPort}`;
   }
 
   /**
@@ -473,9 +517,10 @@ class VHRAudioStream {
         audioBitsPerSecond: 128000 // 128 kbps
       });
       
-      // Build WebSocket URL
-      const relayBase = this.config.relayBase || window.location.origin;
-      const relayUrl = new URL(relayBase);
+      // Build WebSocket URL with LAN/IP override to avoid wss://www... when running en local
+      const relayBase = await this._resolveRelayBase();
+      const relayHttp = relayBase.startsWith('http') ? relayBase : `http://${relayBase}`;
+      const relayUrl = new URL(relayHttp);
       const wsProtocol = relayUrl.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${wsProtocol}//${relayUrl.host}/api/audio/stream?serial=${encodeURIComponent(targetSerial)}&mode=sender&format=${wsFormat}`;
       

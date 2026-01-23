@@ -15,6 +15,7 @@ build/
 coverage/
 tmp/
 temp/
+backups/
 
 # Logs / diagnostics
 *.log
@@ -39,3 +40,9 @@ Thumbs.db
 *.sqlite
 *.db
 *.db-journal
+
+# Generated artifacts we don't commit
+tmp-app-pkg.json
+tts-receiver-app/.gradle/
+tts-receiver-app/keystore/
+vhr-dashboard-pro-client-full-updated-new3-node-adb/dist-new14/

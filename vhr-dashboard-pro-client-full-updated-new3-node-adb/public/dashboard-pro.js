@@ -83,7 +83,22 @@ let userList = JSON.parse(localStorage.getItem('vhr_user_list') || '[]');
 let userRoles = JSON.parse(localStorage.getItem('vhr_user_roles') || '{}');
 let licenseKey = localStorage.getItem('vhr_license_key') || '';
 let licenseStatus = { licensed: false, trial: false, expired: false };
+let latestDemoStatus = null; // Dernier statut essai/abonnement connu depuis l'API
 const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
+
+// Anti-double clic pour scrcpy
+window.scrcpyLaunching = window.scrcpyLaunching || {};
+const scrcpyLaunchRequests = new Map(); // serialKey -> ongoing promise
+const scrcpyRunning = new Set(); // casques avec scrcpy actif (vu côté serveur)
+const scrcpyToggleLocks = new Map(); // serialKey -> timestamp
+
+function normalizeSerialKeyClient(serial = '') {
+	try {
+		return String(serial || '').replace(/:\d+$/, '');
+	} catch (_) {
+		return String(serial || '');
+	}
+}
 
 function readAuthToken() {
 	return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
@@ -481,89 +496,8 @@ function updateSessionUsersList() {
 // Socket.IO session handlers
 function initSessionSocket() {
 	if (typeof io === 'undefined') return;
-	
-	const socket = window.vhrSocket || io();
-	window.vhrSocket = socket;
-	
-	socket.on('session-created', (data) => {
-		currentSession = { code: data.sessionCode, users: data.users, host: currentUser };
-		showToast(`🎯 Session créée! Code: ${data.sessionCode}`, 'success', 5000);
-		// Show the code prominently
-		showSessionCodePopup(data.sessionCode);
-	});
-	
-	socket.on('session-joined', (data) => {
-		currentSession = { code: data.sessionCode, users: data.users, host: data.host };
-		showToast(`✅ Connecté à la session ${data.sessionCode}`, 'success');
-		document.getElementById('sessionMenu')?.remove();
-	});
-	
-	socket.on('session-updated', (data) => {
-		if (currentSession) {
-			currentSession.users = data.users;
-			if (data.message) {
-				showToast(`🌐 ${data.message}`, 'info');
-			}
-			updateSessionUsersList();
-			updateSessionIndicator();
-		}
-	});
-	
-	socket.on('session-error', (data) => {
-		showToast(`❌ ${data.error}`, 'error');
-	});
-	
-	socket.on('session-action', (data) => {
-		// Handle synchronized actions from other users
-		console.log('[Session] Action received:', data);
-		handleSessionAction(data);
-	});
-}
-
-function handleSessionAction(data) {
-	const { action, payload, from } = data;
-	
-	switch(action) {
-		case 'launch-game':
-			showToast(`🎮 ${from} lance ${payload.gameName}`, 'info');
-			break;
-		case 'device-selected':
-			showToast(`📱 ${from} a sélectionné ${payload.deviceName}`, 'info');
-			break;
-		case 'settings-changed':
-			showToast(`⚙️ ${from} a modifié les paramètres`, 'info');
-			break;
-	}
-}
-
-window.createSession = function() {
-	if (!currentUser || currentUser === 'Invité') {
-		showToast('❌ Connectez-vous d\'abord pour créer une session', 'error');
-		return;
-	}
-	
-	if (window.vhrSocket) {
-		window.vhrSocket.emit('create-session', { username: currentUser });
-	} else {
-		showToast('❌ Connexion socket non disponible', 'error');
-	}
-};
-
-window.joinSession = function() {
-	const code = document.getElementById('joinSessionCode')?.value.trim().toUpperCase();
-	if (!code || code.length !== 6) {
-		showToast('❌ Entrez un code de session valide (6 caractères)', 'error');
-		return;
-	}
-	
-	if (!currentUser || currentUser === 'Invité') {
-		showToast('❌ Connectez-vous d\'abord pour rejoindre une session', 'error');
-		return;
-	}
-	
-	if (window.vhrSocket) {
-		window.vhrSocket.emit('join-session', { sessionCode: code, username: currentUser });
-	}
+	if (window.vhrSocket) return;
+	window.vhrSocket = io();
 };
 
 window.leaveSession = function() {
@@ -656,6 +590,64 @@ window.addDashboardToFavorites = function() {
 	}
 };
 
+// ========== SCRCPY DOWNLOAD ACTIONS ========== 
+window.downloadScrcpyPc = function() {
+	try {
+		window.open('/download/scrcpy-windows', '_blank');
+		showToast('Téléchargement Streamer (PC) lancé dans le navigateur.', 'info');
+	} catch (e) {
+		showToast('Impossible d’ouvrir le téléchargement scrcpy.', 'error');
+	}
+};
+
+window.downloadScrcpyApk = function() {
+	try {
+		const win = window.open('/download/scrcpy-apk', '_blank');
+		if (!win) showToast('Autorisez les popups pour télécharger l’APK scrcpy.', 'info');
+	} catch (e) {
+		showToast('APK scrcpy introuvable (placez scrcpy-android.apk dans assets/scrcpy/).', 'warning');
+	}
+};
+
+window.toggleScrcpyMenu = function() {
+	const existing = document.getElementById('scrcpyMenu');
+	if (existing) {
+		existing.remove();
+		return;
+	}
+
+	const btn = document.getElementById('scrcpyDownloadBtn');
+	const rect = btn ? btn.getBoundingClientRect() : { left: 20, bottom: 60 };
+	const menu = document.createElement('div');
+	menu.id = 'scrcpyMenu';
+	menu.style = `position:absolute;left:${rect.left + window.scrollX}px;top:${rect.bottom + window.scrollY + 8}px;z-index:2000;`;
+	menu.innerHTML = `
+		<div style="background:#1a1d24;border:2px solid #1abc9c;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,0.35);padding:14px;min-width:260px;color:#ecf0f1;">
+			<div style='font-weight:bold;margin-bottom:8px;color:#1abc9c;'>📥 Télécharger Streamer</div>
+			<div style='display:flex;flex-direction:column;gap:8px;'>
+				<button onclick='downloadScrcpyPc(); closeScrcpyMenu();' style='background:#1abc9c;color:#000;border:none;padding:10px;border-radius:8px;cursor:pointer;font-weight:bold;'>🖥️ Streamer (PC)</button>
+				<button onclick='downloadScrcpyApk(); closeScrcpyMenu();' style='background:#16a085;color:#fff;border:none;padding:10px;border-radius:8px;cursor:pointer;font-weight:bold;'>🤖 Streamer (APK)</button>
+				<small style='color:#95a5a6;'>Placez l’APK dans <code>assets/scrcpy/scrcpy-android.apk</code> sur le serveur.</small>
+			</div>
+			<button onclick='closeScrcpyMenu();' style='margin-top:10px;background:#e74c3c;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;width:100%;'>❌ Fermer</button>
+		</div>
+	`;
+	document.body.appendChild(menu);
+
+	const closeOnClickOutside = (ev) => {
+		if (!menu.contains(ev.target) && ev.target !== btn) {
+			closeScrcpyMenu();
+			document.removeEventListener('click', closeOnClickOutside);
+		}
+	};
+	setTimeout(() => document.addEventListener('click', closeOnClickOutside), 0);
+};
+
+window.closeScrcpyMenu = function() {
+	const existing = document.getElementById('scrcpyMenu');
+	if (existing) existing.remove();
+};
+
 // ========== MON COMPTE PANEL ========== 
 function showAccountPanel() {
 	let panel = document.getElementById('accountPanel');
@@ -713,6 +705,7 @@ function showAccountPanel() {
 	`;
 	
 	document.body.appendChild(panel);
+	setTimeout(() => loadBillingDetails(), 100);
 	setAudioPanelMinimized(true);
 	setAudioPanelMinimized(true);
 }
@@ -884,25 +877,26 @@ function getSettingsContent() {
 	return `
 		<div style='max-width:700px;margin:0 auto;'>
 			<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>💳 Abonnement & Facturation</h3>
-			<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;border-left:4px solid #3498db;'>
+			<div id='billingOverview' style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;border-left:4px solid #3498db;'>
 				<div style='margin-bottom:16px;'>
 					<label style='color:#95a5a6;font-size:12px;text-transform:uppercase;letter-spacing:1px;'>Statut</label>
-					<div style='color:#fff;font-size:16px;font-weight:bold;margin-top:4px;'>
-						<span style='color:#2ecc71;'>✓ Plan Actif</span>
-						<span style='color:#95a5a6;margin-left:12px;font-size:13px;'>(29€/mois)</span>
-					</div>
+					<div id='billingPlanStatus' style='color:#fff;font-size:16px;font-weight:bold;margin-top:4px;'>Chargement en cours...</div>
+					<div id='billingPlanAmount' style='color:#95a5a6;margin-top:6px;font-size:13px;'></div>
 				</div>
 				<div style='margin-bottom:20px;padding:12px;background:#1a1d24;border-radius:6px;'>
 					<div style='color:#95a5a6;font-size:12px;'>Prochain renouvellement</div>
-					<div style='color:#2ecc71;font-size:14px;font-weight:bold;margin-top:4px;'>15 Janvier 2025</div>
+					<div id='billingNextRenewal' style='color:#2ecc71;font-size:14px;font-weight:bold;margin-top:4px;'>Chargement...</div>
 				</div>
 				<div style='display:flex;gap:10px;flex-wrap:wrap;'>
 					<button onclick='openBillingPortal()' style='flex:1;min-width:150px;background:#3498db;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>📄 Factures</button>
 					<button onclick='openBillingPortal()' style='flex:1;min-width:150px;background:#f39c12;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>💳 Méthode de paiement</button>
-					<button onclick='confirmCancelSubscription()' style='flex:1;min-width:150px;background:#e74c3c;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>❌ Annuler l\'abonnement</button>
+					<button onclick='confirmCancelSubscription()' style='flex:1;min-width:150px;background:#e74c3c;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>❌ Annuler l'abonnement</button>
+					<button id='billingRefreshBtn' onclick='loadBillingDetails()' style='flex:1;min-width:150px;background:#2ecc71;color:#000;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>🔄 Actualiser</button>
 				</div>
 			</div>
 			
+			<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>📄 Factures récentes</h3>
+			<div id='billingInvoicesList' style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;min-height:120px;'>Chargement en cours...</div>
 			<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>🎨 Apparence</h3>
 			<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;'>
 				<div style='margin-bottom:16px;'>
@@ -1521,9 +1515,19 @@ window.createDesktopShortcut = async function() {
 };
 
 window.openBillingPortal = async function() {
-	// Redirection systématique vers la page billing vitrine (pas d'appel API local)
+	showToast('🔄 Chargement du portail de facturation...', 'info');
+	try {
+		const res = await api('/api/billing/portal');
+		if (res && res.ok && res.url) {
+			window.open(res.url, '_blank');
+			return;
+		}
+		showToast('❌ Impossible d’ouvrir le portail de facturation', 'error');
+	} catch (e) {
+		console.error('[billing] open portal error', e);
+		showToast('❌ Erreur de facturation : ' + (e?.message || e), 'error');
+	}
 	goToOfficialBillingPage();
-	return;
 };
 
 window.confirmCancelSubscription = function() {
@@ -2161,7 +2165,12 @@ async function api(path, opts = {}) {
 		// Timeout support
 		const controller = new AbortController();
 		const t = setTimeout(() => controller.abort(), opts.timeout || API_TIMEOUT_MS);
-		const res = await fetch(targetUrl, { ...opts, signal: controller.signal }).finally(() => clearTimeout(t));
+		let res;
+		try {
+			res = await fetch(targetUrl, { ...opts, signal: controller.signal });
+		} finally {
+			clearTimeout(t);
+		}
 		
 		// Check if response is JSON
 		const contentType = res.headers.get('content-type');
@@ -2262,6 +2271,7 @@ async function loadDevices(forceOrEvent = false) {
 			if (!initialDevicesLoadComplete) initialDevicesLoadComplete = true;
 			// Récupérer l'état des jeux en cours depuis le serveur avant de rendre
 			await syncRunningAppsFromServer();
+			await syncScrcpyStatus();
 			
 			// Mettre à jour le nombre de casques gérés
 			if (devices.length > 0) {
@@ -2330,6 +2340,7 @@ function renderDevicesTable() {
 	devices.forEach((d, idx) => {
 		const bgColor = idx % 2 === 0 ? '#1a1d24' : '#23272f';
 		const statusColor = d.status === 'device' ? '#2ecc71' : d.status === 'streaming' ? '#3498db' : '#e74c3c';
+		const scrcpyOn = scrcpyRunning.has(normalizeSerialKeyClient(d.serial));
 		const statusIcon = d.status === 'device' ? '✅' : d.status === 'streaming' ? '🟢' : '❌';
 		const runningGamesList = runningApps[d.serial] || [];
 		const serialJson = JSON.stringify(d.serial);
@@ -2374,19 +2385,9 @@ function renderDevicesTable() {
 				${runningGameDisplay}
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				${d.status !== 'streaming' ? `
-					<select id='profile_${safeId}' style='background:#34495e;color:#fff;border:1px solid #2ecc71;padding:6px;border-radius:4px;margin-bottom:4px;width:140px;'>
-						<option value='ultra-low'>Ultra Low</option>
-						<option value='low'>Low</option>
-						<option value='wifi'>WiFi</option>
-						<option value='default' selected>Default</option>
-						<option value='high'>High</option>
-						<option value='ultra'>Ultra</option>
-					</select><br>
-					<button onclick='startStreamFromTable(${JSON.stringify(d.serial)})' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>▶️ Scrcpy</button>
-				` : `
-					<button onclick='stopStreamFromTable(${JSON.stringify(d.serial)})' style='background:#e74c3c;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>⏹️ Stop</button>
-				`}
+				<div style='display:flex;flex-direction:column;gap:6px;align-items:center;justify-content:center;'>
+					<button data-scrcpy-toggle="${safeSerial}" onclick='toggleScrcpy(${JSON.stringify(d.serial)})' style='background:${scrcpyOn ? '#e74c3c' : '#2ecc71'};color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:bold;'>${scrcpyOn ? '⏹️ Scrcpy OFF' : '▶️ Scrcpy ON'}</button>
+				</div>
 			</td>
 			<td style='padding:12px;text-align:center;'>
 				${!d.serial.includes(':') ? `
@@ -2398,8 +2399,8 @@ function renderDevicesTable() {
 				<button onclick='showFavoritesDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#e67e22;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin-top:4px;'>⭐ Favoris</button>
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='background:#16a085;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;'>🗣️ Voix LAN</button>
-				<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:11px;margin-left:4px;' title='Installer l’émetteur voix sur le casque'>📲 Émetteur</button>
+				<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='background:#16a085;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;'>🗣️ Parler</button>
+				<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:11px;margin-left:4px;' title='Installer l’émetteur voix sur le casque'>📲 Télécharger vers casque</button>
 			</td>
 			<td style='padding:12px;text-align:center;'>
 				<button onclick='renameDevice({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>✏️</button>
@@ -2476,28 +2477,16 @@ function renderDevicesCards() {
 				</span>
 			</div>
 			${runningGameDisplay}
-			<div style='margin-bottom:10px;'>
-					${d.status !== 'streaming' ? `
-					<select id='profile_card_${safeId}' style='width:100%;background:#34495e;color:#fff;border:1px solid #2ecc71;padding:8px;border-radius:6px;margin-bottom:6px;'>
-						<option value='ultra-low'>Ultra Low</option>
-						<option value='low'>Low</option>
-						<option value='wifi'>WiFi</option>
-						<option value='default' selected>Default</option>
-						<option value='high'>High</option>
-						<option value='ultra'>Ultra</option>
-					</select>
-					<button onclick='startStreamFromCard(${JSON.stringify(d.serial)})' style='width:100%;background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>▶️ Scrcpy</button>
-				` : `
-					<button onclick='stopStreamFromTable(${JSON.stringify(d.serial)})' style='width:100%;background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>⏹️ Stop Stream</button>
-				`}
+			<div style='margin-bottom:10px;display:flex;flex-direction:column;gap:8px;'>
+				<button data-scrcpy-toggle="${safeSerial}" onclick='toggleScrcpy(${JSON.stringify(d.serial)})' style='background:${scrcpyOn ? '#e74c3c' : '#2ecc71'};color:#fff;border:none;padding:10px;border-radius:8px;cursor:pointer;font-weight:bold;'>${scrcpyOn ? '⏹️ Scrcpy OFF' : '▶️ Scrcpy ON'}</button>
 			</div>
 			<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;'>
 				<button onclick='showAppsDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#f39c12;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>📱 Apps</button>
 				<button onclick='showFavoritesDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#e67e22;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>⭐ Favoris</button>
 			</div>
 			<div style='display:flex;gap:6px;margin-bottom:6px;'>
-				<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='flex:1;background:#16a085;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;'>🗣️ Voix LAN</button>
-				<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:10px 12px;border-radius:6px;cursor:pointer;' title='Installer l’émetteur voix sur le casque'>📲 Émetteur</button>
+				<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='flex:1;background:#16a085;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;'>🗣️ Parler</button>
+				<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:10px 12px;border-radius:6px;cursor:pointer;' title='Installer l’émetteur voix sur le casque'>📲 Télécharger vers casque</button>
 			</div>
 			${!d.serial.includes(':') ? `
 				<button onclick='connectWifiAuto(${JSON.stringify(d.serial)})' style='width:100%;background:#9b59b6;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>📶 WiFi Auto</button>
@@ -2557,7 +2546,7 @@ function renderDevices() {
 	else renderDevicesCards();
 }
 
-// ========== STREAMING FUNCTIONS ========== 
+// (WebRTC receiver features removed)
 
 // Show audio output selection dialog for stream
 window.showStreamAudioDialog = function(serial, callback) {
@@ -2574,18 +2563,29 @@ window.showStreamAudioDialog = function(serial, callback) {
 	dialog.onclick = (e) => { if (e.target === dialog) dialog.remove(); };
 	
 	dialog.innerHTML = `
-		<div style='background:#1a1d24;border:2px solid #2ecc71;border-radius:12px;padding:24px;max-width:400px;width:90%;text-align:center;'>
+		<div style='background:#1a1d24;border:2px solid #2ecc71;border-radius:12px;padding:24px;max-width:440px;width:90%;text-align:center;'>
 			<h3 style='color:#2ecc71;margin:0 0 8px 0;'>🎮 Scrcpy - ${deviceName}</h3>
-			<p style='color:#95a5a6;margin:0 0 20px 0;font-size:12px;'>${serial}</p>
-			<p style='color:#bdc3c7;margin-bottom:20px;font-size:14px;'>🔊 Où voulez-vous entendre le son ?</p>
+			<p style='color:#95a5a6;margin:0 0 12px 0;font-size:12px;'>${serial}</p>
+			<div style='display:flex;flex-direction:column;gap:12px;margin-bottom:16px;'>
+				<label style='color:#bdc3c7;font-size:13px;font-weight:bold;'>Qualité vidéo</label>
+				<select id='scrcpyQualitySelect' style='background:#0f1117;color:#fff;border:1px solid #2ecc71;border-radius:8px;padding:10px;font-size:13px;outline:none;'>
+					<option value='ultra-low'>Ultra bas (800px, 2 Mbps)</option>
+					<option value='low'>Bas (960px, 4 Mbps)</option>
+					<option value='balanced' selected>Équilibré (1280px, 8 Mbps)</option>
+					<option value='high'>Haut (1920px, 12 Mbps)</option>
+					<option value='ultra'>Très haut (2160px, 20 Mbps)</option>
+					<option value='max'>Max (2880px, 25 Mbps)</option>
+				</select>
+			</div>
+			<p style='color:#bdc3c7;margin-bottom:16px;font-size:14px;'>🔊 Où voulez-vous entendre le son ?</p>
 			<div style='display:flex;flex-direction:column;gap:10px;'>
-				<button onclick='window.launchStreamWithAudio("${serial}", "headset")' style='background:linear-gradient(135deg, #3498db 0%, #2980b9 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
+				<button data-scrcpy-btn="${serial}" onclick='window.launchStreamWithAudio("${serial}", "headset")' style='background:linear-gradient(135deg, #3498db 0%, #2980b9 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
 					📱 Casque uniquement
 				</button>
-				<button onclick='window.launchStreamWithAudio("${serial}", "pc")' style='background:linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
+				<button data-scrcpy-btn="${serial}" onclick='window.launchStreamWithAudio("${serial}", "pc")' style='background:linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
 					💻 PC uniquement
 				</button>
-				<button onclick='window.launchStreamWithAudio("${serial}", "both")' style='background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
+				<button data-scrcpy-btn="${serial}" onclick='window.launchStreamWithAudio("${serial}", "both")' style='background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
 					🔊 Casque + PC (recommandé)
 				</button>
 			</div>
@@ -2596,36 +2596,75 @@ window.showStreamAudioDialog = function(serial, callback) {
 };
 
 window.launchStreamWithAudio = async function(serial, audioOutput) {
+	const serialKey = normalizeSerialKeyClient(serial);
+	if (scrcpyLaunchRequests.has(serialKey)) {
+		showToast('Scrcpy déjà en lancement pour ce casque', 'info');
+		return scrcpyLaunchRequests.get(serialKey);
+	}
+	if (window.scrcpyLaunching[serialKey]) {
+		showToast('Scrcpy déjà en cours pour ce casque', 'info');
+		return;
+	}
+	window.scrcpyLaunching[serialKey] = true;
+
+	const buttons = Array.from(document.querySelectorAll(`[data-scrcpy-btn="${serial}"]`));
+	buttons.forEach(btn => { btn.disabled = true; btn.style.opacity = '0.6'; btn.style.pointerEvents = 'none'; });
 	// Close dialog
 	const dialog = document.getElementById('streamAudioDialog');
 	if (dialog) dialog.remove();
 	
 	showToast('🎮 Lancement Scrcpy...', 'info');
-	
-	const res = await api('/api/scrcpy-gui', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ serial, audioOutput })
-	});
-	
-	if (res.ok) {
-		const audioMsg = audioOutput === 'headset' ? '(son sur casque)' : audioOutput === 'pc' ? '(son sur PC)' : '(son sur casque + PC)';
-		showToast(`🎮 Scrcpy lancé ! ${audioMsg}`, 'success');
-		incrementStat('totalSessions');
-	} else {
-		showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
-	}
-	setTimeout(loadDevices, 500);
+
+	const launchPromise = (async () => {
+		try {
+			const qualitySelect = document.getElementById('scrcpyQualitySelect');
+			const quality = qualitySelect ? qualitySelect.value : 'balanced';
+
+			const prep = await api('/api/scrcpy/prepare', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ serial })
+			});
+			if (!prep.ok || !prep.token) {
+				showToast('❌ Scrcpy: autorisation manquante', 'error');
+				return;
+			}
+
+			const res = await api('/api/scrcpy-gui', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ serial, audioOutput, quality, token: prep.token })
+			});
+			
+			if (res.ok) {
+				setScrcpyState(serial, true);
+				const audioMsg = audioOutput === 'headset' ? '(son sur casque)' : audioOutput === 'pc' ? '(son sur PC)' : '(son sur casque + PC)';
+				showToast(`🎮 Scrcpy lancé ! ${audioMsg}`, 'success');
+				incrementStat('totalSessions');
+			} else if (res.alreadyRunning || res.debounced || res.inflight) {
+				setScrcpyState(serial, true);
+				showToast('Scrcpy déjà lancé pour ce casque', 'info');
+			} else {
+				showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
+			}
+		} finally {
+			setTimeout(() => { delete window.scrcpyLaunching[serialKey]; }, 10000);
+			scrcpyLaunchRequests.delete(serialKey);
+			buttons.forEach(btn => { btn.disabled = false; btn.style.opacity = '1'; btn.style.pointerEvents = 'auto'; });
+			setTimeout(loadDevices, 500);
+		}
+	})();
+
+	scrcpyLaunchRequests.set(serialKey, launchPromise);
+	return launchPromise;
 };
 
 window.startStreamFromTable = async function(serial) {
-	// Show audio output selection dialog
-	window.showStreamAudioDialog(serial);
+	window.toggleScrcpy(serial);
 };
 
 window.startStreamFromCard = async function(serial) {
-	// Show audio output selection dialog  
-	window.showStreamAudioDialog(serial);
+	window.toggleScrcpy(serial);
 };
 
 window.startStreamJSMpeg = async function(serial) {
@@ -2639,6 +2678,76 @@ window.startStreamJSMpeg = async function(serial) {
 		setTimeout(() => showStreamViewer(serial), 500);
 	}
 	else showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
+};
+
+function updateScrcpyButtons(serial) {
+	const buttons = document.querySelectorAll(`[data-scrcpy-toggle="${serial}"]`);
+	const isOn = scrcpyRunning.has(normalizeSerialKeyClient(serial));
+	buttons.forEach(btn => {
+		btn.textContent = isOn ? '⏹️ Scrcpy OFF' : '▶️ Scrcpy ON';
+		btn.style.background = isOn ? '#e74c3c' : '#3498db';
+		btn.style.color = '#fff';
+		btn.style.opacity = '1';
+		btn.style.pointerEvents = 'auto';
+		btn.disabled = false;
+	});
+}
+
+function setScrcpyState(serial, running) {
+	if (!serial) return;
+	const key = normalizeSerialKeyClient(serial);
+	if (running) scrcpyRunning.add(key);
+	else scrcpyRunning.delete(key);
+	updateScrcpyButtons(serial);
+}
+
+async function syncScrcpyStatus() {
+	try {
+		const res = await api('/api/scrcpy/status');
+		if (res.ok && Array.isArray(res.running)) {
+			scrcpyRunning.clear();
+			res.running.forEach(item => { if (item && item.serial) scrcpyRunning.add(normalizeSerialKeyClient(item.serial)); });
+		}
+	} catch (e) {
+		console.warn('[scrcpy] sync status failed', e?.message || e);
+	}
+}
+
+window.stopScrcpy = async function(serial) {
+	if (!serial) return;
+	try {
+		const res = await api('/api/scrcpy/stop', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ serial })
+		});
+		if (res.ok) {
+			setScrcpyState(serial, false);
+			showToast(res.killed > 0 ? '⏹️ Scrcpy arrêté' : 'ℹ️ Pas de session scrcpy active', res.killed > 0 ? 'success' : 'info');
+		} else {
+			showToast('❌ Arrêt scrcpy: ' + (res.error || 'inconnu'), 'error');
+		}
+	} catch (e) {
+		showToast('❌ Arrêt scrcpy: ' + (e?.message || e), 'error');
+	} finally {
+		updateScrcpyButtons(serial);
+		setTimeout(loadDevices, 500);
+	}
+};
+
+window.toggleScrcpy = function(serial) {
+	const serialKey = normalizeSerialKeyClient(serial);
+	const lastToggle = scrcpyToggleLocks.get(serialKey) || 0;
+	if (Date.now() - lastToggle < 2000) {
+		console.warn('[scrcpy] toggle ignored (debounce) for', serial);
+		return;
+	}
+	scrcpyToggleLocks.set(serialKey, Date.now());
+
+	if (scrcpyRunning.has(serialKey)) {
+		return window.stopScrcpy(serial);
+	}
+	return window.showStreamAudioDialog(serial);
 };
 
 window.showStreamViewer = function(serial) {
@@ -2656,19 +2765,12 @@ window.showStreamViewer = function(serial) {
 	
 	// Store serial in data attribute for later use
 	modal.dataset.serial = serial;
-	
+
 	modal.innerHTML = `
 		<div style='width:90%;max-width:960px;background:#1a1d24;border-radius:12px;overflow:hidden;box-shadow:0 8px 32px #000;'>
 			<div style='background:#23272f;padding:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;'>
 				<h2 style='color:#2ecc71;margin:0;'>📹 Stream - ${deviceName}</h2>
 
-			<div style="background:#2c3e50;padding:18px;border-radius:12px;margin:12px 0 24px 0;border:2px dashed #f39c12;">
-				<h3 style="color:#f39c12;margin:0 0 8px 0;">🎁 Bénéficier de l'essai gratuit 7 jours</h3>
-				<p style="color:#ecf0f1;margin:0 0 12px 0;font-size:13px;">Active immédiatement votre période d'essai (si elle n'a jamais été démarrée) et relance la vérification côté serveur/Stripe.</p>
-				<button onclick="startTrialNow()" style="width:100%;background:#f39c12;color:#000;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:15px;">
-					🚀 Lancer l'essai gratuit
-				</button>
-			</div>
 				<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;'>
 					<label style='color:#fff;font-size:12px;display:flex;align-items:center;gap:6px;'>
 						🔊 Son:
@@ -3201,18 +3303,54 @@ window.showVoiceAppDialog = function(serial) {
 };
 
 // ========== DEVICE ACTIONS ========== 
-window.renameDevice = async function(device) {
-	const name = prompt('Nouveau nom pour le casque', device.name);
-	if (!name || name === device.name) return;
-	const res = await api('/api/devices/rename', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ serial: device.serial, name })
-	});
-	if (res.ok) {
-		showToast('✅ Casque renommé !', 'success');
-		loadDevices();
-	} else showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
+window.renameDevice = function(device) {
+	// Remplacer prompt (bloqué) par un mini-modal custom
+	const existing = document.getElementById('renameDeviceModal');
+	if (existing) existing.remove();
+
+	const modal = document.createElement('div');
+	modal.id = 'renameDeviceModal';
+	modal.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.75);z-index:3500;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);';
+	modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+	modal.innerHTML = `
+		<div style="background:#1a1d24;border:2px solid #2ecc71;border-radius:12px;padding:24px;width:360px;box-shadow:0 8px 24px #000;color:#fff;">
+			<h3 style="margin-top:0;color:#2ecc71;">📝 Renommer le casque</h3>
+			<p style="color:#bdc3c7;font-size:13px;margin:0 0 10px 0;">Serial : ${device.serial}</p>
+			<input id="renameDeviceInput" type="text" value="${device.name || ''}" style="width:100%;padding:10px;border-radius:8px;border:2px solid #34495e;background:#23272f;color:#fff;font-size:14px;box-sizing:border-box;" />
+			<div style="display:flex;gap:10px;margin-top:16px;">
+				<button id="renameDeviceSave" style="flex:1;background:#2ecc71;color:#000;border:none;padding:10px;border-radius:8px;font-weight:bold;cursor:pointer;">✅ Renommer</button>
+				<button id="renameDeviceCancel" style="background:#e74c3c;color:#fff;border:none;padding:10px 14px;border-radius:8px;font-weight:bold;cursor:pointer;">❌</button>
+			</div>
+		</div>
+	`;
+
+	document.body.appendChild(modal);
+	const input = document.getElementById('renameDeviceInput');
+	if (input) input.focus();
+
+	const closeModal = () => modal.remove();
+
+	const submit = async () => {
+		const name = (document.getElementById('renameDeviceInput').value || '').trim();
+		if (!name || name === device.name) { closeModal(); return; }
+		const res = await api('/api/devices/rename', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ serial: device.serial, name })
+		});
+		if (res.ok) {
+			showToast('✅ Casque renommé !', 'success');
+			loadDevices();
+			closeModal();
+		} else {
+			showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
+		}
+	};
+
+	document.getElementById('renameDeviceSave').onclick = submit;
+	document.getElementById('renameDeviceCancel').onclick = closeModal;
+	input.addEventListener('keypress', (e) => { if (e.key === 'Enter') submit(); });
 };
 
 window.showAppsDialog = async function(device) {
@@ -3643,6 +3781,61 @@ function goToOfficialBillingPage() {
 	}
 }
 
+window.loadBillingDetails = async function() {
+	const planStatusEl = document.getElementById('billingPlanStatus');
+	const planAmountEl = document.getElementById('billingPlanAmount');
+	const nextRenewalEl = document.getElementById('billingNextRenewal');
+	const invoiceListEl = document.getElementById('billingInvoicesList');
+	if (!planStatusEl || !nextRenewalEl || !invoiceListEl) return;
+	planStatusEl.textContent = 'Chargement en cours...';
+	planAmountEl.textContent = '';
+	nextRenewalEl.textContent = 'Chargement...';
+	invoiceListEl.innerHTML = 'Chargement en cours...';
+	try {
+		const [subsRes, invoicesRes] = await Promise.all([
+			api('/api/billing/subscriptions'),
+			api('/api/billing/invoices')
+		]);
+		let activeSub = null;
+		if (subsRes && subsRes.ok && Array.isArray(subsRes.subscriptions)) {
+			activeSub = subsRes.subscriptions.find(s => ['active','trialing','past_due'].includes(s.status));
+		}
+		if (activeSub) {
+			const planName = activeSub.plan?.nickname || activeSub.plan?.product || activeSub.plan?.id || 'Abonnement premium';
+			planStatusEl.innerHTML = `Plan ${planName} • <span style='color:#2ecc71;'>${activeSub.status}</span>`;
+			const amount = activeSub.plan?.amount || activeSub.plan?.unit_amount || activeSub.plan?.price?.unit_amount;
+			if (amount) planAmountEl.textContent = `${formatCurrency(amount)} / ${activeSub.plan?.interval || 'mois'}`;
+			const nextDate = (activeSub.current_period_end ? new Date(activeSub.current_period_end * 1000) : null);
+			if (nextDate) nextRenewalEl.textContent = nextDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+		} else {
+			planStatusEl.innerHTML = `<span style='color:#e67e22;'>Aucun abonnement actif</span>`;
+			planAmountEl.textContent = '';
+			nextRenewalEl.innerHTML = '—';
+		}
+		if (invoicesRes && invoicesRes.ok && Array.isArray(invoicesRes.invoices) && invoicesRes.invoices.length > 0) {
+			invoiceListEl.innerHTML = invoicesRes.invoices.slice(0,5).map(inv => `
+				<div style='margin-bottom:10px;padding:12px;background:#1a1d24;border-radius:8px;border:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;gap:12px;'>
+					<div>
+						<div style='color:#fff;font-weight:bold;'>Facture #${inv.number || inv.id}</div>
+						<div style='color:#95a5a6;font-size:12px;'>${formatDate(inv.created)}</div>
+					</div>
+					<div style='text-align:right;'>
+						<div style='color:#2ecc71;font-weight:bold;'>${formatCurrency(inv.total || inv.amount_paid)}</div>
+						<div style='color:#95a5a6;font-size:12px;'>${inv.status || ''}</div>
+					</div>
+				</div>
+			`).join('');
+		} else {
+			invoiceListEl.innerHTML = '<div style="color:#95a5a6;font-size:13px;">Aucune facture récente disponible.</div>';
+		}
+	} catch (e) {
+		console.error('[billing] load details error', e);
+		planStatusEl.textContent = 'Impossible de charger les informations';
+		nextRenewalEl.textContent = 'Erreur';
+		invoiceListEl.innerHTML = `<div style='color:#e74c3c;'>${(e?.message || 'Erreur serveur')}</div>`;
+	}
+};
+
 window.openOfficialBillingPage = function() {
 	goToOfficialBillingPage();
 	const modal = document.getElementById('unlockModal');
@@ -3651,6 +3844,14 @@ window.openOfficialBillingPage = function() {
 
 async function checkLicense() {
 	try {
+		// Si aucun token n'est présent, forcer l'auth avant d'appeler l'API (évite les 401 en boucle)
+		const token = readAuthToken();
+		if (!token) {
+			showToast('🔐 Connectez-vous pour vérifier votre essai/abonnement', 'warning');
+			showAuthModal('login');
+			return false;
+		}
+
 		// Admin = accès illimité (bypass paywall/licence)
 		// Exigence : vhr avec mot de passe doit être toujours connecté en illimité,
 		// même si le JWT n'est pas présent/valide côté client (ex: cookie expiré).
@@ -3666,13 +3867,20 @@ async function checkLicense() {
 		const res = await api('/api/demo/status');
 		
 		if (!res || !res.ok) {
+			if (res && res._status === 401) {
+				showToast('🔐 Connectez-vous pour vérifier votre essai/abonnement', 'warning');
+				showAuthModal('login');
+				return false;
+			}
 			console.error('[license] demo status check failed');
 			// Bloquer l'accès par défaut si la vérification échoue (éviter l'accès sans abo)
-			showUnlockModal({ expired: true, accessBlocked: true, subscriptionStatus: 'unknown' });
+			latestDemoStatus = null;
+			showUnlockModal({ expired: true, accessBlocked: true, subscriptionStatus: 'unknown', trialAvailable: false });
 			return false;
 		}
 		
 		const demoStatus = res.demo;
+		latestDemoStatus = demoStatus;
 		console.log('[license] Demo status:', demoStatus);
 		
 		// Demo is still valid - show banner with remaining days
@@ -3688,7 +3896,8 @@ async function checkLicense() {
 			showUnlockModal({
 				expired: true,
 				accessBlocked: true,
-				subscriptionStatus: demoStatus.subscriptionStatus
+				subscriptionStatus: demoStatus.subscriptionStatus,
+				trialAvailable: false
 			});
 			return false; // BLOCK ACCESS
 		} else {
@@ -3705,10 +3914,11 @@ async function checkLicense() {
 
 function showTrialBanner(daysRemaining) {
 	let banner = document.getElementById('trialBanner');
-	if (banner) return;
-	
-	banner = document.createElement('div');
-	banner.id = 'trialBanner';
+	const alreadyExists = !!banner;
+	if (!banner) {
+		banner = document.createElement('div');
+		banner.id = 'trialBanner';
+	}
 	
 	let bannerText = '';
 	let bgColor = 'linear-gradient(135deg, #f39c12, #e67e22)'; // Orange for trial
@@ -3729,7 +3939,7 @@ function showTrialBanner(daysRemaining) {
 			🚀 Débloquer maintenant
 		</button>` : ''}
 	`;
-	document.body.appendChild(banner);
+	if (!alreadyExists) document.body.appendChild(banner);
 	document.body.style.paddingTop = '106px'; // 56 navbar + 50 banner
 	
 	// Add margin-top to deviceGrid to prevent overlap with headers
@@ -3739,7 +3949,19 @@ function showTrialBanner(daysRemaining) {
 	}
 }
 
+function isTrialAvailableFromStatus(status) {
+	if (status && typeof status.trialAvailable === 'boolean') return status.trialAvailable;
+	if (latestDemoStatus) return !latestDemoStatus.demoExpired && !latestDemoStatus.accessBlocked;
+	// Par défaut, si on ne sait pas, on laisse l'essai visible uniquement avant qu'un statut expiré ne soit connu
+	return true;
+}
+
 window.showUnlockModal = function(status = licenseStatus) {
+	const existingBanner = document.getElementById('trialBanner');
+	if (existingBanner) {
+		existingBanner.remove();
+		document.body.style.paddingTop = '56px';
+	}
 	let modal = document.getElementById('unlockModal');
 	if (modal) modal.remove();
 	
@@ -3750,7 +3972,6 @@ window.showUnlockModal = function(status = licenseStatus) {
 	// Determine the message based on status
 	let headerMessage = '<h2 style="color:#e74c3c;">⚠️ Accès refusé</h2>';
 	let bodyMessage = '<p style="color:#95a5a6;">Votre période d\'essai a expiré.<br>Pour continuer à utiliser VHR Dashboard, choisissez une option ci-dessous :</p>';
-	
 	if (status.expired || status.accessBlocked) {
 		headerMessage = '<h2 style="color:#e74c3c;">⚠️ Essai expiré - Abonnement requis</h2>';
 		bodyMessage = '<p style="color:#95a5a6;">Votre accès à VHR Dashboard a expiré car votre période d\'essai est terminée et aucun abonnement n\'est actif.<br><br>Choisissez une option ci-dessous pour continuer :</p>';
@@ -3783,14 +4004,6 @@ window.showUnlockModal = function(status = licenseStatus) {
 				</div>
 			</div>
 
-			<!-- Reset trial (self-service) -->
-			<div style="background:#34495e;padding:16px;border-radius:12px;margin:12px 0;border:1px dashed #f39c12;">
-				<h4 style="color:#f39c12;margin:0 0 6px 0;">🔄 Réinitialiser l'essai</h4>
-				<p style="color:#ecf0f1;margin:0 0 10px 0;font-size:13px;">En cas de blocage anormal, relancez votre essai gratuit (si disponible) et rafraîchissez le statut.</p>
-				<button onclick="resetMyTrial()" style="width:100%;background:#f39c12;color:#000;border:none;padding:10px;border-radius:8px;cursor:pointer;font-weight:bold;">
-					♻️ Relancer mon essai
-				</button>
-			</div>
 			
 			<!-- Option 2: Achat définitif -->
 			<div style="background:#2c3e50;padding:24px;border-radius:12px;margin:20px 0;border:2px solid #2ecc71;">
@@ -3841,6 +4054,12 @@ window.purchasePro = function() {
 
 window.startStripeCheckoutFromApp = async function() {
 	try {
+		const token = readAuthToken() || await syncTokenFromCookie();
+		if (!token) {
+			showToast('🔐 Connectez-vous avant de vous abonner', 'warning');
+			showAuthModal('login');
+			return;
+		}
 		const returnUrl = `${window.location.origin}/vhr-dashboard-pro.html?subscription=success`;
 		const cancelUrl = `${window.location.origin}/vhr-dashboard-pro.html?subscription=canceled`;
 		const res = await api('/api/subscriptions/create-checkout', {
@@ -3860,11 +4079,40 @@ window.startStripeCheckoutFromApp = async function() {
 	}
 };
 
+// Démarre l'essai 7 jours via Stripe (identique à checkout, le trial est porté par le plan côté serveur)
+window.startStripeTrialCheckout = async function() {
+	try {
+		const token = readAuthToken() || await syncTokenFromCookie();
+		if (!token) {
+			showToast('🔐 Connectez-vous avant de lancer l\'essai Stripe', 'warning');
+			showAuthModal('login');
+			return;
+		}
+		const returnUrl = `${window.location.origin}/vhr-dashboard-pro.html?subscription=success`;
+		const cancelUrl = `${window.location.origin}/vhr-dashboard-pro.html?subscription=canceled`;
+		const res = await api('/api/subscriptions/create-checkout', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ planId: 'STANDARD', returnUrl, cancelUrl })
+		});
+		if (res && res.ok && res.url) {
+			showToast('Redirection vers Stripe (essai 7 jours)…', 'info');
+			window.location.href = res.url;
+			return;
+		}
+		showToast(res && res.error ? res.error : 'Impossible de créer la session Stripe', 'error');
+	} catch (e) {
+		console.error('[stripe] trial checkout error', e);
+		showToast('Erreur lors de la création de la session Stripe', 'error');
+	}
+};
+
 window.resetMyTrial = async function() {
 	try {
 		const res = await api('/api/demo/reset-self', { method: 'POST' });
 		if (res && res.ok && res.demo) {
 			const demo = res.demo;
+			latestDemoStatus = demo;
 			showToast(`✅ Essai réinitialisé : ${demo.remainingDays} jour(s) restant(s)`, 'success');
 			closeUnlockModal();
 			showTrialBanner(demo.remainingDays);
@@ -3888,6 +4136,7 @@ window.startTrialNow = async function() {
 		const res = await api('/api/demo/status');
 		if (res && res.ok && res.demo) {
 			const demo = res.demo;
+			latestDemoStatus = demo;
 			if (!demo.demoExpired) {
 				showToast(`✅ Essai activé : ${demo.remainingDays} jour(s) restant(s)`, 'success');
 				closeUnlockModal();

@@ -1,13 +1,28 @@
 // Electron main process entry for VHR Dashboard
 // Boots the local Express server then opens a BrowserWindow on it.
 
-const { app, BrowserWindow, session } = require('electron');
+const { app, BrowserWindow, session, shell } = require('electron');
 const { fork } = require('child_process');
 const path = require('path');
 const http = require('http');
 const https = require('https');
 const os = require('os');
 const { startRelayClient } = require('./services/relay-client');
+
+// WebRTC signaling was removed; keep a safe optional import so Electron still boots
+let startSignalingServer = () => {
+  console.log('[electron] signaling server skipped (WebRTC disabled)');
+};
+try {
+  const maybeModule = require(path.join(__dirname, 'electron', 'src', 'signaling-server'));
+  if (maybeModule && typeof maybeModule.startSignalingServer === 'function') {
+    startSignalingServer = maybeModule.startSignalingServer;
+  } else {
+    console.warn('[electron] signaling-server module present but missing startSignalingServer export; keeping disabled');
+  }
+} catch (e) {
+  console.warn('[electron] signaling-server module not found; continuing without WebRTC signaling:', e?.message || e);
+}
 
 const PORT = process.env.PORT || 3000;
 const FORCE_HTTP = process.env.FORCE_HTTP === '1';
@@ -19,19 +34,12 @@ if (preferHttps) {
   app.commandLine.appendSwitch('ignore-certificate-errors');
 }
 
-function getLocalLanIp() {
-  const ifaces = os.networkInterfaces();
-  for (const name of Object.keys(ifaces)) {
-    for (const iface of ifaces[name] || []) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address;
-      }
-    }
-  }
-  return 'localhost';
-}
 let serverProcess = null;
 let relayClient = null;
+let mainWindow = null;
+let creatingWindow = false;
+const externalOpenCooldown = new Map(); // url -> timestamp
+const EXTERNAL_OPEN_COOLDOWN_MS = Number(process.env.EXTERNAL_OPEN_COOLDOWN_MS || 5000);
 
 function configurePermissions() {
   // Allow only audio/video capture; deny everything else.
@@ -44,6 +52,40 @@ function configurePermissions() {
 
     session.defaultSession.setPermissionCheckHandler((wc, permission) => allowed.has(permission));
   }
+
+  // Contrôler l'ouverture de nouvelles fenêtres (window.open)
+  app.on('web-contents-created', (_event, contents) => {
+    contents.setWindowOpenHandler(({ url }) => {
+      try {
+        // Autoriser les pages locales du dashboard dans la même app
+        if (url.startsWith('http://localhost') || url.startsWith('https://localhost') || url.startsWith('http://127.0.0.1') || url.startsWith('https://127.0.0.1')) {
+          return { action: 'allow' };
+        }
+
+        const now = Date.now();
+        const key = String(url || '').toLowerCase();
+        const last = externalOpenCooldown.get(key) || 0;
+        if (now - last < EXTERNAL_OPEN_COOLDOWN_MS) {
+          console.warn('[electron] External open throttled:', url);
+          return { action: 'deny' };
+        }
+        externalOpenCooldown.set(key, now);
+
+        // Pour les liens externes classiques (site vitrine, etc.), ouvrir via l'OS
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          shell.openExternal(url);
+          return { action: 'deny' };
+        }
+      } catch (e) {
+        console.warn('[electron] window.open blocked (error):', e?.message || e);
+      }
+      return { action: 'deny' };
+    });
+  });
+}
+
+function sleep(ms = 200) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function startServer() {
@@ -53,6 +95,7 @@ function startServer() {
   // Propagate defaults to child server AND current Electron process (for relay-client)
   process.env.RELAY_URL = process.env.RELAY_URL || defaultRelayUrl;
   process.env.RELAY_SESSION_ID = process.env.RELAY_SESSION_ID || 'default';
+  // ADB activé par défaut pour détecter le casque ; on peut forcer NO_ADB=1 si besoin WebRTC-only
   process.env.NO_ADB = process.env.NO_ADB ?? '0';
 
   const env = {
@@ -75,7 +118,7 @@ function stopServer() {
   }
 }
 
-function waitForServerOnProtocol(protocol = 'http', maxAttempts = 30, delayMs = 300) {
+function waitForServerOnProtocol(protocol = 'http', maxAttempts = 60, delayMs = 500) {
   return new Promise((resolve, reject) => {
     let attempts = 0;
     const url = `${protocol}://localhost:${PORT}/ping`;
@@ -103,13 +146,15 @@ function waitForServerOnProtocol(protocol = 'http', maxAttempts = 30, delayMs = 
   });
 }
 
-async function waitForServer(maxAttemptsPerProtocol = 30, delayMs = 300) {
+async function waitForServer(maxAttemptsPerProtocol, delayMs) {
+  const attempts = Number(maxAttemptsPerProtocol ?? process.env.WAIT_FOR_SERVER_ATTEMPTS ?? 80);
+  const delay = Number(delayMs ?? process.env.WAIT_FOR_SERVER_DELAY_MS ?? 500);
   const protocols = preferHttps ? ['https', 'http'] : ['http', 'https'];
   let lastError = null;
 
   for (const protocol of protocols) {
     try {
-      await waitForServerOnProtocol(protocol, maxAttemptsPerProtocol, delayMs);
+      await waitForServerOnProtocol(protocol, attempts, delay);
       return protocol;
     } catch (err) {
       lastError = err;
@@ -119,8 +164,57 @@ async function waitForServer(maxAttemptsPerProtocol = 30, delayMs = 300) {
   throw lastError || new Error('Server not responding');
 }
 
+async function loadDashboardWithRetry(win, targetUrl) {
+  const maxAttempts = Number(process.env.LOAD_RETRY_ATTEMPTS || 5);
+  const delayMs = Number(process.env.LOAD_RETRY_DELAY_MS || 1500);
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (!win || win.isDestroyed()) return;
+    try {
+      await win.loadURL(targetUrl);
+      return;
+    } catch (err) {
+      console.warn(`[electron] loadURL failed (${attempt}/${maxAttempts}) ->`, err && err.message ? err.message : err);
+      if (attempt >= maxAttempts) break;
+      await sleep(delayMs);
+      try {
+        await waitForServer();
+      } catch (waitErr) {
+        console.warn('[electron] waitForServer retry failed:', waitErr && waitErr.message ? waitErr.message : waitErr);
+      }
+    }
+  }
+
+  const fallbackHtml = 'data:text/html;charset=utf-8,' + encodeURIComponent(`
+    <html><body style="background:#0d0f14;color:#e0e0e0;font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;">
+      <div style="max-width:640px;text-align:center;">
+        <h2>🚧 Dashboard inaccessible</h2>
+        <p>Le serveur local n'a pas encore répondu. Patientez quelques secondes puis relancez, ou vérifiez qu'un antivirus/firewall ne bloque pas le port ${PORT}.</p>
+        <p style="margin-top:18px;font-size:14px;color:#9aa0a6;">Astuce : fermez puis relancez l'application si le problème persiste.</p>
+      </div>
+    </body></html>
+  `);
+
+  try {
+    await win.loadURL(fallbackHtml);
+  } catch (fallbackErr) {
+    console.error('[electron] fallback load failed:', fallbackErr && fallbackErr.message ? fallbackErr.message : fallbackErr);
+  }
+}
+
 async function createWindow() {
-  const win = new BrowserWindow({
+  if (creatingWindow) return mainWindow;
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+    return mainWindow;
+  }
+
+  creatingWindow = true;
+  console.log('[electron] CREATE WINDOW', new Date().toISOString());
+
+  mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     backgroundColor: '#0d0f14',
@@ -135,37 +229,71 @@ async function createWindow() {
   try {
     resolvedProtocol = await waitForServer();
   } catch (e) {
-    // Continue avec le protocole par défaut pour afficher une page d'erreur intégrée si nécessaire
     console.warn('[electron] waitForServer failed, falling back:', e && e.message ? e.message : e);
   }
 
-  // Tolérer les certificats auto-signés sur localhost uniquement
-  app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
-    if (url.startsWith('https://localhost') || url.startsWith('https://127.0.0.1')) {
-      event.preventDefault();
-      return callback(true);
-    }
-    return callback(false);
-  });
-
   const targetUrl = `${resolvedProtocol}://localhost:${PORT}/vhr-dashboard-pro.html`;
-  await win.loadURL(targetUrl);
+  try {
+    await loadDashboardWithRetry(mainWindow, targetUrl);
+  } finally {
+    creatingWindow = false;
+  }
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 }
 
-app.whenReady().then(() => {
-  configurePermissions();
-  startServer();
-  relayClient = startRelayClient({
-    app: 'vhr-dashboard-electron',
-    version: app.getVersion && app.getVersion(),
-    sessionId: process.env.RELAY_SESSION_ID || undefined,
-  });
-  createWindow();
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
+// Tolérer les certificats auto-signés sur localhost uniquement
+app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
+  if (url.startsWith('https://localhost') || url.startsWith('https://127.0.0.1')) {
+    event.preventDefault();
+    return callback(true);
+  }
+  return callback(false);
 });
+
+// Fermeture immédiate des fenêtres supplémentaires créées par erreur
+app.on('browser-window-created', (event, win) => {
+  if (mainWindow && win !== mainWindow) {
+    console.warn('[electron] Extra window detected, closing to avoid duplicates');
+    setImmediate(() => {
+      try { if (!win.isDestroyed()) win.close(); } catch (_) {}
+    });
+  }
+});
+
+// Verrou single instance pour éviter plusieurs BrowserWindow simultanées
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    } else {
+      createWindow();
+    }
+  });
+
+  app.whenReady().then(() => {
+    configurePermissions();
+    startServer();
+    startSignalingServer(3001); // no-op if WebRTC signaling is unavailable/disabled
+    relayClient = startRelayClient({
+      app: 'vhr-dashboard-electron',
+      version: app.getVersion && app.getVersion(),
+      sessionId: process.env.RELAY_SESSION_ID || undefined,
+    });
+    createWindow();
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

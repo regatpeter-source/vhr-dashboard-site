@@ -130,6 +130,9 @@
           <p>Accédez au dashboard complet en 1 clic. Essai gratuit 7 jours.</p>
           <a href="https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.0-client/VHR.Dashboard.Setup.1.0.1.exe" id="launchDashboardBtn" class="cta">Télécharger le pack</a>
           <span class="badge badge-demo">Accès immédiat</span>
+          <div id="downloadShortcutReminder" class="download-shortcut-reminder" role="status" aria-live="polite">
+            Pendant l’installation, le programme crée automatiquement un raccourci VHR Dashboard Pro sur le bureau (la case est cochée par défaut). Garde-le, ou épingle-le à la barre des tâches pour l’ouvrir rapidement.
+          </div>
         </div>
         <div class="download-block">
           <div class="block-icon">📖</div>
@@ -239,5 +242,20 @@
   <script src="/script.js"></script>
   <script src="/js/botpress-config.js"></script>
   <script src="https://cdn.botpress.cloud/webchat/v1/inject.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      var downloadBtn = document.getElementById('launchDashboardBtn');
+      var reminder = document.getElementById('downloadShortcutReminder');
+      if (!downloadBtn || !reminder) {
+        return;
+      }
+      downloadBtn.addEventListener('click', function () {
+        reminder.classList.add('download-shortcut-reminder--visible');
+        window.setTimeout(function () {
+          reminder.classList.remove('download-shortcut-reminder--visible');
+        }, 14000);
+      });
+    });
+  </script>
 </body>
 </html>

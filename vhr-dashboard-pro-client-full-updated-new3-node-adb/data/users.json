@@ -64,5 +64,16 @@
     "lastInvoicePaidAt": null,
     "subscriptionStatus": null,
     "subscriptionId": null
+  },
+  {
+    "username": "titouille44",
+    "passwordHash": "$2b$10$ph2s0VT858zUJQ6B9aOTHe3J773OejxTT.TJs8fd7dS9pbNeGIkfi",
+    "role": "user",
+    "email": null,
+    "stripeCustomerId": null,
+    "latestInvoiceId": null,
+    "lastInvoicePaidAt": null,
+    "subscriptionStatus": null,
+    "subscriptionId": null
   }
 ]
