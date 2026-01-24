@@ -85,14 +85,6 @@ let licenseKey = localStorage.getItem('vhr_license_key') || '';
 let licenseStatus = { licensed: false, trial: false, expired: false };
 const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
 
-function normalizeSerialKeyClient(serial = '') {
-	try {
-		return String(serial || '').replace(/:\d+$/, '');
-	} catch (_) {
-		return String(serial || '');
-	}
-}
-
 function readAuthToken() {
 	return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
 }
@@ -346,7 +338,7 @@ window.createNewUser = async function() {
 	}
 	
 	try {
-		const res = await fetch(resolveApiUrl('/api/dashboard/register'), {
+		const res = await fetch('/api/dashboard/register', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ username, password, role })
@@ -428,7 +420,7 @@ window.loginUser = async function() {
 	}
 	
 	try {
-		const res = await fetch(resolveApiUrl('/api/dashboard/login'), {
+		const res = await fetch('/api/dashboard/login', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ username, password })
@@ -1051,69 +1043,8 @@ window.switchAccountTab = function(tab) {
 // ========== AUDIO STREAMING (WebRTC) ==========
 let activeAudioStream = null;  // Global audio stream instance
 let activeAudioSerial = null;  // Serial of device receiving audio
-let audioVizRaf = null;        // requestAnimationFrame handle for visualizer
 
 console.log('[voice] dashboard-pro.js build stamp: 2026-01-17 22:00');
-
-// Audio visualizer driven by analyser data when disponible, sinon fallback
-window.animateAudioVisualizer = function() {
-	// Stop previous loop if any
-	if (audioVizRaf) {
-		cancelAnimationFrame(audioVizRaf);
-		audioVizRaf = null;
-	}
-
-	const container = document.getElementById('audioVizContainer');
-	if (!container) return; // no panel yet
-
-	const bars = Array.from(container.children || []);
-	let t = 0;
-
-	const tick = () => {
-		t += 0.04;
-
-		let spectrum = null;
-		// Use real mic spectrum if available
-		if (activeAudioStream && activeAudioStream.analyser) {
-			const analyser = activeAudioStream.analyser;
-			const binCount = analyser.frequencyBinCount;
-			spectrum = new Uint8Array(binCount);
-			analyser.getByteFrequencyData(spectrum);
-		}
-
-		bars.forEach((bar, idx) => {
-			let height;
-			if (spectrum) {
-				const bin = Math.floor((idx / Math.max(1, bars.length - 1)) * (spectrum.length - 1));
-				const v = spectrum[bin] || 0;
-				height = Math.min(180, Math.max(6, (v / 255) * 180));
-			} else {
-				const phase = t * 2 + idx * 0.35;
-				const base = 12 + 28 * Math.sin(phase) ** 2;
-				const jitter = Math.random() * 18;
-				height = Math.min(180, Math.max(6, base + jitter));
-			}
-			bar.style.height = height + 'px';
-		});
-
-		audioVizRaf = requestAnimationFrame(tick);
-	};
-
-	tick();
-};
-
-window.stopAudioVisualizer = function() {
-	if (audioVizRaf) {
-		cancelAnimationFrame(audioVizRaf);
-		audioVizRaf = null;
-	}
-	const container = document.getElementById('audioVizContainer');
-	if (container) {
-		Array.from(container.children || []).forEach(bar => {
-			bar.style.height = '6px';
-		});
-	}
-};
 
 // Keep panel always compact (no fullscreen overlay)
 function setAudioPanelMinimized() {
@@ -1322,7 +1253,7 @@ window.sendVoiceToHeadset = async function(serial) {
 				}
 			} catch (adbLaunchErr) {
 				console.warn('[voice] ADB launch voice app error:', adbLaunchErr);
-				// Second fallback si l'appel ADB échoue directement
+				// Second fallback if l'appel ADB échoue directement
 				try {
 					const openRes = await api('/api/device/open-audio-receiver', {
 						method: 'POST',
@@ -1445,36 +1376,110 @@ window.toggleLocalVoiceMonitor = function() {
 	showToast(!isMonitoring ? '🎧 Écoute locale activée' : '🔇 Écoute locale désactivée', 'info');
 };
 
-window.showStreamAudioDialog = function(serial) {
-	// Remplacé par WebRTC : ouvrir directement la page de test avec le serial comme room
-	return launchWebrtcStream(serial);
+window.animateAudioVisualizer = function() {
+	// Stop animation if stream is closed or panel is gone
+	if (!activeAudioStream || !document.getElementById('audioVizContainer')) {
+		return; // Don't call requestAnimationFrame - stop the loop
+	}
+	
+	const bars = document.querySelectorAll('#audioVizContainer > div');
+	
+	try {
+		const freqData = activeAudioStream.getFrequencyData();
+		
+		if (freqData && bars.length > 0) {
+			const barCount = bars.length;
+			for (let i = 0; i < barCount; i++) {
+				const idx = Math.floor((i / barCount) * freqData.length);
+				const height = Math.max(4, (freqData[idx] / 255) * 100);
+				bars[i].style.height = height + '%';
+			}
+		}
+	} catch (e) {
+		// If there's an error getting frequency data, just skip this frame
+		console.warn('[animateAudioVisualizer] Error:', e.message);
+	}
+	
+	requestAnimationFrame(window.animateAudioVisualizer);
 };
 
-window.launchStreamWithAudio = function(serial) {
-	// Alias rétrocompatibilité : redirige vers WebRTC
-	return launchWebrtcStream(serial);
+window.closeAccountPanel = function() {
+	const panel = document.getElementById('accountPanel');
+	if (panel) panel.remove();
 };
 
-// Panneau de gestion du stockage local
 window.showStoragePanel = function() {
-	const existing = document.getElementById('storagePanel');
-	if (existing) existing.remove();
-
-	const panel = document.createElement('div');
+	let panel = document.getElementById('storagePanel');
+	if (panel) panel.remove();
+	
+	const localStorageSize = Object.keys(localStorage).reduce((total, key) => {
+		return total + localStorage.getItem(key).length;
+	}, 0);
+	
+	const localStorageSizeKB = (localStorageSize / 1024).toFixed(2);
+	const localStorageSizeMB = (localStorageSize / (1024 * 1024)).toFixed(4);
+	
+	const storageItems = Object.keys(localStorage).filter(key => key.startsWith('vhr_')).map(key => {
+		const size = (localStorage.getItem(key).length / 1024).toFixed(2);
+		return `
+			<tr style='border-bottom:1px solid #2ecc71;'>
+				<td style='padding:12px;font-size:13px;'>${key}</td>
+				<td style='padding:12px;font-size:13px;text-align:right;'>${size} KB</td>
+				<td style='padding:12px;text-align:center;'>
+					<button onclick="localStorage.removeItem('${key}'); window.showStoragePanel();" style='background:#e74c3c;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:bold;'>Supprimer</button>
+				</td>
+			</tr>
+		`;
+	}).join('');
+	
+	panel = document.createElement('div');
 	panel.id = 'storagePanel';
-	panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:4000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
+	panel.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.85);z-index:2000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);';
+	panel.onclick = (e) => { if (e.target === panel) window.closeStoragePanel(); };
+	
 	panel.innerHTML = `
-		<div style='background:#1a1d24;border:2px solid #2ecc71;border-radius:12px;padding:24px;max-width:520px;width:92%;color:#ecf0f1;box-shadow:0 10px 30px rgba(0,0,0,0.45);'>
-			<h3 style='margin:0 0 12px 0;color:#2ecc71;'>🗄️ Gestion du stockage local</h3>
-			<p style='margin:0 0 16px 0;font-size:13px;color:#bdc3c7;'>Inspectez ou videz le localStorage utilisé par le tableau de bord.</p>
-			<div style='margin-top:8px;padding:16px;background:#2c3e50;border-radius:8px;border-left:4px solid #e74c3c;'>
-				<p style='margin:0;font-size:12px;color:#ecf0f1;'>
-					<strong>Note :</strong> le localStorage du navigateur est limité (≈5-10 MB). Supprimez des éléments pour libérer de l'espace.
-				</p>
+		<div style='background:#1a1d24;border:3px solid #e74c3c;border-radius:16px;padding:0;max-width:800px;width:90%;max-height:85vh;overflow-y:auto;box-shadow:0 8px 32px #000;color:#fff;'>
+			<!-- Header -->
+			<div style='background:linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);padding:24px;border-radius:13px 13px 0 0;position:relative;'>
+				<button onclick='window.closeStoragePanel()' style='position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:18px;font-weight:bold;'>✕</button>
+				<div style='display:flex;align-items:center;gap:16px;'>
+					<div style='font-size:40px;'>💾</div>
+					<div>
+						<h2 style='margin:0;font-size:28px;color:#fff;'>Gestion du Stockage</h2>
+						<p style='margin:6px 0 0 0;font-size:13px;opacity:0.9;'>Taille totale: <strong>${localStorageSizeMB} MB</strong> (${localStorageSizeKB} KB)</p>
+					</div>
+				</div>
 			</div>
-			<div style='margin-top:18px;display:flex;gap:12px;justify-content:center;'>
-				<button onclick='window.closeStoragePanel()' style='background:#3498db;color:#fff;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-weight:bold;'>Fermer</button>
-				<button onclick='localStorage.clear(); alert("Stockage vidé!"); window.showStoragePanel();' style='background:#e74c3c;color:#fff;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-weight:bold;'>Vider tout</button>
+			
+			<!-- Content -->
+			<div style='padding:24px;'>
+				<h3 style='margin-top:0;color:#2ecc71;margin-bottom:16px;'>Fichiers stockés:</h3>
+				<div style='overflow-x:auto;'>
+					<table style='width:100%;border-collapse:collapse;font-size:13px;'>
+						<thead>
+							<tr style='background:#2ecc71;color:#000;font-weight:bold;'>
+								<th style='padding:12px;text-align:left;'>Clé de stockage</th>
+								<th style='padding:12px;text-align:right;'>Taille</th>
+								<th style='padding:12px;text-align:center;'>Action</th>
+							</tr>
+						</thead>
+						<tbody>
+							${storageItems || '<tr><td colspan="3" style="padding:12px;text-align:center;color:#95a5a6;">Aucun stockage VHR détecté</td></tr>'}
+						</tbody>
+					</table>
+				</div>
+				
+				<div style='margin-top:24px;padding:16px;background:#2c3e50;border-radius:8px;border-left:4px solid #e74c3c;'>
+					<p style='margin:0;font-size:12px;color:#ecf0f1;'>
+						<strong>Note:</strong> Le localStorage du navigateur peut stocker jusqu'à 5-10 MB selon votre navigateur. 
+						Vous pouvez supprimer des éléments individuellement pour libérer de l'espace.
+					</p>
+				</div>
+				
+				<div style='margin-top:24px;display:flex;gap:12px;justify-content:center;'>
+					<button onclick='window.closeStoragePanel()' style='background:#3498db;color:#fff;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-weight:bold;'>Fermer</button>
+					<button onclick='localStorage.clear(); alert("Stockage vidé!"); window.showStoragePanel();' style='background:#e74c3c;color:#fff;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-weight:bold;'>Vider tout</button>
+				</div>
 			</div>
 		</div>
 	`;
@@ -1744,123 +1749,25 @@ if (urlParams.get('mock-auth') === '1' || urlParams.get('mock') === '1') {
 	try { localStorage.setItem('useMockAuth', '1'); } catch (e) {}
 }
 
-const IS_LAN_OR_LOCALHOST = (() => {
-	try {
-		const host = window.location.hostname || '';
-		if (host === 'localhost' || host === '127.0.0.1') return true;
-		if (/^10\./.test(host)) return true;
-		if (/^192\.168\./.test(host)) return true;
-		if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
-		if (window.location.protocol === 'file:') return true;
-		return false;
-	} catch (e) { return false; }
-})();
-
 const FORCE_PROD_AUTH = (() => {
 	if (urlParams.get('auth') === 'prod' || urlParams.get('prod-auth') === '1') return true;
-	try {
-		const stored = localStorage.getItem('forceProdAuth');
-		if (stored === '1') return true;
-		if (stored === '0') return false;
-	} catch (e) {}
-	// défaut: si on veut auth en HTTPS, on privilégie prod même en LAN (basculer api séparément)
-	return true;
+	try { return localStorage.getItem('forceProdAuth') === '1'; } catch (e) { return true; } // défaut: prod
 })();
-
 const FORCE_LOCAL_AUTH = (() => {
 	if (urlParams.get('auth') === 'local' || urlParams.get('local-auth') === '1') return true;
-	try {
-		const stored = localStorage.getItem('forceLocalAuth');
-		if (stored === '1') return true;
-		if (stored === '0') return false;
-	} catch (e) {}
-	return false;
+	try { return localStorage.getItem('forceLocalAuth') === '1'; } catch (e) { return false; }
+})();
+const USE_MOCK_AUTH = (() => {
+	if (urlParams.get('mock-auth') === '1' || urlParams.get('mock') === '1') return true;
+	try { return localStorage.getItem('useMockAuth') === '1'; } catch (e) { return false; }
 })();
 
-const FORCE_LOCAL_API = (() => {
-	if (urlParams.get('api') === 'local' || urlParams.get('local-api') === '1') return true;
-	try {
-		const stored = localStorage.getItem('forceLocalApi');
-		if (stored === '1') return true;
-		if (stored === '0') return false;
-	} catch (e) {}
-	return IS_LAN_OR_LOCALHOST;
-})();
-
-const FORCE_PROD_API = (() => {
-	if (urlParams.get('api') === 'prod' || urlParams.get('prod-api') === '1') return true;
-	try {
-		const stored = localStorage.getItem('forceProdApi');
-		if (stored === '1') return true;
-		if (stored === '0') return false;
-	} catch (e) {}
-	return false;
-})();
-// Sécurité : mode mock désactivé par défaut, pas de réactivation via query/localStorage
-const USE_MOCK_AUTH = false;
-
-// Par défaut on pointe vers l'API HTTPS de prod, sauf override local/mock/env explicite ou détection LAN.
-const PROD_API_BASE = 'https://www.vhr-dashboard-site.com';
-const ENV_API_BASE = (window.env && window.env.API_BASE_URL) ? window.env.API_BASE_URL.trim() : '';
-const LOCAL_API_DEFAULT = (() => {
-	if (window.location.origin && window.location.origin.startsWith('http')) return window.location.origin;
-	return 'http://localhost:3000';
-})();
-
-// Origin à utiliser pour les appels API (évite file:///api/... en mode Electron)
-const API_ORIGIN = (() => {
-	if (ENV_API_BASE) return ENV_API_BASE;
-	if (FORCE_LOCAL_API && !FORCE_PROD_API) return LOCAL_API_DEFAULT;
-	if (FORCE_PROD_API) return PROD_API_BASE;
-	// défaut: local si LAN, sinon prod
-	return IS_LAN_OR_LOCALHOST ? LOCAL_API_DEFAULT : PROD_API_BASE;
-})();
-
-const AUTH_API_BASE = (() => {
-	if (ENV_API_BASE) return ENV_API_BASE;
-	if (FORCE_PROD_AUTH) return PROD_API_BASE;
-	if (FORCE_LOCAL_AUTH) return LOCAL_API_DEFAULT;
-	return PROD_API_BASE;
-})();
-const RESOLVED_AUTH_BASE = AUTH_API_BASE || API_ORIGIN || PROD_API_BASE;
-const resolveApiUrl = (p) => (p.startsWith('http://') || p.startsWith('https://')) ? p : `${API_ORIGIN}${p}`;
-
+// Par défaut on pointe vers l'API HTTPS de prod, sauf si override local/mock explicite.
+const AUTH_API_BASE = (FORCE_LOCAL_AUTH || USE_MOCK_AUTH) ? '' : 'https://www.vhr-dashboard-site.com';
 // Secret partagé pour synchroniser les comptes prod vers le backend local (HTTP)
 const SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
-
-const ENV_RELAY_BASE = (window.env && window.env.RELAY_URL) ? window.env.RELAY_URL.trim() : '';
-const FORCE_LOCAL_SOCKET = (() => {
-	if (urlParams.get('socket') === 'local' || urlParams.get('local-socket') === '1') return true;
-	try {
-		const stored = localStorage.getItem('forceLocalSocket');
-		if (stored === '1') return true;
-		if (stored === '0') return false;
-	} catch (e) {}
-	return false;
-})();
-const FORCE_PROD_SOCKET = (() => {
-	if (urlParams.get('socket') === 'prod' || urlParams.get('prod-socket') === '1') return true;
-	try {
-		const stored = localStorage.getItem('forceProdSocket');
-		if (stored === '1') return true;
-		if (stored === '0') return false;
-	} catch (e) {}
-	return true; // défaut: sessions multi-utilisateurs en HTTPS (prod)
-})();
-
-const SOCKET_BASE = (() => {
-	if (ENV_RELAY_BASE) return ENV_RELAY_BASE;
-	if (ENV_API_BASE) return ENV_API_BASE;
-	if (FORCE_LOCAL_SOCKET && !FORCE_PROD_SOCKET) {
-		if (window.location.origin && window.location.origin.startsWith('http')) return window.location.origin;
-		return 'http://localhost:3000';
-	}
-	// défaut: prod (HTTPS/WSS) pour la session collaborative
-	return PROD_API_BASE;
-})();
-
-const socket = io(SOCKET_BASE, {
-	path: '/socket.io',
+const API_BASE = '/api';
+const socket = io({
 	reconnection: true,
 	reconnectionAttempts: 5,
 	reconnectionDelay: 1000,
@@ -1878,11 +1785,8 @@ const API_TIMEOUT_MS = 15000; // 15s timeout for HTTP requests to avoid false ti
 let offlineReasons = new Set();
 let offlineBannerEl = null;
 let isLoadingDevices = false;
-let pendingLoadDevices = false;
 let lastDevicesLoadTs = 0;
-let initialDevicesLoadComplete = false;
-let initialDevicesLoadScheduled = false;
-const MIN_LOAD_DEVICES_INTERVAL_MS = 1500; // throttle to avoid overlapping fetches
+const MIN_LOAD_DEVICES_INTERVAL_MS = 3000; // throttle to avoid overlapping fetches
 
 function renderOfflineBanner() {
 	if (offlineReasons.size === 0) {
@@ -1980,11 +1884,6 @@ let devices = [];
 let games = [];
 let favorites = [];
 let runningApps = {}; // Track running apps: { serial: [pkg1, pkg2, ...] }
-// Scrcpy state (toggle ON/OFF)
-window.scrcpyLaunching = window.scrcpyLaunching || {};
-const scrcpyLaunchRequests = new Map(); // serialKey -> ongoing promise
-const scrcpyRunning = new Set(); // obsolète (scrcpy remplacé par WebRTC)
-const scrcpyToggleLocks = new Map(); // serialKey -> timestamp
 let gameMetaMap = {}; // Map packageId -> { name, icon }
 const DEFAULT_GAME_ICON = 'https://cdn-icons-png.flaticon.com/512/1005/1005141.png';
 let serverInfoCache = null; // { lanIp, port, host }
@@ -2198,14 +2097,10 @@ async function api(path, opts = {}) {
 			};
 		}
 
-		const targetUrl = (path.startsWith('http://') || path.startsWith('https://'))
-			? path
-			: `${API_ORIGIN}${path}`;
-
 		// Timeout support
 		const controller = new AbortController();
 		const t = setTimeout(() => controller.abort(), opts.timeout || API_TIMEOUT_MS);
-		const res = await fetch(targetUrl, { ...opts, signal: controller.signal }).finally(() => clearTimeout(t));
+		const res = await fetch(path, { ...opts, signal: controller.signal }).finally(() => clearTimeout(t));
 		
 		// Check if response is JSON
 		const contentType = res.headers.get('content-type');
@@ -2270,18 +2165,13 @@ async function refreshDevicesList() {
 	}
 }
 
-async function loadDevices(forceOrEvent = false) {
-	// Allow DOM onclick without explicit param to bypass the throttle
-	const isUserClick = (typeof Event !== 'undefined' && forceOrEvent instanceof Event)
-		|| (typeof window !== 'undefined' && window.event instanceof Event);
-	const force = forceOrEvent === true || isUserClick;
-
+async function loadDevices() {
 	const now = Date.now();
 	if (isLoadingDevices) {
 		console.warn('[devices] Ignored loadDevices: already loading');
 		return;
 	}
-	if (!force && now - lastDevicesLoadTs < MIN_LOAD_DEVICES_INTERVAL_MS) {
+	if (now - lastDevicesLoadTs < MIN_LOAD_DEVICES_INTERVAL_MS) {
 		console.warn('[devices] Ignored loadDevices: throttled');
 		return;
 	}
@@ -2293,7 +2183,6 @@ async function loadDevices(forceOrEvent = false) {
 			lastDevicesLoadTs = Date.now();
 			// Récupérer l'état des jeux en cours depuis le serveur avant de rendre
 			await syncRunningAppsFromServer();
-			await syncScrcpyStatus();
 			
 			// Mettre à jour le nombre de casques gérés
 			if (devices.length > 0) {
@@ -2317,6 +2206,10 @@ async function loadDevices(forceOrEvent = false) {
 // Expose loadDevices globally for onclick handlers in HTML
 window.loadDevices = loadDevices;
 
+function isRelayDevice(dev) {
+	return !!dev && (dev.origin === 'relay' || dev.status === 'relay');
+}
+
 // ========== RENDER: TABLE VIEW ========== 
 function renderDevicesTable() {
 	const container = document.getElementById('deviceGrid');
@@ -2329,7 +2222,7 @@ function renderDevicesTable() {
 	if (devices.length === 0) {
 		container.innerHTML = `<div style='text-align:center;color:#fff;font-size:18px;padding:40px;'>
 			Aucun casque détecté 😢<br><br>
-			<button onclick="loadDevices(true)" style='background:#2ecc71;color:#000;border:none;padding:12px 24px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>🔄 Rafraîchir</button>
+			<button onclick="loadDevices()" style='background:#2ecc71;color:#000;border:none;padding:12px 24px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>🔄 Rafraîchir</button>
 		</div>`;
 		return;
 	}
@@ -2352,11 +2245,12 @@ function renderDevicesTable() {
 	
 	devices.forEach((d, idx) => {
 		const bgColor = idx % 2 === 0 ? '#1a1d24' : '#23272f';
-		const statusColor = d.status === 'device' ? '#2ecc71' : d.status === 'streaming' ? '#3498db' : '#e74c3c';
-		const statusIcon = d.status === 'device' ? '✅' : d.status === 'streaming' ? '🟢' : '❌';
+		const relay = isRelayDevice(d);
+		const statusColor = relay ? '#9b59b6' : d.status === 'device' ? '#2ecc71' : d.status === 'streaming' ? '#3498db' : '#e74c3c';
+		const statusIcon = relay ? '📡' : d.status === 'device' ? '✅' : d.status === 'streaming' ? '🟢' : '❌';
+		const statusLabel = relay ? 'relay (cloud)' : d.status;
 		const runningGamesList = runningApps[d.serial] || [];
 		const serialJson = JSON.stringify(d.serial);
-		// scrcpy supprimé : WebRTC prend le relais
 		const runningGameDisplay = runningGamesList.length > 0 ? runningGamesList.map(pkg => {
 			const meta = getGameMeta(pkg);
 			const safeName = meta.name.replace(/"/g, '&quot;');
@@ -2381,23 +2275,13 @@ function renderDevicesTable() {
 		// Create safe ID for HTML (no colons, dots, or special chars)
 		const safeId = d.serial.replace(/[^a-zA-Z0-9]/g, '_');
 		
-		table += `<tr style='background:${bgColor};border-bottom:1px solid #34495e;'>
-			<td style='padding:12px;'>
-				<div style='font-weight:bold;font-size:16px;color:#2ecc71;'>${d.name}</div>
-				<div style='font-size:11px;color:#95a5a6;margin-top:2px;'>${d.serial}</div>
-			</td>
-			<td style='padding:12px;text-align:center;'>
-				<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#95a5a6;'>🔋 Batterie...</div>
-			</td>
-			<td style='padding:12px;'>
-				<span style='background:${statusColor};color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:bold;'>
-					${statusIcon} ${d.status}
-				</span>
-			</td>
-			<td style='padding:12px;text-align:center;'>
-				${runningGameDisplay}
-			</td>
-			<td style='padding:12px;text-align:center;'>
+		const batteryCell = relay 
+			? `<div style='font-size:14px;font-weight:bold;color:#bdc3c7;'>🔋 N/A (relais)</div>`
+			: `<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#95a5a6;'>🔋 Batterie...</div>`;
+
+		const streamingCell = relay
+			? `<div style='color:#bdc3c7;font-size:12px;max-width:160px;margin:0 auto;'>Actions locales désactivées en mode cloud. Connectez l'agent PC pour le contrôle ADB.</div>`
+			: (d.status !== 'streaming' ? `
 				<select id='profile_${safeId}' style='background:#34495e;color:#fff;border:1px solid #2ecc71;padding:6px;border-radius:4px;margin-bottom:4px;width:140px;'>
 					<option value='ultra-low'>Ultra Low</option>
 					<option value='low'>Low</option>
@@ -2406,25 +2290,68 @@ function renderDevicesTable() {
 					<option value='high'>High</option>
 					<option value='ultra'>Ultra</option>
 				</select><br>
-				<button data-webrtc-launch=${serialJson} onclick='launchWebrtcStream(${serialJson})' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>▶️ WebRTC</button>
-				<button onclick='installWebrtcReceiver(${serialJson})' style='background:#27ae60;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📲 Installer WebRTC</button>
+				<button onclick='startStreamFromTable(${JSON.stringify(d.serial)})' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>▶️ Scrcpy</button>
+			` : `
+				<button onclick='stopStreamFromTable(${JSON.stringify(d.serial)})' style='background:#e74c3c;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>⏹️ Stop</button>
+			`);
+
+		const wifiCell = relay
+			? `<span style='color:#95a5a6;'>-</span>`
+			: (!d.serial.includes(':') ? `
+				<button onclick='connectWifiAuto(${JSON.stringify(d.serial)})' style='background:#9b59b6;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📶 WiFi Auto</button>
+			` : `<span style='color:#95a5a6;'>-</span>`);
+
+		const appsCell = relay
+			? `<div style='color:#bdc3c7;font-size:12px;'>Apps/Favoris indisponibles en mode relais</div>`
+			: `
+			<button onclick='showAppsDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#f39c12;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📱 Apps</button>
+			<button onclick='showFavoritesDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#e67e22;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin-top:4px;'>⭐ Favoris</button>
+		`;
+
+		const voiceCell = relay
+			? `<div style='color:#bdc3c7;font-size:12px;'>Voix PC→Casque indisponible en mode relais</div>`
+			: `
+			<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='background:#16a085;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;'>🗣️ Voix LAN</button>
+			<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:11px;margin-left:4px;' title='Installer l’émetteur voix sur le casque'>📲 Émetteur</button>
+		`;
+
+		const actionsCell = relay
+			? `<div style='color:#bdc3c7;font-size:12px;'>Actions ADB désactivées (relais cloud)</div>`
+			: `
+			<button onclick='renameDevice({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>✏️</button>
+			<button onclick='showStorageDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>💾</button>
+		`;
+
+		table += `<tr style='background:${bgColor};border-bottom:1px solid #34495e;'>
+			<td style='padding:12px;'>
+				<div style='font-weight:bold;font-size:16px;color:#2ecc71;'>${d.name}</div>
+				<div style='font-size:11px;color:#95a5a6;margin-top:2px;'>${d.serial}</div>
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				${!d.serial.includes(':') ? `
-					<button onclick='connectWifiAuto(${JSON.stringify(d.serial)})' style='background:#9b59b6;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📶 WiFi Auto</button>
-				` : `<span style='color:#95a5a6;'>-</span>`}
+				${batteryCell}
+			</td>
+			<td style='padding:12px;'>
+				<span style='background:${statusColor};color:${relay ? '#fff' : '#fff'};padding:4px 10px;border-radius:6px;font-size:12px;font-weight:bold;'>
+					${statusIcon} ${statusLabel}
+				</span>
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				<button onclick='showAppsDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#f39c12;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📱 Apps</button>
-				<button onclick='showFavoritesDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#e67e22;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;margin-top:4px;'>⭐ Favoris</button>
+				${runningGameDisplay}
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='background:#16a085;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;'>🗣️ Voix LAN</button>
-				<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:11px;margin-left:4px;' title='Installer l’émetteur voix sur le casque'>📲 Émetteur</button>
+				${streamingCell}
 			</td>
 			<td style='padding:12px;text-align:center;'>
-				<button onclick='renameDevice({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>✏️</button>
-				<button onclick='showStorageDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>💾</button>
+				${wifiCell}
+			</td>
+			<td style='padding:12px;text-align:center;'>
+				${appsCell}
+			</td>
+			<td style='padding:12px;text-align:center;'>
+				${voiceCell}
+			</td>
+			<td style='padding:12px;text-align:center;'>
+				${actionsCell}
 			</td>
 		</tr>`;
 		
@@ -2449,7 +2376,7 @@ function renderDevicesCards() {
 	if (devices.length === 0) {
 		grid.innerHTML = `<div style='text-align:center;color:#fff;grid-column:1/-1;padding:40px;'>
 			Aucun casque détecté 😢<br><br>
-			<button onclick="loadDevices(true)" style='background:#2ecc71;color:#000;border:none;padding:12px 24px;border-radius:8px;cursor:pointer;font-weight:bold;'>🔄 Rafraîchir</button>
+			<button onclick="loadDevices()" style='background:#2ecc71;color:#000;border:none;padding:12px 24px;border-radius:8px;cursor:pointer;font-weight:bold;'>🔄 Rafraîchir</button>
 		</div>`;
 		return;
 	}
@@ -2458,7 +2385,8 @@ function renderDevicesCards() {
 		const card = document.createElement('div');
 		card.style = 'background:#1a1d24;border:2px solid #2ecc71;border-radius:12px;padding:18px;box-shadow:0 4px 16px #000;color:#fff;';
 		
-		const statusColor = d.status === 'device' ? '#2ecc71' : d.status === 'streaming' ? '#3498db' : '#e74c3c';
+		const relay = isRelayDevice(d);
+		const statusColor = relay ? '#9b59b6' : d.status === 'device' ? '#2ecc71' : d.status === 'streaming' ? '#3498db' : '#e74c3c';
 		const runningGamesList = runningApps[d.serial] || [];
 		const serialJson = JSON.stringify(d.serial);
 		const runningGameDisplay = runningGamesList.length > 0 ? runningGamesList.map(pkg => {
@@ -2485,45 +2413,72 @@ function renderDevicesCards() {
 		// Create safe ID for HTML (no colons, dots, or special chars)
 		const safeId = d.serial.replace(/[^a-zA-Z0-9]/g, '_');
 		
+		const batteryBlock = relay
+			? `<div style='font-size:14px;font-weight:bold;color:#bdc3c7;'>🔋 N/A (relais)</div>`
+			: `<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#95a5a6;'>🔋 Batterie...</div>`;
+
+		const streamingBlock = relay
+			? `<div style='color:#bdc3c7;font-size:12px;margin-bottom:10px;'>Actions locales désactivées en mode cloud. Ouvrez l'agent PC pour contrôler le casque.</div>`
+			: (d.status !== 'streaming' ? `
+			<select id='profile_card_${safeId}' style='width:100%;background:#34495e;color:#fff;border:1px solid #2ecc71;padding:8px;border-radius:6px;margin-bottom:6px;'>
+				<option value='ultra-low'>Ultra Low</option>
+				<option value='low'>Low</option>
+				<option value='wifi'>WiFi</option>
+				<option value='default' selected>Default</option>
+				<option value='high'>High</option>
+				<option value='ultra'>Ultra</option>
+			</select>
+			<button onclick='startStreamFromCard(${JSON.stringify(d.serial)})' style='width:100%;background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>▶️ Scrcpy</button>
+		` : `
+			<button onclick='stopStreamFromTable(${JSON.stringify(d.serial)})' style='width:100%;background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>⏹️ Stop Stream</button>
+		`);
+
+		const appsBlock = relay
+			? `<div style='color:#bdc3c7;font-size:12px;margin-bottom:10px;'>Apps/Favoris indisponibles en mode relais</div>`
+			: `<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;'>
+				<button onclick='showAppsDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#f39c12;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>📱 Apps</button>
+				<button onclick='showFavoritesDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#e67e22;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>⭐ Favoris</button>
+			</div>`;
+
+		const voiceBlock = relay
+			? `<div style='color:#bdc3c7;font-size:12px;margin-bottom:6px;'>Voix PC→Casque indisponible en mode relais</div>`
+			: `<div style='display:flex;gap:6px;margin-bottom:6px;'>
+				<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='flex:1;background:#16a085;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;'>🗣️ Voix LAN</button>
+				<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:10px 12px;border-radius:6px;cursor:pointer;' title='Installer l’émetteur voix sur le casque'>📲 Émetteur</button>
+			</div>`;
+
+		const wifiBlock = relay
+			? ''
+			: (!d.serial.includes(':') ? `
+				<button onclick='connectWifiAuto(${JSON.stringify(d.serial)})' style='width:100%;background:#9b59b6;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>📶 WiFi Auto</button>
+			` : '');
+
+		const actionsBlock = relay
+			? `<div style='color:#bdc3c7;font-size:12px;'>Actions ADB désactivées (relais cloud)</div>`
+			: `<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;'>
+				<button onclick='renameDevice({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>✏️ Renommer</button>
+				<button onclick='showStorageDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>💾 Stockage</button>
+			</div>`;
+
 		card.innerHTML = `
 			<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'>
 				<div style='font-weight:bold;font-size:18px;color:#2ecc71;'>${d.name}</div>
-				<div id='battery_${safeId}' style='font-size:14px;font-weight:bold;color:#95a5a6;'>🔋 Batterie...</div>
+				${batteryBlock}
 			</div>
 			<div style='font-size:11px;color:#95a5a6;margin-bottom:12px;'>${d.serial}</div>
 			<div style='margin-bottom:12px;'>
 				<span style='background:${statusColor};color:#fff;padding:4px 12px;border-radius:6px;font-size:12px;font-weight:bold;'>
-					${d.status === 'device' ? '✅' : d.status === 'streaming' ? '🟢' : '❌'} ${d.status}
+					${relay ? '📡 relay (cloud)' : (d.status === 'device' ? '✅ device' : d.status === 'streaming' ? '🟢 streaming' : `❌ ${d.status}`)}
 				</span>
 			</div>
 			${runningGameDisplay}
 			<div style='margin-bottom:10px;'>
-				<select id='profile_card_${safeId}' style='width:100%;background:#34495e;color:#fff;border:1px solid #2ecc71;padding:8px;border-radius:6px;margin-bottom:6px;'>
-					<option value='ultra-low'>Ultra Low</option>
-					<option value='low'>Low</option>
-					<option value='wifi'>WiFi</option>
-					<option value='default' selected>Default</option>
-					<option value='high'>High</option>
-					<option value='ultra'>Ultra</option>
-				</select>
-				<button data-webrtc-launch=${serialJson} onclick='launchWebrtcStream(${serialJson})' style='width:100%;background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>▶️ WebRTC</button>
-				<button onclick='installWebrtcReceiver(${serialJson})' style='width:100%;background:#27ae60;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>📲 Installer WebRTC</button>
+				${streamingBlock}
 			</div>
-			<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;'>
-				<button onclick='showAppsDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#f39c12;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>📱 Apps</button>
-				<button onclick='showFavoritesDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#e67e22;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>⭐ Favoris</button>
-			</div>
-			<div style='display:flex;gap:6px;margin-bottom:6px;'>
-				<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='flex:1;background:#16a085;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;'>🗣️ Voix LAN</button>
-				<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:10px 12px;border-radius:6px;cursor:pointer;' title='Installer l’émetteur voix sur le casque'>📲 Émetteur</button>
-			</div>
-			${!d.serial.includes(':') ? `
-				<button onclick='connectWifiAuto(${JSON.stringify(d.serial)})' style='width:100%;background:#9b59b6;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>📶 WiFi Auto</button>
-			` : ''}
-			<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;'>
-				<button onclick='renameDevice({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>✏️ Renommer</button>
-				<button onclick='showStorageDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>💾 Stockage</button>
-			</div>
+			${appsBlock}
+			${voiceBlock}
+			${wifiBlock}
+			${actionsBlock}
 		`;
 		
 		grid.appendChild(card);
@@ -2535,6 +2490,8 @@ function renderDevicesCards() {
 // Fetch and update battery level for a device
 async function fetchBatteryLevel(serial) {
 	if (!serial) return;
+	const device = devices.find(d => d.serial === serial);
+	if (device && isRelayDevice(device)) return; // Pas de batterie en mode relais
 	const now = Date.now();
 	const nextAllowed = batteryBackoff[serial] || 0;
 	if (now < nextAllowed) return;
@@ -2597,13 +2554,13 @@ window.showStreamAudioDialog = function(serial, callback) {
 			<p style='color:#95a5a6;margin:0 0 20px 0;font-size:12px;'>${serial}</p>
 			<p style='color:#bdc3c7;margin-bottom:20px;font-size:14px;'>🔊 Où voulez-vous entendre le son ?</p>
 			<div style='display:flex;flex-direction:column;gap:10px;'>
-				<button data-scrcpy-btn="${serial}" onclick='window.launchStreamWithAudio("${serial}", "headset")' style='background:linear-gradient(135deg, #3498db 0%, #2980b9 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
+				<button onclick='window.launchStreamWithAudio("${serial}", "headset")' style='background:linear-gradient(135deg, #3498db 0%, #2980b9 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
 					📱 Casque uniquement
 				</button>
-				<button data-scrcpy-btn="${serial}" onclick='window.launchStreamWithAudio("${serial}", "pc")' style='background:linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
+				<button onclick='window.launchStreamWithAudio("${serial}", "pc")' style='background:linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
 					💻 PC uniquement
 				</button>
-				<button data-scrcpy-btn="${serial}" onclick='window.launchStreamWithAudio("${serial}", "both")' style='background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
+				<button onclick='window.launchStreamWithAudio("${serial}", "both")' style='background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
 					🔊 Casque + PC (recommandé)
 				</button>
 			</div>
@@ -2614,72 +2571,36 @@ window.showStreamAudioDialog = function(serial, callback) {
 };
 
 window.launchStreamWithAudio = async function(serial, audioOutput) {
-	const serialKey = normalizeSerialKeyClient(serial);
-	if (scrcpyLaunchRequests.has(serialKey)) {
-		showToast('Scrcpy déjà en lancement pour ce casque', 'info');
-		return scrcpyLaunchRequests.get(serialKey);
-	}
-	if (window.scrcpyLaunching[serialKey]) {
-		showToast('Scrcpy déjà en cours pour ce casque', 'info');
-		return;
-	}
-	window.scrcpyLaunching[serialKey] = true;
-
-	const buttons = Array.from(document.querySelectorAll(`[data-scrcpy-btn="${serial}"]`));
-	buttons.forEach(btn => { btn.disabled = true; btn.style.opacity = '0.6'; btn.style.pointerEvents = 'none'; });
 	// Close dialog
 	const dialog = document.getElementById('streamAudioDialog');
 	if (dialog) dialog.remove();
 	
 	showToast('🎮 Lancement Scrcpy...', 'info');
-
-	const launchPromise = (async () => {
-		try {
-			const prep = await api('/api/scrcpy/prepare', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ serial })
-			});
-			if (!prep.ok || !prep.token) {
-				showToast('❌ Scrcpy: autorisation manquante', 'error');
-				return;
-			}
-
-			const res = await api('/api/scrcpy-gui', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ serial, audioOutput, token: prep.token })
-			});
-			
-			if (res.ok) {
-				setScrcpyState(serial, true);
-				const audioMsg = audioOutput === 'headset' ? '(son sur casque)' : audioOutput === 'pc' ? '(son sur PC)' : '(son sur casque + PC)';
-				showToast(`🎮 Scrcpy lancé ! ${audioMsg}`, 'success');
-				incrementStat('totalSessions');
-			} else if (res.alreadyRunning || res.debounced || res.inflight) {
-				setScrcpyState(serial, true);
-				showToast('Scrcpy déjà lancé pour ce casque', 'info');
-			} else {
-				showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
-			}
-		} finally {
-			setTimeout(() => { delete window.scrcpyLaunching[serialKey]; }, 10000);
-			scrcpyLaunchRequests.delete(serialKey);
-			buttons.forEach(btn => { btn.disabled = false; btn.style.opacity = '1'; btn.style.pointerEvents = 'auto'; });
-			setTimeout(loadDevices, 500);
-		}
-	})();
-
-	scrcpyLaunchRequests.set(serialKey, launchPromise);
-	return launchPromise;
+	
+	const res = await api('/api/scrcpy-gui', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ serial, audioOutput })
+	});
+	
+	if (res.ok) {
+		const audioMsg = audioOutput === 'headset' ? '(son sur casque)' : audioOutput === 'pc' ? '(son sur PC)' : '(son sur casque + PC)';
+		showToast(`🎮 Scrcpy lancé ! ${audioMsg}`, 'success');
+		incrementStat('totalSessions');
+	} else {
+		showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
+	}
+	setTimeout(loadDevices, 500);
 };
 
 window.startStreamFromTable = async function(serial) {
-	window.toggleScrcpy(serial);
+	// Show audio output selection dialog
+	window.showStreamAudioDialog(serial);
 };
 
 window.startStreamFromCard = async function(serial) {
-	window.toggleScrcpy(serial);
+	// Show audio output selection dialog  
+	window.showStreamAudioDialog(serial);
 };
 
 window.startStreamJSMpeg = async function(serial) {
@@ -2693,93 +2614,6 @@ window.startStreamJSMpeg = async function(serial) {
 		setTimeout(() => showStreamViewer(serial), 500);
 	}
 	else showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
-};
-
-function updateScrcpyButtons(serial) {
-	const buttons = document.querySelectorAll(`[data-scrcpy-toggle="${serial}"]`);
-	const isOn = scrcpyRunning.has(normalizeSerialKeyClient(serial));
-	buttons.forEach(btn => {
-		btn.textContent = isOn ? '⏹️ Scrcpy OFF' : '▶️ Scrcpy ON';
-		btn.style.background = isOn ? '#e74c3c' : '#3498db';
-		btn.style.color = '#fff';
-		btn.style.opacity = '1';
-		btn.style.pointerEvents = 'auto';
-		btn.disabled = false;
-	});
-}
-
-function setScrcpyState(serial, running) {
-	if (!serial) return;
-	const key = normalizeSerialKeyClient(serial);
-	if (running) scrcpyRunning.add(key);
-	else scrcpyRunning.delete(key);
-	updateScrcpyButtons(serial);
-}
-
-async function syncScrcpyStatus() {
-	try {
-		const res = await api('/api/scrcpy/status');
-		if (res.ok && Array.isArray(res.running)) {
-			scrcpyRunning.clear();
-			res.running.forEach(item => { if (item && item.serial) scrcpyRunning.add(normalizeSerialKeyClient(item.serial)); });
-		}
-	} catch (e) {
-		console.warn('[scrcpy] sync status failed', e?.message || e);
-	}
-}
-
-window.stopScrcpy = async function(serial) {
-	if (!serial) return;
-	try {
-		const res = await api('/api/scrcpy/stop', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ serial })
-		});
-		if (res.ok) {
-			setScrcpyState(serial, false);
-			showToast(res.killed > 0 ? '⏹️ Scrcpy arrêté' : 'ℹ️ Pas de session scrcpy active', res.killed > 0 ? 'success' : 'info');
-		} else {
-			showToast('❌ Arrêt scrcpy: ' + (res.error || 'inconnu'), 'error');
-		}
-	} catch (e) {
-		showToast('❌ Arrêt scrcpy: ' + (e?.message || e), 'error');
-	} finally {
-		updateScrcpyButtons(serial);
-		setTimeout(loadDevices, 500);
-	}
-};
-
-window.toggleScrcpy = function(serial) {
-	return launchWebrtcStream(serial);
-};
-
-window.launchWebrtcStream = async function(serial) {
-	const roomKey = normalizeSerialKeyClient(serial || 'test');
-	const room = encodeURIComponent(roomKey);
-	const url = `/webrtc-test.html?room=${room}&role=sender&autostart=1`;
-	const isElectron = !!(window?.process?.versions?.electron) || /Electron/i.test(navigator.userAgent || '');
-
-	// 1) Try to auto-open the receiver on the headset (native broadcast only; no browser fallback)
-	try {
-		const res = await api('/api/webrtc/open-receiver', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ serial, room: roomKey, noBrowserFallback: true })
-		});
-		if (!res.ok) {
-			const detail = [res.stderr, res.stdout].filter(Boolean).join('\n').trim();
-			throw new Error((res.error || 'Impossible d\'ouvrir le récepteur') + (detail ? ('\n' + detail) : ''));
-		}
-		showToast('📡 Récepteur lancé sur le casque', 'success');
-	} catch (e) {
-		console.warn('[webrtc] open-receiver failed:', e);
-		showToast('⚠️ Récepteur non démarré automatiquement: ' + (e?.message || e), 'warning');
-	}
-
-	// 2) Ne plus ouvrir automatiquement la page WebRTC côté PC (Electron ou navigateur)
-	console.log('[webrtc] Aucun onglet ouvert automatiquement pour la room', roomKey);
-	showToast('▶️ WebRTC prêt (aucune page PC ouverte)', 'info');
 };
 
 window.showStreamViewer = function(serial) {
@@ -3028,9 +2862,6 @@ window.connectWifiAuto = async function(serial) {
 
 // ========== VOICE TO HEADSET (TTS) ========== 
 window.closeAudioStream = async function(silent = false) {
-	// Stop visualizer loop immediately
-	window.stopAudioVisualizer();
-
 	// ALWAYS remove the panel first to ensure UI is responsive
 	const panel = document.getElementById('audioStreamPanel');
 	if (panel) {
@@ -3242,79 +3073,6 @@ window.installVoiceApp = async function(serial) {
 		return false;
 	}
 };
-
-	// Installer l'APK WebRTC Receiver sur le casque (similaire à l'install voix)
-	window.installWebrtcReceiver = async function(serial) {
-		// Fermer toute modale précédente et afficher la progression
-		closeModal();
-
-		const progressHtml = `
-			<div style="background:#0f1724;color:#fff;padding:24px;border-radius:12px;width:420px;max-width:90vw;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.45);">
-				<h2 style="margin:0 0 12px 0;">📲 Installation WebRTC Receiver</h2>
-				<p style="color:#95a5a6;margin:0 0 16px 0;">Transfert et installation de l'APK sur le casque...</p>
-				<div style="position:relative;height:12px;background:#162032;border-radius:6px;overflow:hidden;">
-					<div id="webrtcInstallProgressBar" style="height:100%;width:10%;background:linear-gradient(90deg,#2ecc71,#27ae60);"></div>
-				</div>
-				<p id="webrtcInstallProgressText" style="color:#95a5a6;margin-top:12px;font-size:14px;">Préparation...</p>
-				<p style="color:#7f8c8d;font-size:12px;">Casque: ${serial || ''}</p>
-			</div>
-		`;
-
-		showModal(progressHtml);
-
-		const updateProgress = (percent, text) => {
-			const bar = document.getElementById('webrtcInstallProgressBar');
-			const textEl = document.getElementById('webrtcInstallProgressText');
-			if (bar) bar.style.width = percent + '%';
-			if (textEl) textEl.textContent = text;
-		};
-
-		try {
-			updateProgress(20, 'Connexion ADB...');
-			await new Promise(r => setTimeout(r, 300));
-
-			updateProgress(50, 'Transfert de l\'APK...');
-			const res = await api('/api/webrtc/install-receiver', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ serial })
-			});
-
-			updateProgress(85, 'Finalisation...');
-			await new Promise(r => setTimeout(r, 300));
-
-			if (res && res.ok) {
-				updateProgress(100, 'Installation terminée !');
-				const successHtml = `
-					<div style="background:#0f1724;color:#fff;padding:24px;border-radius:12px;width:420px;max-width:90vw;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.45);">
-						<div style="font-size:72px;margin-bottom:12px;">✅</div>
-						<h2 style="margin:0 0 12px 0;color:#2ecc71;">APK installée</h2>
-						<p style="color:#bdc3c7;margin:0 0 16px 0;">Le récepteur WebRTC est prêt sur le casque.</p>
-						<button onclick="closeModal()" style="background:linear-gradient(135deg,#2ecc71,#27ae60);color:#fff;border:none;padding:12px 24px;border-radius:8px;font-weight:bold;cursor:pointer;">Fermer</button>
-					</div>
-				`;
-				showModal(successHtml);
-				showToast('✅ Récepteur WebRTC installé !', 'success');
-				return;
-			}
-
-			const serverErr = res?.error || 'Installation échouée';
-			const extra = [res?.stderr, res?.stdout].filter(Boolean).join('\n').trim();
-			throw new Error(extra ? `${serverErr}\n${extra}` : serverErr);
-		} catch (e) {
-			console.error('[installWebrtcReceiver] Error:', e);
-			const errHtml = `
-				<div style="background:#0f1724;color:#fff;padding:24px;border-radius:12px;width:420px;max-width:90vw;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.45);">
-					<div style="font-size:64px;margin-bottom:12px;">❌</div>
-					<h2 style="margin:0 0 12px 0;color:#e74c3c;">Installation échouée</h2>
-					<p style="color:#bdc3c7;margin:0 0 16px 0;white-space:pre-line;">${(e && e.message) || 'Erreur inconnue'}</p>
-					<button onclick="closeModal()" style="background:#e74c3c;color:#fff;border:none;padding:12px 24px;border-radius:8px;font-weight:bold;cursor:pointer;">Fermer</button>
-				</div>
-			`;
-			showModal(errHtml);
-			showToast('❌ Erreur installation WebRTC: ' + ((e && e.message) || 'inconnue'), 'error');
-		}
-	};
 
 // Bouton de téléchargement de la voix désactivé (supprimé)
 window.downloadVoiceApk = function() {
@@ -3740,7 +3498,7 @@ window.uploadDevGameToHeadset = async function(serial, deviceName) {
 		
 		try {
 			showToast('📤 Envoi du fichier en cours...', 'info');
-			const res = await fetch(resolveApiUrl('/api/upload-dev-game'), {
+			const res = await fetch('/api/upload-dev-game', {
 				method: 'POST',
 				body: formData
 			});
@@ -3870,7 +3628,14 @@ async function checkLicense() {
 		if (!res || !res.ok) {
 			console.error('[license] demo status check failed');
 			// Bloquer l'accès par défaut si la vérification échoue (éviter l'accès sans abo)
-			showUnlockModal({ expired: true, accessBlocked: true, subscriptionStatus: 'unknown' });
+			showUnlockModal({ expired: true, accessBlocked: true, subscriptionStatus: res?.demo?.subscriptionStatus || 'unknown' });
+			return false;
+		}
+
+		if (res.code === 'account_deleted') {
+			showToast('❌ Ce compte a été supprimé ou désactivé', 'error');
+			saveAuthToken('');
+			showAuthModal('login');
 			return false;
 		}
 		
@@ -3890,7 +3655,8 @@ async function checkLicense() {
 			showUnlockModal({
 				expired: true,
 				accessBlocked: true,
-				subscriptionStatus: demoStatus.subscriptionStatus
+				subscriptionStatus: demoStatus.subscriptionStatus,
+				hasActiveLicense: demoStatus.hasActiveLicense
 			});
 			return false; // BLOCK ACCESS
 		} else {
@@ -3901,7 +3667,8 @@ async function checkLicense() {
 		}
 	} catch (e) {
 		console.error('[license] check failed:', e);
-		return true; // Allow access on error (fail-open for UX)
+		showUnlockModal({ expired: true, accessBlocked: true, subscriptionStatus: 'unknown' });
+		return false; // Fail closed to prevent accès sans licence
 	}
 }
 
@@ -4187,7 +3954,7 @@ window.loginUser = async function() {
 	try {
 		let res, data;
 		// 1) Auth prod par username
-		res = await fetch(`${RESOLVED_AUTH_BASE}/api/login`, {
+		res = await fetch(`${AUTH_API_BASE}/api/login`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			credentials: 'include',
@@ -4197,7 +3964,7 @@ window.loginUser = async function() {
 
 		// 2) Fallback prod par email
 		if (!(res.ok && data.ok)) {
-			res = await fetch(`${RESOLVED_AUTH_BASE}/api/auth/login`, {
+			res = await fetch(`${AUTH_API_BASE}/api/auth/login`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				credentials: 'include',
@@ -4211,7 +3978,7 @@ window.loginUser = async function() {
 			const syncedUsername = data.user?.username || data.user?.name || identifier;
 			const syncedEmail = data.user?.email || identifier;
 			try {
-				await fetch(resolveApiUrl('/api/admin/sync-user'), {
+				await fetch('/api/admin/sync-user', {
 					method: 'POST',
 					headers: {
 						'Content-Type': 'application/json',
@@ -4225,7 +3992,7 @@ window.loginUser = async function() {
 
 			// Obtenir un token local pour les requêtes HTTP/localhost
 			try {
-				const localRes = await fetch(resolveApiUrl('/api/login'), {
+				const localRes = await fetch('/api/login', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					credentials: 'include',
@@ -4244,7 +4011,7 @@ window.loginUser = async function() {
 		if (!(res.ok && data.ok)) {
 			try {
 				// Créer/synchroniser l'utilisateur en local avec le secret partagé
-				await fetch(resolveApiUrl('/api/admin/sync-user'), {
+				await fetch('/api/admin/sync-user', {
 					method: 'POST',
 					headers: {
 						'Content-Type': 'application/json',
@@ -4257,7 +4024,7 @@ window.loginUser = async function() {
 			}
 
 			try {
-				const localRes = await fetch(resolveApiUrl('/api/login'), {
+				const localRes = await fetch('/api/login', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					credentials: 'include',
@@ -4280,8 +4047,6 @@ window.loginUser = async function() {
 			showToast('✅ Connecté avec succès !', 'success');
 			currentUser = data.user?.name || data.user?.username || data.user?.email || identifier;
 			localStorage.setItem('vhr_current_user', currentUser);
-			setUser(currentUser);
-			setUserRole(currentUser, data.user?.role || 'user');
 			
 			const modal = document.getElementById('authModal');
 			if (modal) modal.remove();
@@ -4296,7 +4061,22 @@ window.loginUser = async function() {
 				});
 			}, 200);
 		} else {
-			showToast('❌ ' + (data.error || 'Connexion échouée'), 'error');
+			if (data && data.code === 'account_deleted') {
+				showToast('❌ Ce compte a été supprimé ou désactivé', 'error');
+				saveAuthToken('');
+				showAuthModal('login');
+				return;
+			}
+			if (data && data.code === 'demo_expired') {
+				showUnlockModal({
+					expired: true,
+					accessBlocked: true,
+					subscriptionStatus: data.demo?.subscriptionStatus,
+					hasActiveLicense: data.demo?.hasActiveLicense
+				});
+				return;
+			}
+			showToast('❌ ' + (data?.error || 'Connexion échouée'), 'error');
 		}
 	} catch (e) {
 		console.error('[auth] login error:', e);
@@ -4331,7 +4111,7 @@ window.registerUser = async function() {
 	showToast('📝 Création de compte...', 'info');
 	
 	try {
-		const res = await fetch(`${RESOLVED_AUTH_BASE}/api/auth/register`, {
+		const res = await fetch(`${AUTH_API_BASE}/api/auth/register`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			credentials: 'include', // Important: send cookies
@@ -4341,39 +4121,8 @@ window.registerUser = async function() {
 		const data = await res.json();
 		
 		if (res.ok && data.ok) {
-			const syncedUsername = data.user?.username || data.user?.name || username;
-			const syncedEmail = data.user?.email || email;
-			let effectiveToken = data.token || '';
-			try {
-				await fetch(resolveApiUrl('/api/admin/sync-user'), {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						'x-sync-secret': SYNC_USERS_SECRET
-					},
-					body: JSON.stringify({ username: syncedUsername, email: syncedEmail, role: 'user', password })
-				});
-			} catch (syncErr) {
-				console.warn('[registerUser] sync-user failed', syncErr);
-			}
-
-			try {
-				const localRes = await fetch(resolveApiUrl('/api/login'), {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					credentials: 'include',
-					body: JSON.stringify({ username: syncedUsername, password })
-				});
-				const localData = await localRes.json();
-				if (localRes.ok && localData.ok && localData.token) {
-					effectiveToken = localData.token;
-				}
-			} catch (localLoginErr) {
-				console.warn('[registerUser] local login after register failed', localLoginErr);
-			}
-
-			if (effectiveToken) {
-				saveAuthToken(effectiveToken);
+			if (data.token) {
+				saveAuthToken(data.token);
 			}
 			// JWT token is now in httpOnly cookie
 			// Trial period starts now (set by server)
@@ -4486,21 +4235,13 @@ function hideDashboardContent() {
 	}
 }
 
-// Sécurité UX : si l'appel /api/check-auth ne répond pas (réseau/SSL), on force l'affichage du login après un délai
-let authFallbackTimer = setTimeout(() => {
-	console.warn('[auth] Fallback timeout reached, showing login modal');
-	hideDashboardContent();
-	showAuthModal('login');
-}, 12000);
-
 // Check JWT authentication FIRST - this will show auth modal if needed
 checkJWTAuth().then(isAuth => {
-	clearTimeout(authFallbackTimer);
 	if (isAuth) {
 		// User is authenticated - always show dashboard content first
 		showDashboardContent();
 		createNavbar();
-        
+		
 		// Then check license/subscription status
 		checkLicense().then(hasAccess => {
 			if (hasAccess) {
