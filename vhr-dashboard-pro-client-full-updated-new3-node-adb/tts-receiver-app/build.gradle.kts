@@ -22,10 +22,16 @@ android {
 
     signingConfigs {
         create("release") {
-            val ksPath = System.getenv("VHR_KEYSTORE_PATH") ?: "${rootDir}/keystore/release-keystore.jks"
-            val ksPass = System.getenv("VHR_KEYSTORE_PASSWORD") ?: "VhrKeystore2026!"
-            val keyAlias = System.getenv("VHR_KEY_ALIAS") ?: "vhrapp"
-            val keyPass = System.getenv("VHR_KEY_PASSWORD") ?: ksPass
+            val ksPath = System.getenv("VHR_KEYSTORE_PATH").orEmpty().ifBlank {
+                throw GradleException("VHR_KEYSTORE_PATH must be set as an environment variable or in local.properties")
+            }
+            val ksPass = System.getenv("VHR_KEYSTORE_PASSWORD").orEmpty().ifBlank {
+                throw GradleException("VHR_KEYSTORE_PASSWORD must be set as an environment variable")
+            }
+            val keyAlias = System.getenv("VHR_KEY_ALIAS").orEmpty().ifBlank {
+                throw GradleException("VHR_KEY_ALIAS must be set as an environment variable")
+            }
+            val keyPass = System.getenv("VHR_KEY_PASSWORD").orEmpty().ifBlank { ksPass }
 
             storeFile = file(ksPath)
             storePassword = ksPass
