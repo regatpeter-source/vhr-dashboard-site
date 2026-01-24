@@ -71,8 +71,36 @@ const os = require('os');
 
 // PostgreSQL database module
 
-const db = process.env.DATABASE_URL ? require('./db-postgres') : null;
-const USE_POSTGRES = !!process.env.DATABASE_URL;
+const RAW_DATABASE_URL = (process.env.DATABASE_URL || '').trim();
+const isValidPostgresUrl = (value) => {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'postgres:' || parsed.protocol === 'postgresql:';
+  } catch (e) {
+    return false;
+  }
+};
+
+let db = null;
+let USE_POSTGRES = false;
+
+if (RAW_DATABASE_URL) {
+  if (isValidPostgresUrl(RAW_DATABASE_URL)) {
+    process.env.DATABASE_URL = RAW_DATABASE_URL;
+    try {
+      db = require('./db-postgres');
+      USE_POSTGRES = true;
+    } catch (err) {
+      console.error('[DB] Failed to load Postgres module:', err && err.message ? err.message : err);
+      console.warn('[DB] Falling back to JSON/SQLite storage. Verify that the Postgres driver is installed and DATABASE_URL is reachable.');
+    }
+  } else {
+    console.warn('[DB] DATABASE_URL is set but appears invalid. Falling back to JSON/SQLite storage. Please provide a valid PostgreSQL URL.');
+  }
+} else {
+  console.log('[DB] DATABASE_URL not configured; using JSON/SQLite user store.');
+}
 // Admin allowlist (only these usernames are allowed to access admin endpoints)
 const ADMIN_ALLOWLIST = (process.env.ADMIN_ALLOWLIST || 'vhr')
   .split(',')
@@ -201,6 +229,82 @@ function elevateAdminIfAllowlisted(user) {
   }
   return user;
 }
+
+// Anti-rafale scrcpy
+const SCRCPY_LAUNCH_DEBOUNCE_MS = Number(process.env.SCRCPY_LAUNCH_DEBOUNCE_MS || 10000);
+const SCRCPY_GLOBAL_LOCK_MS = Number(process.env.SCRCPY_GLOBAL_LOCK_MS || 5000);
+const scrcpyLaunchLocks = new Map();
+let scrcpyGlobalLockUntil = 0;
+
+const normalizeSerialKey = (serial) => String(serial || '').trim().toLowerCase();
+
+const scrcpyLaunchTokens = new Map();
+const SCRCPY_TOKEN_TTL_MS = Number(process.env.SCRCPY_TOKEN_TTL_MS || 5000);
+
+function isProcessAlive(procOrPid) {
+  const pid = typeof procOrPid === 'number' ? procOrPid : (procOrPid && procOrPid.pid);
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function stopScrcpyProcesses(serial = null) {
+  const normalized = serial ? normalizeSerialKey(serial) : null;
+  let killed = 0;
+
+  for (const [pid, info] of Array.from(trackedProcesses.entries())) {
+    if (info.type !== 'scrcpy') continue;
+    if (normalized && normalizeSerialKey(info.serial) !== normalized) continue;
+
+    try {
+      if (isProcessAlive(pid)) {
+        if (process.platform === 'win32') {
+          spawn('taskkill', ['/F', '/T', '/PID', pid.toString()]);
+        } else {
+          try { process.kill(pid, 'SIGTERM'); } catch (_) { process.kill(pid, 'SIGKILL'); }
+        }
+        killed += 1;
+      }
+    } catch (e) {
+      console.warn('[scrcpy] stop error for PID', pid, e && e.message ? e.message : e);
+    }
+
+    trackedProcesses.delete(pid);
+  }
+
+  if (normalized) {
+    scrcpyLaunchLocks.delete(normalized);
+  } else {
+    scrcpyLaunchLocks.clear();
+  }
+
+  return killed;
+}
+
+function scrcpyTokenKey(serialKey, ip = '') {
+  return `${serialKey}::${ip || 'unknown'}`;
+}
+
+function issueScrcpyToken(serialKey, ip = '') {
+  const token = crypto.randomBytes(16).toString('hex');
+  const key = scrcpyTokenKey(serialKey, ip);
+  scrcpyLaunchTokens.set(key, { token, expiresAt: Date.now() + SCRCPY_TOKEN_TTL_MS });
+  return token;
+}
+
+function consumeScrcpyToken(serialKey, ip = '', token = '') {
+  const key = scrcpyTokenKey(serialKey, ip);
+  const entry = scrcpyLaunchTokens.get(key);
+  if (!entry) return false;
+  const valid = entry.token === token && Date.now() <= entry.expiresAt;
+  scrcpyLaunchTokens.delete(key);
+  return valid;
+}
+
 function startBundledAdbServer() {
   if (process.env.NO_ADB === '1') {
     console.log('[ADB] NO_ADB=1: démarrage automatique ADB ignoré.');
@@ -1688,6 +1792,9 @@ app.post('/create-checkout-session', async (req, res) => {
 
 // --- Utilisateurs (simple persistence JSON: replace with a proper DB in production) ---
 const USERS_FILE = path.join(__dirname, 'data', 'users.json');
+const DEMO_STATE_FILE = path.join(__dirname, 'data', 'demo-state.json');
+const DEMO_TRIAL_DAYS = Math.max(1, Number.parseInt(process.env.DEMO_TRIAL_DAYS || '7', 10) || 7);
+let cachedDemoState = null;
 
 function ensureDataDir() {
   try { fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true }); } catch (e) { }
@@ -1716,20 +1823,51 @@ function saveUsers() {
   }
 }
 
+function loadDemoState() {
+  if (cachedDemoState) return cachedDemoState;
+  ensureDataDir();
+  let state = {};
+  try {
+    if (fs.existsSync(DEMO_STATE_FILE)) {
+      const raw = fs.readFileSync(DEMO_STATE_FILE, 'utf8').trim();
+      if (raw) {
+        state = JSON.parse(raw);
+      }
+    }
+  } catch (e) {
+    console.warn('[demo] Failed to read demo state, resetting:', e && e.message ? e.message : e);
+    state = {};
+  }
+
+  if (!state.startDate) {
+    state.startDate = Date.now();
+    try {
+      fs.writeFileSync(DEMO_STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
+      console.log(`[demo] Starting trial for ${DEMO_TRIAL_DAYS} day(s). State persisted to ${DEMO_STATE_FILE}`);
+    } catch (err) {
+      console.warn('[demo] Unable to persist demo state:', err && err.message ? err.message : err);
+    }
+  }
+
+  cachedDemoState = state;
+  return cachedDemoState;
+}
+
 // ========== DEMO STATUS MANAGEMENT ========== 
 function getDemoStatus() {
-  const DEMO_START = new Date('2025-12-07T00:00:00Z').getTime();
-  const DEMO_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
-  const DEMO_END = DEMO_START + DEMO_DURATION;
-  
+  const state = loadDemoState();
+  const startMs = Number(state.startDate) || Date.now();
+  const duration = DEMO_TRIAL_DAYS * 24 * 60 * 60 * 1000;
+  const demoEnd = startMs + duration;
   const now = Date.now();
-  const daysRemaining = Math.ceil((DEMO_END - now) / (24 * 60 * 60 * 1000));
-  const isExpired = now > DEMO_END;
-  
+  const daysRemaining = Math.ceil((demoEnd - now) / (24 * 60 * 60 * 1000));
+  const isExpired = now > demoEnd;
+
   return {
     isExpired,
     daysRemaining: Math.max(0, daysRemaining),
-    expiresAt: new Date(DEMO_END).toISOString(),
+    expiresAt: new Date(demoEnd).toISOString(),
+    demoStartAt: new Date(startMs).toISOString(),
     message: isExpired ? 'Demo expiré' : `Essai gratuit - ${Math.max(0, daysRemaining)} jour(s) restant(s)`
   };
 }
@@ -7898,17 +8036,17 @@ function resolveScrcpyExecutable() {
   const exeResourcesUnpacked = exeDir ? path.join(exeDir, 'resources', 'app.asar.unpacked') : null;
 
   const candidates = [
-    resourcesAppUnpacked ? path.join(resourcesAppUnpacked, 'scrcpy', 'scrcpy-noconsole.exe') : null,
     resourcesAppUnpacked ? path.join(resourcesAppUnpacked, 'scrcpy', 'scrcpy.exe') : null,
     resourcesAppUnpacked ? path.join(resourcesAppUnpacked, 'scrcpy', 'scrcpy') : null,
-    exeResourcesUnpacked ? path.join(exeResourcesUnpacked, 'scrcpy', 'scrcpy-noconsole.exe') : null,
     exeResourcesUnpacked ? path.join(exeResourcesUnpacked, 'scrcpy', 'scrcpy.exe') : null,
     exeResourcesUnpacked ? path.join(exeResourcesUnpacked, 'scrcpy', 'scrcpy') : null,
-    path.join(__dirname, 'scrcpy', 'scrcpy-noconsole.exe'),
     path.join(__dirname, 'scrcpy', 'scrcpy.exe'),
     path.join(__dirname, 'scrcpy', 'scrcpy'),
-    'C:/ProgramData/chocolatey/lib/scrcpy/tools/scrcpy-noconsole.exe',
     'C:/ProgramData/chocolatey/lib/scrcpy/tools/scrcpy.exe',
+    resourcesAppUnpacked ? path.join(resourcesAppUnpacked, 'scrcpy', 'scrcpy-noconsole.exe') : null,
+    exeResourcesUnpacked ? path.join(exeResourcesUnpacked, 'scrcpy', 'scrcpy-noconsole.exe') : null,
+    path.join(__dirname, 'scrcpy', 'scrcpy-noconsole.exe'),
+    'C:/ProgramData/chocolatey/lib/scrcpy/tools/scrcpy-noconsole.exe',
     'scrcpy'
   ].filter(Boolean);
 
@@ -7963,7 +8101,7 @@ app.post('/api/scrcpy-gui', async (req, res) => {
     const proc = spawn(scrcpyExe, scrcpyArgs, {
       detached: true,
       stdio: ['ignore', 'ignore', 'pipe'],
-      windowsHide: true,
+      windowsHide: false,
       env: { ...process.env, PATH: envPath },
       cwd: scrcpyDir || process.cwd()
     });

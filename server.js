@@ -63,8 +63,36 @@ const os = require('os');
 
 // PostgreSQL database module
 
-const db = process.env.DATABASE_URL ? require('./db-postgres') : null;
-const USE_POSTGRES = !!process.env.DATABASE_URL;
+const RAW_DATABASE_URL = (process.env.DATABASE_URL || '').trim();
+const isValidPostgresUrl = (value) => {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'postgres:' || parsed.protocol === 'postgresql:';
+  } catch (e) {
+    return false;
+  }
+};
+
+let db = null;
+let USE_POSTGRES = false;
+
+if (RAW_DATABASE_URL) {
+  if (isValidPostgresUrl(RAW_DATABASE_URL)) {
+    process.env.DATABASE_URL = RAW_DATABASE_URL;
+    try {
+      db = require('./db-postgres');
+      USE_POSTGRES = true;
+    } catch (err) {
+      console.error('[DB] Failed to load Postgres module:', err && err.message ? err.message : err);
+      console.warn('[DB] Falling back to JSON/SQLite storage. Verify that the Postgres driver is installed and DATABASE_URL is reachable.');
+    }
+  } else {
+    console.warn('[DB] DATABASE_URL is set but appears invalid. Falling back to JSON/SQLite storage. Please provide a valid PostgreSQL URL.');
+  }
+} else {
+  console.log('[DB] DATABASE_URL not configured; using JSON/SQLite user store.');
+}
 // Admin allowlist (only these usernames are allowed to access admin endpoints)
 const ADMIN_ALLOWLIST = (process.env.ADMIN_ALLOWLIST || 'vhr')
   .split(',')
@@ -1722,6 +1750,8 @@ app.post('/create-checkout-session', async (req, res) => {
 // --- Utilisateurs (simple persistence JSON: replace with a proper DB in production) ---
 const USERS_FILE = path.join(__dirname, 'data', 'users.json');
 const DELETED_USERS_FILE = path.join(__dirname, 'data', 'deleted-users.json');
+const DEMO_STATE_FILE = path.join(__dirname, 'data', 'demo-state.json');
+let cachedDemoState = null;
 
 function ensureDataDir() {
   try { fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true }); } catch (e) { }
@@ -1855,6 +1885,36 @@ function saveUsers() {
   }
 }
 
+function loadDemoState() {
+  if (cachedDemoState) return cachedDemoState;
+  ensureDataDir();
+  let state = {};
+  try {
+    if (fs.existsSync(DEMO_STATE_FILE)) {
+      const raw = fs.readFileSync(DEMO_STATE_FILE, 'utf8').trim();
+      if (raw) {
+        state = JSON.parse(raw);
+      }
+    }
+  } catch (e) {
+    console.warn('[demo] Failed to load demo state, resetting to now:', e && e.message ? e.message : e);
+    state = {};
+  }
+
+  if (!state.startDate) {
+    state.startDate = Date.now();
+    try {
+      fs.writeFileSync(DEMO_STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
+      console.log(`[demo] Nouvelle date de départ de l'essai enregistrée: ${new Date(state.startDate).toISOString()}`);
+    } catch (e) {
+      console.warn('[demo] Impossible de persister la date de l\'essai:', e && e.message ? e.message : e);
+    }
+  }
+
+  cachedDemoState = state;
+  return cachedDemoState;
+}
+
 function isUserDeletedOrDisabled(user) {
   if (!user) return false;
   const normalized = normalizeUserRecord(user);
@@ -1867,11 +1927,11 @@ function isUserDeletedOrDisabled(user) {
 }
 
 // ========== DEMO STATUS MANAGEMENT ========== 
-// Fallback server-wide demo window (used only when no user context is available)
-const SERVER_DEMO_START_MS = Date.now();
 function getDemoStatus() {
+  const state = loadDemoState();
+  const startMs = Number(state.startDate) || Date.now();
   const duration = demoConfig.DEMO_DURATION_MS || (demoConfig.DEMO_DAYS * 24 * 60 * 60 * 1000);
-  const demoEndMs = SERVER_DEMO_START_MS + duration;
+  const demoEndMs = startMs + duration;
 
   const now = Date.now();
   const daysRemaining = Math.ceil((demoEndMs - now) / (24 * 60 * 60 * 1000));
@@ -1881,6 +1941,7 @@ function getDemoStatus() {
     isExpired,
     daysRemaining: Math.max(0, daysRemaining),
     expiresAt: new Date(demoEndMs).toISOString(),
+    demoStartAt: new Date(startMs).toISOString(),
     message: isExpired ? 'Demo expiré' : `Essai gratuit - ${Math.max(0, daysRemaining)} jour(s) restant(s)`
   };
 }
