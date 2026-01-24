@@ -91,6 +91,11 @@ const SYNC_USER_ENDPOINT = SYNC_USER_ENDPOINT_RAW.startsWith('/')
 const SYNC_TARGET_TIMEOUT_MS = Math.max(2000, Number.parseInt(process.env.SYNC_TARGET_TIMEOUT_MS || '6000', 10) || 6000);
 const HAS_SYNC_TARGETS = SYNC_TARGET_BASE_URLS.length > 0;
 
+const FORCE_HTTP = process.env.FORCE_HTTP === '1';
+const NO_BROWSER_FALLBACK = process.env.NO_BROWSER_FALLBACK === '1';
+const QUIET_MODE = process.env.QUIET_MODE === '1';
+const SUPPRESS_WARNINGS = process.env.SUPPRESS_WARNINGS === '1';
+
 // Manual email overrides to re-link Stripe customers when the stored email is missing/incorrect.
 // Can be provided via JSON in env USER_EMAIL_OVERRIDES_JSON, e.g. {"pitou":"vhrealityone@gmail.com"}
 const EMAIL_OVERRIDE_MAP = (() => {
@@ -105,7 +110,7 @@ const EMAIL_OVERRIDE_MAP = (() => {
 
 function isAllowedAdminUser(user) {
   const username = (typeof user === 'string' ? user : (user && user.username) || '').toLowerCase();
-  return !!username && EFFECTIVE_ADMIN_ALLOWLIST.includes(username);
+  return !!username && ADMIN_ALLOWLIST.includes(username);
 }
 
 function ensureAllowedAdmin(req, res) {
@@ -116,79 +121,13 @@ function ensureAllowedAdmin(req, res) {
   return true;
 }
 
-function buildSyncHeaders() {
-  return {
-    'Content-Type': 'application/json',
-    'x-sync-secret': SYNC_USERS_SECRET
-  };
-}
-
-async function syncUserToDashboardTargets(user) {
-  if (!HAS_SYNC_TARGETS || !user || !user.username) return;
-
-  const passwordHash = user.passwordHash || user.passwordhash || null;
-  if (!passwordHash) {
-    console.warn('[sync] Skipping user sync because passwordHash is missing for', user.username);
-    return;
-  }
-
-  const payload = {
-    username: user.username,
-    email: user.email || user.normalizedEmail || null,
-    role: user.role || 'user',
-    passwordHash,
-    demoStartDate: user.demoStartDate || null,
-    subscriptionStatus: user.subscriptionStatus || null,
-    subscriptionId: user.subscriptionId || null,
-    stripeCustomerId: user.stripeCustomerId || null,
-    source: 'site-register'
-  };
-
-  const headers = buildSyncHeaders();
-  const controllerSupported = typeof AbortController === 'function';
-  const tasks = SYNC_TARGET_BASE_URLS.map(async (baseUrl) => {
-    const targetUrl = `${baseUrl}${SYNC_USER_ENDPOINT}`;
-    const controller = controllerSupported ? new AbortController() : null;
-    const signal = controller ? controller.signal : undefined;
-    const timeoutId = controller ? setTimeout(() => controller.abort(), SYNC_TARGET_TIMEOUT_MS) : null;
-    try {
-      const res = await fetch(targetUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-        signal
-      });
-      if (!res.ok) {
-        console.warn(`[sync] ${targetUrl} responded ${res.status}`);
-      }
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        console.warn(`[sync] ${targetUrl} timed out after ${SYNC_TARGET_TIMEOUT_MS}ms`);
-      } else {
-        console.error('[sync] Failed to sync user to', targetUrl, err && err.message ? err.message : err);
-      }
-    } finally {
-      if (timeoutId) clearTimeout(timeoutId);
-    }
-  });
-
-  await Promise.all(tasks);
-}
-
-function triggerUserSync(user) {
-  if (!HAS_SYNC_TARGETS) return;
-  syncUserToDashboardTargets(user).catch(err => console.error('[sync] Internal error while syncing user:', err && err.message ? err.message : err));
-}
-
-// Force the allowlisted admin users to stay admins (even if a stale role=user exists).
 function elevateAdminIfAllowlisted(user) {
   if (!user || !user.username) return user;
   const uname = String(user.username).toLowerCase();
-  if (!EFFECTIVE_ADMIN_ALLOWLIST.includes(uname)) return user;
+  if (!ADMIN_ALLOWLIST.includes(uname)) return user;
   if (user.role !== 'admin') {
     user.role = 'admin';
     try {
-      // Avoid overwriting stored user with partial JWT payload; reload if needed
       const stored = getUserByUsername(user.username);
       if (stored) {
         stored.role = 'admin';
@@ -196,144 +135,24 @@ function elevateAdminIfAllowlisted(user) {
       } else {
         persistUser(user);
       }
-    } catch (e) { console.warn('[admin] elevate failed:', e?.message || e); }
+    } catch (e) {
+      console.warn('[admin] elevate failed:', (e && e.message) || e);
+    }
   }
   return user;
 }
-// ========== HTTPS SUPPORT (PRODUCTION) ==========
-const FORCE_HTTP = process.env.FORCE_HTTP === '1';
-const QUIET_MODE = process.env.QUIET_MODE === '1';
-const SUPPRESS_WARNINGS = process.env.SUPPRESS_WARNINGS === '1';
-const HTTPS_ENABLED = process.env.HTTPS_ENABLED === '1';
-const HTTPS_CERT_FILE = process.env.HTTPS_CERT_FILE || './cert.pem';
-const HTTPS_KEY_FILE = process.env.HTTPS_KEY_FILE || './key.pem';
-const HTTPS_CA_FILE = process.env.HTTPS_CA_FILE || process.env.HTTPS_CHAIN_FILE || '';
 
-let useHttps = false;
-let httpsOptions = {};
-let hasCert = false;
-
-// Optional quiet mode to silence non-critical logs for local users
-if (QUIET_MODE) {
-  const noop = () => {};
-  console.log = noop;
-  console.info = noop;
-  // keep console.warn and console.error for important issues
-  console.warn('[quiet] QUIET_MODE=1 actif: logs info masqués');
-}
-
-// Optional warning filter: only keep server warnings, hide noisy services (email/stripe/db)
-if (SUPPRESS_WARNINGS) {
-  const origWarn = console.warn.bind(console);
-  console.warn = (msg, ...args) => {
-    const m = String(msg || '');
-    // Show only warnings starting with [server]
-    if (m.startsWith('[server')) {
-      origWarn(msg, ...args);
-    }
-  };
-  console.warn('[quiet] SUPPRESS_WARNINGS=1 actif: warnings non-serveur masqués');
-}
-
-// HTTPS opt-in: only enabled if HTTPS_ENABLED=1 and certs are present
-try {
-  const certPath = path.resolve(HTTPS_CERT_FILE);
-  const keyPath = path.resolve(HTTPS_KEY_FILE);
-  const caPath = HTTPS_CA_FILE ? path.resolve(HTTPS_CA_FILE) : null;
-
-  if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
-    httpsOptions = {
-      cert: fs.readFileSync(certPath),
-      key: fs.readFileSync(keyPath)
-    };
-
-    if (caPath) {
-      if (fs.existsSync(caPath)) {
-        httpsOptions.ca = fs.readFileSync(caPath);
-        console.log(`[HTTPS] Chaîne intermédiaire chargée (${caPath}).`);
-      } else {
-        console.warn(`[HTTPS] HTTPS_CA_FILE défini mais introuvable: ${caPath}`);
-      }
-    }
-
-    hasCert = true;
-    console.log(`[HTTPS] Certificat SSL détecté (${certPath}).`);
-  } else {
-    if (!fs.existsSync(certPath)) console.warn(`[HTTPS] Certificat manquant: ${certPath}`);
-    if (!fs.existsSync(keyPath)) console.warn(`[HTTPS] Clé privée manquante: ${keyPath}`);
-  }
-} catch (e) {
-  console.warn('[HTTPS] Erreur lors du chargement du certificat SSL:', e.message);
-}
-
-// HTTPS principal activé uniquement si HTTPS_ENABLED=1 et certificat présent
-if (HTTPS_ENABLED && hasCert) {
-  useHttps = true;
-  console.log('[HTTPS] HTTPS_ENABLED=1 - démarrage principal en HTTPS.');
-} else {
-  console.log('[HTTPS] HTTPS désactivé - démarrage principal en HTTP.');
-  if (HTTPS_ENABLED && !hasCert) {
-    console.warn('[HTTPS] HTTPS_ENABLED=1 mais aucun certificat valide détecté. Vérifiez HTTPS_CERT_FILE / HTTPS_KEY_FILE / HTTPS_CA_FILE.');
-  }
-}
-
-// Render force le HTTPS au niveau du proxy. Pour éviter un double TLS qui casse WebSocket/ADB,
-// on désactive systématiquement le HTTPS applicatif quand on détecte Render.
-const IS_RENDER = !!process.env.RENDER || !!process.env.RENDER_EXTERNAL_URL || !!process.env.RENDER_SERVICE_ID;
-if (IS_RENDER) {
-  useHttps = false;
-  console.log('[HTTPS] Environnement Render détecté: serveur forcé en HTTP derrière le proxy TLS.');
-}
-
-if (useHttps && FORCE_HTTP) {
-  useHttps = false;
-  console.log('[HTTPS] FORCE_HTTP=1 détecté - démarrage forcé en HTTP malgré certificat.');
-}
-// ========== ADB BINARY DISCOVERY & AUTO-PATH ==========
-const PROJECT_ROOT = __dirname;
-const PLATFORM_TOOLS_DIR = path.join(PROJECT_ROOT, 'platform-tools');
-const ADB_FILENAME = process.platform === 'win32' ? 'adb.exe' : 'adb';
-const BUNDLED_ADB_PATH = path.join(PLATFORM_TOOLS_DIR, ADB_FILENAME);
-const HAS_BUNDLED_ADB = fs.existsSync(BUNDLED_ADB_PATH);
-const ADB_BIN = HAS_BUNDLED_ADB ? BUNDLED_ADB_PATH : ADB_FILENAME;
-
-if (HAS_BUNDLED_ADB) {
-  const adbDir = path.dirname(BUNDLED_ADB_PATH);
-  const currentPath = (process.env.PATH || '').split(path.delimiter);
-  if (!currentPath.includes(adbDir)) {
-    process.env.PATH = `${adbDir}${path.delimiter}${process.env.PATH || ''}`;
-  }
-  console.log(`[ADB] Binaire embarqué détecté: ${ADB_BIN}. Ajouté en priorité au PATH.`);
-} else {
-  console.log('[ADB] Aucun binaire ADB embarqué détecté, utilisation du adb présent dans le PATH système.');
-}
-
-function startBundledAdbServer() {
-  if (process.env.NO_ADB === '1') {
-    console.log('[ADB] NO_ADB=1: démarrage automatique ADB ignoré.');
-    return;
-  }
-  try {
-    const adbStartCmd = `"${ADB_BIN}" start-server`;
-    execSync(adbStartCmd, { stdio: 'ignore', timeout: 5000 });
-    console.log('[ADB] adb start-server lancé automatiquement au démarrage.');
-  } catch (e) {
-    console.warn('[ADB] Impossible de lancer adb start-server automatiquement:', e.message);
-  }
-}
-
-// ========== PROCESS TRACKING & CLEANUP ==========
-// Track all spawned processes for proper cleanup
+// ========== PROCESS TRACKING & CLEANUP =========
 const trackedProcesses = new Map(); // pid -> { process, type, serial, startTime }
 let cleanupIntervalId = null;
 
 function trackProcess(proc, type, serial = null) {
   if (proc && proc.pid) {
-    trackedProcesses.set(proc.pid, { 
-      process: proc, 
-      type, 
-      serial, 
-      startTime: Date.now() 
+    trackedProcesses.set(proc.pid, {
+      process: proc,
+      type,
+      serial,
+      startTime: Date.now()
     });
     console.log(`[Process] Tracking ${type} process (PID: ${proc.pid})`);
   }
@@ -8821,7 +8640,6 @@ app.post('/api/audio/signal', async (req, res) => {
     console.log(`[WebRTC] ${type} signal from ${username}`, { sessionId, initiator });
 
     if (type === 'offer') {
-      // PC initiates call to headset
       const session = {
         id: sessionId,
         initiator: username,
@@ -8833,7 +8651,6 @@ app.post('/api/audio/signal', async (req, res) => {
 
       audioSessions.set(sessionId, session);
 
-      // Store for 30 seconds waiting for answer
       setTimeout(() => {
         if (audioSessions.has(sessionId) && !audioSessions.get(sessionId).answer) {
           audioSessions.delete(sessionId);
@@ -8848,60 +8665,38 @@ app.post('/api/audio/signal', async (req, res) => {
       });
 
     } else if (type === 'answer') {
-      // Headset responds with answer
       const session = audioSessions.get(sessionId);
       if (!session) {
-        return res.status(400).json({
-          ok: false,
-          error: 'Session not found or expired'
-        });
+        return res.status(400).json({ ok: false, error: 'Session not found or expired' });
       }
 
       session.answer = answer;
       session.answeredAt = Date.now();
 
-      res.json({
-        ok: true,
-        sessionId,
-        message: 'Answer stored'
-      });
+      res.json({ ok: true, sessionId, message: 'Answer stored' });
 
     } else if (type === 'ice-candidate') {
-      // Store ICE candidate
       const session = audioSessions.get(sessionId);
       if (session) {
         session.candidates = session.candidates || [];
         session.candidates.push(candidate);
       }
 
-      res.json({
-        ok: true,
-        message: 'ICE candidate stored'
-      });
+      res.json({ ok: true, message: 'ICE candidate stored' });
 
     } else if (type === 'close') {
-      // Close session
       audioSessions.delete(sessionId);
       console.log(`[WebRTC] Session ${sessionId} closed`);
 
-      res.json({
-        ok: true,
-        message: 'Session closed'
-      });
+      res.json({ ok: true, message: 'Session closed' });
 
     } else {
-      res.status(400).json({
-        ok: false,
-        error: 'Unknown signal type: ' + type
-      });
+      res.status(400).json({ ok: false, error: 'Unknown signal type: ' + type });
     }
 
   } catch (error) {
     console.error('[WebRTC] Signaling error:', error.message);
-    res.status(500).json({
-      ok: false,
-      error: 'Signaling error: ' + error.message
-    });
+    res.status(500).json({ ok: false, error: 'Signaling error: ' + error.message });
   }
 });
 
@@ -8914,10 +8709,7 @@ app.get('/api/audio/session/:sessionId', authMiddleware, (req, res) => {
     const session = audioSessions.get(req.params.sessionId);
     
     if (!session) {
-      return res.json({
-        ok: false,
-        error: 'Session not found'
-      });
+      return res.json({ ok: false, error: 'Session not found' });
     }
 
     const elapsed = Date.now() - session.createdAt;
@@ -8934,10 +8726,7 @@ app.get('/api/audio/session/:sessionId', authMiddleware, (req, res) => {
 
   } catch (error) {
     console.error('[WebRTC] Error retrieving session:', error.message);
-    res.status(500).json({
-      ok: false,
-      error: error.message
-    });
+    res.status(500).json({ ok: false, error: error.message });
   }
 });
 

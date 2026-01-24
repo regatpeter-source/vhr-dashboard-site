@@ -1723,6 +1723,21 @@ if (!currentUser) {
 // ========== API & DATA ========== 
 const urlParams = new URLSearchParams(window.location.search || '');
 
+const AUTH_OVERRIDE_RESET_KEY = 'vhr_dashboard_override_reset';
+const AUTH_OVERRIDE_RESET_VERSION = '2026-01-24';
+(function resetLegacyAuthOverrides() {
+	if (typeof localStorage === 'undefined') return;
+	try {
+		const previous = localStorage.getItem(AUTH_OVERRIDE_RESET_KEY);
+		if (previous === AUTH_OVERRIDE_RESET_VERSION) return;
+		['forceLocalAuth', 'useMockAuth', 'forceProdAuth'].forEach(k => localStorage.removeItem(k));
+		localStorage.setItem(AUTH_OVERRIDE_RESET_KEY, AUTH_OVERRIDE_RESET_VERSION);
+		console.info(`[auth] Cleared legacy local/mock override flags (release ${AUTH_OVERRIDE_RESET_VERSION})`);
+	} catch (err) {
+		console.warn('[auth] Unable to reset local/mock override flags', err);
+	}
+})();
+
 // Persiste le choix si un paramètre d'URL est fourni
 if (urlParams.get('auth') === 'prod' || urlParams.get('prod-auth') === '1') {
 	try { localStorage.setItem('forceProdAuth', '1'); localStorage.removeItem('forceLocalAuth'); } catch (e) {}

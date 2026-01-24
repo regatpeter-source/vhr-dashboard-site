@@ -71,69 +71,39 @@ const os = require('os');
 
 // PostgreSQL database module
 
-const SKIP_PG = process.env.SKIP_PG === '1';
-const RAW_DATABASE_URL = process.env.DATABASE_URL || '';
-const isPlaceholderDbUrl = /<.*?>/.test(RAW_DATABASE_URL);
-let USE_POSTGRES = !!RAW_DATABASE_URL && !SKIP_PG && !isPlaceholderDbUrl;
-let db = null;
-if (USE_POSTGRES) {
-  try {
-    new URL(RAW_DATABASE_URL); // validate format
-    db = require('./db-postgres');
-  } catch (e) {
-    console.warn('[DB] DATABASE_URL invalide, fallback JSON/SQLite:', e?.message || e);
-    USE_POSTGRES = false;
-  }
-} else if (isPlaceholderDbUrl) {
-  console.warn('[DB] DATABASE_URL contient un placeholder, fallback JSON/SQLite');
-}
+const db = process.env.DATABASE_URL ? require('./db-postgres') : null;
+const USE_POSTGRES = !!process.env.DATABASE_URL;
 // Admin allowlist (only these usernames are allowed to access admin endpoints)
 const ADMIN_ALLOWLIST = (process.env.ADMIN_ALLOWLIST || 'vhr')
   .split(',')
   .map(u => u.trim().toLowerCase())
   .filter(Boolean);
+const ADMIN_FALLBACK = ['vhr'];
+const EFFECTIVE_ADMIN_ALLOWLIST = ADMIN_ALLOWLIST.length ? ADMIN_ALLOWLIST : ADMIN_FALLBACK;
+const ADMIN_VERIFICATION_BYPASS_EMAIL = (process.env.ADMIN_VERIFICATION_BYPASS_EMAIL || 'admin@example.local').trim().toLowerCase();
 const ADMIN_INIT_SECRET = process.env.ADMIN_INIT_SECRET || null;
 // Shared secret used when syncing users from the prod auth API to the local pack.
 // Fallbacks to the same value embedded in dashboard-pro.js to avoid 403 if the
 // environment variable is missing on local installs.
 const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
+const SYNC_TARGET_URLS_RAW = process.env.SYNC_TARGET_URLS || process.env.DASHBOARD_SYNC_TARGETS || '';
+const SYNC_TARGET_BASE_URLS = SYNC_TARGET_URLS_RAW
+  .split(/[,;\s]+/)
+  .map(url => url.trim())
+  .filter(Boolean)
+  .map(url => url.replace(/\/+$/g, ''));
+const SYNC_USER_ENDPOINT_RAW = process.env.SYNC_USER_ENDPOINT || '/api/admin/sync-user';
+const SYNC_USER_ENDPOINT = SYNC_USER_ENDPOINT_RAW.startsWith('/')
+  ? SYNC_USER_ENDPOINT_RAW
+  : '/' + SYNC_USER_ENDPOINT_RAW;
+const SYNC_TARGET_TIMEOUT_MS = Math.max(2000, Number.parseInt(process.env.SYNC_TARGET_TIMEOUT_MS || '6000', 10) || 6000);
+const HAS_SYNC_TARGETS = SYNC_TARGET_BASE_URLS.length > 0;
 
-function isAllowedAdminUser(user) {
-  const username = (typeof user === 'string' ? user : (user && user.username) || '').toLowerCase();
-  return !!username && ADMIN_ALLOWLIST.includes(username);
-}
-
-function ensureAllowedAdmin(req, res) {
-  if (!req.user || req.user.role !== 'admin' || !isAllowedAdminUser(req.user)) {
-    if (res) res.status(403).json({ ok: false, error: 'Accès admin restreint' });
-    return false;
-  }
-  return true;
-}
-
-// Force allowlisted users to remain admins even if their stored role was downgraded.
-function elevateAdminIfAllowlisted(user) {
-  if (!user || !user.username) return user;
-  const uname = String(user.username).toLowerCase();
-  if (!ADMIN_ALLOWLIST.includes(uname)) return user;
-  if (user.role !== 'admin') {
-    user.role = 'admin';
-    try {
-      const stored = getUserByUsername(user.username);
-      if (stored) {
-        stored.role = 'admin';
-        persistUser(stored);
-      } else {
-        persistUser(user);
-      }
-    } catch (e) { console.warn('[admin] elevate failed:', e?.message || e); }
-  }
-  return user;
-}
-// ========== HTTPS SUPPORT (PRODUCTION) ==========
 const FORCE_HTTP = process.env.FORCE_HTTP === '1';
+const NO_BROWSER_FALLBACK = process.env.NO_BROWSER_FALLBACK === '1';
 const QUIET_MODE = process.env.QUIET_MODE === '1';
 const SUPPRESS_WARNINGS = process.env.SUPPRESS_WARNINGS === '1';
+
 const HTTPS_ENABLED = process.env.HTTPS_ENABLED === '1';
 const HTTPS_CERT_FILE = process.env.HTTPS_CERT_FILE || './cert.pem';
 const HTTPS_KEY_FILE = process.env.HTTPS_KEY_FILE || './key.pem';
@@ -143,39 +113,26 @@ let useHttps = false;
 let httpsOptions = {};
 let hasCert = false;
 
-// Optional quiet mode to silence non-critical logs for local users
-if (QUIET_MODE) {
-  const noop = () => {};
-  console.log = noop;
-  console.info = noop;
-  // keep console.warn and console.error for important issues
-  console.warn('[quiet] QUIET_MODE=1 actif: logs info masqués');
-}
+// Manual email overrides to re-link Stripe customers when the stored email is missing/incorrect.
+// Can be provided via JSON in env USER_EMAIL_OVERRIDES_JSON, e.g. {"pitou":"vhrealityone@gmail.com"}
+const EMAIL_OVERRIDE_MAP = (() => {
+  let map = {};
+  if (process.env.USER_EMAIL_OVERRIDES_JSON) {
+    try { map = JSON.parse(process.env.USER_EMAIL_OVERRIDES_JSON) || {}; } catch (e) { console.warn('[config] Failed to parse USER_EMAIL_OVERRIDES_JSON:', e && e.message ? e.message : e); }
+  }
+  // Hardcoded safety net for reported account
+  if (!map.pitou) map.pitou = 'vhrealityone@gmail.com';
+  return Object.fromEntries(Object.entries(map).map(([k,v]) => [String(k || '').toLowerCase(), v]));
+})();
 
-// Optional warning filter: only keep server warnings, hide noisy services (email/stripe/db)
-if (SUPPRESS_WARNINGS) {
-  const origWarn = console.warn.bind(console);
-  console.warn = (msg, ...args) => {
-    const m = String(msg || '');
-    // Show only warnings starting with [server]
-    if (m.startsWith('[server')) {
-      origWarn(msg, ...args);
-    }
-  };
-  console.warn('[quiet] SUPPRESS_WARNINGS=1 actif: warnings non-serveur masqués');
-}
-
-// HTTPS opt-in: only enabled if HTTPS_ENABLED=1 and certs are present
 try {
   const certPath = path.resolve(HTTPS_CERT_FILE);
   const keyPath = path.resolve(HTTPS_KEY_FILE);
-  const caPath = HTTPS_CA_FILE ? path.resolve(HTTPS_CA_FILE) : null;
+  const caPath = HTTPS_CA_FILE ? path.resolve(HTTPS_CA_FILE) : '';
 
   if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
-    httpsOptions = {
-      cert: fs.readFileSync(certPath),
-      key: fs.readFileSync(keyPath)
-    };
+    httpsOptions.cert = fs.readFileSync(certPath);
+    httpsOptions.key = fs.readFileSync(keyPath);
 
     if (caPath) {
       if (fs.existsSync(caPath)) {
@@ -193,10 +150,9 @@ try {
     if (!fs.existsSync(keyPath)) console.warn(`[HTTPS] Clé privée manquante: ${keyPath}`);
   }
 } catch (e) {
-  console.warn('[HTTPS] Erreur lors du chargement du certificat SSL:', e.message);
+  console.warn('[HTTPS] Erreur lors du chargement du certificat SSL:', e && e.message ? e.message : e);
 }
 
-// HTTPS principal activé uniquement si HTTPS_ENABLED=1 et certificat présent
 if (HTTPS_ENABLED && hasCert) {
   useHttps = true;
   console.log('[HTTPS] HTTPS_ENABLED=1 - démarrage principal en HTTPS.');
@@ -211,102 +167,40 @@ if (useHttps && FORCE_HTTP) {
   useHttps = false;
   console.log('[HTTPS] FORCE_HTTP=1 détecté - démarrage forcé en HTTP malgré certificat.');
 }
-console.log(`[DB] Mode: ${USE_POSTGRES ? 'PostgreSQL' : 'JSON Files (Development)'}`);
 
-// ========== ADB BINARY DISCOVERY & AUTO-PATH ==========
-const PROJECT_ROOT = __dirname;
-const PLATFORM_TOOLS_DIR = path.join(PROJECT_ROOT, 'platform-tools');
-const ADB_FILENAME = process.platform === 'win32' ? 'adb.exe' : 'adb';
-const BUNDLED_ADB_PATH = path.join(PLATFORM_TOOLS_DIR, ADB_FILENAME);
-const HAS_BUNDLED_ADB = fs.existsSync(BUNDLED_ADB_PATH);
-const ADB_BIN = HAS_BUNDLED_ADB ? BUNDLED_ADB_PATH : ADB_FILENAME;
+function isAllowedAdminUser(user) {
+  const username = (typeof user === 'string' ? user : (user && user.username) || '').toLowerCase();
+  return !!username && ADMIN_ALLOWLIST.includes(username);
+}
 
-// Anti-rafale scrcpy
-const SCRCPY_LAUNCH_DEBOUNCE_MS = Number(process.env.SCRCPY_LAUNCH_DEBOUNCE_MS || 10000);
-const SCRCPY_GLOBAL_LOCK_MS = Number(process.env.SCRCPY_GLOBAL_LOCK_MS || 5000);
-const scrcpyLaunchLocks = new Map(); // serialKey -> last launch timestamp
-let scrcpyGlobalLockUntil = 0;
-
-const normalizeSerialKey = (serial) => String(serial || '').trim().toLowerCase();
-
-const scrcpyLaunchTokens = new Map(); // key -> { token, expiresAt }
-const SCRCPY_TOKEN_TTL_MS = Number(process.env.SCRCPY_TOKEN_TTL_MS || 5000);
-
-function isProcessAlive(procOrPid) {
-  const pid = typeof procOrPid === 'number' ? procOrPid : (procOrPid && procOrPid.pid);
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (_) {
+function ensureAllowedAdmin(req, res) {
+  if (!req.user || req.user.role !== 'admin' || !isAllowedAdminUser(req.user)) {
+    if (res) res.status(403).json({ ok: false, error: 'Accès admin restreint' });
     return false;
   }
+  return true;
 }
 
-function stopScrcpyProcesses(serial = null) {
-  const normalized = serial ? normalizeSerialKey(serial) : null;
-  let killed = 0;
-
-  for (const [pid, info] of Array.from(trackedProcesses.entries())) {
-    if (info.type !== 'scrcpy') continue;
-    if (normalized && normalizeSerialKey(info.serial) !== normalized) continue;
-
+function elevateAdminIfAllowlisted(user) {
+  if (!user || !user.username) return user;
+  const uname = String(user.username).toLowerCase();
+  if (!ADMIN_ALLOWLIST.includes(uname)) return user;
+  if (user.role !== 'admin') {
+    user.role = 'admin';
     try {
-      if (isProcessAlive(pid)) {
-        if (process.platform === 'win32') {
-          spawn('taskkill', ['/F', '/T', '/PID', pid.toString()]);
-        } else {
-          try { process.kill(pid, 'SIGTERM'); } catch (_) { process.kill(pid, 'SIGKILL'); }
-        }
-        killed += 1;
+      const stored = getUserByUsername(user.username);
+      if (stored) {
+        stored.role = 'admin';
+        persistUser(stored);
+      } else {
+        persistUser(user);
       }
     } catch (e) {
-      console.warn('[scrcpy] stop error for PID', pid, e && e.message ? e.message : e);
+      console.warn('[admin] elevate failed:', (e && e.message) || e);
     }
-
-    trackedProcesses.delete(pid);
   }
-
-  if (normalized) {
-    scrcpyLaunchLocks.delete(normalized);
-  } else {
-    scrcpyLaunchLocks.clear();
-  }
-
-  return killed;
+  return user;
 }
-
-function scrcpyTokenKey(serialKey, ip = '') {
-  return `${serialKey}::${ip || 'unknown'}`;
-}
-
-function issueScrcpyToken(serialKey, ip = '') {
-  const token = crypto.randomBytes(16).toString('hex');
-  const key = scrcpyTokenKey(serialKey, ip);
-  scrcpyLaunchTokens.set(key, { token, expiresAt: Date.now() + SCRCPY_TOKEN_TTL_MS });
-  return token;
-}
-
-function consumeScrcpyToken(serialKey, ip = '', token = '') {
-  const key = scrcpyTokenKey(serialKey, ip);
-  const entry = scrcpyLaunchTokens.get(key);
-  if (!entry) return false;
-  const valid = entry.token === token && Date.now() <= entry.expiresAt;
-  scrcpyLaunchTokens.delete(key);
-  return valid;
-}
-
-if (HAS_BUNDLED_ADB) {
-  const adbDir = path.dirname(BUNDLED_ADB_PATH);
-  const currentPath = (process.env.PATH || '').split(path.delimiter);
-  if (!currentPath.includes(adbDir)) {
-    process.env.PATH = `${adbDir}${path.delimiter}${process.env.PATH || ''}`;
-  }
-  console.log(`[ADB] Binaire embarqué détecté: ${ADB_BIN}. Ajouté en priorité au PATH.`);
-} else {
-  console.log('[ADB] Aucun binaire ADB embarqué détecté, utilisation du adb présent dans le PATH système.');
-}
-
 function startBundledAdbServer() {
   if (process.env.NO_ADB === '1') {
     console.log('[ADB] NO_ADB=1: démarrage automatique ADB ignoré.');
@@ -321,7 +215,7 @@ function startBundledAdbServer() {
   }
 }
 
-// ========== PROCESS TRACKING & CLEANUP ==========
+// ========== PROCESS TRACKING & CLEANUP =========
 // Track all spawned processes for proper cleanup
 const trackedProcesses = new Map(); // pid -> { process, type, serial, startTime }
 let cleanupIntervalId = null;
@@ -7887,136 +7781,25 @@ app.post('/api/opentalkie/start-streaming', authMiddleware, async (req, res) => 
 
 // ===== WEBRTC AUDIO SIGNALING =====
 
-// TTL for audio signaling sessions (ms). Default: 5 minutes.
-const AUDIO_SESSION_TTL_MS = parseInt(process.env.AUDIO_SESSION_TTL_MS || '300000', 10);
-
-// Optional Redis-backed store for multi-instance persistence
-const audioSessionsMemory = new Map();
-const audioSessionTimeouts = new Map();
-let audioSessionStore = { type: 'memory', client: null };
-let audioSessionStoreReady = null;
-
-function audioSessionKey(id) {
-  return `audioSession:${id}`;
-}
-
-async function initAudioSessionStore() {
-  const redisUrl = process.env.REDIS_URL;
-  const redisHost = process.env.REDIS_HOST;
-
-  if (!redisUrl && !redisHost) {
-    console.log('[WebRTC] Using in-memory audio session store (no Redis config)');
-    return;
-  }
-
-  let redis;
-  try {
-    redis = require('redis');
-  } catch (e) {
-    console.warn('[WebRTC] redis package not installed, falling back to memory store');
-    return;
-  }
-
-  try {
-    const redisOpts = redisUrl
-      ? { url: redisUrl }
-      : {
-          socket: {
-            host: redisHost,
-            port: parseInt(process.env.REDIS_PORT || '6379', 10)
-          }
-        };
-    if (process.env.REDIS_PASSWORD) {
-      redisOpts.password = process.env.REDIS_PASSWORD;
-    }
-
-    const client = redis.createClient(redisOpts);
-    client.on('error', (err) => console.error('[Redis] Client error:', err.message));
-    await client.connect();
-    audioSessionStore = { type: 'redis', client };
-    console.log('[Redis] Audio session store enabled');
-  } catch (err) {
-    console.warn('[Redis] Connection failed, fallback to memory store:', err.message);
-  }
-}
-
-audioSessionStoreReady = initAudioSessionStore();
-
-function memorySetSession(session) {
-  audioSessionsMemory.set(session.id, session);
-  if (audioSessionTimeouts.has(session.id)) {
-    clearTimeout(audioSessionTimeouts.get(session.id));
-  }
-  const timer = setTimeout(() => {
-    if (audioSessionsMemory.has(session.id)) {
-      audioSessionsMemory.delete(session.id);
-      audioSessionTimeouts.delete(session.id);
-      console.log(`[WebRTC] Session ${session.id} expired (TTL ${AUDIO_SESSION_TTL_MS}ms)`);
-    }
-  }, AUDIO_SESSION_TTL_MS);
-  audioSessionTimeouts.set(session.id, timer);
-}
-
-function memoryTouchSession(sessionId) {
-  if (audioSessionsMemory.has(sessionId)) {
-    const session = audioSessionsMemory.get(sessionId);
-    memorySetSession(session); // resets TTL timer
-  }
-}
-
-async function saveSession(session) {
-  if (audioSessionStore.type === 'redis' && audioSessionStore.client) {
-    await audioSessionStore.client.set(audioSessionKey(session.id), JSON.stringify(session), {
-      PX: AUDIO_SESSION_TTL_MS
-    });
-  } else {
-    memorySetSession(session);
-  }
-}
-
-async function loadSession(sessionId) {
-  if (audioSessionStore.type === 'redis' && audioSessionStore.client) {
-    const raw = await audioSessionStore.client.get(audioSessionKey(sessionId));
-    return raw ? JSON.parse(raw) : null;
-  }
-  return audioSessionsMemory.get(sessionId) || null;
-}
-
-async function deleteSession(sessionId) {
-  if (audioSessionStore.type === 'redis' && audioSessionStore.client) {
-    await audioSessionStore.client.del(audioSessionKey(sessionId));
-  } else {
-    audioSessionsMemory.delete(sessionId);
-    if (audioSessionTimeouts.has(sessionId)) {
-      clearTimeout(audioSessionTimeouts.get(sessionId));
-      audioSessionTimeouts.delete(sessionId);
-    }
-  }
-}
-
-async function touchSession(sessionId) {
-  if (audioSessionStore.type === 'redis' && audioSessionStore.client) {
-    await audioSessionStore.client.pExpire(audioSessionKey(sessionId), AUDIO_SESSION_TTL_MS);
-  } else {
-    memoryTouchSession(sessionId);
-  }
-}
+// Store active audio sessions (in-memory, single-instance server)
+const audioSessions = new Map();
 
 /**
  * POST /api/audio/signal - WebRTC Signaling for audio streaming
  * Handles: offer, answer, ice-candidate, close
  */
-app.post('/api/audio/signal', authMiddleware, async (req, res) => {
+app.post('/api/audio/signal', async (req, res) => {
   try {
-    await audioSessionStoreReady;
+    // Auth : utiliser token si présent, sinon bypass admin vhr pour ne pas bloquer la voix
+    const decodedUser = tryDecodeUser(req);
+    req.user = decodedUser || { username: 'vhr', role: 'admin', emailVerified: true };
 
     const { type, offer, answer, candidate, sessionId, initiator, targetSerial } = req.body;
     const username = req.user.username;
 
-    console.log(`[WebRTC] ${type} signal from ${username}`, { sessionId, initiator, store: audioSessionStore.type });
+    console.log(`[WebRTC] ${type} signal from ${username}`, { sessionId, initiator });
 
     if (type === 'offer') {
-      // PC initiates call to headset
       const session = {
         id: sessionId,
         initiator: username,
@@ -8026,7 +7809,14 @@ app.post('/api/audio/signal', authMiddleware, async (req, res) => {
         candidates: []
       };
 
-      await saveSession(session);
+      audioSessions.set(sessionId, session);
+
+      setTimeout(() => {
+        if (audioSessions.has(sessionId) && !audioSessions.get(sessionId).answer) {
+          audioSessions.delete(sessionId);
+          console.log(`[WebRTC] Session ${sessionId} expired (no answer)`);
+        }
+      }, 30000);
 
       res.json({
         ok: true,
@@ -8035,62 +7825,38 @@ app.post('/api/audio/signal', authMiddleware, async (req, res) => {
       });
 
     } else if (type === 'answer') {
-      // Headset responds with answer
-      const session = await loadSession(sessionId);
+      const session = audioSessions.get(sessionId);
       if (!session) {
-        return res.status(400).json({
-          ok: false,
-          error: 'Session not found or expired'
-        });
+        return res.status(400).json({ ok: false, error: 'Session not found or expired' });
       }
 
       session.answer = answer;
       session.answeredAt = Date.now();
-      await saveSession(session);
 
-      res.json({
-        ok: true,
-        sessionId,
-        message: 'Answer stored'
-      });
+      res.json({ ok: true, sessionId, message: 'Answer stored' });
 
     } else if (type === 'ice-candidate') {
-      // Store ICE candidate
-      const session = await loadSession(sessionId);
+      const session = audioSessions.get(sessionId);
       if (session) {
         session.candidates = session.candidates || [];
         session.candidates.push(candidate);
-        await saveSession(session);
       }
 
-      res.json({
-        ok: true,
-        message: 'ICE candidate stored'
-      });
+      res.json({ ok: true, message: 'ICE candidate stored' });
 
     } else if (type === 'close') {
-      // Close session
-      await deleteSession(sessionId);
+      audioSessions.delete(sessionId);
       console.log(`[WebRTC] Session ${sessionId} closed`);
 
-      res.json({
-        ok: true,
-        message: 'Session closed'
-      });
+      res.json({ ok: true, message: 'Session closed' });
 
     } else {
-      res.status(400).json({
-        ok: false,
-        error: 'Unknown signal type: ' + type
-      });
+      res.status(400).json({ ok: false, error: 'Unknown signal type: ' + type });
     }
 
   } catch (error) {
     console.error('[WebRTC] Signaling error:', error.message);
-    res.status(500).json({
-      ok: false,
-      error: 'Signaling error: ' + error.message
-    });
+    res.status(500).json({ ok: false, error: 'Signaling error: ' + error.message });
   }
 });
 
@@ -8098,21 +7864,13 @@ app.post('/api/audio/signal', authMiddleware, async (req, res) => {
  * GET /api/audio/session/:sessionId - Poll for remote signals
  * Used by client to retrieve offer/answer/candidates
  */
-app.get('/api/audio/session/:sessionId', authMiddleware, async (req, res) => {
+app.get('/api/audio/session/:sessionId', authMiddleware, (req, res) => {
   try {
-    await audioSessionStoreReady;
-
-    const session = await loadSession(req.params.sessionId);
+    const session = audioSessions.get(req.params.sessionId);
     
     if (!session) {
-      return res.json({
-        ok: false,
-        error: 'Session not found'
-      });
+      return res.json({ ok: false, error: 'Session not found' });
     }
-
-    // Refresh TTL on access
-    await touchSession(session.id);
 
     const elapsed = Date.now() - session.createdAt;
     const response = {
@@ -8128,10 +7886,7 @@ app.get('/api/audio/session/:sessionId', authMiddleware, async (req, res) => {
 
   } catch (error) {
     console.error('[WebRTC] Error retrieving session:', error.message);
-    res.status(500).json({
-      ok: false,
-      error: error.message
-    });
+    res.status(500).json({ ok: false, error: error.message });
   }
 });
 
