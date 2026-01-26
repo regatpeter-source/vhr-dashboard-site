@@ -1,7 +1,7 @@
 [
   {
     "username": "vhr",
-    "passwordHash": "$2b$10$kid1paWP/BtIh6wUh8s69..KeCaywEuuGx1I6AjUyQJPY18wsjdZm",
+    "passwordHash": "$2b$10$Bor/ndmm9gAsS1cDr2a14.vh15geun1/R5MCUhggHNULL0Abdy.5G",
     "role": "admin",
     "email": "vhr",
     "stripeCustomerId": null,
@@ -59,6 +59,17 @@
     "passwordHash": "$2b$10$vL0AmczB9SJk5tjtoMDwCeaGLLsVgQwmPhIW4f1..ftKk3j/GBBV.",
     "role": "user",
     "email": null,
+    "stripeCustomerId": null,
+    "latestInvoiceId": null,
+    "lastInvoicePaidAt": null,
+    "subscriptionStatus": null,
+    "subscriptionId": null
+  },
+  {
+    "username": "demo_guest",
+    "passwordHash": "$2b$10$wM3fMsYvhXhyye/I80gpJuAu9M51s2Qm1BjyTuCICXla17aAZEwSq",
+    "role": "user",
+    "email": "demo@vhr-dashboard-site.com",
     "stripeCustomerId": null,
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,

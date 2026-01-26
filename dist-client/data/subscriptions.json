@@ -1,0 +1,16 @@
+[
+  {
+    "id": 1,
+    "userId": "user_1769423875437_05ny39tog",
+    "username": "demo_guest",
+    "email": "demo@vhr-dashboard-site.com",
+    "stripeSubscriptionId": null,
+    "stripePriceId": null,
+    "status": "trial",
+    "planName": "guest-demo",
+    "startDate": "2026-01-26T10:38:09.199Z",
+    "endDate": "2026-02-02T10:38:09.202Z",
+    "createdAt": "2026-01-26T10:38:09.203Z",
+    "updatedAt": "2026-01-26T10:38:09.203Z"
+  }
+]

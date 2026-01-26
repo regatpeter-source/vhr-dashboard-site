@@ -62,6 +62,17 @@
       "buildResources": "build",
       "output": "dist"
     },
+    "extraResources": [
+      {
+        "from": "check-adb.bat",
+        "to": "."
+      }
+      ,
+      {
+        "from": "platform-tools",
+        "to": "platform-tools"
+      }
+    ],
     "files": [
       "**/*",
       "!dist{,/**}",

@@ -124,6 +124,8 @@ const NO_BROWSER_FALLBACK = process.env.NO_BROWSER_FALLBACK === '1';
 const QUIET_MODE = process.env.QUIET_MODE === '1';
 const SUPPRESS_WARNINGS = process.env.SUPPRESS_WARNINGS === '1';
 
+let useHttps = false;
+
 // Manual email overrides to re-link Stripe customers when the stored email is missing/incorrect.
 // Can be provided via JSON in env USER_EMAIL_OVERRIDES_JSON, e.g. {"pitou":"vhrealityone@gmail.com"}
 const EMAIL_OVERRIDE_MAP = (() => {
