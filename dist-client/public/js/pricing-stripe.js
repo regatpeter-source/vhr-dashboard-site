@@ -1,5 +1,18 @@
 /* Minimal client code to create a Stripe Checkout session via server endpoint /create-checkout-session */
 (function() {
+  const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
+  const PRICING_URL = 'https://www.vhr-dashboard-site.com/pricing.html';
+  let cachedAccountUser = null;
+  let accountUserPromise = null;
+  function shouldRedirectExternally() {
+    return !OFFICIAL_HOSTS.includes(window.location.hostname);
+  }
+  function redirectToExternalPricing(mode) {
+    const plan = mode === 'subscription' ? 'subscription' : 'payment';
+    const url = `${PRICING_URL}?plan=${encodeURIComponent(plan)}#checkout`;
+    window.location.href = url;
+  }
+
   // Show registration modal before proceeding to Stripe
   function showRegistrationModal(priceId, mode, button) {
     const modal = document.createElement('div');
@@ -132,7 +145,31 @@
     });
   }
   
-  function onBuyClick(e) {
+  async function fetchLoggedInUser() {
+    if (cachedAccountUser) return cachedAccountUser;
+    if (accountUserPromise) return accountUserPromise;
+
+    accountUserPromise = (async () => {
+      try {
+        const resp = await fetch('/api/me', { credentials: 'include' });
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        if (data && data.ok && data.user) {
+          cachedAccountUser = data.user;
+          return cachedAccountUser;
+        }
+      } catch (err) {
+        console.log('[pricing-stripe] Unable to fetch logged-in user:', err);
+      }
+      return null;
+    })();
+
+    const result = await accountUserPromise;
+    accountUserPromise = null;
+    return result;
+  }
+
+  async function onBuyClick(e) {
     console.log('[pricing-stripe] onBuyClick called, e:', e);
     e.preventDefault();
     console.log('[pricing-stripe] preventDefault() called');
@@ -140,6 +177,21 @@
     const mode = this.dataset.mode || this.getAttribute('data-mode') || 'payment';
     if (!priceId) return console.warn('[pricing-stripe] priceId not found on element', this);
     
+    if (OFFICIAL_HOSTS.includes(window.location.hostname)) {
+      const accountUser = await fetchLoggedInUser();
+      if (accountUser && accountUser.username && accountUser.email) {
+        console.log('[pricing-stripe] Logged-in user detected; skipping registration modal');
+        proceedToCheckout(priceId, mode, { username: accountUser.username, email: accountUser.email });
+        return;
+      }
+    }
+
+    if (shouldRedirectExternally()) {
+      console.log('[pricing-stripe] Redirecting to external pricing page (official domain)');
+      redirectToExternalPricing(mode);
+      return;
+    }
+
     // Show registration modal before proceeding to Stripe
     showRegistrationModal(priceId, mode, this);
   }

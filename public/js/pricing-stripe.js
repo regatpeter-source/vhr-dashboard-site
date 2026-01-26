@@ -2,6 +2,8 @@
 (function() {
   const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
   const PRICING_URL = 'https://www.vhr-dashboard-site.com/pricing.html';
+  let cachedAccountUser = null;
+  let accountUserPromise = null;
 
   function shouldRedirectExternally() {
     return !OFFICIAL_HOSTS.includes(window.location.hostname);
@@ -11,6 +13,30 @@
     const plan = mode === 'subscription' ? 'subscription' : 'payment';
     const url = `${PRICING_URL}?plan=${encodeURIComponent(plan)}#checkout`;
     window.location.href = url;
+  }
+
+  async function fetchLoggedInUser() {
+    if (cachedAccountUser) return cachedAccountUser;
+    if (accountUserPromise) return accountUserPromise;
+
+    accountUserPromise = (async () => {
+      try {
+        const resp = await fetch('/api/me', { credentials: 'include' });
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        if (data && data.ok && data.user) {
+          cachedAccountUser = data.user;
+          return cachedAccountUser;
+        }
+      } catch (err) {
+        console.log('[pricing-stripe] Unable to fetch logged-in user:', err);
+      }
+      return null;
+    })();
+
+    const result = await accountUserPromise;
+    accountUserPromise = null;
+    return result;
   }
   // Show registration modal before proceeding to Stripe
   function showRegistrationModal(priceId, mode, button) {
@@ -144,7 +170,7 @@
     });
   }
   
-  function onBuyClick(e) {
+  async function onBuyClick(e) {
     console.log('[pricing-stripe] onBuyClick called, e:', e);
     e.preventDefault();
     console.log('[pricing-stripe] preventDefault() called');
@@ -158,7 +184,16 @@
       redirectToExternalPricing(mode);
       return;
     }
-    
+    const accountUser = await fetchLoggedInUser();
+    if (accountUser && accountUser.username && accountUser.email) {
+      console.log('[pricing-stripe] Detected logged-in user, skipping registration modal');
+      proceedToCheckout(priceId, mode, {
+        username: accountUser.username,
+        email: accountUser.email
+      });
+      return;
+    }
+
     // Show registration modal before proceeding to Stripe
     showRegistrationModal(priceId, mode, this);
   }
