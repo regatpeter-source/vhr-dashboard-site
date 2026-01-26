@@ -1767,30 +1767,11 @@ const USE_MOCK_AUTH = (() => {
 	try { return localStorage.getItem('useMockAuth') === '1'; } catch (e) { return false; }
 })();
 
-// Par défaut on pointe vers l'API HTTPS de prod, sauf si on détecte un environnement local ou un override explicite.
 const PRODUCTION_AUTH_ORIGIN = 'https://www.vhr-dashboard-site.com';
-const LOCAL_HOST_PATTERNS = [
-	/^localhost$/,
-	/^127\./,
-	/^10\./,
-	/^192\.168\./,
-	/^172\.(1[6-9]|2\d|3[0-1])\./,
-	/^::1$/
-];
-
-function looksLikeLocalHost(hostname) {
-	if (!hostname) return true;
-	const normalized = hostname.toLowerCase().trim();
-	if (LOCAL_HOST_PATTERNS.some(pattern => pattern.test(normalized))) return true;
-	if (normalized.endsWith('.local') || normalized.endsWith('.lan')) return true;
-	return false;
-}
-
-const isLocalEnvironment = window.location.protocol === 'file:' || looksLikeLocalHost(window.location.hostname);
 const AUTH_API_BASE = (() => {
-	if (FORCE_PROD_AUTH) return PRODUCTION_AUTH_ORIGIN;
 	if (FORCE_LOCAL_AUTH || USE_MOCK_AUTH) return '';
-	return isLocalEnvironment ? '' : PRODUCTION_AUTH_ORIGIN;
+	if (FORCE_PROD_AUTH) return PRODUCTION_AUTH_ORIGIN;
+	return PRODUCTION_AUTH_ORIGIN;
 })();
 // Secret partagé pour synchroniser les comptes prod vers le backend local (HTTP)
 const SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';

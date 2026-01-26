@@ -1763,8 +1763,12 @@ const USE_MOCK_AUTH = (() => {
 	try { return localStorage.getItem('useMockAuth') === '1'; } catch (e) { return false; }
 })();
 
-// Par défaut on pointe vers l'API HTTPS de prod, sauf si override local/mock explicite.
-const AUTH_API_BASE = (FORCE_LOCAL_AUTH || USE_MOCK_AUTH) ? '' : 'https://www.vhr-dashboard-site.com';
+const PRODUCTION_AUTH_ORIGIN = 'https://www.vhr-dashboard-site.com';
+const AUTH_API_BASE = (() => {
+	if (FORCE_LOCAL_AUTH || USE_MOCK_AUTH) return '';
+	if (FORCE_PROD_AUTH) return PRODUCTION_AUTH_ORIGIN;
+	return PRODUCTION_AUTH_ORIGIN;
+})();
 // Secret partagé pour synchroniser les comptes prod vers le backend local (HTTP)
 const SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
 const API_BASE = '/api';
