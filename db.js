@@ -1,6 +1,7 @@
 // Minimal DB adapter using better-sqlite3 if available. Falls back to no-op if not installed.
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 let db = null;
 let enabled = false;
@@ -83,6 +84,15 @@ function initSqlite(dbFile) {
       respondedAt TEXT,
       response TEXT,
       respondedBy TEXT
+    )`).run();
+    // Create installations table
+    db.prepare(`CREATE TABLE IF NOT EXISTS installations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      installationId TEXT UNIQUE,
+      fingerprint TEXT UNIQUE,
+      metadata TEXT,
+      createdAt TEXT,
+      lastSeenAt TEXT
     )`).run();
     enabled = true;
     return true;
@@ -257,4 +267,61 @@ function findSubscriptionByStripeId(stripeId) {
   return db.prepare('SELECT * FROM subscriptions WHERE stripeSubscriptionId = ?').get(stripeId);
 }
 
-module.exports = { initSqlite, isEnabled, addOrUpdateUser, getAllUsers, findUserByUsername, updateUserFields, deleteUserByUsername, addMessage, getAllMessages, getUnreadMessages, updateMessage, deleteMessage, addSubscription, getAllSubscriptions, getActiveSubscriptions, updateSubscription, findSubscriptionByStripeId, findUserByStripeCustomerId };
+function ensureInstallationRecord(installationId, fingerprint, metadata = {}) {
+  if (!enabled || (!installationId && !fingerprint)) return null;
+  const now = new Date().toISOString();
+  const serializedMetadata = JSON.stringify(metadata || {});
+
+  if (fingerprint) {
+    const byFingerprint = db.prepare('SELECT * FROM installations WHERE fingerprint = ?').get(fingerprint);
+    if (byFingerprint) {
+      const updatedId = installationId || byFingerprint.installationId;
+      db.prepare('UPDATE installations SET installationId = ?, fingerprint = ?, metadata = ?, lastSeenAt = ? WHERE id = ?')
+        .run(updatedId, fingerprint, serializedMetadata, now, byFingerprint.id);
+      return {
+        ...byFingerprint,
+        installationId: updatedId,
+        fingerprint,
+        metadata: serializedMetadata ? JSON.parse(serializedMetadata) : null,
+        lastSeenAt: now
+      };
+    }
+  }
+
+  if (installationId) {
+    const existing = db.prepare('SELECT * FROM installations WHERE installationId = ?').get(installationId);
+    if (existing) {
+      db.prepare('UPDATE installations SET fingerprint = ?, metadata = ?, lastSeenAt = ? WHERE installationId = ?')
+        .run(fingerprint || existing.fingerprint, serializedMetadata, now, installationId);
+      return {
+        ...existing,
+        fingerprint: fingerprint || existing.fingerprint,
+        metadata: serializedMetadata ? JSON.parse(serializedMetadata) : null,
+        lastSeenAt: now
+      };
+    }
+  }
+
+  const result = db.prepare('INSERT INTO installations (installationId, fingerprint, metadata, createdAt, lastSeenAt) VALUES (?, ?, ?, ?, ?)')
+    .run(installationId || crypto.randomUUID?.() || '', fingerprint, serializedMetadata, now, now);
+  return {
+    id: result.lastInsertRowid,
+    installationId: installationId || crypto.randomUUID?.() || '',
+    fingerprint,
+    metadata: serializedMetadata ? JSON.parse(serializedMetadata) : null,
+    createdAt: now,
+    lastSeenAt: now
+  };
+}
+
+function getInstallationRecord(installationId) {
+  if (!enabled || !installationId) return null;
+  const existing = db.prepare('SELECT * FROM installations WHERE installationId = ?').get(installationId);
+  if (!existing) return null;
+  return {
+    ...existing,
+    metadata: existing.metadata ? JSON.parse(existing.metadata) : null
+  };
+}
+
+module.exports = { initSqlite, isEnabled, addOrUpdateUser, getAllUsers, findUserByUsername, updateUserFields, deleteUserByUsername, addMessage, getAllMessages, getUnreadMessages, updateMessage, deleteMessage, addSubscription, getAllSubscriptions, getActiveSubscriptions, updateSubscription, findSubscriptionByStripeId, findUserByStripeCustomerId, ensureInstallationRecord, getInstallationRecord };

@@ -84,6 +84,7 @@ let userRoles = JSON.parse(localStorage.getItem('vhr_user_roles') || '{}');
 let licenseKey = localStorage.getItem('vhr_license_key') || '';
 let licenseStatus = { licensed: false, trial: false, expired: false };
 const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
+let installationOverlayElement = null;
 
 function readAuthToken() {
 	return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
@@ -1888,6 +1889,8 @@ let gameMetaMap = {}; // Map packageId -> { name, icon }
 const DEFAULT_GAME_ICON = 'https://cdn-icons-png.flaticon.com/512/1005/1005141.png';
 let serverInfoCache = null; // { lanIp, port, host }
 const VOICE_LAN_OVERRIDE_KEY = 'vhr_voice_lan_ip_override';
+let initialDevicesLoadComplete = false;
+let usbTutorialShown = false;
 
 function updateGameMetaFromList(list) {
 	gameMetaMap = {};
@@ -2198,6 +2201,12 @@ async function loadDevices() {
 			
 			renderDevices();
 			startBatteryPolling();
+			if (!initialDevicesLoadComplete) {
+				initialDevicesLoadComplete = true;
+				if (devices.length === 0 && !usbTutorialShown) {
+					showUsbConnectionTutorial();
+				}
+			}
 		}
 	} finally {
 		isLoadingDevices = false;
@@ -2530,6 +2539,63 @@ async function fetchBatteryLevel(serial) {
 function renderDevices() {
 	if (viewMode === 'table') renderDevicesTable();
 	else renderDevicesCards();
+}
+
+function showUsbConnectionTutorial() {
+	if (usbTutorialShown) return;
+	usbTutorialShown = true;
+	const existing = document.getElementById('usbTutorialOverlay');
+	if (existing) return;
+	const overlay = document.createElement('div');
+	overlay.id = 'usbTutorialOverlay';
+	overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:4500;display:flex;align-items:center;justify-content:center;padding:18px;font-family:inherit;';
+	overlay.onclick = (e) => { if (e.target === overlay) closeUsbConnectionTutorial(); };
+	overlay.innerHTML = `
+		<div style='background:#0c0f15;border:2px solid #2ecc71;border-radius:18px;padding:32px;max-width:920px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.9);color:#fff;'>
+			<h2 style='margin-top:0;color:#2ecc71;font-size:32px;'>Casque non détecté ?</h2>
+			<p style='color:#bdc3c7;font-size:15px;margin-bottom:24px;'>Tout est prêt côté serveur, mais votre machine doit autoriser ADB/USB. Voici les étapes rapides pour débloquer la détection.</p>
+			<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;'>
+				<div style='background:#111620;border:1px solid rgba(46,204,113,0.1);border-radius:12px;padding:16px;'>
+					<h3 style='margin-top:0;color:#2ecc71;'>1. Câble & drivers</h3>
+					<p style='color:#95a5a6;font-size:13px;margin-bottom:12px;'>Vérifiez que vous utilisez un câble USB-C capable de données, branchez une autre prise et redémarrez le casque.</p>
+					<a href='https://developer.oculus.com/downloads/package/oculus-adb-drivers/' target='_blank' rel='noopener noreferrer' style='color:#fff;text-decoration:underline;font-size:13px;'>Télécharger les drivers Meta Quest</a><br>
+					<a href='https://developer.android.com/studio/run/win-usb' target='_blank' rel='noopener noreferrer' style='color:#fff;text-decoration:underline;font-size:13px;'>Guide driver USB Google</a>
+				</div>
+				<div style='background:#111620;border:1px solid rgba(46,204,113,0.1);border-radius:12px;padding:16px;'>
+					<h3 style='margin-top:0;color:#2ecc71;'>2. Mode développeur actif</h3>
+					<p style='color:#95a5a6;font-size:13px;'>Activez le mode développeur dans l'app mobile du casque (Meta Quest, Pico, etc.), puis redémarrez le casque.</p>
+				</div>
+				<div style='background:#111620;border:1px solid rgba(46,204,113,0.1);border-radius:12px;padding:16px;'>
+					<h3 style='margin-top:0;color:#2ecc71;'>3. Autoriser le débogage USB</h3>
+					<p style='color:#95a5a6;font-size:13px;'>Après connexion, acceptez la popup “Autoriser le débogage USB” et cochez “Toujours autoriser”.</p>
+					<p style='color:#95a5a6;font-size:13px;margin-top:8px;'>Lancez <code style='background:#323843;padding:2px 6px;border-radius:4px;'>adb devices</code> pour vérifier la présence.</p>
+				</div>
+				<div style='background:#111620;border:1px solid rgba(46,204,113,0.1);border-radius:12px;padding:16px;'>
+					<h3 style='margin-top:0;color:#2ecc71;'>4. Relancer la détection</h3>
+					<p style='color:#95a5a6;font-size:13px;margin-bottom:12px;'>Réouvrez le dashboard ou cliquez sur “🔄 Rafraîchir” pour relancer l’exploration.</p>
+					<button onclick='closeUsbConnectionTutorial();' style='background:#2ecc71;color:#000;border:none;padding:8px 14px;border-radius:6px;font-weight:bold;cursor:pointer;'>Ok, j’ai vérifié</button>
+				</div>
+			</div>
+			<div style='display:flex;flex-wrap:wrap;gap:10px;margin-top:28px;'>
+				<button onclick='closeUsbConnectionTutorial();' style='flex:1;background:#3498db;color:#fff;border:none;padding:14px;border-radius:8px;font-size:15px;cursor:pointer;font-weight:bold;'>Fermer</button>
+				<button onclick='openUsbConnectionTutorialGuide();' style='flex:1;background:#2ecc71;color:#000;border:none;padding:14px;border-radius:8px;font-size:15px;cursor:pointer;font-weight:bold;'>Voir le guide étape par étape</button>
+			</div>
+			<p style='color:#95a5a6;font-size:12px;margin-top:14px;'>Besoin d’aide personnalisée ? Consultez la section “Drivers Android” dans la doc développeur.</p>
+		</div>
+	`;
+	document.body.appendChild(overlay);
+}
+
+function closeUsbConnectionTutorial() {
+	const overlay = document.getElementById('usbTutorialOverlay');
+	if (overlay) {
+		overlay.remove();
+	}
+}
+
+function openUsbConnectionTutorialGuide() {
+	const target = '/site-vitrine/developer-setup.html';
+	window.open(target, '_blank');
 }
 
 // ========== STREAMING FUNCTIONS ========== 
@@ -4159,6 +4225,61 @@ window.registerUser = async function() {
 };
 
 // ========== CHECK JWT ON LOAD ========== 
+function createInstallationOverlay() {
+	if (installationOverlayElement) return installationOverlayElement;
+	const overlay = document.createElement('div');
+	overlay.id = 'installationVerificationOverlay';
+	overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.85);z-index:9999;backdrop-filter:blur(6px);';
+	overlay.innerHTML = `
+		<div style='max-width:520px;width:90%;background:#0b0f15;border:2px solid #2ecc71;border-radius:18px;padding:32px;color:#fff;box-shadow:0 18px 45px rgba(0,0,0,0.75);text-align:center;'>
+			<div class='installation-title' style='font-size:24px;font-weight:700;margin-bottom:14px;color:#2ecc71;'>Vérification de l\'installation...</div>
+			<p class='installation-detail' style='margin:0;font-size:16px;color:#c8d3e3;line-height:1.5;'>Merci de patienter pendant que l\'installation est validée.</p>
+			<div style='margin-top:24px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;'>
+				<button id='installationRetryBtn' style='border:none;border-radius:10px;padding:12px 24px;background:#2ecc71;color:#000;font-weight:700;cursor:pointer;font-size:14px;'>🔄 Réessayer</button>
+			</div>
+		</div>
+	`;
+	document.body.appendChild(overlay);
+	const retryBtn = overlay.querySelector('#installationRetryBtn');
+	if (retryBtn) {
+		retryBtn.onclick = () => initDashboardPro();
+	}
+	installationOverlayElement = overlay;
+	return overlay;
+}
+
+function showInstallationOverlay(title, detail) {
+	const overlay = createInstallationOverlay();
+	const titleEl = overlay.querySelector('.installation-title');
+	const detailEl = overlay.querySelector('.installation-detail');
+	if (titleEl) titleEl.textContent = title;
+	if (detailEl) detailEl.textContent = detail;
+	overlay.style.display = 'flex';
+}
+
+function hideInstallationOverlay() {
+	if (installationOverlayElement) {
+		installationOverlayElement.style.display = 'none';
+	}
+}
+
+async function ensureInstallationVerified() {
+	try {
+		const res = await api('/api/installation/status', { timeout: 10000 });
+		if (res && res.ok && res.installation && res.installation.installationId) {
+			console.log('[installation] Verified installation id', res.installation.installationId);
+			hideInstallationOverlay();
+			return true;
+		}
+		const detail = res?.error || 'La réponse ne contient pas l\'identifiant attendu.';
+		showInstallationOverlay('Vérification de l\'installation impossible', detail);
+	} catch (err) {
+		console.error('[installation] verification failed', err);
+		showInstallationOverlay('Impossible de contacter le serveur', err?.message || 'Erreur réseau inconnue');
+	}
+	return false;
+}
+
 async function checkJWTAuth() {
 	console.log('[auth] Checking JWT authentication...');
 	try {
@@ -4236,25 +4357,25 @@ function hideDashboardContent() {
 }
 
 // Check JWT authentication FIRST - this will show auth modal if needed
-checkJWTAuth().then(isAuth => {
+async function initDashboardPro() {
+	const verified = await ensureInstallationVerified();
+	if (!verified) {
+		hideDashboardContent();
+		return;
+	}
+	const isAuth = await checkJWTAuth();
 	if (isAuth) {
-		// User is authenticated - always show dashboard content first
 		showDashboardContent();
 		createNavbar();
-		
-		// Then check license/subscription status
 		checkLicense().then(hasAccess => {
 			if (hasAccess) {
-				// User has access (demo valid or active subscription)
 				loadGamesCatalog().finally(() => loadDevices());
 			}
-			// else: Access blocked - unlock modal already shown by checkLicense()
-			// Dashboard content stays visible but unlock modal blocks interaction
 		});
 	} else {
-		// Auth failed - hide the loading overlay, auth modal will show
 		hideDashboardContent();
-		// Auth modal is already shown by checkJWTAuth()
 	}
-});
+}
+
+initDashboardPro();
 

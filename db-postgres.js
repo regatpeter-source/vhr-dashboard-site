@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { Pool } = require('pg');
 
 // Render Postgres typically requires SSL.
@@ -48,6 +49,18 @@ async function initDatabase() {
         )
       `);
       console.log('[DB] [32m[1m✓[0m Messages table ready');
+
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS installations (
+            id SERIAL PRIMARY KEY,
+            installation_id TEXT UNIQUE NOT NULL,
+            fingerprint TEXT NOT NULL UNIQUE,
+            metadata JSONB DEFAULT '{}'::jsonb,
+            createdat TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            lastseenat TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+        console.log('[DB] \u001b[32m\u001b[1m✓\u001b[0m Installations table ready');
 
       // Users
       await client.query(`
@@ -578,6 +591,63 @@ async function deleteSubscription(id) {
   }
 }
 
+async function ensureInstallationRecord(installationId, fingerprint, metadata = {}) {
+  if (!installationId && !fingerprint) return null;
+  const now = new Date();
+  const metaPayload = metadata || {};
+  try {
+    if (fingerprint) {
+      const fingerprintRow = await pool.query('SELECT * FROM installations WHERE fingerprint = $1 LIMIT 1', [fingerprint]);
+      if (fingerprintRow.rowCount > 0) {
+        const existing = fingerprintRow.rows[0];
+        const updatedId = installationId || existing.installation_id;
+        const updateResult = await pool.query(
+          `UPDATE installations SET installation_id = $1, fingerprint = $2, metadata = $3, lastseenat = $4 WHERE id = $5 RETURNING *`,
+          [updatedId, fingerprint, metaPayload, now, existing.id]
+        );
+        return updateResult.rows?.[0] || existing;
+      }
+    }
+    if (installationId) {
+      const existing = await pool.query('SELECT * FROM installations WHERE installation_id = $1 LIMIT 1', [installationId]);
+      if (existing.rowCount > 0) {
+        const row = existing.rows[0];
+        const updatedFingerprint = fingerprint || row.fingerprint;
+        const updateResult = await pool.query(
+          `UPDATE installations SET fingerprint = $1, metadata = $2, lastseenat = $3 WHERE installation_id = $4 RETURNING *`,
+          [updatedFingerprint, metaPayload, now, installationId]
+        );
+        return updateResult.rows?.[0] || row;
+      }
+    }
+
+    if (!fingerprint) return null;
+
+    const newInstallationId = installationId || crypto.randomUUID?.() || crypto.randomBytes(16).toString('hex');
+    const insertResult = await pool.query(
+      `INSERT INTO installations (installation_id, fingerprint, metadata, lastseenat)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [newInstallationId, fingerprint, metaPayload, now]
+    );
+    return insertResult.rows?.[0] || null;
+  } catch (err) {
+    console.error('[DB] Error ensuring installation record:', err && err.message ? err.message : err);
+    return null;
+  }
+}
+
+async function getInstallationById(installationId) {
+  if (!installationId) return null;
+  try {
+    const result = await pool.query('SELECT * FROM installations WHERE installation_id = $1 LIMIT 1', [installationId]);
+    return result.rows?.[0] || null;
+  } catch (err) {
+    console.error('[DB] Error fetching installation record:', err && err.message ? err.message : err);
+    return null;
+  }
+}
+
 module.exports = {
   pool,
   initDatabase,
@@ -596,5 +666,7 @@ module.exports = {
   addSubscription,
   getAllSubscriptions,
   updateSubscription,
-  deleteSubscription
+  deleteSubscription,
+  ensureInstallationRecord,
+  getInstallationById
 };
