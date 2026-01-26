@@ -38,6 +38,28 @@
     accountUserPromise = null;
     return result;
   }
+
+  async function registerAccount({ username, email, password }) {
+    try {
+      const resp = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ username, email, password })
+      });
+      const data = await resp.json();
+      if (!resp.ok || data?.ok !== true) {
+        const reason = data?.error || 'Erreur lors de la création du compte';
+        throw new Error(reason);
+      }
+      if (data.username && data.email) {
+        cachedAccountUser = { username: data.username, email: data.email };
+      }
+      return data;
+    } catch (err) {
+      throw err;
+    }
+  }
   // Show registration modal before proceeding to Stripe
   function showRegistrationModal(priceId, mode, button) {
     const modal = document.createElement('div');
@@ -130,10 +152,18 @@
       }
       
       console.log('[pricing-stripe] User registration data:', { username, email, mode });
-      
-      // Proceed to checkout with user data
-      proceedToCheckout(priceId, mode, { username, email, password });
-      modal.remove();
+      try {
+        const registerResult = await registerAccount({ username, email, password });
+        proceedToCheckout(priceId, mode, {
+          username,
+          email,
+          userId: registerResult.userId
+        });
+        modal.remove();
+      } catch (err) {
+        console.error('[pricing-stripe] Registration failed:', err);
+        alert('Échec de la création du compte : ' + (err.message || 'Erreur inconnue'));
+      }
     });
     
     modal.appendChild(form);
@@ -143,13 +173,12 @@
   // Proceed to Stripe checkout
   function proceedToCheckout(priceId, mode, userData = {}) {
     console.log('[pricing-stripe] Creating checkout session:', { priceId, mode, hasUser: !!userData.username });
-    
+
     const payload = { priceId, mode };
-    if (userData.username) {
-      payload.userEmail = userData.email;
-      payload.username = userData.username;
-      payload.password = userData.password;
-    }
+    if (userData.username) payload.username = userData.username;
+    if (userData.email) payload.userEmail = userData.email;
+    if (userData.userId) payload.userId = userData.userId;
+    if (userData.password) payload.password = userData.password; // kept for backwards compatibility
     
     fetch('/create-checkout-session', {
       method: 'POST', 

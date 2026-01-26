@@ -1686,12 +1686,12 @@ function maskKey(k) {
 }
 
 app.post('/create-checkout-session', async (req, res) => {
-  const { priceId, mode, username, userEmail, password } = req.body || {};
+  const { priceId, mode, username, userEmail, password, userId } = req.body || {};
   const origin = req.headers.origin || `http://localhost:${process.env.PORT || 3000}`;
   if (!priceId || !mode) return res.status(400).json({ error: 'priceId et mode sont requis' });
   
   try {
-    console.log('[Stripe] create-checkout-session request:', { priceId, mode, username, userEmail, origin });
+    console.log('[Stripe] create-checkout-session request:', { priceId, mode, username, userEmail, userId, origin });
     
     // Validate price exists and is compatible with mode
     let priceInfo = null;
@@ -1715,11 +1715,10 @@ app.post('/create-checkout-session', async (req, res) => {
     
     // Build metadata with user info if provided
     const metadata = {};
-    if (username) {
-      metadata.username = username;
-      metadata.userEmail = userEmail;
-      metadata.passwordHash = password; // Will be hashed in webhook
-    }
+    if (username) metadata.username = username;
+    if (userEmail) metadata.userEmail = userEmail;
+    if (userId) metadata.userId = userId;
+    if (password) metadata.passwordHash = password; // Will be hashed in webhook (legacy clients)
     
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -8197,43 +8196,45 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
     let isNewUser = false;
     if (type === 'checkout.session.completed' && obj.metadata) {
       const { username, userEmail, passwordHash } = obj.metadata;
-      if (username && userEmail && passwordHash) {
-        // Check if user already exists
-        user = users.find(u => u.username === username);
-        if (!user) {
-          // Create new user from registration data
-          console.log('[webhook] Creating new user from checkout metadata:', username);
+      const normalizedUsername = username ? username.trim() : null;
+      const normalizedEmail = normalizeEmailValue(userEmail);
+      if (normalizedUsername) {
+        user = getUserByUsername(normalizedUsername);
+      }
+      if (!user && normalizedEmail) {
+        user = getUserByEmail(normalizedEmail);
+      }
+      if (!user && normalizedUsername && normalizedEmail && passwordHash) {
+        console.log('[webhook] Creating new user from checkout metadata:', normalizedUsername);
+        try {
+          const hashedPassword = await bcrypt.hash(passwordHash, 10);
+          user = {
+            id: crypto.randomUUID(),
+            username: normalizedUsername,
+            email: normalizedEmail,
+            passwordHash: hashedPassword,
+            role: 'user',
+            stripeCustomerId: customerId || null,
+            createdAt: new Date().toISOString(),
+            demoStartDate: new Date().toISOString(),
+            demoExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+          };
+          users.push(user);
+          saveUsers();
+          isNewUser = true;
+          console.log('[webhook] New user created:', { username: normalizedUsername, email: normalizedEmail });
+
           try {
-            const hashedPassword = await bcrypt.hash(passwordHash, 10);
-            user = {
-              id: crypto.randomUUID(),
-              username: username,
-              email: userEmail,
-              passwordHash: hashedPassword,
-              role: 'user',
-              stripeCustomerId: customerId || null,
-              createdAt: new Date().toISOString(),
-              demoStartDate: new Date().toISOString(),
-              demoExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+            const credentialsEmailData = {
+              ...user,
+              plainPassword: passwordHash
             };
-            users.push(user);
-            saveUsers();
-            isNewUser = true;
-            console.log('[webhook] New user created:', { username, email: userEmail });
-            
-            // Send credentials email immediately after user creation
-            try {
-              const credentialsEmailData = {
-                ...user,
-                plainPassword: passwordHash // Include password in email data
-              };
-              await emailService.sendCredentialsEmail(credentialsEmailData);
-            } catch (emailError) {
-              console.error('[webhook] Error sending credentials email:', emailError.message);
-            }
-          } catch (error) {
-            console.error('[webhook] Error creating user:', error.message);
+            await emailService.sendCredentialsEmail(credentialsEmailData);
+          } catch (emailError) {
+            console.error('[webhook] Error sending credentials email:', emailError.message);
           }
+        } catch (error) {
+          console.error('[webhook] Error creating user:', error.message);
         }
       }
     }
