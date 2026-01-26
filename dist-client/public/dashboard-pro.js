@@ -84,6 +84,7 @@ let userRoles = JSON.parse(localStorage.getItem('vhr_user_roles') || '{}');
 let licenseKey = localStorage.getItem('vhr_license_key') || '';
 let licenseStatus = { licensed: false, trial: false, expired: false };
 const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
+let installationOverlayElement = null;
 
 function readAuthToken() {
 	return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
@@ -153,6 +154,9 @@ function createNavbar() {
 		<button id="refreshBtn" style="margin-right:15px;background:#9b59b6;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			🔄 Rafraîchir
 		</button>
+		<button id="noticeBtn" style="margin-right:15px;background:#f1c40f;color:#1a1d24;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
+			🛈 Notice
+		</button>
 		<button id="favoritesBtn" style="margin-right:15px;background:#f39c12;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			⭐ Ajouter aux favoris
 		</button>
@@ -164,6 +168,7 @@ function createNavbar() {
 	
 	document.getElementById('toggleViewBtn').onclick = toggleView;
 	document.getElementById('refreshBtn').onclick = refreshDevicesList;
+	document.getElementById('noticeBtn').onclick = showSetupNotice;
 	document.getElementById('favoritesBtn').onclick = addDashboardToFavorites;
 	document.getElementById('accountBtn').onclick = showAccountPanel;
 	updateUserUI();
@@ -1762,8 +1767,31 @@ const USE_MOCK_AUTH = (() => {
 	try { return localStorage.getItem('useMockAuth') === '1'; } catch (e) { return false; }
 })();
 
-// Par défaut on pointe vers l'API HTTPS de prod, sauf si override local/mock explicite.
-const AUTH_API_BASE = (FORCE_LOCAL_AUTH || USE_MOCK_AUTH) ? '' : 'https://www.vhr-dashboard-site.com';
+// Par défaut on pointe vers l'API HTTPS de prod, sauf si on détecte un environnement local ou un override explicite.
+const PRODUCTION_AUTH_ORIGIN = 'https://www.vhr-dashboard-site.com';
+const LOCAL_HOST_PATTERNS = [
+	/^localhost$/,
+	/^127\./,
+	/^10\./,
+	/^192\.168\./,
+	/^172\.(1[6-9]|2\d|3[0-1])\./,
+	/^::1$/
+];
+
+function looksLikeLocalHost(hostname) {
+	if (!hostname) return true;
+	const normalized = hostname.toLowerCase().trim();
+	if (LOCAL_HOST_PATTERNS.some(pattern => pattern.test(normalized))) return true;
+	if (normalized.endsWith('.local') || normalized.endsWith('.lan')) return true;
+	return false;
+}
+
+const isLocalEnvironment = window.location.protocol === 'file:' || looksLikeLocalHost(window.location.hostname);
+const AUTH_API_BASE = (() => {
+	if (FORCE_PROD_AUTH) return PRODUCTION_AUTH_ORIGIN;
+	if (FORCE_LOCAL_AUTH || USE_MOCK_AUTH) return '';
+	return isLocalEnvironment ? '' : PRODUCTION_AUTH_ORIGIN;
+})();
 // Secret partagé pour synchroniser les comptes prod vers le backend local (HTTP)
 const SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
 const API_BASE = '/api';
@@ -1787,6 +1815,8 @@ let offlineBannerEl = null;
 let isLoadingDevices = false;
 let lastDevicesLoadTs = 0;
 const MIN_LOAD_DEVICES_INTERVAL_MS = 3000; // throttle to avoid overlapping fetches
+let initialDevicesLoadComplete = false;
+let usbTutorialShown = false;
 
 function renderOfflineBanner() {
 	if (offlineReasons.size === 0) {
@@ -2198,6 +2228,12 @@ async function loadDevices() {
 			
 			renderDevices();
 			startBatteryPolling();
+			if (!initialDevicesLoadComplete) {
+				initialDevicesLoadComplete = true;
+				if (devices.length === 0 && !usbTutorialShown) {
+					showUsbConnectionTutorial();
+				}
+			}
 		}
 	} finally {
 		isLoadingDevices = false;
@@ -2530,6 +2566,63 @@ async function fetchBatteryLevel(serial) {
 function renderDevices() {
 	if (viewMode === 'table') renderDevicesTable();
 	else renderDevicesCards();
+}
+
+function showUsbConnectionTutorial() {
+	if (usbTutorialShown) return;
+	usbTutorialShown = true;
+	const existing = document.getElementById('usbTutorialOverlay');
+	if (existing) return;
+	const overlay = document.createElement('div');
+	overlay.id = 'usbTutorialOverlay';
+	overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:4500;display:flex;align-items:center;justify-content:center;padding:18px;font-family:inherit;';
+	overlay.onclick = (e) => { if (e.target === overlay) closeUsbConnectionTutorial(); };
+	overlay.innerHTML = `
+		<div style='background:#0c0f15;border:2px solid #2ecc71;border-radius:18px;padding:32px;max-width:920px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.9);color:#fff;'>
+			<h2 style='margin-top:0;color:#2ecc71;font-size:32px;'>Casque non détecté ?</h2>
+			<p style='color:#bdc3c7;font-size:15px;margin-bottom:24px;'>Tout est prêt côté serveur, mais votre machine doit autoriser ADB/USB. Voici les étapes rapides pour débloquer la détection.</p>
+			<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;'>
+				<div style='background:#111620;border:1px solid rgba(46,204,113,0.1);border-radius:12px;padding:16px;'>
+					<h3 style='margin-top:0;color:#2ecc71;'>1. Câble & drivers</h3>
+					<p style='color:#95a5a6;font-size:13px;margin-bottom:12px;'>Vérifiez que vous utilisez un câble USB-C capable de données, branchez une autre prise et redémarrez le casque.</p>
+					<a href='https://developer.oculus.com/downloads/package/oculus-adb-drivers/' target='_blank' rel='noopener noreferrer' style='color:#fff;text-decoration:underline;font-size:13px;'>Télécharger les drivers Meta Quest</a><br>
+					<a href='https://developer.android.com/studio/run/win-usb' target='_blank' rel='noopener noreferrer' style='color:#fff;text-decoration:underline;font-size:13px;'>Guide driver USB Google</a>
+				</div>
+				<div style='background:#111620;border:1px solid rgba(46,204,113,0.1);border-radius:12px;padding:16px;'>
+					<h3 style='margin-top:0;color:#2ecc71;'>2. Mode développeur actif</h3>
+					<p style='color:#95a5a6;font-size:13px;'>Activez le mode développeur dans l'app mobile du casque (Meta Quest, Pico, etc.), puis redémarrez le casque.</p>
+				</div>
+				<div style='background:#111620;border:1px solid rgba(46,204,113,0.1);border-radius:12px;padding:16px;'>
+					<h3 style='margin-top:0;color:#2ecc71;'>3. Autoriser le débogage USB</h3>
+					<p style='color:#95a5a6;font-size:13px;'>Après connexion, acceptez la popup “Autoriser le débogage USB” et cochez “Toujours autoriser”.</p>
+					<p style='color:#95a5a6;font-size:13px;margin-top:8px;'>Lancez <code style='background:#323843;padding:2px 6px;border-radius:4px;'>adb devices</code> pour vérifier la présence.</p>
+				</div>
+				<div style='background:#111620;border:1px solid rgba(46,204,113,0.1);border-radius:12px;padding:16px;'>
+					<h3 style='margin-top:0;color:#2ecc71;'>4. Relancer la détection</h3>
+					<p style='color:#95a5a6;font-size:13px;margin-bottom:12px;'>Réouvrez le dashboard ou cliquez sur “🔄 Rafraîchir” pour relancer l’exploration.</p>
+					<button onclick='closeUsbConnectionTutorial();' style='background:#2ecc71;color:#000;border:none;padding:8px 14px;border-radius:6px;font-weight:bold;cursor:pointer;'>Ok, j’ai vérifié</button>
+				</div>
+			</div>
+			<div style='display:flex;flex-wrap:wrap;gap:10px;margin-top:28px;'>
+				<button onclick='closeUsbConnectionTutorial();' style='flex:1;background:#3498db;color:#fff;border:none;padding:14px;border-radius:8px;font-size:15px;cursor:pointer;font-weight:bold;'>Fermer</button>
+				<button onclick='openUsbConnectionTutorialGuide();' style='flex:1;background:#2ecc71;color:#000;border:none;padding:14px;border-radius:8px;font-size:15px;cursor:pointer;font-weight:bold;'>Voir le guide étape par étape</button>
+			</div>
+			<p style='color:#95a5a6;font-size:12px;margin-top:14px;'>Besoin d’aide personnalisée ? Consultez la section “Drivers Android” dans la doc développeur.</p>
+		</div>
+	`;
+	document.body.appendChild(overlay);
+}
+
+function closeUsbConnectionTutorial() {
+	const overlay = document.getElementById('usbTutorialOverlay');
+	if (overlay) {
+		overlay.remove();
+	}
+}
+
+function openUsbConnectionTutorialGuide() {
+	const target = '/site-vitrine/developer-setup.html';
+	window.open(target, '_blank');
 }
 
 // ========== STREAMING FUNCTIONS ========== 
@@ -3561,6 +3654,31 @@ window.closeModal = function() {
 	if (modal) modal.style.display = 'none';
 };
 
+function showSetupNotice() {
+	const noticeHTML = `
+		<h2 style='margin-top:0;color:#f1c40f;'>🛈 Notice d'initialisation</h2>
+		<p>Avant de lancer le Dashboard PRO, placez toujours le dossier <strong>platform-tools</strong> dans votre variable <strong>PATH</strong>. Si l'appareil sur lequel l'application est installée a déplacé ou extrait les fichiers ailleurs, cette notice explique pourquoi les casques peuvent rester invisibles même après la première installation.</p>
+		<h3 style='color:#2ecc71;'>1. Ajouter platform-tools au PATH</h3>
+		<ol style='padding-left:16px;line-height:1.6;'>
+			<li>Ouvrez l'Explorateur et localisez le dossier <code>platform-tools</code> (souvent dans <code>client-pack\platform-tools</code> ou dans l'archive du dashboard).</li>
+			<li>Copiez le chemin complet du dossier (clic droit → « Copier l'adresse en tant que texte »).</li>
+			<li>Ouvrez le Panneau de configuration → Système → Paramètres système avancés → Variables d'environnement.</li>
+			<li>Dans la variable <strong>PATH</strong>, ajoutez ce dossier. Séparez les entrées par un point-virgule (;) et validez.</li>
+			<li>Fermez puis rouvrez PowerShell ou l'invite de commande avant de relancer le dashboard.</li>
+		</ol>
+		<div style='margin-top:16px;padding:14px;background:#111b23;border:1px solid #3498db;border-radius:8px;'>
+			<strong>Pourquoi cette notice ?</strong>
+			<p style='margin:6px 0 0;'>Les systèmes Windows peuvent modifier l'emplacement des fichiers lors d'un redémarrage ou d'une copie automatique depuis l'appareil. Si les casques ne sont pas détectés, cela vient souvent du fait que la liaison <code>adb</code> pointe vers un <code>platform-tools</code> qui n'y est plus. Ce rappel vous aide à vérifier ou mettre à jour le chemin sans perdre de temps.</p>
+		</div>
+		<div style='margin-top:16px;padding:14px;background:#171f2a;border:1px solid #f39c12;border-radius:8px;'>
+			<strong>Voix & Streaming</strong>
+			<p style='margin:6px 0 0;'>Le premier clic sur les fonctions voix ou streaming peut parfois rester bloqué. Si le flux n'apparaît pas immédiatement, relancez la même fonction une seconde fois : cela réinitialise la chaîne audio/vidéo côté casque et permet de déclencher le streaming.</p>
+		</div>
+		<p style='margin-top:18px;font-size:13px;color:#95a5a6;'>Cette notice est disponible à tout moment depuis la barre d'outils. En cas de doutes sur la détection des casques, revérifiez le PATH et relancez la fonction voix/streaming.</p>
+	`;
+	showModal(noticeHTML);
+}
+
 // ========== SOCKET.IO EVENTS ========== 
 socket.on('devices-update', (data) => {
 	console.log('[socket] devices-update received:', data);
@@ -4158,6 +4276,61 @@ window.registerUser = async function() {
 	}
 };
 
+function createInstallationOverlay() {
+	if (installationOverlayElement) return installationOverlayElement;
+	const overlay = document.createElement('div');
+	overlay.id = 'installationVerificationOverlay';
+	overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.85);z-index:9999;backdrop-filter:blur(6px);';
+	overlay.innerHTML = `
+		<div style='max-width:520px;width:90%;background:#0b0f15;border:2px solid #2ecc71;border-radius:18px;padding:32px;color:#fff;box-shadow:0 18px 45px rgba(0,0,0,0.75);text-align:center;'>
+			<div class='installation-title' style='font-size:24px;font-weight:700;margin-bottom:14px;color:#2ecc71;'>Vérification de l'installation...</div>
+			<p class='installation-detail' style='margin:0;font-size:16px;color:#c8d3e3;line-height:1.5;'>Merci de patienter pendant que l'installation est validée.</p>
+			<div style='margin-top:24px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;'>
+				<button id='installationRetryBtn' style='border:none;border-radius:10px;padding:12px 24px;background:#2ecc71;color:#000;font-weight:700;cursor:pointer;font-size:14px;'>🔄 Réessayer</button>
+			</div>
+		</div>
+	`;
+	document.body.appendChild(overlay);
+	const retryBtn = overlay.querySelector('#installationRetryBtn');
+	if (retryBtn) {
+		retryBtn.onclick = () => initDashboardPro();
+	}
+	installationOverlayElement = overlay;
+	return overlay;
+}
+
+function showInstallationOverlay(title, detail) {
+	const overlay = createInstallationOverlay();
+	const titleEl = overlay.querySelector('.installation-title');
+	const detailEl = overlay.querySelector('.installation-detail');
+	if (titleEl) titleEl.textContent = title;
+	if (detailEl) detailEl.textContent = detail;
+	overlay.style.display = 'flex';
+}
+
+function hideInstallationOverlay() {
+	if (installationOverlayElement) {
+		installationOverlayElement.style.display = 'none';
+	}
+}
+
+async function ensureInstallationVerified() {
+	try {
+		const res = await api('/api/installation/status', { timeout: 10000 });
+		if (res && res.ok && res.installation && res.installation.installationId) {
+			console.log('[installation] Verified installation id', res.installation.installationId);
+			hideInstallationOverlay();
+			return true;
+		}
+		const detail = res?.error || "La réponse ne contient pas l'identifiant attendu.";
+		showInstallationOverlay("Vérification de l'installation impossible", detail);
+	} catch (err) {
+		console.error('[installation] verification failed', err);
+		showInstallationOverlay('Impossible de contacter le serveur', err?.message || 'Erreur réseau inconnue');
+	}
+	return false;
+}
+
 // ========== CHECK JWT ON LOAD ========== 
 async function checkJWTAuth() {
 	console.log('[auth] Checking JWT authentication...');
@@ -4175,16 +4348,19 @@ async function checkJWTAuth() {
 			console.log('[auth] ✓ JWT valid for user:', currentUser);
 			return true;
 		} else {
-			// No valid JWT - show auth modal
 			console.log('[auth] ❌ No valid JWT - authenticated =', res?.authenticated);
-			console.log('[auth] Showing auth modal...');
-			
+			console.log('[auth] Attempting guest demo activation...');
+			const guestActivated = await activateGuestDemo();
+			if (guestActivated) {
+				console.log('[auth] Guest demo activated, proceeding');
+				return true;
+			}
+			console.log('[auth] Guest demo activation failed, showing auth modal');
 			// Hide the loading overlay immediately
 			const overlay = document.getElementById('authOverlay');
 			if (overlay) {
 				overlay.style.display = 'none';
 			}
-			
 			// Show auth modal
 			showAuthModal('login');
 			return false;
@@ -4202,6 +4378,25 @@ async function checkJWTAuth() {
 		showAuthModal('login');
 		return false;
 	}
+}
+
+async function activateGuestDemo() {
+	try {
+		const res = await api('/api/demo/activate-guest', { method: 'POST' });
+		if (res && res.ok && res.user) {
+			if (res.token) {
+				saveAuthToken(res.token);
+			}
+			currentUser = res.user.username || res.user.name || res.user.email;
+			localStorage.setItem('vhr_current_user', currentUser);
+			showToast('✅ Essai invité activé pour 7 jours', 'success');
+			return true;
+		}
+		console.warn('[guest] activation response invalid', res);
+	} catch (e) {
+		console.error('[guest] activation error:', e);
+	}
+	return false;
 }
 
 
@@ -4236,25 +4431,25 @@ function hideDashboardContent() {
 }
 
 // Check JWT authentication FIRST - this will show auth modal if needed
-checkJWTAuth().then(isAuth => {
+async function initDashboardPro() {
+	const verified = await ensureInstallationVerified();
+	if (!verified) {
+		hideDashboardContent();
+		return;
+	}
+	const isAuth = await checkJWTAuth();
 	if (isAuth) {
-		// User is authenticated - always show dashboard content first
 		showDashboardContent();
 		createNavbar();
-		
-		// Then check license/subscription status
 		checkLicense().then(hasAccess => {
 			if (hasAccess) {
-				// User has access (demo valid or active subscription)
 				loadGamesCatalog().finally(() => loadDevices());
 			}
-			// else: Access blocked - unlock modal already shown by checkLicense()
-			// Dashboard content stays visible but unlock modal blocks interaction
 		});
 	} else {
-		// Auth failed - hide the loading overlay, auth modal will show
 		hideDashboardContent();
-		// Auth modal is already shown by checkJWTAuth()
 	}
-});
+}
+
+initDashboardPro();
 
