@@ -2073,7 +2073,7 @@ function ensureDefaultUsers() {
     console.log('[users] adding default admin user');
     users.push({
       username: 'vhr',
-      passwordHash: '$2b$10$AlrD74akc7cp9EbVLJKzcOlPzJbypzSt7a8Sg85KEjpFGM/ofxdLm', // password: VHR@Render#2025!SecureAdmin789
+      passwordHash: '$2b$10$AlrD74akc7cp9EbVLJKzcOlPzJbypzSt7a8Sg85KEjpFGM/ofxdLm', // default admin password (refer to README or secrets store)
       role: 'admin',
       email: 'admin@example.local',
       stripeCustomerId: null,
@@ -2090,7 +2090,7 @@ function ensureDefaultUsers() {
     console.log('[users] adding default demo user');
     users.push({
       username: 'VhrDashboard',
-      passwordHash: '$2b$10$XtU3hKSETcFgyx9w.KfL5unRFQ7H2Q26vBKXXjQ05Kz47mZbvrdQS', // password: VhrDashboard@2025
+      passwordHash: '$2b$10$XtU3hKSETcFgyx9w.KfL5unRFQ7H2Q26vBKXXjQ05Kz47mZbvrdQS', // default demo password (placeholder)
       role: 'user',
       email: 'regatpeter@hotmail.fr',
       stripeCustomerId: null,

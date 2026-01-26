@@ -1752,6 +1752,8 @@ const USERS_FILE = path.join(__dirname, 'data', 'users.json');
 const DELETED_USERS_FILE = path.join(__dirname, 'data', 'deleted-users.json');
 const DEMO_STATE_FILE = path.join(__dirname, 'data', 'demo-state.json');
 let cachedDemoState = null;
+const INSTALLATION_STATE_FILE = path.join(__dirname, 'data', 'installation.json');
+let cachedInstallationState = null;
 
 function ensureDataDir() {
   try { fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true }); } catch (e) { }
@@ -1913,6 +1915,108 @@ function loadDemoState() {
 
   cachedDemoState = state;
   return cachedDemoState;
+}
+
+function loadInstallationState() {
+  if (cachedInstallationState) return cachedInstallationState;
+  ensureDataDir();
+  let state = {};
+  try {
+    if (fs.existsSync(INSTALLATION_STATE_FILE)) {
+      const raw = fs.readFileSync(INSTALLATION_STATE_FILE, 'utf8').trim();
+      if (raw) {
+        state = JSON.parse(raw);
+      }
+    }
+  } catch (e) {
+    console.warn('[installation] Failed to load installation state:', e && e.message ? e.message : e);
+    state = {};
+  }
+
+  if (!state.installationId) {
+    state.installationId = (crypto.randomUUID && crypto.randomUUID()) || crypto.randomBytes(16).toString('hex');
+  }
+  state.createdAt = state.createdAt || new Date().toISOString();
+  state.metadata = state.metadata || {};
+  state.lastSeenAt = state.lastSeenAt || null;
+  cachedInstallationState = state;
+  return cachedInstallationState;
+}
+
+function persistInstallationState(state) {
+  if (!state) return;
+  ensureDataDir();
+  try {
+    fs.writeFileSync(INSTALLATION_STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
+  } catch (e) {
+    console.warn('[installation] Failed to persist installation state:', e && e.message ? e.message : e);
+  }
+  cachedInstallationState = state;
+}
+
+function buildInstallationMetadata(state) {
+  const cpuInfo = typeof os.cpus === 'function' ? os.cpus() : [];
+  return {
+    hostname: os.hostname(),
+    platform: os.platform(),
+    release: os.release(),
+    arch: os.arch(),
+    nodeVersion: process.version,
+    cpuCount: Array.isArray(cpuInfo) ? cpuInfo.length : null,
+    env: process.env.NODE_ENV || 'production',
+    createdAt: state.createdAt,
+    installationId: state.installationId
+  };
+}
+
+function computeInstallationFingerprint(state, metadata) {
+  const parts = [
+    state.installationId,
+    metadata.hostname,
+    metadata.platform,
+    metadata.release,
+    metadata.arch,
+    metadata.nodeVersion,
+    metadata.env,
+    (process.env.COMPUTERNAME || '').toLowerCase(),
+    (process.env.USERDOMAIN || '').toLowerCase()
+  ].filter(Boolean);
+  return crypto.createHash('sha256').update(parts.join('|')).digest('hex');
+}
+
+async function recordInstallationAccess() {
+  const state = loadInstallationState();
+  const metadata = buildInstallationMetadata(state);
+  const fingerprint = computeInstallationFingerprint(state, metadata);
+  state.fingerprint = fingerprint;
+  state.metadata = metadata;
+  state.lastSeenAt = new Date().toISOString();
+  persistInstallationState(state);
+
+  const jobs = [];
+  if (USE_POSTGRES && db && typeof db.ensureInstallationRecord === 'function') {
+    jobs.push(db.ensureInstallationRecord(state.installationId, fingerprint, metadata));
+  }
+  if (!USE_POSTGRES && dbEnabled) {
+    try {
+      const sqliteDb = require('./db');
+      if (typeof sqliteDb.ensureInstallationRecord === 'function') {
+        jobs.push(Promise.resolve(sqliteDb.ensureInstallationRecord(state.installationId, fingerprint, metadata)));
+      }
+    } catch (e) {
+      console.warn('[installation] SQLite helper not available:', e && e.message ? e.message : e);
+    }
+  }
+
+  if (jobs.length) {
+    try {
+      await Promise.all(jobs);
+    } catch (e) {
+      console.error('[installation] Failed to persist record in DB:', e && e.message ? e.message : e);
+    }
+  }
+
+  return state;
 }
 
 function isUserDeletedOrDisabled(user) {
@@ -2210,6 +2314,8 @@ async function initializeApp() {
     console.log('[server] Users loaded at startup: ' + users.length);
   }
 
+  await recordInstallationAccess().catch(err => console.error('[installation] startup record failed:', err && err.message ? err.message : err));
+
   // Kick off periodic reconciliation to auto-confirm subscriptions and send any missing emails
   startSubscriptionReconciler();
 }
@@ -2224,7 +2330,7 @@ function ensureDefaultUsers() {
     console.log('[users] adding default admin user');
     users.push({
       username: 'vhr',
-      passwordHash: '$2b$10$AlrD74akc7cp9EbVLJKzcOlPzJbypzSt7a8Sg85KEjpFGM/ofxdLm', // password: VHR@Render#2025!SecureAdmin789
+      passwordHash: '$2b$10$AlrD74akc7cp9EbVLJKzcOlPzJbypzSt7a8Sg85KEjpFGM/ofxdLm', // default admin password (refer to README or secrets store)
       role: 'admin',
       email: 'admin@example.local',
       stripeCustomerId: null,
@@ -2241,7 +2347,7 @@ function ensureDefaultUsers() {
     console.log('[users] adding default demo user');
     users.push({
       username: 'VhrDashboard',
-      passwordHash: '$2b$10$XtU3hKSETcFgyx9w.KfL5unRFQ7H2Q26vBKXXjQ05Kz47mZbvrdQS', // password: VhrDashboard@2025
+      passwordHash: '$2b$10$XtU3hKSETcFgyx9w.KfL5unRFQ7H2Q26vBKXXjQ05Kz47mZbvrdQS', // default demo password (placeholder)
       role: 'user',
       email: 'regatpeter@hotmail.fr',
       stripeCustomerId: null,
@@ -3407,6 +3513,28 @@ app.get('/api/check-auth', (req, res) => {
   } catch (e) {
     // Token is invalid or expired
     res.json({ ok: false, authenticated: false, user: null });
+  }
+});
+
+app.get('/api/installation/status', async (req, res) => {
+  try {
+    const installation = await recordInstallationAccess();
+    if (!installation) {
+      return res.status(500).json({ ok: false, error: 'Impossible de vérifier l\'installation' });
+    }
+    res.json({
+      ok: true,
+      installation: {
+        installationId: installation.installationId,
+        fingerprint: installation.fingerprint,
+        metadata: installation.metadata,
+        createdAt: installation.createdAt,
+        lastSeenAt: installation.lastSeenAt
+      }
+    });
+  } catch (err) {
+    console.error('[installation] status error:', err && err.message ? err.message : err);
+    res.status(500).json({ ok: false, error: 'Erreur lors de la vérification de l\'installation' });
   }
 });
 

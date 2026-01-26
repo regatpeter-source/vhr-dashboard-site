@@ -196,6 +196,65 @@ if (useHttps && FORCE_HTTP) {
   console.log('[HTTPS] FORCE_HTTP=1 détecté - démarrage forcé en HTTP malgré certificat.');
 }
 
+// ========== ADB BINARY DISCOVERY & AUTO-PATH ==========
+const PROJECT_ROOT = __dirname;
+const ADB_FILENAME = process.platform === 'win32' ? 'adb.exe' : 'adb';
+const sanitizePath = directory => directory ? path.resolve(directory) : null;
+
+const candidatePlatformToolsDirs = (() => {
+  const dirs = [
+    sanitizePath(path.join(PROJECT_ROOT, 'platform-tools')),
+    sanitizePath(path.join(PROJECT_ROOT, 'local', 'platform-tools')),
+    sanitizePath(path.join(PROJECT_ROOT, '..', 'platform-tools')),
+    sanitizePath(path.join(PROJECT_ROOT, '..', 'local', 'platform-tools')),
+    sanitizePath(path.join(PROJECT_ROOT, 'resources', 'app.asar.unpacked', 'platform-tools')),
+    sanitizePath(path.join(PROJECT_ROOT, 'resources', 'app.asar.unpacked', 'local', 'platform-tools'))
+  ];
+
+  if (process && process.resourcesPath) {
+    dirs.push(sanitizePath(path.join(process.resourcesPath, 'app.asar.unpacked', 'platform-tools')));
+    dirs.push(sanitizePath(path.join(process.resourcesPath, 'app.asar.unpacked', 'local', 'platform-tools')));
+    dirs.push(sanitizePath(path.join(process.resourcesPath, 'app', 'platform-tools')));
+  }
+
+  if (process.env.ADB_HOME) {
+    dirs.push(sanitizePath(path.join(process.env.ADB_HOME, 'platform-tools')));
+  }
+  if (process.env.ANDROID_HOME) {
+    dirs.push(sanitizePath(path.join(process.env.ANDROID_HOME, 'platform-tools')));
+  }
+  if (process.env.ANDROID_SDK_ROOT) {
+    dirs.push(sanitizePath(path.join(process.env.ANDROID_SDK_ROOT, 'platform-tools')));
+  }
+
+  return Array.from(new Set(dirs.filter(Boolean)));
+})();
+
+const locateBundledAdb = () => {
+  for (const adbDir of candidatePlatformToolsDirs) {
+    const candidate = path.join(adbDir, ADB_FILENAME);
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
+const BUNDLED_ADB_PATH = locateBundledAdb();
+const HAS_BUNDLED_ADB = Boolean(BUNDLED_ADB_PATH);
+const ADB_BIN = HAS_BUNDLED_ADB ? BUNDLED_ADB_PATH : ADB_FILENAME;
+
+if (HAS_BUNDLED_ADB) {
+  const adbDir = path.dirname(BUNDLED_ADB_PATH);
+  const currentPath = (process.env.PATH || '').split(path.delimiter);
+  if (!currentPath.includes(adbDir)) {
+    process.env.PATH = `${adbDir}${path.delimiter}${process.env.PATH || ''}`;
+  }
+  console.log(`[ADB] Binaire embarqué détecté: ${ADB_BIN}. Ajouté en priorité au PATH.`);
+} else {
+  console.log(`[ADB] Aucun binaire ADB embarqué détecté, utilisation du ${ADB_FILENAME} présent dans le PATH système.`);
+}
+
 function isAllowedAdminUser(user) {
   const username = (typeof user === 'string' ? user : (user && user.username) || '').toLowerCase();
   return !!username && ADMIN_ALLOWLIST.includes(username);
@@ -959,6 +1018,9 @@ function getDemoRemainingDays(user) {
 }
 
 const LICENSES_FILE = path.join(__dirname, 'data', 'licenses.json');
+const GUEST_DEMO_USERNAME = process.env.GUEST_DEMO_USERNAME || 'demo_guest';
+const GUEST_DEMO_EMAIL = process.env.GUEST_DEMO_EMAIL || 'demo@vhr-dashboard-site.com';
+const GUEST_DEMO_PASSWORD_HASH = process.env.GUEST_DEMO_PASSWORD_HASH || '$2b$10$wM3fMsYvhXhyye/I80gpJuAu9M51s2Qm1BjyTuCICXla17aAZEwSq';
 
 // ========== EMAIL CONFIGURATION ==========
 // Support both Brevo and Gmail configurations
@@ -1793,8 +1855,10 @@ app.post('/create-checkout-session', async (req, res) => {
 // --- Utilisateurs (simple persistence JSON: replace with a proper DB in production) ---
 const USERS_FILE = path.join(__dirname, 'data', 'users.json');
 const DEMO_STATE_FILE = path.join(__dirname, 'data', 'demo-state.json');
+const INSTALLATION_STATE_FILE = path.join(__dirname, 'data', 'installation.json');
 const DEMO_TRIAL_DAYS = Math.max(1, Number.parseInt(process.env.DEMO_TRIAL_DAYS || '7', 10) || 7);
 let cachedDemoState = null;
+let cachedInstallationState = null;
 
 function ensureDataDir() {
   try { fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true }); } catch (e) { }
@@ -1851,6 +1915,108 @@ function loadDemoState() {
 
   cachedDemoState = state;
   return cachedDemoState;
+}
+
+function loadInstallationState() {
+  if (cachedInstallationState) return cachedInstallationState;
+  ensureDataDir();
+  let state = {};
+  try {
+    if (fs.existsSync(INSTALLATION_STATE_FILE)) {
+      const raw = fs.readFileSync(INSTALLATION_STATE_FILE, 'utf8').trim();
+      if (raw) {
+        state = JSON.parse(raw);
+      }
+    }
+  } catch (e) {
+    console.warn('[installation] Failed to load installation state:', e && e.message ? e.message : e);
+    state = {};
+  }
+
+  if (!state.installationId) {
+    state.installationId = (crypto.randomUUID && crypto.randomUUID()) || crypto.randomBytes(16).toString('hex');
+  }
+  state.createdAt = state.createdAt || new Date().toISOString();
+  state.metadata = state.metadata || {};
+  state.lastSeenAt = state.lastSeenAt || null;
+  cachedInstallationState = state;
+  return cachedInstallationState;
+}
+
+function persistInstallationState(state) {
+  if (!state) return;
+  ensureDataDir();
+  try {
+    fs.writeFileSync(INSTALLATION_STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
+  } catch (e) {
+    console.warn('[installation] Failed to persist installation state:', e && e.message ? e.message : e);
+  }
+  cachedInstallationState = state;
+}
+
+function buildInstallationMetadata(state) {
+  const cpuInfo = typeof os.cpus === 'function' ? os.cpus() : [];
+  return {
+    hostname: os.hostname(),
+    platform: os.platform(),
+    release: os.release(),
+    arch: os.arch(),
+    nodeVersion: process.version,
+    cpuCount: Array.isArray(cpuInfo) ? cpuInfo.length : null,
+    env: process.env.NODE_ENV || 'production',
+    createdAt: state.createdAt,
+    installationId: state.installationId
+  };
+}
+
+function computeInstallationFingerprint(state, metadata) {
+  const parts = [
+    state.installationId,
+    metadata.hostname,
+    metadata.platform,
+    metadata.release,
+    metadata.arch,
+    metadata.nodeVersion,
+    metadata.env,
+    (process.env.COMPUTERNAME || '').toLowerCase(),
+    (process.env.USERDOMAIN || '').toLowerCase()
+  ].filter(Boolean);
+  return crypto.createHash('sha256').update(parts.join('|')).digest('hex');
+}
+
+async function recordInstallationAccess() {
+  const state = loadInstallationState();
+  const metadata = buildInstallationMetadata(state);
+  const fingerprint = computeInstallationFingerprint(state, metadata);
+  state.fingerprint = fingerprint;
+  state.metadata = metadata;
+  state.lastSeenAt = new Date().toISOString();
+  persistInstallationState(state);
+
+  const jobs = [];
+  if (USE_POSTGRES && db && typeof db.ensureInstallationRecord === 'function') {
+    jobs.push(db.ensureInstallationRecord(state.installationId, fingerprint, metadata));
+  }
+  if (!USE_POSTGRES && dbEnabled) {
+    try {
+      const sqliteDb = require('./db');
+      if (typeof sqliteDb.ensureInstallationRecord === 'function') {
+        jobs.push(Promise.resolve(sqliteDb.ensureInstallationRecord(state.installationId, fingerprint, metadata)));
+      }
+    } catch (e) {
+      console.warn('[installation] SQLite helper not available:', e && e.message ? e.message : e);
+    }
+  }
+
+  if (jobs.length) {
+    try {
+      await Promise.all(jobs);
+    } catch (e) {
+      console.error('[installation] Failed to persist record in DB:', e && e.message ? e.message : e);
+    }
+  }
+
+  return state;
 }
 
 // ========== DEMO STATUS MANAGEMENT ========== 
@@ -2109,6 +2275,8 @@ async function initializeApp() {
     console.log('[server] Users loaded at startup: ' + users.length);
   }
 
+  await recordInstallationAccess().catch(err => console.error('[installation] startup record failed:', err && err.message ? err.message : err));
+
   // Kick off periodic reconciliation to auto-confirm subscriptions and send any missing emails
   startSubscriptionReconciler();
 }
@@ -2123,7 +2291,7 @@ function ensureDefaultUsers() {
     console.log('[users] adding default admin user');
     users.push({
       username: 'vhr',
-      passwordHash: '$2b$10$AlrD74akc7cp9EbVLJKzcOlPzJbypzSt7a8Sg85KEjpFGM/ofxdLm', // password: VHR@Render#2025!SecureAdmin789
+      passwordHash: '$2b$10$AlrD74akc7cp9EbVLJKzcOlPzJbypzSt7a8Sg85KEjpFGM/ofxdLm', // default admin password (refer to README or secrets store)
       role: 'admin',
       email: 'admin@example.local',
       stripeCustomerId: null,
@@ -2140,7 +2308,7 @@ function ensureDefaultUsers() {
     console.log('[users] adding default demo user');
     users.push({
       username: 'VhrDashboard',
-      passwordHash: '$2b$10$XtU3hKSETcFgyx9w.KfL5unRFQ7H2Q26vBKXXjQ05Kz47mZbvrdQS', // password: VhrDashboard@2025
+      passwordHash: '$2b$10$XtU3hKSETcFgyx9w.KfL5unRFQ7H2Q26vBKXXjQ05Kz47mZbvrdQS', // default demo password (placeholder)
       role: 'user',
       email: 'regatpeter@hotmail.fr',
       stripeCustomerId: null,
@@ -2312,6 +2480,37 @@ function ensureUserSubscription(user, options = {}) {
   }
 
   return true;
+}
+
+function startGuestDemoSession() {
+  const now = new Date().toISOString();
+  let guest = getUserByUsername(GUEST_DEMO_USERNAME);
+  if (!guest) {
+    guest = {
+      id: `guest_${Date.now()}`,
+      username: GUEST_DEMO_USERNAME,
+      email: GUEST_DEMO_EMAIL,
+      passwordHash: GUEST_DEMO_PASSWORD_HASH,
+      role: 'user',
+      createdAt: now,
+      updatedAt: now
+    };
+  }
+
+  guest.demoStartDate = now;
+  guest.subscriptionStatus = null;
+  guest.subscriptionId = null;
+  guest.updatedAt = now;
+
+  persistUser(guest);
+  ensureUserSubscription(guest, {
+    planName: 'guest-demo',
+    status: 'trial',
+    startDate: now,
+    endDate: new Date(Date.now() + demoConfig.DEMO_DURATION_MS).toISOString()
+  });
+
+  return guest;
 }
 
 function removeUserByUsername(username) {
@@ -2996,6 +3195,28 @@ app.get('/api/check-auth', (req, res) => {
   }
 });
 
+app.get('/api/installation/status', async (req, res) => {
+  try {
+    const installation = await recordInstallationAccess();
+    if (!installation) {
+      return res.status(500).json({ ok: false, error: 'Impossible de vérifier l\'installation' });
+    }
+    res.json({
+      ok: true,
+      installation: {
+        installationId: installation.installationId,
+        fingerprint: installation.fingerprint,
+        metadata: installation.metadata,
+        createdAt: installation.createdAt,
+        lastSeenAt: installation.lastSeenAt
+      }
+    });
+  } catch (err) {
+    console.error('[installation] status error:', err && err.message ? err.message : err);
+    res.status(500).json({ ok: false, error: 'Erreur lors de la vérification de l\'installation' });
+  }
+});
+
 // ========== LICENSE VERIFICATION FOR FEATURES ==========
 
 /**
@@ -3423,6 +3644,33 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
   } catch (e) {
     console.error('[demo] status error:', e);
     res.status(500).json({ ok: false, error: 'Server error', details: e.message });
+  }
+});
+
+// Génère un jeton JWT pour un utilisateur invité en démonstration 7 jours
+app.post('/api/demo/activate-guest', async (req, res) => {
+  try {
+    const guestUser = startGuestDemoSession();
+    const token = jwt.sign({ username: guestUser.username, role: guestUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    res.cookie('vhr_token', token, buildAuthCookieOptions(req));
+
+    res.json({
+      ok: true,
+      token,
+      user: { username: guestUser.username, email: guestUser.email, role: guestUser.role },
+      demo: {
+        demoStartDate: guestUser.demoStartDate,
+        expiresAt: guestUser.demoStartDate ? new Date(new Date(guestUser.demoStartDate).getTime() + demoConfig.DEMO_DURATION_MS).toISOString() : null,
+        remainingDays: getDemoRemainingDays(guestUser),
+        totalDays: demoConfig.DEMO_DAYS,
+        message: `✅ Essai invité activé - ${getDemoRemainingDays(guestUser)} jour(s) restant(s)`,
+        hasValidSubscription: false,
+        accessBlocked: false
+      }
+    });
+  } catch (e) {
+    console.error('[demo] activate-guest error:', e);
+    res.status(500).json({ ok: false, error: 'Unable to start guest demo' });
   }
 });
 
