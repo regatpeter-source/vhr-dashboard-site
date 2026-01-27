@@ -110,6 +110,24 @@ const ADMIN_FALLBACK = ['vhr'];
 const EFFECTIVE_ADMIN_ALLOWLIST = ADMIN_ALLOWLIST.length ? ADMIN_ALLOWLIST : ADMIN_FALLBACK;
 const ADMIN_VERIFICATION_BYPASS_EMAIL = (process.env.ADMIN_VERIFICATION_BYPASS_EMAIL || 'admin@example.local').trim().toLowerCase();
 const ADMIN_INIT_SECRET = process.env.ADMIN_INIT_SECRET || null;
+const ADMIN_PASSWORD_PLAIN = (process.env.ADMIN_PASSWORD || '').trim();
+const ADMIN_PASSWORD_HASH_OVERRIDE = (process.env.ADMIN_PASSWORD_HASH || '').trim();
+const DEFAULT_ADMIN_PASSWORD_HASH = '$2b$10$AlrD74akc7cp9EbVLJKzcOlPzJbypzSt7a8Sg85KEjpFGM/ofxdLm';
+let cachedAdminPasswordHash = null;
+
+function resolveAdminPasswordHash(forceRehash = false) {
+  if (!forceRehash && cachedAdminPasswordHash) {
+    return cachedAdminPasswordHash;
+  }
+  if (ADMIN_PASSWORD_HASH_OVERRIDE) {
+    cachedAdminPasswordHash = ADMIN_PASSWORD_HASH_OVERRIDE;
+  } else if (ADMIN_PASSWORD_PLAIN) {
+    cachedAdminPasswordHash = bcrypt.hashSync(ADMIN_PASSWORD_PLAIN, 10);
+  } else {
+    cachedAdminPasswordHash = DEFAULT_ADMIN_PASSWORD_HASH;
+  }
+  return cachedAdminPasswordHash;
+}
 // Shared secret used when syncing users from the prod auth API to the local pack.
 // Fallbacks to the same value embedded in dashboard-pro.js to avoid 403 if the
 // environment variable is missing on local installs.
@@ -2286,12 +2304,14 @@ async function initializeApp() {
 function ensureDefaultUsers() {
   const hasAdmin = users.some(u => u.username === 'vhr');
   const hasDemo = users.some(u => u.username === 'VhrDashboard');
-  
+  let usersChanged = false;
+  const adminPasswordHash = resolveAdminPasswordHash();
+
   if (!hasAdmin) {
     console.log('[users] adding default admin user');
     users.push({
       username: 'vhr',
-      passwordHash: '$2b$10$AlrD74akc7cp9EbVLJKzcOlPzJbypzSt7a8Sg85KEjpFGM/ofxdLm', // default admin password (refer to README or secrets store)
+      passwordHash: adminPasswordHash,
       role: 'admin',
       email: 'admin@example.local',
       stripeCustomerId: null,
@@ -2302,8 +2322,17 @@ function ensureDefaultUsers() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
+    usersChanged = true;
+  } else if (ADMIN_PASSWORD_PLAIN) {
+    const adminUser = users.find(u => u.username === 'vhr');
+    if (adminUser && !bcrypt.compareSync(ADMIN_PASSWORD_PLAIN, adminUser.passwordHash)) {
+      adminUser.passwordHash = resolveAdminPasswordHash(true);
+      adminUser.updatedAt = new Date().toISOString();
+      console.log('[users] Admin password synchronized from environment');
+      usersChanged = true;
+    }
   }
-  
+
   if (!hasDemo) {
     console.log('[users] adding default demo user');
     users.push({
@@ -2319,10 +2348,10 @@ function ensureDefaultUsers() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
+    usersChanged = true;
   }
-  
-  // Save to file if users were added
-  if (!hasAdmin || !hasDemo) {
+
+  if (usersChanged) {
     saveUsers();
   }
 }
