@@ -3521,6 +3521,18 @@ app.post('/api/admin/sync-user', async (req, res) => {
   }
 });
 
+// Fournit aux clients locaux le secret de synchronisation actif (pour éviter les builds figés)
+app.get('/api/admin/sync-config', (req, res) => {
+  if (!SYNC_USERS_SECRET) {
+    return res.status(404).json({ ok: false, error: 'SYNC_USERS_SECRET non configuré' });
+  }
+  res.json({
+    ok: true,
+    syncSecret: SYNC_USERS_SECRET,
+    syncEndpoint: SYNC_USER_ENDPOINT
+  });
+});
+
 // Diagnostic endpoint to check database and user status (admin only)
 app.get('/api/admin/diagnose', authMiddleware, async (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;

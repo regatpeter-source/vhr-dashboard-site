@@ -1049,7 +1049,7 @@ window.switchAccountTab = function(tab) {
 let activeAudioStream = null;  // Global audio stream instance
 let activeAudioSerial = null;  // Serial of device receiving audio
 
-console.log('[voice] dashboard-pro.js build stamp: 2026-01-17 22:00');
+console.log('[voice] dashboard-pro.js build stamp: 2026-01-26 22:00');
 
 // Keep panel always compact (no fullscreen overlay)
 function setAudioPanelMinimized() {
@@ -1769,13 +1769,32 @@ const USE_MOCK_AUTH = (() => {
 
 const PRODUCTION_AUTH_ORIGIN = 'https://www.vhr-dashboard-site.com';
 const AUTH_API_BASE = (() => {
-	if (FORCE_LOCAL_AUTH || USE_MOCK_AUTH) return '';
-	if (FORCE_PROD_AUTH) return PRODUCTION_AUTH_ORIGIN;
-	return PRODUCTION_AUTH_ORIGIN;
+    if (FORCE_LOCAL_AUTH || USE_MOCK_AUTH) return '';
+    if (FORCE_PROD_AUTH) return PRODUCTION_AUTH_ORIGIN;
+    return PRODUCTION_AUTH_ORIGIN;
 })();
-// Secret partagé pour synchroniser les comptes prod vers le backend local (HTTP)
-const SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
+const DEFAULT_SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
 const API_BASE = '/api';
+let cachedSyncUsersSecret = DEFAULT_SYNC_USERS_SECRET;
+let syncSecretPromise = null;
+
+function getSyncUsersSecret() {
+	if (syncSecretPromise) return syncSecretPromise;
+	syncSecretPromise = fetch('/api/admin/sync-config', {
+		credentials: 'include'
+	})
+	.then(async res => {
+		if (!res.ok) throw new Error('sync config unavailable');
+		const payload = await res.json().catch(() => null);
+		return payload?.syncSecret || DEFAULT_SYNC_USERS_SECRET;
+	})
+	.catch(() => DEFAULT_SYNC_USERS_SECRET)
+	.then(secret => {
+		cachedSyncUsersSecret = secret;
+		return cachedSyncUsersSecret;
+	});
+	return syncSecretPromise;
+}
 const socket = io({
 	reconnection: true,
 	reconnectionAttempts: 5,
@@ -4077,11 +4096,12 @@ window.loginUser = async function() {
 			const syncedUsername = data.user?.username || data.user?.name || identifier;
 			const syncedEmail = data.user?.email || identifier;
 			try {
+				const syncSecret = await getSyncUsersSecret();
 				await fetch('/api/admin/sync-user', {
 					method: 'POST',
 					headers: {
 						'Content-Type': 'application/json',
-						'x-sync-secret': SYNC_USERS_SECRET
+						'x-sync-secret': syncSecret
 					},
 					body: JSON.stringify({ username: syncedUsername, email: syncedEmail, role: 'user', password })
 				});
@@ -4114,7 +4134,7 @@ window.loginUser = async function() {
 					method: 'POST',
 					headers: {
 						'Content-Type': 'application/json',
-						'x-sync-secret': SYNC_USERS_SECRET
+						'x-sync-secret': await getSyncUsersSecret()
 					},
 					body: JSON.stringify({ username: identifier, email: identifier, role: 'user', password })
 				});

@@ -154,6 +154,9 @@ function createNavbar() {
 		<button id="refreshBtn" style="margin-right:15px;background:#9b59b6;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			🔄 Rafraîchir
 		</button>
+		<button id="noticeBtn" style="margin-right:15px;background:#f1c40f;color:#1a1d24;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
+			🛈 Notice
+		</button>
 		<button id="favoritesBtn" style="margin-right:15px;background:#f39c12;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			⭐ Ajouter aux favoris
 		</button>
@@ -165,6 +168,7 @@ function createNavbar() {
 	
 	document.getElementById('toggleViewBtn').onclick = toggleView;
 	document.getElementById('refreshBtn').onclick = refreshDevicesList;
+	document.getElementById('noticeBtn').onclick = showSetupNotice;
 	document.getElementById('favoritesBtn').onclick = addDashboardToFavorites;
 	document.getElementById('accountBtn').onclick = showAccountPanel;
 	updateUserUI();
@@ -1811,6 +1815,8 @@ let offlineBannerEl = null;
 let isLoadingDevices = false;
 let lastDevicesLoadTs = 0;
 const MIN_LOAD_DEVICES_INTERVAL_MS = 3000; // throttle to avoid overlapping fetches
+let initialDevicesLoadComplete = false;
+let usbTutorialShown = false;
 
 function renderOfflineBanner() {
 	if (offlineReasons.size === 0) {
@@ -1912,8 +1918,6 @@ let gameMetaMap = {}; // Map packageId -> { name, icon }
 const DEFAULT_GAME_ICON = 'https://cdn-icons-png.flaticon.com/512/1005/1005141.png';
 let serverInfoCache = null; // { lanIp, port, host }
 const VOICE_LAN_OVERRIDE_KEY = 'vhr_voice_lan_ip_override';
-let initialDevicesLoadComplete = false;
-let usbTutorialShown = false;
 
 function updateGameMetaFromList(list) {
 	gameMetaMap = {};
@@ -3650,6 +3654,31 @@ window.closeModal = function() {
 	if (modal) modal.style.display = 'none';
 };
 
+function showSetupNotice() {
+	const noticeHTML = `
+		<h2 style='margin-top:0;color:#f1c40f;'>🛈 Notice d'initialisation</h2>
+		<p>Avant de lancer le Dashboard PRO, placez toujours le dossier <strong>platform-tools</strong> dans votre variable <strong>PATH</strong>. Si l'appareil sur lequel l'application est installée a déplacé ou extrait les fichiers ailleurs, cette notice explique pourquoi les casques peuvent rester invisibles même après la première installation.</p>
+		<h3 style='color:#2ecc71;'>1. Ajouter platform-tools au PATH</h3>
+		<ol style='padding-left:16px;line-height:1.6;'>
+			<li>Ouvrez l'Explorateur et localisez le dossier <code>platform-tools</code> (souvent dans <code>client-pack\platform-tools</code> ou dans l'archive du dashboard).</li>
+			<li>Copiez le chemin complet du dossier (clic droit → « Copier l'adresse en tant que texte »).</li>
+			<li>Ouvrez le Panneau de configuration → Système → Paramètres système avancés → Variables d'environnement.</li>
+			<li>Dans la variable <strong>PATH</strong>, ajoutez ce dossier. Séparez les entrées par un point-virgule (;) et validez.</li>
+			<li>Fermez puis rouvrez PowerShell ou l'invite de commande avant de relancer le dashboard.</li>
+		</ol>
+		<div style='margin-top:16px;padding:14px;background:#111b23;border:1px solid #3498db;border-radius:8px;'>
+			<strong>Pourquoi cette notice ?</strong>
+			<p style='margin:6px 0 0;'>Les systèmes Windows peuvent modifier l'emplacement des fichiers lors d'un redémarrage ou d'une copie automatique depuis l'appareil. Si les casques ne sont pas détectés, cela vient souvent du fait que la liaison <code>adb</code> pointe vers un <code>platform-tools</code> qui n'y est plus. Ce rappel vous aide à vérifier ou mettre à jour le chemin sans perdre de temps.</p>
+		</div>
+		<div style='margin-top:16px;padding:14px;background:#171f2a;border:1px solid #f39c12;border-radius:8px;'>
+			<strong>Voix & Streaming</strong>
+			<p style='margin:6px 0 0;'>Le premier clic sur les fonctions voix ou streaming peut parfois rester bloqué. Si le flux n'apparaît pas immédiatement, relancez la même fonction une seconde fois : cela réinitialise la chaîne audio/vidéo côté casque et permet de déclencher le streaming.</p>
+		</div>
+		<p style='margin-top:18px;font-size:13px;color:#95a5a6;'>Cette notice est disponible à tout moment depuis la barre d'outils. En cas de doutes sur la détection des casques, revérifiez le PATH et relancez la fonction voix/streaming.</p>
+	`;
+	showModal(noticeHTML);
+}
+
 // ========== SOCKET.IO EVENTS ========== 
 socket.on('devices-update', (data) => {
 	console.log('[socket] devices-update received:', data);
@@ -4248,7 +4277,6 @@ window.registerUser = async function() {
 	}
 };
 
-// ========== CHECK JWT ON LOAD ========== 
 function createInstallationOverlay() {
 	if (installationOverlayElement) return installationOverlayElement;
 	const overlay = document.createElement('div');
@@ -4256,8 +4284,8 @@ function createInstallationOverlay() {
 	overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.85);z-index:9999;backdrop-filter:blur(6px);';
 	overlay.innerHTML = `
 		<div style='max-width:520px;width:90%;background:#0b0f15;border:2px solid #2ecc71;border-radius:18px;padding:32px;color:#fff;box-shadow:0 18px 45px rgba(0,0,0,0.75);text-align:center;'>
-			<div class='installation-title' style='font-size:24px;font-weight:700;margin-bottom:14px;color:#2ecc71;'>Vérification de l\'installation...</div>
-			<p class='installation-detail' style='margin:0;font-size:16px;color:#c8d3e3;line-height:1.5;'>Merci de patienter pendant que l\'installation est validée.</p>
+			<div class='installation-title' style='font-size:24px;font-weight:700;margin-bottom:14px;color:#2ecc71;'>Vérification de l'installation...</div>
+			<p class='installation-detail' style='margin:0;font-size:16px;color:#c8d3e3;line-height:1.5;'>Merci de patienter pendant que l'installation est validée.</p>
 			<div style='margin-top:24px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;'>
 				<button id='installationRetryBtn' style='border:none;border-radius:10px;padding:12px 24px;background:#2ecc71;color:#000;font-weight:700;cursor:pointer;font-size:14px;'>🔄 Réessayer</button>
 			</div>
@@ -4295,8 +4323,8 @@ async function ensureInstallationVerified() {
 			hideInstallationOverlay();
 			return true;
 		}
-		const detail = res?.error || 'La réponse ne contient pas l\'identifiant attendu.';
-		showInstallationOverlay('Vérification de l\'installation impossible', detail);
+		const detail = res?.error || "La réponse ne contient pas l'identifiant attendu.";
+		showInstallationOverlay("Vérification de l'installation impossible", detail);
 	} catch (err) {
 		console.error('[installation] verification failed', err);
 		showInstallationOverlay('Impossible de contacter le serveur', err?.message || 'Erreur réseau inconnue');
@@ -4304,6 +4332,7 @@ async function ensureInstallationVerified() {
 	return false;
 }
 
+// ========== CHECK JWT ON LOAD ========== 
 async function checkJWTAuth() {
 	console.log('[auth] Checking JWT authentication...');
 	try {
@@ -4320,16 +4349,19 @@ async function checkJWTAuth() {
 			console.log('[auth] ✓ JWT valid for user:', currentUser);
 			return true;
 		} else {
-			// No valid JWT - show auth modal
 			console.log('[auth] ❌ No valid JWT - authenticated =', res?.authenticated);
-			console.log('[auth] Showing auth modal...');
-			
+			console.log('[auth] Attempting guest demo activation...');
+			const guestActivated = await activateGuestDemo();
+			if (guestActivated) {
+				console.log('[auth] Guest demo activated, proceeding');
+				return true;
+			}
+			console.log('[auth] Guest demo activation failed, showing auth modal');
 			// Hide the loading overlay immediately
 			const overlay = document.getElementById('authOverlay');
 			if (overlay) {
 				overlay.style.display = 'none';
 			}
-			
 			// Show auth modal
 			showAuthModal('login');
 			return false;
@@ -4347,6 +4379,25 @@ async function checkJWTAuth() {
 		showAuthModal('login');
 		return false;
 	}
+}
+
+async function activateGuestDemo() {
+	try {
+		const res = await api('/api/demo/activate-guest', { method: 'POST' });
+		if (res && res.ok && res.user) {
+			if (res.token) {
+				saveAuthToken(res.token);
+			}
+			currentUser = res.user.username || res.user.name || res.user.email;
+			localStorage.setItem('vhr_current_user', currentUser);
+			showToast('✅ Essai invité activé pour 7 jours', 'success');
+			return true;
+		}
+		console.warn('[guest] activation response invalid', res);
+	} catch (e) {
+		console.error('[guest] activation error:', e);
+	}
+	return false;
 }
 
 
