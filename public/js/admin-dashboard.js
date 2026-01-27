@@ -130,7 +130,7 @@ function renderUsersTable(list) {
   tbody.innerHTML = '';
 
   if (!list || list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#718096;padding:18px;">Aucun utilisateur pour ces filtres</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#718096;padding:18px;">Aucun utilisateur pour ces filtres</td></tr>';
     return;
   }
 
@@ -140,12 +140,32 @@ function renderUsersTable(list) {
     const lastSeenValue = user.lastActivity || user.lastLogin || null;
     const lastSeenLabel = lastSeenValue ? new Date(lastSeenValue).toLocaleString('fr-FR') : 'N/A';
     const isProtectedAdmin = user.role === 'admin' && user.username && user.username.toLowerCase() === 'vhr';
+    const access = user.accessSummary || {};
+    const demoDays = Number.isFinite(access.demoRemainingDays) ? access.demoRemainingDays : null;
+    const demoText = access.hasDemo
+      ? (access.demoExpired ? 'Expiré' : `${demoDays ?? 0} jour(s)`) 
+      : 'N/A';
+    const demoBadge = access.demoExpired ? 'badge-inactive' : 'badge-active';
+    const subscriptionState = (access.subscriptionStatus || user.subscriptionStatus || 'none').toLowerCase();
+    const subscriptionBadge = subscriptionState === 'active'
+      ? 'badge-active'
+      : subscriptionState === 'cancelled'
+        ? 'badge-unread'
+        : 'badge-inactive';
+    const subscriptionLabel = subscriptionState === 'none' ? 'aucun' : subscriptionState;
+    const licenseLabel = access.hasPerpetualLicense
+      ? `Oui${access.licenseCount > 1 ? ` (${access.licenseCount})` : ''}`
+      : 'Non';
+    const licenseBadge = access.hasPerpetualLicense ? 'badge-active' : 'badge-inactive';
     row.innerHTML = `
       <td>${user.username}</td>
       <td>${user.email || 'N/A'}</td>
       <td><span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></td>
       <td>${createdLabel}</td>
       <td>${lastSeenLabel}</td>
+      <td><span class="badge ${demoBadge}">${demoText}</span></td>
+      <td><span class="badge ${subscriptionBadge}">${subscriptionLabel}</span></td>
+      <td><span class="badge ${licenseBadge}">${licenseLabel}</span></td>
       <td>
         <button class="action-btn action-btn-view" onclick="viewUser('${user.username}')">View</button>
         ${isProtectedAdmin ? '' : `<button class="action-btn action-btn-delete" onclick="deleteUserAccount('${user.username}')">Delete</button>`}
@@ -289,6 +309,16 @@ async function viewUser(username) {
       const lastLogin = user.lastLogin ? new Date(user.lastLogin).toLocaleString('fr-FR') : 'N/A';
       const lastActivity = user.lastActivity ? new Date(user.lastActivity).toLocaleString('fr-FR') : 'N/A';
       const subStatusLabel = user.subscriptionStatus || 'None';
+      const access = user.accessSummary || {};
+      const demoStatusLabel = !access.hasDemo
+        ? 'Non initialisé'
+        : access.demoExpired
+          ? 'Expiré'
+          : `${Number.isFinite(access.demoRemainingDays) ? access.demoRemainingDays : 0} jour(s) restant(s)`;
+      const subscriptionDetailLabel = access.subscriptionStatus || subStatusLabel || 'aucun';
+      const licenseDetailLabel = access.hasPerpetualLicense
+        ? `Oui${access.licenseCount > 1 ? ` (${access.licenseCount})` : ''}`
+        : 'Non';
       
       modalBody.innerHTML = `
         <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
@@ -305,6 +335,12 @@ async function viewUser(username) {
           <p style="margin: 0 0 5px 0;"><strong>Status:</strong> ${subStatusLabel}</p>
           <p style="margin: 0;"><strong>Subscription ID:</strong> ${user.subscriptionId || 'N/A'}</p>
         </div>
+          <div style="margin-top:16px; padding: 14px; background: #f1f5f9; border-radius: 8px; border: 1px dashed #cbd5e0;">
+            <h4 style="margin-top: 0;">Statut d'accès</h4>
+            <p style="margin: 4px 0;"><strong>Essai :</strong> ${demoStatusLabel}</p>
+            <p style="margin: 4px 0;"><strong>Abonnement :</strong> ${subscriptionDetailLabel}</p>
+            <p style="margin: 4px 0;"><strong>Licence à vie :</strong> ${licenseDetailLabel}</p>
+          </div>
         <div style="margin-top:16px; padding: 14px; background: #f9fafb; border: 1px dashed #cbd5e0; border-radius: 8px; display:flex; gap:8px; flex-wrap:wrap;">
           <button class="action-btn action-btn-view" style="background:#c6f6d5;color:#22543d;" onclick="manageSubscription('${user.username}','free_month')">Offrir 1 mois gratuit</button>
           <button class="action-btn action-btn-delete" style="background:#fed7d7;color:#742a2a;" onclick="manageSubscription('${user.username}','cancel')">Annuler l'abonnement</button>

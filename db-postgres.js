@@ -77,6 +77,7 @@ async function initDatabase() {
           subscriptionid VARCHAR(255),
           lastlogin TIMESTAMPTZ,
           lastactivity TIMESTAMPTZ,
+          demostartdate TIMESTAMPTZ,
           emailverified BOOLEAN DEFAULT FALSE,
           emailverificationtoken TEXT,
           emailverificationexpiresat TIMESTAMPTZ,
@@ -93,14 +94,15 @@ async function initDatabase() {
         { name: 'latestinvoiceid', type: 'VARCHAR(255)' },
         { name: 'lastinvoicepaidat', type: 'TIMESTAMPTZ' },
         { name: 'subscriptionstatus', type: 'VARCHAR(50)' },
-          { name: 'subscriptionid', type: 'VARCHAR(255)' },
-          { name: 'lastlogin', type: 'TIMESTAMPTZ' },
-          { name: 'lastactivity', type: 'TIMESTAMPTZ' },
-          { name: 'emailverified', type: 'BOOLEAN DEFAULT FALSE' },
-          { name: 'emailverificationtoken', type: 'TEXT' },
-          { name: 'emailverificationexpiresat', type: 'TIMESTAMPTZ' },
-          { name: 'emailverificationsentat', type: 'TIMESTAMPTZ' },
-          { name: 'emailverifiedat', type: 'TIMESTAMPTZ' }
+        { name: 'subscriptionid', type: 'VARCHAR(255)' },
+        { name: 'lastlogin', type: 'TIMESTAMPTZ' },
+        { name: 'lastactivity', type: 'TIMESTAMPTZ' },
+        { name: 'demostartdate', type: 'TIMESTAMPTZ' },
+        { name: 'emailverified', type: 'BOOLEAN DEFAULT FALSE' },
+        { name: 'emailverificationtoken', type: 'TEXT' },
+        { name: 'emailverificationexpiresat', type: 'TIMESTAMPTZ' },
+        { name: 'emailverificationsentat', type: 'TIMESTAMPTZ' },
+        { name: 'emailverifiedat', type: 'TIMESTAMPTZ' }
       ];
 
       for (const col of columnChecks) {
@@ -327,7 +329,7 @@ async function deleteMessage(id) {
 async function getUsers() {
   try {
     const result = await pool.query(
-      'SELECT id, username, email, role, createdat, updatedat, lastlogin, lastactivity, subscriptionstatus, subscriptionid, stripecustomerid, emailverified, emailverificationtoken, emailverificationexpiresat, emailverificationsentat, emailverifiedat FROM users ORDER BY createdat DESC'
+      'SELECT id, username, email, role, createdat, updatedat, lastlogin, lastactivity, demostartdate, subscriptionstatus, subscriptionid, stripecustomerid, emailverified, emailverificationtoken, emailverificationexpiresat, emailverificationsentat, emailverifiedat FROM users ORDER BY createdat DESC'
     );
     return result.rows || [];
   } catch (err) {
@@ -370,6 +372,7 @@ async function getUserByUsername(username) {
            subscriptionid,
            lastlogin,
            lastactivity,
+           demostartdate,
            createdat,
            updatedat,
            emailverified,
@@ -411,6 +414,8 @@ async function getUserByUsername(username) {
       lastLogin: optionalFields.lastlogin || null,
       lastactivity: optionalFields.lastactivity || null,
       lastActivity: optionalFields.lastactivity || null,
+      demostartdate: optionalFields.demostartdate || null,
+      demoStartDate: optionalFields.demostartdate || null,
       emailverified: optionalFields.emailverified ?? null,
       emailVerified: optionalFields.emailverified ?? null,
       emailverificationtoken: optionalFields.emailverificationtoken || null,
@@ -432,11 +437,18 @@ async function getUserByUsername(username) {
   }
 }
 
-async function createUser(id, username, passwordHash, email, role = 'user') {
+async function createUser(id, username, passwordHash, email, role = 'user', options = {}) {
   try {
+    const columns = ['id', 'username', 'passwordhash', 'email', 'role'];
+    const values = [id, username, passwordHash, email || null, role];
+    if (options && options.demoStartDate) {
+      columns.push('demostartdate');
+      values.push(options.demoStartDate);
+    }
+    const placeholders = columns.map((_, idx) => `$${idx + 1}`);
     const result = await pool.query(
-      'INSERT INTO users (id, username, passwordhash, email, role) VALUES ($1, $2, $3, $4, $5) RETURNING id, username, email, role',
-      [id, username, passwordHash, email || null, role]
+      `INSERT INTO users (${columns.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING id, username, email, role, demostartdate`,
+      values
     );
     return result.rows?.[0] || null;
   } catch (err) {
@@ -460,6 +472,7 @@ async function updateUser(id, updates) {
       'subscriptionid',
       'lastlogin',
       'lastactivity',
+      'demostartdate',
       'emailverified',
       'emailverificationtoken',
       'emailverificationexpiresat',

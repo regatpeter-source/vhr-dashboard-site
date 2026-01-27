@@ -1887,6 +1887,7 @@ function normalizeUserRecord(user) {
   normalized.updatedAt = normalized.updatedAt || normalized.updatedat || null;
   normalized.lastLogin = normalized.lastLogin || normalized.lastlogin || null;
   normalized.lastActivity = normalized.lastActivity || normalized.lastactivity || null;
+  normalized.demoStartDate = normalized.demoStartDate || normalized.demostartdate || null;
 
   // Normalize deletion/disable flags
   normalized.status = (normalized.status || normalized.accountStatus || '').toString().toLowerCase() || null;
@@ -1918,6 +1919,7 @@ function saveUsers() {
       lastActivity: u.lastActivity || null,
       createdAt: u.createdAt || null,
       updatedAt: u.updatedAt || null,
+      demoStartDate: u.demoStartDate || null,
       emailVerified: u.emailVerified ?? true,
       emailVerificationToken: u.emailVerificationToken || null,
       emailVerificationExpiresAt: u.emailVerificationExpiresAt || null,
@@ -2520,6 +2522,7 @@ function persistUser(user) {
     if (Object.prototype.hasOwnProperty.call(user, 'emailVerificationExpiresAt')) updatePayload.emailverificationexpiresat = user.emailVerificationExpiresAt || null;
     if (Object.prototype.hasOwnProperty.call(user, 'emailVerificationSentAt')) updatePayload.emailverificationsentat = user.emailVerificationSentAt || null;
     if (Object.prototype.hasOwnProperty.call(user, 'emailVerifiedAt')) updatePayload.emailverifiedat = user.emailVerifiedAt || null;
+    if (Object.prototype.hasOwnProperty.call(user, 'demoStartDate')) updatePayload.demostartdate = user.demoStartDate || null;
 
     // Save async to PostgreSQL (fire and forget to avoid blocking)
     db.getUserByUsername(user.username)
@@ -2527,7 +2530,9 @@ function persistUser(user) {
         if (existing && existing.id) {
           return db.updateUser(existing.id, updatePayload);
         }
-        return db.createUser(user.id || `user_${user.username}`, user.username, user.passwordHash, user.email, user.role);
+        return db.createUser(user.id || `user_${user.username}`, user.username, user.passwordHash, user.email, user.role, {
+          demoStartDate: user.demoStartDate || null
+        });
       })
       .catch(err => console.error('[db] persistUser error:', err && err.message ? err.message : err));
     return true;
@@ -2933,23 +2938,28 @@ function authMiddleware(req, res, next) {
   if (!token) return res.status(401).json({ ok: false, error: 'Token manquant' });
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = elevateAdminIfAllowlisted(decoded);
-    if (req.user && req.user.emailVerified === undefined) {
-      req.user.emailVerified = true;
+    const username = String(decoded?.username || '').trim();
+    if (!username) {
+      return res.status(401).json({ ok: false, error: 'Token invalide (utilisateur manquant)' });
     }
-
-    // Block deleted/disabled accounts even if a stale token is presented
-    try {
-      const storedUser = getUserByUsername(decoded.username);
-      if (storedUser && isUserDeletedOrDisabled(storedUser)) {
+    if (!USE_POSTGRES && !dbEnabled) {
+      reloadUsers();
+    }
+    const storedUser = getUserByUsername(username);
+    if (!storedUser) {
+      if (isUsernameDeleted(username)) {
         return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
       }
-      if (!storedUser && isUsernameDeleted(decoded.username)) {
-        return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
-      }
-    } catch (lookupErr) {
-      console.warn('[auth] user lookup failed during token check:', lookupErr && lookupErr.message ? lookupErr.message : lookupErr);
+      return res.status(401).json({ ok: false, error: 'Token invalide (utilisateur non trouvé)' });
     }
+    if (isUserDeletedOrDisabled(storedUser)) {
+      return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+    }
+    const elevated = elevateAdminIfAllowlisted(storedUser);
+    if (elevated && elevated.emailVerified === undefined) {
+      elevated.emailVerified = true;
+    }
+    req.user = elevated;
 
     updateUserActivity(req.user.username, { reason: 'activity' })
       .catch(e => console.warn('[auth] unable to record activity:', e && e.message ? e.message : e));
@@ -3449,7 +3459,7 @@ app.post('/api/admin/sync-user', async (req, res) => {
     return res.status(403).json({ ok: false, error: 'Secret invalide' });
   }
 
-  const { username, email, role = 'user', password, passwordHash, stripeCustomerId, subscriptionStatus } = req.body || {};
+  const { username, email, role = 'user', password, passwordHash, stripeCustomerId, subscriptionStatus, demoStartDate } = req.body || {};
   if (!username) {
     return res.status(400).json({ ok: false, error: 'username requis' });
   }
@@ -3474,18 +3484,24 @@ app.post('/api/admin/sync-user', async (req, res) => {
     if (USE_POSTGRES && db) {
       const existing = await db.getUserByUsername(username);
       if (existing && existing.id) {
-        await db.updateUser(existing.id, {
+        const updates = {
           passwordhash: finalHash,
           email: email || existing.email,
           role: role || existing.role,
           stripecustomerid: stripeCustomerId || existing.stripecustomerid || existing.stripeCustomerId || null,
           subscriptionstatus: subscriptionStatus || existing.subscriptionstatus || existing.subscriptionStatus || null
-        });
+        };
+        if (demoStartDate) {
+          updates.demostartdate = demoStartDate;
+        }
+        await db.updateUser(existing.id, updates);
         return res.json({ ok: true, action: 'updated', mode: 'postgres' });
       }
 
       const newId = `user_${username}`;
-      await db.createUser(newId, username, finalHash, email || null, role || 'user');
+      await db.createUser(newId, username, finalHash, email || null, role || 'user', {
+        demoStartDate: demoStartDate || null
+      });
       // Note: subscription fields can be updated later if provided
       return res.json({ ok: true, action: 'created', mode: 'postgres' });
     }
@@ -3499,6 +3515,7 @@ app.post('/api/admin/sync-user', async (req, res) => {
       if (role) user.role = role;
       if (stripeCustomerId !== undefined) user.stripeCustomerId = stripeCustomerId;
       if (subscriptionStatus !== undefined) user.subscriptionStatus = subscriptionStatus;
+      if (demoStartDate !== undefined) user.demoStartDate = demoStartDate;
     } else {
       user = {
         id: `user_${username}`,
@@ -3509,7 +3526,7 @@ app.post('/api/admin/sync-user', async (req, res) => {
         stripeCustomerId: stripeCustomerId || null,
         subscriptionStatus: subscriptionStatus || null,
         createdAt: new Date().toISOString(),
-        demoStartDate: demoConfig.MODE === 'database' ? new Date().toISOString() : null
+        demoStartDate: demoStartDate || (demoConfig.MODE === 'database' ? new Date().toISOString() : null)
       };
     }
 
@@ -4207,31 +4224,9 @@ app.post('/api/admin/revoke-subscription', authMiddleware, async (req, res) => {
 // Get demo/trial status - also check Stripe subscription status
 app.get('/api/demo/status', authMiddleware, async (req, res) => {
   try {
-    let user = getUserByUsername(req.user.username);
-
-    // Auto-provision a local user with an active trial when the JWT is valid
-    // but the account has not yet been synced to this instance (common for new
-    // signups coming from the site vitrine before the local pack has the user).
+    const user = getUserByUsername(req.user.username);
     if (!user) {
-      if (isUsernameDeleted(req.user.username)) {
-        return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
-      }
-      console.warn(`[demo/status] User ${req.user.username} not found locally - auto-creating trial account`);
-      user = {
-        id: `auto_${req.user.username}_${Date.now()}`,
-        username: req.user.username,
-        email: req.user.email || null,
-        role: req.user.role || 'user',
-        demoStartDate: new Date().toISOString(),
-        subscriptionStatus: null,
-        subscriptionId: null,
-        stripeCustomerId: null,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-
-      persistUser(user);
-      ensureUserSubscription(user, { planName: 'auto-provision', status: 'trial' });
+      return res.status(404).json({ ok: false, error: 'Utilisateur non trouvé', code: 'user_not_found' });
     }
 
     if (isUserDeletedOrDisabled(user)) {
