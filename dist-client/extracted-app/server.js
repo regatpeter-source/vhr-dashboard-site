@@ -1017,64 +1017,10 @@ function getDemoRemainingDays(user) {
   return Math.max(0, remainingDays);
 }
 
-function buildUserAccessSummary(user, options = {}) {
-  if (!user) {
-    return {
-      demoStartDate: null,
-      demoExpiresAt: null,
-      demoRemainingDays: demoConfig.DEMO_DAYS,
-      demoExpired: false,
-      hasDemo: false,
-      hasActiveSubscription: false,
-      subscriptionStatus: 'none',
-      hasPerpetualLicense: false,
-      hasSubscriptionLicense: false,
-      licenseCount: 0,
-      licenseTypes: [],
-      activeLicenses: []
-    };
-  }
-
-  const licenses = options.licenses || loadLicenses();
-  const normalizedUsername = (user.username || '').toLowerCase();
-  const normalizedId = String(user.id || user.userId || '');
-
-  const activeLicenses = (licenses || []).filter(license => {
-    if (!license || String(license.status || '').toLowerCase() !== 'active') return false;
-    const licenseUsername = (license.username || '').toLowerCase();
-    const licenseUserId = String(license.userId || '');
-    return (licenseUserId && licenseUserId === normalizedId) || (licenseUsername && licenseUsername === normalizedUsername);
-  });
-
-  const hasPerpetualLicense = activeLicenses.some(l => l.type === 'perpetual');
-  const hasSubscriptionLicense = activeLicenses.some(l => l.type === 'subscription');
-  const hasDemo = Boolean(user.demoStartDate);
-  const demoRemainingDays = getDemoRemainingDays(user);
-  const demoExpired = isDemoExpired(user);
-  const demoExpiresAt = user.demoStartDate ? new Date(new Date(user.demoStartDate).getTime() + demoConfig.DEMO_DURATION_MS).toISOString() : null;
-  const hasActiveSubscription = (user.subscriptionStatus === 'active') || hasSubscriptionLicense;
-
-  return {
-    demoStartDate: user.demoStartDate || null,
-    demoExpiresAt,
-    demoRemainingDays,
-    demoExpired,
-    hasDemo,
-    hasActiveSubscription,
-    subscriptionStatus: hasActiveSubscription ? 'active' : (user.subscriptionStatus || 'none'),
-    hasPerpetualLicense,
-    hasSubscriptionLicense,
-    licenseCount: activeLicenses.length,
-    licenseTypes: Array.from(new Set(activeLicenses.map(l => l.type).filter(Boolean))),
-    activeLicenses: activeLicenses.map(l => ({
-      key: l.key,
-      type: l.type || null,
-      createdAt: l.createdAt || l.issuedAt || null
-    }))
-  };
-}
-
 const LICENSES_FILE = path.join(__dirname, 'data', 'licenses.json');
+const GUEST_DEMO_USERNAME = process.env.GUEST_DEMO_USERNAME || 'demo_guest';
+const GUEST_DEMO_EMAIL = process.env.GUEST_DEMO_EMAIL || 'demo@vhr-dashboard-site.com';
+const GUEST_DEMO_PASSWORD_HASH = process.env.GUEST_DEMO_PASSWORD_HASH || '$2b$10$wM3fMsYvhXhyye/I80gpJuAu9M51s2Qm1BjyTuCICXla17aAZEwSq';
 
 // ========== EMAIL CONFIGURATION ==========
 // Support both Brevo and Gmail configurations
@@ -2536,6 +2482,37 @@ function ensureUserSubscription(user, options = {}) {
   return true;
 }
 
+function startGuestDemoSession() {
+  const now = new Date().toISOString();
+  let guest = getUserByUsername(GUEST_DEMO_USERNAME);
+  if (!guest) {
+    guest = {
+      id: `guest_${Date.now()}`,
+      username: GUEST_DEMO_USERNAME,
+      email: GUEST_DEMO_EMAIL,
+      passwordHash: GUEST_DEMO_PASSWORD_HASH,
+      role: 'user',
+      createdAt: now,
+      updatedAt: now
+    };
+  }
+
+  guest.demoStartDate = now;
+  guest.subscriptionStatus = null;
+  guest.subscriptionId = null;
+  guest.updatedAt = now;
+
+  persistUser(guest);
+  ensureUserSubscription(guest, {
+    planName: 'guest-demo',
+    status: 'trial',
+    startDate: now,
+    endDate: new Date(Date.now() + demoConfig.DEMO_DURATION_MS).toISOString()
+  });
+
+  return guest;
+}
+
 function removeUserByUsername(username) {
   if (dbEnabled) {
       const user = getUserByUsername(username);
@@ -2599,18 +2576,7 @@ function authMiddleware(req, res, next) {
   if (!token) return res.status(401).json({ ok: false, error: 'Token manquant' });
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const username = String(decoded?.username || '').trim();
-    if (!username) {
-      return res.status(401).json({ ok: false, error: 'Token invalide (utilisateur manquant)' });
-    }
-    if (!USE_POSTGRES && !dbEnabled) {
-      reloadUsers();
-    }
-    const storedUser = getUserByUsername(username);
-    if (!storedUser) {
-      return res.status(401).json({ ok: false, error: 'Token invalide (utilisateur non trouvé)' });
-    }
-    req.user = elevateAdminIfAllowlisted(storedUser);
+    req.user = elevateAdminIfAllowlisted(decoded);
     next();
   } catch (e) {
     return res.status(401).json({ ok: false, error: 'Token invalide' });
@@ -3578,9 +3544,7 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
       persistUser(user);
       ensureUserSubscription(user, { planName: 'auto-provision', status: 'trial' });
     }
-    const licenses = loadLicenses();
-    const accessSnapshot = buildUserAccessSummary(user, { licenses });
-
+    
     // ADMINS: Skip license/demo checks and grant full access
     if (user.role === 'admin') {
       console.log(`[demo/status] Admin user ${user.username} - unrestricted access`);
@@ -3600,19 +3564,22 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
       });
     }
     
-    const demoExpired = accessSnapshot.demoExpired;
-    const remainingDays = accessSnapshot.demoRemainingDays;
-    const expirationDate = accessSnapshot.demoExpiresAt;
-
-    let hasValidSubscription = accessSnapshot.hasActiveSubscription;
-    let subscriptionStatus = accessSnapshot.subscriptionStatus;
+    const demoExpired = isDemoExpired(user);
+    const remainingDays = getDemoRemainingDays(user);
+    const expirationDate = user.demoStartDate ? 
+      new Date(new Date(user.demoStartDate).getTime() + demoConfig.DEMO_DURATION_MS).toISOString() : 
+      null;
     
     // Check if demo is expired
     if (demoExpired) {
       // Demo is expired - check if user has ACTIVE subscription with Stripe
+      let hasValidSubscription = false;
+      let subscriptionStatus = 'none';
       let stripeError = null;
-      if (!hasValidSubscription && user.stripeCustomerId) {
+      
+      if (user.stripeCustomerId) {
         try {
+          // Fetch latest subscription from Stripe for this customer
           const stripeSubs = await stripe.subscriptions.list({
             customer: user.stripeCustomerId,
             status: 'active',
@@ -3622,9 +3589,10 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
           if (stripeSubs.data && stripeSubs.data.length > 0) {
             const activeSub = stripeSubs.data[0];
             hasValidSubscription = activeSub.status === 'active';
-            subscriptionStatus = activeSub.status;
+            subscriptionStatus = activeSub.status; // 'active', 'past_due', etc.
             console.log(`[demo/status] User ${user.username} has Stripe subscription: ${subscriptionStatus}`);
           } else {
+            // No active subscription
             subscriptionStatus = 'none';
             console.log(`[demo/status] User ${user.username} has no active Stripe subscription`);
           }
@@ -3632,20 +3600,17 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
           console.error(`[demo/status] Error checking Stripe subscription for ${user.username}:`, e.message);
           stripeError = e.message;
         }
-      } else if (!hasValidSubscription) {
+      } else {
+        // No Stripe customer ID
+        subscriptionStatus = 'none';
         console.log(`[demo/status] User ${user.username} has no Stripe customer ID`);
       }
       
-      const accessBlocked = !(hasValidSubscription || accessSnapshot.hasPerpetualLicense);
-      const message = accessSnapshot.hasPerpetualLicense
-        ? '✅ Licence à vie active'
-        : hasValidSubscription
-          ? '✅ Accès accordé via abonnement actif'
-          : '❌ Essai expiré - Abonnement requis pour continuer';
+      // If demo expired AND no valid subscription = BLOCKED
       res.json({
         ok: true,
         demo: {
-          demoStartDate: accessSnapshot.demoStartDate,
+          demoStartDate: user.demoStartDate || null,
           demoExpired: true,
           remainingDays: 0,
           totalDays: demoConfig.DEMO_DAYS,
@@ -3653,35 +3618,26 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
           hasValidSubscription: hasValidSubscription,
           subscriptionStatus: subscriptionStatus,
           stripeError: stripeError,
-          hasPerpetualLicense: accessSnapshot.hasPerpetualLicense,
-          licenseTypes: accessSnapshot.licenseTypes,
-          licenseCount: accessSnapshot.licenseCount,
-          activeLicenses: accessSnapshot.activeLicenses,
-          accessBlocked: accessBlocked,
-          message: message
+          accessBlocked: !hasValidSubscription, // KEY: Block access if no valid subscription
+          message: hasValidSubscription 
+            ? '✅ Accès accordé via abonnement actif'
+            : '❌ Essai expiré - Abonnement requis pour continuer'
         }
       });
     } else {
       // Demo is still valid - user can access
-      const message = accessSnapshot.hasPerpetualLicense
-        ? '✅ Licence à vie active'
-        : `✅ Essai en cours - ${remainingDays} jour(s) restant(s)`;
       res.json({
         ok: true,
         demo: {
-          demoStartDate: accessSnapshot.demoStartDate,
+          demoStartDate: user.demoStartDate || null,
           demoExpired: false,
           remainingDays: remainingDays,
           totalDays: demoConfig.DEMO_DAYS,
           expirationDate: expirationDate,
-          hasValidSubscription: hasValidSubscription,
-          subscriptionStatus: subscriptionStatus,
-          hasPerpetualLicense: accessSnapshot.hasPerpetualLicense,
-          licenseTypes: accessSnapshot.licenseTypes,
-          licenseCount: accessSnapshot.licenseCount,
-          activeLicenses: accessSnapshot.activeLicenses,
+          hasValidSubscription: user.subscriptionStatus === 'active',
+          subscriptionStatus: user.subscriptionStatus || 'none',
           accessBlocked: false,
-          message: message
+          message: `✅ Essai en cours - ${remainingDays} jour(s) restant(s)`
         }
       });
     }
@@ -3692,8 +3648,11 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
 });
 
 // Génère un jeton JWT pour un utilisateur invité en démonstration 7 jours
-app.post('/api/demo/activate-guest', (req, res) => {
-  res.status(403).json({ ok: false, error: 'Activation de démo invité désactivée. Connectez-vous avec un compte réel.' });
+app.post('/api/demo/activate-guest', async (req, res) => {
+  res.status(403).json({
+    ok: false,
+    error: 'Activation de démo invité désactivée. Connectez-vous avec un compte réel.'
+  });
 });
 
 // ========== PROTECTED DOWNLOADS (VHR PRO) ==========
@@ -4867,12 +4826,7 @@ app.get('/api/admin', authMiddleware, (req, res) => {
 app.get('/api/admin/users', authMiddleware, (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;
   try {
-    const licenses = loadLicenses();
-    const enrichedUsers = (users || []).map(u => ({
-      ...u,
-      accessSummary: buildUserAccessSummary(u, { licenses })
-    }));
-    res.json({ ok: true, users: enrichedUsers });
+    res.json({ ok: true, users });
   } catch (e) {
     console.error('[api] admin/users:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -5038,6 +4992,39 @@ app.get('/api/test/messages', (req, res) => {
     res.json({ ok: true, messages, count: messages.length });
   } catch (e) {
     console.error('[api/test/messages] error:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Get all messages (AUTHENTICATED)
+app.get('/api/admin/messages', authMiddleware, async (req, res) => {
+  console.log('[api/admin/messages] Called');
+  console.log('[api/admin/messages] User role:', req.user?.role);
+  if (!ensureAllowedAdmin(req, res)) return;
+  try {
+    let messageList;
+    
+    if (USE_POSTGRES) {
+      messageList = await db.getMessages();
+    } else {
+      messageList = messages || [];
+    }
+    
+    res.json({ ok: true, messages: messageList });
+  } catch (e) {
+    console.error('[api] admin/messages:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Get unread messages only
+app.get('/api/admin/messages/unread', authMiddleware, (req, res) => {
+  if (!ensureAllowedAdmin(req, res)) return;
+  try {
+    const unread = messages.filter(m => m.status === 'unread');
+    res.json({ ok: true, messages: unread });
+  } catch (e) {
+    console.error('[api] admin/messages/unread:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
