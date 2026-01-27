@@ -106,17 +106,15 @@ const ADMIN_INIT_SECRET = process.env.ADMIN_INIT_SECRET || null;
 // Fallbacks to the same value embedded in dashboard-pro.js to avoid 403 if the
 // environment variable is missing on local installs.
 const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
+const SYNC_TARGETS_JSON = (process.env.SYNC_TARGETS_JSON || '').trim();
 const SYNC_TARGET_URLS_RAW = process.env.SYNC_TARGET_URLS || process.env.DASHBOARD_SYNC_TARGETS || '';
-const SYNC_TARGET_BASE_URLS = SYNC_TARGET_URLS_RAW
-  .split(/[,;\s]+/)
-  .map(url => url.trim())
-  .filter(Boolean)
-  .map(url => url.replace(/\/+$/g, ''));
+const SYNC_TARGET_TIMEOUT_MS = Math.max(2000, Number.parseInt(process.env.SYNC_TARGET_TIMEOUT_MS || '6000', 10) || 6000);
 const SYNC_USER_ENDPOINT_RAW = process.env.SYNC_USER_ENDPOINT || '/api/admin/sync-user';
 const SYNC_USER_ENDPOINT = SYNC_USER_ENDPOINT_RAW.startsWith('/')
   ? SYNC_USER_ENDPOINT_RAW
   : '/' + SYNC_USER_ENDPOINT_RAW;
-const SYNC_TARGET_TIMEOUT_MS = Math.max(2000, Number.parseInt(process.env.SYNC_TARGET_TIMEOUT_MS || '6000', 10) || 6000);
+const SYNC_TARGETS = parseSyncTargetsConfig();
+const SYNC_TARGET_BASE_URLS = SYNC_TARGETS.map(t => t.url);
 const HAS_SYNC_TARGETS = SYNC_TARGET_BASE_URLS.length > 0;
 
 const FORCE_HTTP = process.env.FORCE_HTTP === '1';
@@ -149,6 +147,57 @@ function ensureAllowedAdmin(req, res) {
     return false;
   }
   return true;
+}
+
+function normalizeSyncTargetEntry(entry) {
+  if (!entry) return null;
+  const link = (entry.url || entry.target || entry.baseUrl || '').toString().trim();
+  if (!link) return null;
+  const sanitizedUrl = link.replace(/\/+$/g, '');
+  const candidateSecret = (entry.secret || entry.syncSecret || entry.accessSecret || entry.authSecret || '').toString().trim();
+  const secret = candidateSecret || SYNC_USERS_SECRET || '';
+  if (!secret) {
+    console.warn('[sync] Missing secret for target', sanitizedUrl); // Do not log secret
+    return null;
+  }
+  const timeoutCandidate = Number.parseInt(entry.timeoutMs || entry.timeout || entry.syncTimeout, 10);
+  const timeoutMs = Number.isFinite(timeoutCandidate) && timeoutCandidate > 0 ? Math.max(timeoutCandidate, 1000) : SYNC_TARGET_TIMEOUT_MS;
+  return { url: sanitizedUrl, secret, timeoutMs };
+}
+
+function parseSyncTargetsConfig() {
+  const targets = [];
+  const seen = new Set();
+
+  const addEntry = (entry) => {
+    const normalized = normalizeSyncTargetEntry(entry);
+    if (!normalized || seen.has(normalized.url)) return;
+    seen.add(normalized.url);
+    targets.push(normalized);
+  };
+
+  if (SYNC_TARGETS_JSON) {
+    try {
+      const parsed = JSON.parse(SYNC_TARGETS_JSON);
+      if (Array.isArray(parsed)) {
+        parsed.forEach(addEntry);
+      } else if (parsed && typeof parsed === 'object') {
+        addEntry(parsed);
+      }
+    } catch (e) {
+      console.warn('[sync] Failed to parse SYNC_TARGETS_JSON:', e && e.message ? e.message : e);
+    }
+  }
+
+  if (SYNC_TARGET_URLS_RAW) {
+    SYNC_TARGET_URLS_RAW
+      .split(/[,;\s]+/)
+      .map(url => url.trim())
+      .filter(Boolean)
+      .forEach(raw => addEntry({ url: raw }));
+  }
+
+  return targets;
 }
 
 function elevateAdminIfAllowlisted(user) {
@@ -2717,6 +2766,79 @@ function ensureUserSubscription(user, options = {}) {
   }
 
   return true;
+}
+
+function promiseWithTimeout(promise, ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return promise;
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  });
+}
+
+function buildSyncPayload(user) {
+  const normalized = normalizeUserRecord(user);
+  if (!normalized || !normalized.username) return null;
+  return {
+    username: normalized.username,
+    email: normalized.email || null,
+    role: normalized.role || 'user',
+    passwordHash: normalized.passwordHash || normalized.passwordhash || null,
+    stripeCustomerId: normalized.stripeCustomerId || normalized.stripecustomerid || null,
+    subscriptionStatus: normalized.subscriptionStatus || normalized.subscriptionstatus || null,
+    subscriptionId: normalized.subscriptionId || normalized.subscriptionid || null,
+    demoStartDate: normalized.demoStartDate || normalized.createdAt || null,
+    emailVerified: isEmailVerified(normalized)
+  };
+}
+
+async function syncUserToTarget(target, payload) {
+  if (!target || !target.url) {
+    throw new Error('Invalid sync target');
+  }
+  const endpoint = `${target.url}${SYNC_USER_ENDPOINT}`;
+  const body = JSON.stringify(payload);
+  const response = await promiseWithTimeout(fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-sync-secret': target.secret
+    },
+    body
+  }), target.timeoutMs || SYNC_TARGET_TIMEOUT_MS);
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    const message = `HTTP ${response.status} ${response.statusText}` + (text ? ` ${text}` : '');
+    throw new Error(message.trim());
+  }
+}
+
+async function triggerUserSync(user) {
+  if (!HAS_SYNC_TARGETS) return;
+  const payload = buildSyncPayload(user);
+  if (!payload) return;
+
+  const start = Date.now();
+  const results = await Promise.allSettled(SYNC_TARGETS.map(target => syncUserToTarget(target, payload)));
+  const failures = [];
+  results.forEach((result, idx) => {
+    if (result.status === 'rejected') {
+      failures.push({
+        target: SYNC_TARGETS[idx].url,
+        reason: result.reason && result.reason.message ? result.reason.message : String(result.reason || 'unknown')
+      });
+    }
+  });
+
+  const duration = Date.now() - start;
+  if (results.length) {
+    console.log(`[sync] ${payload.username} pushed to ${results.length} targets in ${duration}ms (failures: ${failures.length})`);
+    failures.forEach(f => console.warn(`[sync] ${payload.username} -> ${f.target} failed: ${f.reason}`));
+  }
 }
 
 function removeUserByUsername(username) {
@@ -8423,6 +8545,8 @@ app.post('/api/register', async (req, res) => {
       planName: 'account-signup',
       status: 'trial'
     });
+
+    triggerUserSync(newUser);
 
     // Envoyer l'email de confirmation de compte (best-effort)
     const verificationEnforced = shouldEnforceEmailVerification(newUser);
