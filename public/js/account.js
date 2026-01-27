@@ -3,29 +3,8 @@
   const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
   const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
   const PROD_API = 'https://www.vhr-dashboard-site.com';
-  const DEFAULT_SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
       // Forcer l'API vers la prod pour que les comptes créés en ligne soient reconnus, même si la page est servie en localhost/LAN.
       const API_BASE = PROD_API;
-  let cachedSyncUsersSecret = DEFAULT_SYNC_USERS_SECRET;
-  let syncSecretPromise = null;
-
-  function getSyncUsersSecret() {
-    if (syncSecretPromise) return syncSecretPromise;
-    syncSecretPromise = fetch('/api/admin/sync-config', {
-      credentials: 'include'
-    })
-    .then(async res => {
-      if (!res.ok) throw new Error('sync config unavailable');
-      const payload = await res.json().catch(() => null);
-      return payload?.syncSecret || DEFAULT_SYNC_USERS_SECRET;
-    })
-    .catch(() => DEFAULT_SYNC_USERS_SECRET)
-    .then(secret => {
-      cachedSyncUsersSecret = secret;
-      return cachedSyncUsersSecret;
-    });
-    return syncSecretPromise;
-  }
   const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
 
   // --- Token bootstrap via querystring (to support redirection depuis le site https) ---
@@ -347,18 +326,6 @@
         return;
       }
       loginMessage.textContent = 'Compte créé ✓ Vous êtes connecté(e).'; 
-      // Sync vers backend Dashboard PRO (PostgreSQL) pour usage LAN/HTTP
-      try {
-        const syncSecret = await getSyncUsersSecret();
-        fetch(API_BASE + '/api/admin/sync-user', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-sync-secret': syncSecret
-          },
-          body: JSON.stringify({ username, email, role: 'user', password: p1 })
-        }).catch(()=>{});
-      } catch (err) { console.warn('[signup] sync-user failed', err); }
       await loadMe(); 
       // Pour les admins éventuels, rediriger vers l’admin; sinon rester dans l’espace compte sécurisé
       const role = (res.user && res.user.role) || res.role || res.userRole || 'user';

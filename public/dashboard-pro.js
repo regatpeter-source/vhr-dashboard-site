@@ -114,16 +114,18 @@ async function syncTokenFromCookie() {
 	// to LAN HTTP) but localStorage lacks the JWT, ask the server to echo it once so we can
 	// propagate it via ?token=… on LAN links.
 	const existing = readAuthToken();
-	if (existing) return existing;
-	try {
-		const res = await api('/api/check-auth?includeToken=1');
-		if (res && res.ok && res.authenticated && res.token) {
-			return saveAuthToken(res.token);
+		if (existing) {
+			return existing;
 		}
-	} catch (e) {
-		console.warn('[auth] syncTokenFromCookie failed', e);
-	}
-	return '';
+		try {
+			const res = await api('/api/check-auth?includeToken=1');
+			if (res && res.ok && res.authenticated && res.token) {
+				return saveAuthToken(res.token);
+			}
+		} catch (e) {
+			console.warn('[auth] syncTokenFromCookie failed', e);
+		}
+		return '';
 }
 
 function captureTokenFromQuery() {
@@ -1790,28 +1792,7 @@ const AUTH_API_BASE = (() => {
 	if (FORCE_PROD_AUTH) return PRODUCTION_AUTH_ORIGIN;
 	return PRODUCTION_AUTH_ORIGIN;
 })();
-const DEFAULT_SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
 const API_BASE = '/api';
-let cachedSyncUsersSecret = DEFAULT_SYNC_USERS_SECRET;
-let syncSecretPromise = null;
-
-function getSyncUsersSecret() {
-	if (syncSecretPromise) return syncSecretPromise;
-	syncSecretPromise = fetch('/api/admin/sync-config', {
-		credentials: 'include'
-	})
-	.then(async res => {
-		if (!res.ok) throw new Error('sync config unavailable');
-		const payload = await res.json().catch(() => null);
-		return payload?.syncSecret || DEFAULT_SYNC_USERS_SECRET;
-	})
-	.catch(() => DEFAULT_SYNC_USERS_SECRET)
-	.then(secret => {
-		cachedSyncUsersSecret = secret;
-		return cachedSyncUsersSecret;
-	});
-	return syncSecretPromise;
-}
 const socket = io({
 	reconnection: true,
 	reconnectionAttempts: 5,
@@ -4131,20 +4112,6 @@ window.loginUser = async function() {
 		if (res.ok && data.ok) {
 			const syncedUsername = data.user?.username || data.user?.name || identifier;
 			const syncedEmail = data.user?.email || identifier;
-			try {
-				const syncSecret = await getSyncUsersSecret();
-				await fetch('/api/admin/sync-user', {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						'x-sync-secret': syncSecret
-					},
-					body: JSON.stringify({ username: syncedUsername, email: syncedEmail, role: 'user', password })
-				});
-			} catch (syncErr) {
-				console.warn('[loginUser] sync-user failed', syncErr);
-			}
-
 			// Obtenir un token local pour les requêtes HTTP/localhost
 			try {
 				const localRes = await fetch('/api/login', {
@@ -4164,20 +4131,6 @@ window.loginUser = async function() {
 
 		// 4) Fallback local si prod échoue
 		if (!(res.ok && data.ok)) {
-			try {
-				// Créer/synchroniser l'utilisateur en local avec le secret partagé
-				await fetch('/api/admin/sync-user', {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						'x-sync-secret': await getSyncUsersSecret()
-					},
-					body: JSON.stringify({ username: identifier, email: identifier, role: 'user', password })
-				});
-			} catch (syncErr) {
-				console.warn('[loginUser] sync-user after prod failure failed', syncErr);
-			}
-
 			try {
 				const localRes = await fetch('/api/login', {
 					method: 'POST',

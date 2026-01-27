@@ -117,6 +117,8 @@ const SYNC_TARGETS = parseSyncTargetsConfig();
 const SYNC_TARGET_BASE_URLS = SYNC_TARGETS.map(t => t.url);
 const HAS_SYNC_TARGETS = SYNC_TARGET_BASE_URLS.length > 0;
 
+const AUTH_API_BASE = (process.env.AUTH_API_BASE || 'https://www.vhr-dashboard-site.com').replace(/\/+$/, '');
+
 const FORCE_HTTP = process.env.FORCE_HTTP === '1';
 const NO_BROWSER_FALLBACK = process.env.NO_BROWSER_FALLBACK === '1';
 const QUIET_MODE = process.env.QUIET_MODE === '1';
@@ -2993,6 +2995,51 @@ function tryDecodeUser(req) {
   }
 }
 
+async function attemptRemoteDashboardLogin(identifier, password) {
+  if (!AUTH_API_BASE || !identifier || !password) return null;
+  const attempts = [
+    { path: '/api/login', payload: { username: identifier, password } },
+    { path: '/api/auth/login', payload: { email: identifier, password } }
+  ];
+  for (const attempt of attempts) {
+    try {
+      const response = await fetch(AUTH_API_BASE + attempt.path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(attempt.payload)
+      });
+      const data = await response.json().catch(() => null);
+      if (response.ok && data && data.ok) {
+        return { data, endpoint: attempt.path };
+      }
+      console.warn(`[remote-auth] ${attempt.path} did not authenticate (status ${response.status})`);
+    } catch (error) {
+      console.warn(`[remote-auth] ${attempt.path} error:`, error && error.message ? error.message : error);
+    }
+  }
+  return null;
+}
+
+async function ensureLocalUserFromRemote(remoteUser = {}, password = '', fallbackUsername = '') {
+  const username = (remoteUser.username || remoteUser.name || fallbackUsername || '').toString().trim();
+  if (!username) return null;
+  const passwordHash = await bcrypt.hash(password, 10);
+  const now = new Date().toISOString();
+  const baseUser = await findUserByUsernameAsync(username);
+  const updatedUser = {
+    id: baseUser?.id || `user_${username}`,
+    username,
+    email: remoteUser.email || baseUser?.email || `${username}@dashboard.local`,
+    role: remoteUser.role || baseUser?.role || 'user',
+    passwordHash,
+    demoStartDate: baseUser?.demoStartDate || now,
+    createdAt: baseUser?.createdAt || now,
+    updatedAt: now
+  };
+  persistUser(updatedUser);
+  return updatedUser;
+}
+
 // --- Route de login ---
 app.post('/api/login', async (req, res) => {
   console.log('[api/login] request received:', req.body);
@@ -3013,8 +3060,17 @@ app.post('/api/login', async (req, res) => {
     if (isUsernameDeleted(username)) {
       return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
     }
-    console.log('[api/login] user not found');
-    return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
+    console.log('[api/login] user not found locally, trying remote auth');
+    const remoteAuth = await attemptRemoteDashboardLogin(username, password);
+    if (remoteAuth && remoteAuth.data && remoteAuth.data.ok) {
+      console.log('[api/login] remote auth succeeded, syncing local user');
+      await ensureLocalUserFromRemote(remoteAuth.data.user || {}, password, username);
+      user = await findUserByUsernameAsync((remoteAuth.data.user?.username || remoteAuth.data.user?.name || username).trim());
+    }
+    if (!user) {
+      console.log('[api/login] remote auth failed or no user created');
+      return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
+    }
   }
 
   if (isUserDeletedOrDisabled(user)) {
@@ -3451,15 +3507,31 @@ app.post('/api/admin/init-users', async (req, res) => {
 // Usage: POST /api/admin/sync-user avec en-tête x-sync-secret ou body.secret = SYNC_USERS_SECRET
 // Payload attendu: { username, email, role, passwordHash?, password?, stripeCustomerId?, subscriptionStatus? }
 app.post('/api/admin/sync-user', async (req, res) => {
-  if (!SYNC_USERS_SECRET) {
-    return res.status(403).json({ ok: false, error: 'SYNC_USERS_SECRET non configuré' });
-  }
   const providedSecret = req.headers['x-sync-secret'] || req.body?.secret || req.query?.secret;
-  if (providedSecret !== SYNC_USERS_SECRET) {
-    return res.status(403).json({ ok: false, error: 'Secret invalide' });
+  const secretValid = SYNC_USERS_SECRET && providedSecret === SYNC_USERS_SECRET;
+  const authUser = tryDecodeUser(req);
+  if (!secretValid && !authUser) {
+    const msg = SYNC_USERS_SECRET ? 'Secret invalide' : 'SYNC_USERS_SECRET non configuré';
+    return res.status(403).json({ ok: false, error: msg });
   }
 
-  const { username, email, role = 'user', password, passwordHash, stripeCustomerId, subscriptionStatus, demoStartDate } = req.body || {};
+  const payload = req.body || {};
+  const targetUsername = (payload.username || payload.name || authUser?.username || '').toString().trim();
+  if (!targetUsername) {
+    return res.status(400).json({ ok: false, error: 'username requis' });
+  }
+
+  if (!secretValid && authUser && authUser.username !== targetUsername && authUser.role !== 'admin') {
+    return res.status(403).json({ ok: false, error: 'Impossible de synchroniser un autre utilisateur' });
+  }
+
+  payload.username = targetUsername;
+  if (!secretValid && authUser && !payload.email) {
+    payload.email = authUser.email || null;
+  }
+
+  const { email, role = 'user', password, passwordHash, stripeCustomerId, subscriptionStatus, demoStartDate } = payload;
+  const username = payload.username;
   if (!username) {
     return res.status(400).json({ ok: false, error: 'username requis' });
   }
@@ -3468,7 +3540,7 @@ app.post('/api/admin/sync-user', async (req, res) => {
     return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
   }
 
-  const emailProvided = Object.prototype.hasOwnProperty.call(req.body || {}, 'email');
+  const emailProvided = Object.prototype.hasOwnProperty.call(payload, 'email');
   const normalizedEmail = normalizeEmailValue(email);
 
   try {
@@ -3539,17 +3611,6 @@ app.post('/api/admin/sync-user', async (req, res) => {
 });
 
 // Fournit aux clients locaux le secret de synchronisation actif (pour éviter les builds figés)
-app.get('/api/admin/sync-config', (req, res) => {
-  if (!SYNC_USERS_SECRET) {
-    return res.status(404).json({ ok: false, error: 'SYNC_USERS_SECRET non configuré' });
-  }
-  res.json({
-    ok: true,
-    syncSecret: SYNC_USERS_SECRET,
-    syncEndpoint: SYNC_USER_ENDPOINT
-  });
-});
-
 // Diagnostic endpoint to check database and user status (admin only)
 app.get('/api/admin/diagnose', authMiddleware, async (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;
