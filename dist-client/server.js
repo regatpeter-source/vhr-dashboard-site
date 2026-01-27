@@ -1931,7 +1931,8 @@ function saveUsers() {
       latestInvoiceId: u.latestInvoiceId || null,
       lastInvoicePaidAt: u.lastInvoicePaidAt || null,
       subscriptionStatus: u.subscriptionStatus || null,
-      subscriptionId: u.subscriptionId || null
+      subscriptionId: u.subscriptionId || null,
+      demoStartDate: u.demoStartDate || null
     }));
     fs.writeFileSync(USERS_FILE, JSON.stringify(toSave, null, 2), 'utf8');
     return true;
