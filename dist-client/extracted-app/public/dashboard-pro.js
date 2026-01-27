@@ -82,9 +82,19 @@ let currentUser = localStorage.getItem('vhr_user') || '';
 let userList = JSON.parse(localStorage.getItem('vhr_user_list') || '[]');
 let userRoles = JSON.parse(localStorage.getItem('vhr_user_roles') || '{}');
 let licenseKey = localStorage.getItem('vhr_license_key') || '';
-let licenseStatus = { licensed: false, trial: false, expired: false };
+let licenseStatus = {
+	licensed: false,
+	trial: false,
+	expired: false,
+	accessBlocked: false,
+	demo: null,
+	subscriptionStatus: 'unknown',
+	hasPerpetualLicense: false,
+	licenseCount: 0
+};
 const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
 let installationOverlayElement = null;
+const DEMO_GUEST_USERNAME = 'demo_guest';
 
 function readAuthToken() {
 	return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
@@ -851,6 +861,17 @@ function getProfileContent(stats, role) {
 					<button onclick='confirmDeleteAccount()' style='width:100%;background:#e74c3c;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;'>
 						🗑️ Supprimer mon compte
 					</button>
+				</div>
+
+				<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>💠 Statut d'accès</h3>
+				<div style='background:#23272f;padding:18px;border-radius:8px;'>
+					<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;'>
+						<span style='color:#95a5a6;font-size:13px;'>Statut actuel</span>
+						${getAccessStatusBadge(licenseStatus.demo || licenseStatus)}
+					</div>
+					<div style='background:#1a1d24;padding:12px;border-radius:6px;'>
+						${buildAccessSummaryHtml(licenseStatus.demo || licenseStatus)}
+					</div>
 				</div>
 			</div>
 		</div>
@@ -3759,6 +3780,14 @@ async function checkLicense() {
 		
 		const demoStatus = res.demo;
 		console.log('[license] Demo status:', demoStatus);
+		licenseStatus.demo = demoStatus;
+		licenseStatus.subscriptionStatus = demoStatus.subscriptionStatus || 'unknown';
+		licenseStatus.hasPerpetualLicense = Boolean(demoStatus.hasPerpetualLicense);
+		licenseStatus.licenseCount = demoStatus.licenseCount || 0;
+		licenseStatus.accessBlocked = Boolean(demoStatus.accessBlocked);
+		licenseStatus.trial = !demoStatus.demoExpired;
+		licenseStatus.expired = Boolean(demoStatus.demoExpired);
+		licenseStatus.licensed = Boolean(demoStatus.hasValidSubscription || demoStatus.hasPerpetualLicense || !demoStatus.demoExpired || demoStatus.subscriptionStatus === 'admin');
 		
 		// Demo is still valid - show banner with remaining days
 		if (!demoStatus.demoExpired) {
@@ -3826,6 +3855,40 @@ function showTrialBanner(daysRemaining) {
 	}
 }
 
+function buildAccessSummaryHtml(status = {}) {
+	const detail = status.demo || status;
+	const demoLabel = detail.demoExpired
+		? 'Expiré'
+		: Number.isFinite(detail.remainingDays) ? `${detail.remainingDays} jour(s)` : 'N/A';
+	const subscriptionLabel = detail.subscriptionStatus || 'aucun';
+	const licenseLabel = detail.hasPerpetualLicense
+		? `Oui${detail.licenseCount > 1 ? ` (${detail.licenseCount})` : ''}`
+		: 'Non';
+	return `
+		<div style="display:flex;flex-direction:column;gap:6px;color:#ecf0f3;">
+			<div style="display:flex;justify-content:space-between;">
+				<span>🎯 Essai</span>
+				<strong>${demoLabel}</strong>
+			</div>
+			<div style="display:flex;justify-content:space-between;">
+				<span>📅 Abonnement</span>
+				<strong>${subscriptionLabel}</strong>
+			</div>
+			<div style="display:flex;justify-content:space-between;">
+				<span>🛡️ Licence</span>
+				<strong>${licenseLabel}</strong>
+			</div>
+		</div>
+	`;
+}
+
+function getAccessStatusBadge(detail = {}) {
+	if (detail.accessBlocked) {
+		return '<span style="color:#e74c3c;font-weight:600;">🔒 Bloqué</span>';
+	}
+	return '<span style="color:#2ecc71;font-weight:600;">✅ Actif</span>';
+}
+
 window.showUnlockModal = function(status = licenseStatus) {
 	let modal = document.getElementById('unlockModal');
 	if (modal) modal.remove();
@@ -3842,11 +3905,13 @@ window.showUnlockModal = function(status = licenseStatus) {
 		headerMessage = '<h2 style="color:#e74c3c;">⚠️ Essai expiré - Abonnement requis</h2>';
 		bodyMessage = '<p style="color:#95a5a6;">Votre accès à VHR Dashboard a expiré car votre période d\'essai est terminée et aucun abonnement n\'est actif.<br><br>Choisissez une option ci-dessous pour continuer :</p>';
 	}
+	const summaryHtml = buildAccessSummaryHtml(status);
 	
 	modal.innerHTML = `
 		<div style="background:linear-gradient(135deg, #1a1d24, #2c3e50);max-width:700px;width:90%;border-radius:16px;padding:40px;color:#fff;box-shadow:0 8px 32px #000;">
 			${headerMessage}
 			${bodyMessage}
+			${summaryHtml}
 			
 			<!-- Option 1: Abonnement mensuel -->
 			<div style="background:#2c3e50;padding:24px;border-radius:12px;margin:20px 0;border:2px solid #3498db;">
@@ -4340,6 +4405,15 @@ async function checkJWTAuth() {
 		console.log('[auth] API response:', res);
 		
 		if (res && res.ok && res.authenticated && res.user) {
+			const username = (res.user.username || '').toLowerCase();
+			if (username === DEMO_GUEST_USERNAME) {
+				console.warn('[auth] Demo guest tokens blocked');
+				await revokeGuestSession();
+				const overlay = document.getElementById('authOverlay');
+				if (overlay) overlay.style.display = 'none';
+				showAuthModal('login');
+				return false;
+			}
 			if (res.token) {
 				saveAuthToken(res.token);
 			}
@@ -4350,13 +4424,6 @@ async function checkJWTAuth() {
 			return true;
 		} else {
 			console.log('[auth] ❌ No valid JWT - authenticated =', res?.authenticated);
-			console.log('[auth] Attempting guest demo activation...');
-			const guestActivated = await activateGuestDemo();
-			if (guestActivated) {
-				console.log('[auth] Guest demo activated, proceeding');
-				return true;
-			}
-			console.log('[auth] Guest demo activation failed, showing auth modal');
 			// Hide the loading overlay immediately
 			const overlay = document.getElementById('authOverlay');
 			if (overlay) {
@@ -4381,25 +4448,15 @@ async function checkJWTAuth() {
 	}
 }
 
-async function activateGuestDemo() {
+async function revokeGuestSession() {
 	try {
-		const res = await api('/api/demo/activate-guest', { method: 'POST' });
-		if (res && res.ok && res.user) {
-			if (res.token) {
-				saveAuthToken(res.token);
-			}
-			currentUser = res.user.username || res.user.name || res.user.email;
-			localStorage.setItem('vhr_current_user', currentUser);
-			showToast('✅ Essai invité activé pour 7 jours', 'success');
-			return true;
-		}
-		console.warn('[guest] activation response invalid', res);
-	} catch (e) {
-		console.error('[guest] activation error:', e);
+		await api('/api/logout', { method: 'POST' });
+	} catch (err) {
+		console.warn('[auth] Guest logout failed', err);
 	}
-	return false;
+	saveAuthToken('');
+	showToast('❌ Le mode invité a été bloqué. Connectez-vous avec votre compte.', 'warning');
 }
-
 
 // ========== INIT ========== 
 console.log('[Dashboard PRO] Init');
