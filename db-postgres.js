@@ -130,19 +130,42 @@ async function initDatabase() {
         CREATE TABLE IF NOT EXISTS subscriptions (
           id SERIAL PRIMARY KEY,
           userid VARCHAR(255) REFERENCES users(id),
-          plan VARCHAR(50),
+          username VARCHAR(255),
+          email VARCHAR(255),
+          planname VARCHAR(50),
           status VARCHAR(50),
           stripesubscriptionid VARCHAR(255),
+          stripepriceid VARCHAR(255),
+          totalpaid NUMERIC DEFAULT 0,
+          startdate TIMESTAMPTZ,
+          enddate TIMESTAMPTZ,
+          cancelledat TIMESTAMPTZ,
           createdat TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
           expiresat TIMESTAMPTZ,
           updatedat TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         )
-          emailverified BOOLEAN DEFAULT FALSE,
-          emailverificationtoken TEXT,
-          emailverificationexpiresat TIMESTAMPTZ,
-          emailverificationsentat TIMESTAMPTZ,
-          emailverifiedat TIMESTAMPTZ,
       `);
+      const subscriptionColumnChecks = [
+        { name: 'username', type: 'VARCHAR(255)' },
+        { name: 'email', type: 'VARCHAR(255)' },
+        { name: 'planname', type: 'VARCHAR(50)' },
+        { name: 'stripepriceid', type: 'VARCHAR(255)' },
+        { name: 'totalpaid', type: 'NUMERIC DEFAULT 0' },
+        { name: 'startdate', type: 'TIMESTAMPTZ' },
+        { name: 'enddate', type: 'TIMESTAMPTZ' },
+        { name: 'cancelledat', type: 'TIMESTAMPTZ' }
+      ];
+      for (const col of subscriptionColumnChecks) {
+        try {
+          await client.query(`ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`);
+          console.log(`[DB] Subscriptions column ${col.name} ensured`);
+        } catch (subColErr) {
+          if (subColErr.message && subColErr.message.includes('already exists')) {
+            continue;
+          }
+          console.log(`[DB] Note: Could not add subscriptions column ${col.name}:`, subColErr && subColErr.message);
+        }
+      }
       console.log('[DB] [32m[1m✓[0m Subscriptions table ready');
 
       await importMessagesIfNeeded(client);
