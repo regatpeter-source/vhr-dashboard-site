@@ -5369,13 +5369,30 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
 
     // Normalize dates and filter out test accounts from response
     const normalized = Array.isArray(list)
-      ? list.map(u => {
+      ? (await Promise.all(list.map(async u => {
           const createdAt = u.createdAt || u.createdat || u.created || u.updatedAt || u.updatedat || null;
           const updatedAt = u.updatedAt || u.updatedat || null;
           const lastLogin = u.lastLogin || u.lastlogin || null;
           const lastActivity = u.lastActivity || u.lastactivity || null;
-          return { ...u, createdAt, updatedAt, lastLogin, lastActivity };
-        })
+          const normalizedUser = normalizeUserRecord({ ...u, createdAt, updatedAt, lastLogin, lastActivity });
+          if (!normalizedUser) return null;
+          const demoStatus = await buildDemoStatusForUser(normalizedUser);
+          const demoRemainingDays = Number.isFinite(demoStatus.remainingDays)
+            ? Math.max(0, demoStatus.remainingDays)
+            : 0;
+          const accessSummary = {
+            hasDemo: true,
+            demoExpired: !!demoStatus.demoExpired,
+            demoRemainingDays,
+            demoMessage: demoStatus.message || null,
+            subscriptionStatus: demoStatus.subscriptionStatus || (normalizedUser.subscriptionStatus || 'none'),
+            hasPerpetualLicense: !!demoStatus.hasActiveLicense,
+            licenseCount: typeof demoStatus.licenseCount === 'number'
+              ? demoStatus.licenseCount
+              : (normalizedUser.licenseCount || 0)
+          };
+          return { ...normalizedUser, accessSummary };
+        }))).filter(Boolean)
       : list;
 
     // Return all users (including test accounts) so admin can audit every entry
