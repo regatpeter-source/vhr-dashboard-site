@@ -10,166 +10,110 @@ const VHR_BROADCAST_CHANNEL = typeof BroadcastChannel !== 'undefined' ? new Broa
 let isAudioSessionOwner = false;
 
 // Listen for messages from other tabs
+
 if (VHR_BROADCAST_CHANNEL) {
 	VHR_BROADCAST_CHANNEL.onmessage = (event) => {
-		function getSettingsContent() {
-			const prefs = getUserPreferences();
-			const detail = licenseStatus.demo || licenseStatus;
-			const subscriptionStatusLabel = detail.subscriptionStatus ? detail.subscriptionStatus.replace(/_/g, ' ') : '—';
-			const planName = detail.planName ||
-				(detail.subscriptionStatus === 'admin'
-					? 'Administrateur (accès illimité)'
-					: detail.subscriptionStatus === 'active'
-						? 'Plan Pro'
-						: detail.subscriptionStatus === 'trial'
-							? 'Essai gratuit'
-							: detail.hasActiveLicense
-								? 'Licence à vie'
-								: 'Sans abonnement');
-			let planPrice = detail.planPrice || '';
-			if (!planPrice) {
-				if (detail.subscriptionStatus === 'active') planPrice = '29€/mois';
-				else if (detail.subscriptionStatus === 'trial') planPrice = 'Essai gratuit';
-				else if (detail.subscriptionStatus === 'admin') planPrice = 'Accès illimité';
-				else if (detail.hasActiveLicense) planPrice = 'Paiement unique';
-				else planPrice = '—';
-			}
-			const statusBadge = detail.accessBlocked
-				? '<span style="color:#e74c3c;font-weight:600;">🔒 Bloqué</span>'
-				: detail.expired
-					? '<span style="color:#f39c12;font-weight:600;">⚠️ Expiré</span>'
-					: '<span style="color:#2ecc71;font-weight:600;">✅ Actif</span>';
-			const renewalLabel = detail.expirationDate
-				? formatLongDate(detail.expirationDate)
-				: Number.isFinite(detail.remainingDays)
-					? `${detail.remainingDays} jour(s)`
-					: '—';
-			const remainingLabel = Number.isFinite(detail.remainingDays)
-				? detail.remainingDays < 0
-					? 'Illimité'
-					: `${detail.remainingDays} jour(s)`
-				: '—';
-			const licenseLabel = detail.hasActiveLicense ? '✅ Oui' : '❌ Non';
-			const planMessage = detail.message || 'Les détails de facturation sont synchronisés avec notre portail sécurisé.';
+		const { type, tabId, serial } = event.data;
 
-			return `
-				<div style='max-width:700px;margin:0 auto;'>
-					<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>💳 Abonnement & Facturation</h3>
-					<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;border-left:4px solid #3498db;'>
-						<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px;'>
-							<div style='background:#1a1d24;padding:16px;border-radius:8px;border:1px solid #34495e;min-height:120px;'>
-								<div style='color:#95a5a6;font-size:12px;margin-bottom:6px;'>Plan</div>
-								<div style='color:#fff;font-size:16px;font-weight:bold;line-height:1.3;'>${planName}</div>
-								<div style='color:#95a5a6;font-size:12px;margin-top:6px;'>${subscriptionStatusLabel}</div>
-								<div style='color:#2ecc71;font-size:18px;font-weight:bold;margin-top:10px;'>${planPrice}</div>
-							</div>
-							<div style='background:#1a1d24;padding:16px;border-radius:8px;border:1px solid #34495e;min-height:120px;'>
-								<div style='color:#95a5a6;font-size:12px;margin-bottom:6px;'>Statut</div>
-								<div style='font-size:18px;margin-bottom:6px;'>${statusBadge}</div>
-								<div style='color:#95a5a6;font-size:12px;'>${detail.accessBlocked ? 'Accès bloqué' : detail.expired ? 'Licence expirée' : 'Activité en ordre'}</div>
-							</div>
-							<div style='background:#1a1d24;padding:16px;border-radius:8px;border:1px solid #34495e;min-height:120px;'>
-								<div style='color:#95a5a6;font-size:12px;margin-bottom:6px;'>Renouvellement</div>
-								<div style='color:#fff;font-size:16px;font-weight:bold;'>${renewalLabel}</div>
-								<div style='color:#95a5a6;font-size:12px;'>Prochain prélèvement</div>
-							</div>
-							<div style='background:#1a1d24;padding:16px;border-radius:8px;border:1px solid #34495e;min-height:120px;'>
-								<div style='color:#95a5a6;font-size:12px;margin-bottom:6px;'>Jours restants</div>
-								<div style='color:#fff;font-size:16px;font-weight:bold;'>${remainingLabel}</div>
-								<div style='color:#95a5a6;font-size:12px;'>${detail.subscriptionStatus === 'trial' ? 'Essai gratuit' : 'Données synchronisées'}</div>
-							</div>
-							<div style='background:#1a1d24;padding:16px;border-radius:8px;border:1px solid #34495e;min-height:120px;'>
-								<div style='color:#95a5a6;font-size:12px;margin-bottom:6px;'>Licence à vie</div>
-								<div style='color:#fff;font-size:18px;font-weight:bold;'>${licenseLabel}</div>
-								<div style='color:#95a5a6;font-size:12px;'>${detail.hasActiveLicense ? 'Clé activée' : 'Non activée'}</div>
-							</div>
-						</div>
-						<p style='color:#bdc3c7;font-size:14px;margin-bottom:16px;'>${planMessage}</p>
-						<div style='display:flex;gap:10px;flex-wrap:wrap;'>
-							<button onclick='openBillingPortal()' style='flex:1;min-width:150px;background:#3498db;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>📄 Factures</button>
-							<button onclick='openBillingPortal()' style='flex:1;min-width:150px;background:#f39c12;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>💳 Méthode de paiement</button>
-							<button onclick='confirmCancelSubscription()' style='flex:1;min-width:150px;background:#e74c3c;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>❌ Annuler l\'abonnement</button>
-						</div>
-					</div>
-			
-					<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>🎨 Apparence</h3>
-					<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;'>
-						<div style='margin-bottom:16px;'>
-							<label style='color:#fff;font-size:15px;display:flex;align-items:center;cursor:pointer;'>
-								<input type='checkbox' id='prefAutoRefresh' ${prefs.autoRefresh !== false ? 'checked' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
-								<span>🔄 Rafraîchissement automatique des casques</span>
-							</label>
-						</div>
-						<div style='margin-bottom:16px;'>
-							<label style='color:#fff;font-size:15px;display:flex;align-items:center;cursor:pointer;'>
-								<input type='checkbox' id='prefNotifications' ${prefs.notifications !== false ? 'checked' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
-								<span>🔔 Notifications toast activées</span>
-							</label>
-						</div>
-						<div style='margin-bottom:16px;'>
-							<label style='color:#fff;font-size:15px;display:flex;align-items:center;cursor:pointer;'>
-								<input type='checkbox' id='prefSounds' ${prefs.sounds === true ? 'checked' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
-								<span>🔊 Sons d\'actions activés</span>
-							</label>
-						</div>
-						<div>
-							<label style='color:#95a5a6;font-size:13px;display:block;margin-bottom:8px;'>Vue par défaut</label>
-							<select id='prefDefaultView' style='width:100%;background:#1a1d24;color:#fff;border:2px solid #34495e;padding:10px;border-radius:6px;font-size:14px;cursor:pointer;'>
-								<option value='table' ${viewMode === 'table' ? 'selected' : ''}>📊 Tableau</option>
-								<option value='cards' ${viewMode === 'cards' ? 'selected' : ''}>🎴 Cartes</option>
-							</select>
-						</div>
-					</div>
-			
-					<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>⚡ Performance</h3>
-					<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;'>
-						<div style='margin-bottom:16px;'>
-							<label style='color:#95a5a6;font-size:13px;display:block;margin-bottom:8px;'>Profil streaming par défaut</label>
-							<select id='prefDefaultProfile' style='width:100%;background:#1a1d24;color:#fff;border:2px solid #34495e;padding:10px;border-radius:6px;font-size:14px;cursor:pointer;'>
-								<option value='ultra-low'>Ultra Low (320p)</option>
-								<option value='low'>Low (480p)</option>
-								<option value='wifi'>WiFi (640p)</option>
-								<option value='default' selected>Default (720p)</option>
-								<option value='high'>High (1280p)</option>
-								<option value='ultra'>Ultra (1920p)</option>
-							</select>
-						</div>
-						<div>
-							<label style='color:#95a5a6;font-size:13px;display:block;margin-bottom:8px;'>Intervalle de rafraîchissement (secondes)</label>
-							<input type='number' id='prefRefreshInterval' value='${prefs.refreshInterval || 5}' min='1' max='60' style='width:100%;background:#1a1d24;color:#fff;border:2px solid #34495e;padding:10px;border-radius:6px;font-size:14px;' />
-						</div>
-					</div>
-			
-					<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>🔧 Avancé</h3>
-					<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;'>
-						<div style='margin-bottom:16px;'>
-							<label style='color:#fff;font-size:15px;display:flex;align-items:center;cursor:pointer;'>
-								<input type='checkbox' id='prefDebugMode' ${prefs.debugMode === true ? 'checked' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
-								<span>🐛 Mode debug (logs console)</span>
-							</label>
-						</div>
-						<div>
-							<label style='color:#fff;font-size:15px;display:flex;align-items:center;cursor:pointer;'>
-								<input type='checkbox' id='prefAutoWifi' ${prefs.autoWifi === true ? 'checked' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
-								<span>📶 WiFi auto au démarrage</span>
-							</label>
-						</div>
-					</div>
-			
-					<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>🖥️ Raccourcis Bureau</h3>
-					<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;'>
-						<p style='color:#95a5a6;font-size:13px;margin-bottom:16px;'>Créez un raccourci sur votre bureau pour lancer rapidement le dashboard. Le serveur démarrera automatiquement en arrière-plan.</p>
-						<button onclick='window.createDesktopShortcut()' style='width:100%;background:linear-gradient(135deg, #3498db 0%, #2980b9 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;display:flex;align-items:center;justify-content:center;gap:10px;'>
-							<span style='font-size:20px;'>🖥️</span> Créer un raccourci sur le bureau
-						</button>
-					</div>
-			
-					<button onclick='saveSettings()' style='width:100%;background:#2ecc71;color:#000;border:none;padding:16px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>
-						💾 Sauvegarder les paramètres
-					</button>
-				</div>
-			`;
+		if (tabId === VHR_TAB_ID) return; // Ignore own messages
+
+		switch(type) {
+			case 'audio-started':
+				// Another tab started audio - close ours if active
+				if (activeAudioStream) {
+					console.log('[VHR Multi-Tab] Another tab started audio, closing local stream');
+					window.closeAudioStream(true); // true = silent close (no toast)
+				}
+				break;
+			case 'audio-stopped':
+				console.log('[VHR Multi-Tab] Another tab stopped audio for', serial);
+				break;
+			case 'request-audio-status':
+				// Another tab is asking who owns the audio
+				if (activeAudioStream && isAudioSessionOwner) {
+					VHR_BROADCAST_CHANNEL.postMessage({
+						type: 'audio-status-response',
+						tabId: VHR_TAB_ID,
+						serial: activeAudioSerial,
+						active: true
+					});
+				}
+				break;
 		}
+	};
+}
+
+// Notify other tabs when audio starts/stops
+function broadcastAudioState(type, serial) {
+	if (VHR_BROADCAST_CHANNEL) {
+		VHR_BROADCAST_CHANNEL.postMessage({ type, tabId: VHR_TAB_ID, serial });
+	}
+}
+
+// Clean up on page unload
+window.addEventListener('beforeunload', () => {
+	if (activeAudioStream) {
+		broadcastAudioState('audio-stopped', activeAudioSerial);
+		// Attempt synchronous cleanup
+		try {
+			if (activeAudioStream.localStream) {
+				activeAudioStream.localStream.getTracks().forEach(t => t.stop());
+			}
+		} catch (e) { /* ignore */ }
+	}
+});
+
+// ========== HELPER FUNCTIONS ========== 
+// Toggle password visibility in forms
+window.toggleDashboardPassword = function(inputId) {
+	const input = document.getElementById(inputId);
+	if (!input) return;
+	if (input.type === 'password') {
+		input.type = 'text';
+	} else {
+		input.type = 'password';
+	}
+};
+
+function showModalInputPrompt(options = {}) {
+	const {
+		title,
+		message,
+		defaultValue = '',
+		placeholder = '',
+		confirmText = 'Valider',
+		cancelText = 'Annuler',
+		type = 'text',
+		selectOptions = []
+	} = options || {};
+	const normalizedDefault = defaultValue != null ? defaultValue : '';
+	return new Promise(resolve => {
+		const existing = document.getElementById('vhrInputPromptOverlay');
+		if (existing) existing.remove();
+		const overlay = document.createElement('div');
+		overlay.id = 'vhrInputPromptOverlay';
+		overlay.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;background:rgba(4,6,13,0.75);backdrop-filter:blur(6px);padding:20px;z-index:5500;';
+		const dialog = document.createElement('div');
+		dialog.style = 'background:#11131a;border-radius:16px;padding:24px;width:100%;max-width:420px;border:2px solid #2ecc71;box-shadow:0 25px 70px rgba(0,0,0,0.65);';
+		if (title) {
+			const titleEl = document.createElement('h3');
+			titleEl.textContent = title;
+			titleEl.style = 'margin:0 0 8px;color:#2ecc71;font-size:22px;';
+			dialog.appendChild(titleEl);
+		}
+		if (message) {
+			const messageEl = document.createElement('p');
+			messageEl.textContent = message;
+			messageEl.style = 'margin:0 0 12px;color:#b0b7c4;font-size:14px;';
+			dialog.appendChild(messageEl);
+		}
+		let inputElement;
+		if (Array.isArray(selectOptions) && selectOptions.length) {
+			inputElement = document.createElement('select');
+			inputElement.style = 'width:100%;padding:12px;border-radius:8px;border:1px solid #34495e;background:#182026;color:#fff;font-size:16px;';
+			selectOptions.forEach(option => {
+				const optionEl = document.createElement('option');
+				if (typeof option === 'string') {
 					optionEl.value = option;
 					optionEl.textContent = option;
 				} else {
@@ -342,8 +286,8 @@ function createNavbar() {
 	
 	nav.style = 'position:fixed;top:0;left:0;width:100vw;height:50px;background:#1a1d24;color:#fff;z-index:1100;display:flex;align-items:center;box-shadow:0 2px 8px #000;border-bottom:2px solid #2ecc71;';
 	nav.innerHTML = `
-		<div style='display:flex;align-items:center;font-weight:bold;margin-left:20px;gap:10px;'>
-			<img src='/assets/logo-vd.svg' alt='VHR Dashboard' style='height:32px;width:auto;object-fit:contain;filter:drop-shadow(0 0 6px rgba(0,0,0,0.45));'>
+		<div style='display:flex;align-items:center;font-weight:bold;margin-left:20px;gap:10px;' aria-label='VHR Dashboard PRO'>
+			<img src='/assets/logo-vd.svg' alt='' aria-hidden='true' onerror="this.style.display='none';" style='height:32px;width:auto;object-fit:contain;filter:drop-shadow(0 0 6px rgba(0,0,0,0.45));'>
 			<span style='color:#2ecc71;font-size:20px;'>VHR DASHBOARD PRO</span>
 		</div>
 		<div style='flex:1'></div>

@@ -1007,6 +1007,15 @@ function initializeDemoForUser(user) {
   return user;
 }
 
+function ensureElectronTrialStarted(user, options = {}) {
+  if (!user || demoConfig.MODE !== 'database') return false;
+  if (user.demoStartDate && !options.force) return false;
+  user.demoStartDate = new Date().toISOString();
+  persistUser(user);
+  console.log(`[demo] Trial start recorded for ${user.username} (${options.reason || 'electron login'})`);
+  return true;
+}
+
 // Vérifier si la démo est expirée pour un utilisateur
 function isDemoExpired(user) {
   if (!user || !user.demoStartDate || user.subscriptionStatus === 'active') {
@@ -2651,6 +2660,11 @@ app.post('/api/login', async (req, res) => {
   }
 
   console.log('[api/login] login successful for:', user.username);
+  const userAgent = String(req.headers['user-agent'] || '').toLowerCase();
+  const isElectronClient = userAgent.includes('electron') || String(req.headers['x-vhr-electron'] || '').toLowerCase() === 'electron';
+  if (isElectronClient) {
+    ensureElectronTrialStarted(user, { reason: 'login-electron' });
+  }
   const elevatedUser = elevateAdminIfAllowlisted(user);
   const token = jwt.sign({ username: elevatedUser.username, role: elevatedUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
   const cookieOptions = buildAuthCookieOptions(req);
@@ -3384,6 +3398,11 @@ app.post('/api/auth/login', async (req, res) => {
   }
   
   console.log('[api/auth/login] login successful for:', user.username);
+  const userAgent = String(req.headers['user-agent'] || '').toLowerCase();
+  const isElectronClient = userAgent.includes('electron') || String(req.headers['x-vhr-electron'] || '').toLowerCase() === 'electron';
+  if (isElectronClient) {
+    ensureElectronTrialStarted(user, { reason: 'auth-electron' });
+  }
   
   const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
   const cookieOptions = buildAuthCookieOptions(req);

@@ -13,9 +13,9 @@ let isAudioSessionOwner = false;
 if (VHR_BROADCAST_CHANNEL) {
 	VHR_BROADCAST_CHANNEL.onmessage = (event) => {
 		const { type, tabId, serial } = event.data;
-		
+
 		if (tabId === VHR_TAB_ID) return; // Ignore own messages
-		
+
 		switch(type) {
 			case 'audio-started':
 				// Another tab started audio - close ours if active
@@ -24,11 +24,9 @@ if (VHR_BROADCAST_CHANNEL) {
 					window.closeAudioStream(true); // true = silent close (no toast)
 				}
 				break;
-				
 			case 'audio-stopped':
 				console.log('[VHR Multi-Tab] Another tab stopped audio for', serial);
 				break;
-				
 			case 'request-audio-status':
 				// Another tab is asking who owns the audio
 				if (activeAudioStream && isAudioSessionOwner) {
@@ -271,8 +269,9 @@ function createNavbar() {
 	
 	nav.style = 'position:fixed;top:0;left:0;width:100vw;height:50px;background:#1a1d24;color:#fff;z-index:1100;display:flex;align-items:center;box-shadow:0 2px 8px #000;border-bottom:2px solid #2ecc71;';
 	nav.innerHTML = `
-		<div style='display:flex;align-items:center;font-size:22px;font-weight:bold;margin-left:20px;color:#2ecc71;'>
-			🥽 VHR DASHBOARD PRO
+		<div style='display:flex;align-items:center;font-size:22px;font-weight:bold;margin-left:20px;color:#2ecc71;' aria-label='VHR Dashboard PRO'>
+			<span style='font-size:28px;margin-right:8px;'>🥽</span>
+			<span>VHR DASHBOARD PRO</span>
 		</div>
 		<div style='flex:1'></div>
 		<button id="toggleViewBtn" style="margin-right:15px;background:#2ecc71;color:#000;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
