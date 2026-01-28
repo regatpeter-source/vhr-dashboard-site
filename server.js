@@ -1221,7 +1221,10 @@ async function sendLicenseEmail(email, licenseKey, username) {
     subject: '🎉 Votre licence VHR Dashboard',
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #0d0f14; color: #ecf0f1; border-radius: 10px;">
-        <h1 style="color: #2ecc71; text-align: center;">🥽 VHR Dashboard</h1>
+        <h1 style="color: #2ecc71; text-align: center; display:flex;align-items:center;justify-content:center;gap:12px;">
+          <img src="https://www.vhr-dashboard-site.com/assets/logo-vd.svg" alt="VHR Dashboard" style="height:48px;width:auto;filter:drop-shadow(0 3px 6px rgba(0,0,0,0.45));">
+          VHR Dashboard
+        </h1>
         <h2 style="color: #3498db;">Merci pour votre achat !</h2>
         <p>Bonjour <strong>${username}</strong>,</p>
         <p>Votre licence VHR Dashboard a été activée avec succès. Voici votre clé de licence :</p>
@@ -2400,6 +2403,7 @@ function ensureDefaultUsers() {
   let usersChanged = false;
   const adminPasswordHash = resolveAdminPasswordHash();
 
+  const adminUser = users.find(u => u.username === 'vhr');
   if (!hasAdmin) {
     console.log('[users] adding default admin user');
     users.push({
@@ -2416,12 +2420,16 @@ function ensureDefaultUsers() {
       updatedAt: new Date().toISOString()
     });
     usersChanged = true;
-  } else if (ADMIN_PASSWORD_PLAIN) {
-    const adminUser = users.find(u => u.username === 'vhr');
-    if (adminUser && !bcrypt.compareSync(ADMIN_PASSWORD_PLAIN, adminUser.passwordHash)) {
+  } else {
+    if (ADMIN_PASSWORD_PLAIN && adminUser && !bcrypt.compareSync(ADMIN_PASSWORD_PLAIN, adminUser.passwordHash)) {
       adminUser.passwordHash = resolveAdminPasswordHash(true);
       adminUser.updatedAt = new Date().toISOString();
       console.log('[users] Admin password synchronized from environment');
+      usersChanged = true;
+    } else if (ADMIN_PASSWORD_HASH_OVERRIDE && adminUser && adminUser.passwordHash !== ADMIN_PASSWORD_HASH_OVERRIDE) {
+      adminUser.passwordHash = resolveAdminPasswordHash(true);
+      adminUser.updatedAt = new Date().toISOString();
+      console.log('[users] Admin hash synchronized from override');
       usersChanged = true;
     }
   }

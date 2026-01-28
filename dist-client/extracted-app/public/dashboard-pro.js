@@ -76,6 +76,123 @@ window.toggleDashboardPassword = function(inputId) {
 	}
 };
 
+function showModalInputPrompt(options = {}) {
+	const {
+		title,
+		message,
+		defaultValue = '',
+		placeholder = '',
+		confirmText = 'Valider',
+		cancelText = 'Annuler',
+		type = 'text',
+		selectOptions = []
+	} = options || {};
+	const normalizedDefault = defaultValue != null ? defaultValue : '';
+	return new Promise(resolve => {
+		const existing = document.getElementById('vhrInputPromptOverlay');
+		if (existing) existing.remove();
+		const overlay = document.createElement('div');
+		overlay.id = 'vhrInputPromptOverlay';
+		overlay.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;background:rgba(4,6,13,0.75);backdrop-filter:blur(6px);padding:20px;z-index:5500;';
+		const dialog = document.createElement('div');
+		dialog.style = 'background:#11131a;border-radius:16px;padding:24px;width:100%;max-width:420px;border:2px solid #2ecc71;box-shadow:0 25px 70px rgba(0,0,0,0.65);';
+		if (title) {
+			const titleEl = document.createElement('h3');
+			titleEl.textContent = title;
+			titleEl.style = 'margin:0 0 8px;color:#2ecc71;font-size:22px;';
+			dialog.appendChild(titleEl);
+		}
+		if (message) {
+			const messageEl = document.createElement('p');
+			messageEl.textContent = message;
+			messageEl.style = 'margin:0 0 12px;color:#b0b7c4;font-size:14px;';
+			dialog.appendChild(messageEl);
+		}
+		let inputElement;
+		if (Array.isArray(selectOptions) && selectOptions.length) {
+			inputElement = document.createElement('select');
+			inputElement.style = 'width:100%;padding:12px;border-radius:8px;border:1px solid #34495e;background:#182026;color:#fff;font-size:16px;';
+			selectOptions.forEach(option => {
+				const optionEl = document.createElement('option');
+				if (typeof option === 'string') {
+					optionEl.value = option;
+					optionEl.textContent = option;
+				} else {
+					optionEl.value = option.value;
+					optionEl.textContent = option.label || option.value;
+					if (option.disabled) optionEl.disabled = true;
+				}
+				if (String(optionEl.value) === String(normalizedDefault)) {
+					optionEl.selected = true;
+				}
+				inputElement.appendChild(optionEl);
+			});
+			if (!inputElement.value && selectOptions[0]) {
+				inputElement.value = selectOptions[0].value;
+			}
+		} else {
+			inputElement = document.createElement('input');
+			inputElement.type = type;
+			inputElement.placeholder = placeholder;
+			inputElement.value = normalizedDefault;
+			inputElement.style = 'width:100%;padding:12px;border-radius:8px;border:1px solid #34495e;background:#182026;color:#fff;font-size:16px;';
+		}
+		inputElement.setAttribute('autocomplete', 'off');
+		inputElement.setAttribute('aria-label', message || title || 'Saisie');
+		dialog.appendChild(inputElement);
+		const actions = document.createElement('div');
+		actions.style = 'display:flex;justify-content:flex-end;gap:12px;margin-top:20px;';
+		const cancelBtn = document.createElement('button');
+		cancelBtn.type = 'button';
+		cancelBtn.textContent = cancelText;
+		cancelBtn.style = 'background:#1a1d24;color:#fff;border:1px solid #34495e;padding:10px 18px;border-radius:8px;cursor:pointer;';
+		const confirmBtn = document.createElement('button');
+		confirmBtn.type = 'button';
+		confirmBtn.textContent = confirmText;
+		confirmBtn.style = 'background:#2ecc71;color:#000;border:none;padding:10px 18px;border-radius:8px;font-weight:bold;cursor:pointer;';
+		actions.appendChild(cancelBtn);
+		actions.appendChild(confirmBtn);
+		dialog.appendChild(actions);
+		overlay.appendChild(dialog);
+		document.body.appendChild(overlay);
+		inputElement.focus();
+		let resolved = false;
+		const handleKeyDown = (event) => {
+			if (event.key === 'Escape') {
+				event.preventDefault();
+				close(null);
+			}
+			if (event.key === 'Enter') {
+				event.preventDefault();
+				handleConfirm();
+			}
+		};
+		const cleanup = () => {
+			document.removeEventListener('keydown', handleKeyDown);
+			if (overlay.parentNode) {
+				overlay.parentNode.removeChild(overlay);
+			}
+		};
+		const close = (value) => {
+			if (resolved) return;
+			resolved = true;
+			cleanup();
+			resolve(value);
+		};
+		const handleConfirm = () => {
+			close(inputElement.value);
+		};
+		document.addEventListener('keydown', handleKeyDown);
+		overlay.addEventListener('click', (event) => {
+			if (event.target === overlay) {
+				close(null);
+			}
+		});
+		confirmBtn.addEventListener('click', handleConfirm);
+		cancelBtn.addEventListener('click', () => close(null));
+	});
+}
+
 // ========== CONFIGURATION ========== 
 let viewMode = localStorage.getItem('vhr_view_mode') || 'table'; // 'table' ou 'cards'
 let currentUser = localStorage.getItem('vhr_user') || '';
@@ -233,8 +350,13 @@ function updateUserUI() {
 		<button id="changeUserBtn" style='margin-left:8px;'>Changer</button>
 		<button id="userMenuBtn">Menu</button>
 	`;
-	document.getElementById('changeUserBtn').onclick = () => {
-		const name = prompt('Nom d\'utilisateur ?', currentUser);
+	document.getElementById('changeUserBtn').onclick = async () => {
+		const name = await showModalInputPrompt({
+			title: 'Changer d\'utilisateur',
+			message: 'Nom d\'utilisateur',
+			defaultValue: currentUser || '',
+			placeholder: 'Nom d\'utilisateur'
+		});
 		if (name && name.trim()) setUser(name.trim());
 	};
 	document.getElementById('userMenuBtn').onclick = showUserMenu;
@@ -289,9 +411,19 @@ window.switchToUser = function(u) {
 	}
 };
 
-window.setUserRolePrompt = function(u) {
-	const role = prompt('Rôle pour '+u+' ? (admin/user/guest)', userRoles[u]||'user');
-	if (role && role.trim()) setUserRole(u, role.trim());
+window.setUserRolePrompt = async function(u) {
+	const role = await showModalInputPrompt({
+		title: 'Modifier le rôle',
+		message: `Rôle pour ${u} ?`,
+		type: 'select',
+		selectOptions: [
+			{ value: 'admin', label: 'Administrateur' },
+			{ value: 'user', label: 'Utilisateur' },
+			{ value: 'guest', label: 'Invité' }
+		],
+		defaultValue: userRoles[u] || 'user'
+	});
+	if (role) setUserRole(u, role.trim());
 };
 
 // Show dialog to add a new user with password
@@ -342,6 +474,7 @@ window.createNewUser = async function() {
 	const username = document.getElementById('newUserName').value.trim();
 	const password = document.getElementById('newUserPass').value;
 	const role = document.getElementById('newUserRole').value;
+	const normalizedRole = normalizeRoleForUser(username, role);
 	
 	if (!username) {
 		showToast('❌ Entrez un nom d\'utilisateur', 'error');
@@ -356,7 +489,7 @@ window.createNewUser = async function() {
 		const res = await fetch('/api/dashboard/register', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ username, password, role })
+			body: JSON.stringify({ username, password, role: normalizedRole })
 		});
 		const data = await res.json();
 		
@@ -365,8 +498,8 @@ window.createNewUser = async function() {
 			if (!userList.includes(username)) {
 				userList.push(username);
 			}
-			userRoles[username] = role;
-			authenticatedUsers[username] = { token: data.token, role };
+			userRoles[username] = normalizedRole;
+			authenticatedUsers[username] = { token: data.token, role: normalizedRole };
 			saveUserList();
 			saveAuthUsers();
 			setUser(username);
@@ -943,22 +1076,79 @@ function getStatsContent(stats) {
 
 function getSettingsContent() {
 	const prefs = getUserPreferences();
+	const detail = licenseStatus.demo || licenseStatus;
+	const subscriptionStatusLabel = detail.subscriptionStatus ? detail.subscriptionStatus.replace(/_/g, ' ') : '—';
+	const planName = detail.planName ||
+		detail.currentPlan?.name ||
+		(detail.subscriptionStatus === 'admin'
+			? 'Administrateur (accès illimité)'
+			: detail.subscriptionStatus === 'active'
+				? 'Plan Pro'
+				: detail.subscriptionStatus === 'trial'
+					? 'Essai gratuit'
+					: detail.hasActiveLicense
+						? 'Licence à vie'
+						: 'Sans abonnement');
+	let planPrice = detail.planPrice || detail.planAmount || detail.priceLabel || detail.price || '';
+	if (!planPrice) {
+		if (detail.subscriptionStatus === 'active') planPrice = 'À partir de 29€/mois';
+		else if (detail.subscriptionStatus === 'trial') planPrice = 'Essai gratuit';
+		else if (detail.subscriptionStatus === 'admin') planPrice = 'Accès illimité';
+		else if (detail.hasActiveLicense) planPrice = 'Paiement unique';
+		else planPrice = 'Détails disponibles sur le portail sécurisé';
+	}
+	const statusBadge = detail.accessBlocked
+		? '<span style="color:#e74c3c;font-weight:600;">🔒 Bloqué</span>'
+		: detail.expired
+			? '<span style="color:#f39c12;font-weight:600;">⚠️ Expiré</span>'
+			: '<span style="color:#2ecc71;font-weight:600;">✅ Actif</span>';
+	const renewalSource = detail.nextBillingDate || detail.expirationDate;
+	const renewalLabel = renewalSource
+		? formatLongDate(renewalSource)
+		: Number.isFinite(detail.remainingDays)
+			? `${detail.remainingDays} jour(s)`
+			: '—';
+	const remainingLabel = Number.isFinite(detail.remainingDays)
+		? detail.remainingDays < 0
+			? 'Illimité'
+			: `${detail.remainingDays} jour(s)`
+		: '—';
+	const licenseLabel = detail.hasActiveLicense ? '✅ Oui' : '❌ Non';
+	const planMessage = detail.message || 'Les détails de facturation sont synchronisés avec notre portail sécurisé.';
 	
 	return `
 		<div style='max-width:700px;margin:0 auto;'>
 			<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>💳 Abonnement & Facturation</h3>
 			<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;border-left:4px solid #3498db;'>
-				<div style='margin-bottom:16px;'>
-					<label style='color:#95a5a6;font-size:12px;text-transform:uppercase;letter-spacing:1px;'>Statut</label>
-					<div style='color:#fff;font-size:16px;font-weight:bold;margin-top:4px;'>
-						<span style='color:#2ecc71;'>✓ Plan Actif</span>
-						<span style='color:#95a5a6;margin-left:12px;font-size:13px;'>(29€/mois)</span>
+				<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px;'>
+					<div style='background:#1a1d24;padding:16px;border-radius:8px;border:1px solid #34495e;min-height:120px;'>
+						<div style='color:#95a5a6;font-size:12px;margin-bottom:6px;'>Plan</div>
+						<div style='color:#fff;font-size:16px;font-weight:bold;line-height:1.3;'>${planName}</div>
+						<div style='color:#95a5a6;font-size:12px;margin-top:6px;'>${subscriptionStatusLabel}</div>
+						<div style='color:#2ecc71;font-size:18px;font-weight:bold;margin-top:10px;'>${planPrice}</div>
+					</div>
+					<div style='background:#1a1d24;padding:16px;border-radius:8px;border:1px solid #34495e;min-height:120px;'>
+						<div style='color:#95a5a6;font-size:12px;margin-bottom:6px;'>Statut</div>
+						<div style='font-size:18px;margin-bottom:6px;'>${statusBadge}</div>
+						<div style='color:#95a5a6;font-size:12px;'>${detail.accessBlocked ? 'Accès bloqué' : detail.expired ? 'Licence expirée' : 'Activité en ordre'}</div>
+					</div>
+					<div style='background:#1a1d24;padding:16px;border-radius:8px;border:1px solid #34495e;min-height:120px;'>
+						<div style='color:#95a5a6;font-size:12px;margin-bottom:6px;'>Renouvellement</div>
+						<div style='color:#fff;font-size:16px;font-weight:bold;'>${renewalLabel}</div>
+						<div style='color:#95a5a6;font-size:12px;'>Prochain prélèvement</div>
+					</div>
+					<div style='background:#1a1d24;padding:16px;border-radius:8px;border:1px solid #34495e;min-height:120px;'>
+						<div style='color:#95a5a6;font-size:12px;margin-bottom:6px;'>Jours restants</div>
+						<div style='color:#fff;font-size:16px;font-weight:bold;'>${remainingLabel}</div>
+						<div style='color:#95a5a6;font-size:12px;'>${detail.subscriptionStatus === 'trial' ? 'Essai gratuit' : 'Données synchronisées'}</div>
+					</div>
+					<div style='background:#1a1d24;padding:16px;border-radius:8px;border:1px solid #34495e;min-height:120px;'>
+						<div style='color:#95a5a6;font-size:12px;margin-bottom:6px;'>Licence à vie</div>
+						<div style='color:#fff;font-size:18px;font-weight:bold;'>${licenseLabel}</div>
+						<div style='color:#95a5a6;font-size:12px;'>${detail.hasActiveLicense ? 'Clé activée' : 'Non activée'}</div>
 					</div>
 				</div>
-				<div style='margin-bottom:20px;padding:12px;background:#1a1d24;border-radius:6px;'>
-					<div style='color:#95a5a6;font-size:12px;'>Prochain renouvellement</div>
-					<div style='color:#2ecc71;font-size:14px;font-weight:bold;margin-top:4px;'>15 Janvier 2025</div>
-				</div>
+				<p style='color:#bdc3c7;font-size:14px;margin-bottom:16px;'>${planMessage}</p>
 				<div style='display:flex;gap:10px;flex-wrap:wrap;'>
 					<button onclick='openBillingPortal()' style='flex:1;min-width:150px;background:#3498db;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>📄 Factures</button>
 					<button onclick='openBillingPortal()' style='flex:1;min-width:150px;background:#f39c12;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>💳 Méthode de paiement</button>
@@ -1644,8 +1834,12 @@ window.confirmDeleteAccount = function() {
 			showToast('🗑️ Compte supprimé', 'error');
 			
 			// Redémarrer avec un nouveau utilisateur
-			setTimeout(() => {
-				const name = prompt('Nouveau nom d\'utilisateur ?');
+			setTimeout(async () => {
+				const name = await showModalInputPrompt({
+					title: 'Nouveau compte',
+					message: 'Quel nom pour le nouvel utilisateur ?',
+					placeholder: 'Nom d\'utilisateur'
+				});
 				if (name && name.trim()) setUser(name.trim());
 				else setUser('Invité');
 			}, 1000);
@@ -3283,12 +3477,19 @@ window.showVoiceAppDialog = function(serial) {
 
 // ========== DEVICE ACTIONS ========== 
 window.renameDevice = async function(device) {
-	const name = prompt('Nouveau nom pour le casque', device.name);
-	if (!name || name === device.name) return;
+	const name = await showModalInputPrompt({
+		title: 'Renommer le casque',
+		message: 'Nom du casque',
+		defaultValue: device.name,
+		placeholder: 'Nom du casque'
+	});
+	if (!name) return;
+	const normalized = name.trim();
+	if (!normalized || normalized === device.name) return;
 	const res = await api('/api/devices/rename', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ serial: device.serial, name })
+		body: JSON.stringify({ serial: device.serial, name: normalized })
 	});
 	if (res.ok) {
 		showToast('✅ Casque renommé !', 'success');

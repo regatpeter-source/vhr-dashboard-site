@@ -956,6 +956,11 @@ function getDemoRemainingDays(user) {
   return Math.max(0, remainingDays);
 }
 
+function getDemoUsedDays(user) {
+  const remainingDays = getDemoRemainingDays(user);
+  return Math.max(0, Math.min(demoConfig.DEMO_DAYS, demoConfig.DEMO_DAYS - remainingDays));
+}
+
 const LICENSES_FILE = path.join(__dirname, 'data', 'licenses.json');
 
 // ========== EMAIL CONFIGURATION ==========
@@ -3290,13 +3295,22 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
     const expirationDate = user.demoStartDate ? 
       new Date(new Date(user.demoStartDate).getTime() + demoConfig.DEMO_DURATION_MS).toISOString() : 
       null;
+    const demoUsedDays = getDemoUsedDays(user);
+    const demoProgressPercent = Math.min(100, Math.max(0, Math.round((demoUsedDays / (demoConfig.DEMO_DAYS || 1)) * 100)));
+    const userSubscriptionStatus = user.subscriptionStatus || 'none';
+    let hasValidSubscription = userSubscriptionStatus === 'active';
+    let subscriptionStatus = userSubscriptionStatus;
+    if (!hasValidSubscription && !demoExpired) {
+      hasValidSubscription = true;
+      subscriptionStatus = 'trial';
+    }
     
     // Check if demo is expired
     if (demoExpired) {
       // Demo is expired - check if user has ACTIVE subscription with Stripe
-      let hasValidSubscription = false;
-      let subscriptionStatus = 'none';
       let stripeError = null;
+      hasValidSubscription = false;
+      subscriptionStatus = 'none';
       
       if (user.stripeCustomerId) {
         try {
@@ -3339,6 +3353,8 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
           hasValidSubscription: hasValidSubscription,
           subscriptionStatus: subscriptionStatus,
           stripeError: stripeError,
+          demoUsedDays: demoConfig.DEMO_DAYS,
+          demoProgressPercent: 100,
           accessBlocked: !hasValidSubscription, // KEY: Block access if no valid subscription
           message: hasValidSubscription 
             ? '✅ Accès accordé via abonnement actif'
@@ -3355,9 +3371,11 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
           remainingDays: remainingDays,
           totalDays: demoConfig.DEMO_DAYS,
           expirationDate: expirationDate,
-          hasValidSubscription: user.subscriptionStatus === 'active',
-          subscriptionStatus: user.subscriptionStatus || 'none',
+          hasValidSubscription: hasValidSubscription,
+          subscriptionStatus: subscriptionStatus,
           accessBlocked: false,
+          demoUsedDays: demoUsedDays,
+          demoProgressPercent: demoProgressPercent,
           message: `✅ Essai en cours - ${remainingDays} jour(s) restant(s)`
         }
       });

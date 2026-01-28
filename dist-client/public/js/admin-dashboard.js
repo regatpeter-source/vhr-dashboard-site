@@ -63,13 +63,41 @@ async function loadUsers() {
       const tbody = document.getElementById('usersList');
       tbody.innerHTML = '';
       data.users.forEach(user => {
+        const createdAt = user.createdAt ? new Date(user.createdAt) : null;
+        const lastActivity = user.lastActivity || user.lastLogin || user.updatedAt || null;
+        const lastActivityLabel = lastActivity ? new Date(lastActivity).toLocaleString() : 'N/A';
+        const createdLabel = createdAt ? createdAt.toLocaleDateString() : 'N/A';
+        const access = user.accessSummary || {};
+        const demoDays = Number.isFinite(access.demoRemainingDays) ? access.demoRemainingDays : 0;
+        const demoText = access.hasDemo
+          ? (access.demoExpired ? 'Expiré' : `${demoDays} jour(s)`)
+          : 'N/A';
+        const demoBadge = access.demoExpired ? 'badge-inactive' : 'badge-active';
+        const subscriptionState = (access.subscriptionStatus || user.subscriptionStatus || 'none').toLowerCase();
+        const subscriptionLabel = subscriptionState === 'none' ? 'aucun' : subscriptionState;
+        const subscriptionBadge = subscriptionState === 'active'
+          ? 'badge-active'
+          : subscriptionState === 'cancelled'
+            ? 'badge-unread'
+            : 'badge-inactive';
+        const licenseLabel = access.hasPerpetualLicense
+          ? `Oui${access.licenseCount > 1 ? ` (${access.licenseCount})` : ''}`
+          : 'Non';
+        const licenseBadge = access.hasPerpetualLicense ? 'badge-active' : 'badge-inactive';
+        const isProtectedAdmin = user.role === 'admin' && user.username && user.username.toLowerCase() === 'vhr';
         const row = tbody.insertRow();
         row.innerHTML = `
           <td>${user.username}</td>
           <td>${user.email || 'N/A'}</td>
           <td><span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></td>
-          <td>${new Date(user.createdAt).toLocaleDateString()}</td>
-          <td><button class="action-btn action-btn-view" onclick="viewUser('${user.username}')">View</button></td>
+          <td>${createdLabel}</td>
+          <td>${lastActivityLabel}</td>
+          <td><span class="badge ${demoBadge}">${demoText}</span></td>
+          <td><span class="badge ${subscriptionBadge}">${subscriptionLabel}</span></td>
+          <td><span class="badge ${licenseBadge}">${licenseLabel}</span></td>
+          <td>
+            <button class="action-btn action-btn-view" onclick="viewUser('${user.username}')">View</button>
+          </td>
         `;
       });
     } else {
@@ -213,6 +241,18 @@ async function viewUser(username) {
       const modalBody = document.getElementById('messageModalBody');
       const createdDate = new Date(user.createdAt).toLocaleString();
       const updatedDate = new Date(user.updatedAt).toLocaleString();
+      const lastLogin = user.lastLogin ? new Date(user.lastLogin).toLocaleString() : 'N/A';
+      const lastActivity = user.lastActivity ? new Date(user.lastActivity).toLocaleString() : 'N/A';
+      const access = user.accessSummary || {};
+      const demoStatusLabel = !access.hasDemo
+        ? 'Non initialisé'
+        : access.demoExpired
+          ? 'Expiré'
+          : `${Number.isFinite(access.demoRemainingDays) ? access.demoRemainingDays : 0} jour(s) restant(s)`;
+      const subscriptionDetailLabel = access.subscriptionStatus || user.subscriptionStatus || 'aucun';
+      const licenseDetailLabel = access.hasPerpetualLicense
+        ? `Oui${access.licenseCount > 1 ? ` (${access.licenseCount})` : ''}`
+        : 'Non';
       
       modalBody.innerHTML = `
         <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
@@ -220,12 +260,20 @@ async function viewUser(username) {
           <p style="margin: 0 0 10px 0;"><strong>Email:</strong> ${user.email || 'N/A'}</p>
           <p style="margin: 0 0 10px 0;"><strong>Role:</strong> <span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></p>
           <p style="margin: 0 0 10px 0;"><strong>Created:</strong> ${createdDate}</p>
-          <p style="margin: 0 0 0 0;"><strong>Updated:</strong> ${updatedDate}</p>
+          <p style="margin: 0 0 6px 0;"><strong>Updated:</strong> ${updatedDate}</p>
+          <p style="margin: 0 0 6px 0;"><strong>Dernière connexion:</strong> ${lastLogin}</p>
+          <p style="margin: 0 0 0 0;"><strong>Dernière activité:</strong> ${lastActivity}</p>
         </div>
         <div style="padding: 15px; background: #fff; border-radius: 8px; border: 1px solid #e0e0e0;">
           <h4 style="margin-top: 0;">Subscription Info</h4>
-          <p style="margin: 0 0 5px 0;"><strong>Status:</strong> ${user.subscriptionStatus || 'None'}</p>
+          <p style="margin: 0 0 5px 0;"><strong>Status:</strong> ${subscriptionDetailLabel}</p>
           <p style="margin: 0;"><strong>Subscription ID:</strong> ${user.subscriptionId || 'N/A'}</p>
+        </div>
+        <div style="margin-top:16px; padding: 14px; background: #f1f5f9; border-radius: 8px; border: 1px dashed #cbd5e0;">
+          <h4 style="margin-top: 0;">Statut d'accès</h4>
+          <p style="margin: 4px 0;"><strong>Essai :</strong> ${demoStatusLabel}</p>
+          <p style="margin: 4px 0;"><strong>Abonnement :</strong> ${subscriptionDetailLabel}</p>
+          <p style="margin: 4px 0;"><strong>Licence à vie :</strong> ${licenseDetailLabel}</p>
         </div>
       `;
       document.getElementById('messageModal').classList.add('active');

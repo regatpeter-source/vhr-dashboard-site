@@ -232,7 +232,10 @@ async function createWindow() {
     console.warn('[electron] waitForServer failed, falling back:', e && e.message ? e.message : e);
   }
 
-  const targetUrl = `${resolvedProtocol}://localhost:${PORT}/vhr-dashboard-pro.html`;
+  const dashboardUrl = new URL(`/vhr-dashboard-pro.html`, `${resolvedProtocol}://localhost:${PORT}`);
+  dashboardUrl.searchParams.set('prod-api', '1');
+  dashboardUrl.searchParams.set('prod-auth', '1');
+  const targetUrl = dashboardUrl.toString();
   try {
     await loadDashboardWithRetry(mainWindow, targetUrl);
   } finally {

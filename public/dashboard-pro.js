@@ -12,25 +12,19 @@ let isAudioSessionOwner = false;
 // Listen for messages from other tabs
 if (VHR_BROADCAST_CHANNEL) {
 	VHR_BROADCAST_CHANNEL.onmessage = (event) => {
-		const { type, tabId, serial } = event.data;
-		
-		if (tabId === VHR_TAB_ID) return; // Ignore own messages
-		
-		switch(type) {
+		const { type, tabId, serial } = event.data || {};
+		if (tabId === VHR_TAB_ID) return;
+		switch (type) {
 			case 'audio-started':
-				// Another tab started audio - close ours if active
 				if (activeAudioStream) {
 					console.log('[VHR Multi-Tab] Another tab started audio, closing local stream');
-					window.closeAudioStream(true); // true = silent close (no toast)
+					window.closeAudioStream(true);
 				}
 				break;
-				
 			case 'audio-stopped':
 				console.log('[VHR Multi-Tab] Another tab stopped audio for', serial);
 				break;
-				
 			case 'request-audio-status':
-				// Another tab is asking who owns the audio
 				if (activeAudioStream && isAudioSessionOwner) {
 					VHR_BROADCAST_CHANNEL.postMessage({
 						type: 'audio-status-response',
@@ -43,38 +37,6 @@ if (VHR_BROADCAST_CHANNEL) {
 		}
 	};
 }
-
-// Notify other tabs when audio starts/stops
-function broadcastAudioState(type, serial) {
-	if (VHR_BROADCAST_CHANNEL) {
-		VHR_BROADCAST_CHANNEL.postMessage({ type, tabId: VHR_TAB_ID, serial });
-	}
-}
-
-// Clean up on page unload
-window.addEventListener('beforeunload', () => {
-	if (activeAudioStream) {
-		broadcastAudioState('audio-stopped', activeAudioSerial);
-		// Attempt synchronous cleanup
-		try {
-			if (activeAudioStream.localStream) {
-				activeAudioStream.localStream.getTracks().forEach(t => t.stop());
-			}
-		} catch (e) { /* ignore */ }
-	}
-});
-
-// ========== HELPER FUNCTIONS ========== 
-// Toggle password visibility in forms
-window.toggleDashboardPassword = function(inputId) {
-	const input = document.getElementById(inputId);
-	if (!input) return;
-	if (input.type === 'password') {
-		input.type = 'text';
-	} else {
-		input.type = 'password';
-	}
-};
 
 // ========== CONFIGURATION ========== 
 let viewMode = localStorage.getItem('vhr_view_mode') || 'table'; // 'table' ou 'cards'
@@ -90,11 +52,33 @@ let licenseStatus = {
 	demo: null,
 	subscriptionStatus: 'unknown',
 	hasPerpetualLicense: false,
-	licenseCount: 0
+	licenseCount: 0,
+	message: ''
 };
+const SUBSCRIPTION_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const DEMO_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+let latestSubscriptionDetails = null;
+let latestSubscriptionFetchedAt = 0;
+let latestDemoFetchedAt = 0;
+const ALLOWED_ADMIN_USER = 'peter';
 const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
 let installationOverlayElement = null;
 const DEMO_GUEST_USERNAME = 'demo_guest';
+
+function isAdminAllowed(user) {
+	return typeof user === 'string' && user === ALLOWED_ADMIN_USER;
+}
+
+function normalizeRoleForUser(user, requestedRole) {
+	const target = (requestedRole || 'user').toLowerCase();
+	if (target === 'guest') return 'guest';
+	if (target === 'admin' && isAdminAllowed(user)) return 'admin';
+	return 'user';
+}
+
+function getDisplayedRole(user) {
+	return normalizeRoleForUser(user, userRoles[user]);
+}
 
 function readAuthToken() {
 	return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
@@ -114,10 +98,10 @@ async function syncTokenFromCookie() {
 	// to LAN HTTP) but localStorage lacks the JWT, ask the server to echo it once so we can
 	// propagate it via ?token=… on LAN links.
 	const existing = readAuthToken();
-		if (existing) {
-			return existing;
-		}
-		try {
+	if (existing) {
+		return existing;
+	}
+	try {
 			const res = await api('/api/check-auth?includeToken=1');
 			if (res && res.ok && res.authenticated && res.token) {
 				return saveAuthToken(res.token);
@@ -144,6 +128,106 @@ function captureTokenFromQuery() {
 
 captureTokenFromQuery();
 
+async function refreshSubscriptionDetails({ force = false } = {}) {
+	if (!currentUser) return latestSubscriptionDetails;
+	if (!force && latestSubscriptionDetails && (Date.now() - latestSubscriptionFetchedAt < SUBSCRIPTION_CACHE_TTL)) {
+		return latestSubscriptionDetails;
+	}
+	try {
+		const res = await api('/api/subscriptions/my-subscription', { timeout: 8000 });
+		if (res && res.ok && res.subscription) {
+			latestSubscriptionDetails = res.subscription;
+			latestSubscriptionFetchedAt = Date.now();
+		}
+	} catch (err) {
+		console.warn('[subscriptions] refresh failed', err);
+	}
+	return latestSubscriptionDetails;
+}
+
+async function refreshDemoStatus({ force = false } = {}) {
+	if (!currentUser) return licenseStatus.demo;
+	if (!force && licenseStatus.demo && (Date.now() - latestDemoFetchedAt < DEMO_CACHE_TTL)) {
+		return licenseStatus.demo;
+	}
+	try {
+		const res = await api('/api/demo/status', { timeout: 8000 });
+		if (res && res.ok && res.demo) {
+			const demo = res.demo;
+			licenseStatus.demo = demo;
+			licenseStatus.subscriptionStatus = demo.subscriptionStatus || licenseStatus.subscriptionStatus;
+			licenseStatus.hasPerpetualLicense = Boolean(demo.hasPerpetualLicense);
+			licenseStatus.licenseCount = demo.licenseCount || licenseStatus.licenseCount;
+			licenseStatus.accessBlocked = Boolean(demo.accessBlocked);
+			licenseStatus.trial = !demo.demoExpired;
+			licenseStatus.expired = Boolean(demo.demoExpired);
+			licenseStatus.licensed = Boolean(demo.hasValidSubscription || demo.hasPerpetualLicense || !demo.demoExpired || demo.subscriptionStatus === 'admin');
+			licenseStatus.message = demo.message || licenseStatus.message;
+			latestDemoFetchedAt = Date.now();
+		}
+	} catch (err) {
+		console.warn('[demo] refresh failed', err);
+	}
+	return licenseStatus.demo;
+}
+
+async function refreshAccountBillingDetails({ forceSubscription = false, forceDemo = false } = {}) {
+	await Promise.all([
+		refreshSubscriptionDetails({ force: forceSubscription }),
+		refreshDemoStatus({ force: forceDemo })
+	]);
+	return buildBillingDetail();
+}
+
+function formatPlanPriceLabel(plan = {}) {
+	if (!plan) return '';
+	if (plan.priceLabel) return plan.priceLabel;
+	const value = typeof plan.price === 'number' ? plan.price : (parseFloat(plan.price) || null);
+	if (Number.isFinite(value)) {
+		const currency = plan.currency || 'EUR';
+		const formatter = new Intl.NumberFormat('fr-FR', { style: 'currency', currency, minimumFractionDigits: 0 });
+		const period = plan.billingPeriod === 'year' ? '/an' : plan.billingPeriod === 'month' ? '/mois' : plan.billingPeriod ? `/${plan.billingPeriod}` : '';
+		return `${formatter.format(value)}${period}`;
+	}
+	return plan.price ? `${plan.price}${plan.billingPeriod ? `/${plan.billingPeriod}` : ''}` : '';
+}
+
+function buildBillingDetail() {
+	const subscription = latestSubscriptionDetails || {};
+	const demo = licenseStatus.demo || {};
+	const plan = subscription.currentPlan || {};
+	const planName = plan.name || licenseStatus.planName || (subscription.isActive ? 'Abonnement actif' : 'Sans abonnement');
+	const planPrice = subscription.currentPlan ? formatPlanPriceLabel(plan) : (licenseStatus.planPrice || '—');
+	const subscriptionStatus = subscription.status || demo.subscriptionStatus || licenseStatus.subscriptionStatus || 'inconnu';
+	const renewalDate = subscription.nextBillingDate || subscription.endDate;
+	const expirationDate = demo.expirationDate || renewalDate;
+	const remainingDays = Number.isFinite(demo.remainingDays)
+		? demo.remainingDays
+		: Number.isFinite(subscription.daysUntilRenewal)
+			? subscription.daysUntilRenewal
+			: undefined;
+	return {
+		planName,
+		planPrice: planPrice || '—',
+		subscriptionStatus,
+		subscriptionStatusLabel: (subscriptionStatus || '—inconnu—').replace(/_/g, ' '),
+		nextBillingDate: renewalDate,
+		renewalDate,
+		expirationDate,
+		remainingDays,
+		daysUntilRenewal: subscription.daysUntilRenewal,
+		hasActiveLicense: licenseStatus.hasActiveLicense,
+		accessBlocked: licenseStatus.accessBlocked,
+		expired: licenseStatus.expired,
+		message: licenseStatus.message || demo.message || 'Les détails de facturation sont synchronisés avec notre portail sécurisé.',
+		licenseCount: licenseStatus.licenseCount || 0,
+		demoExpired: Boolean(demo.demoExpired),
+		isTrial: Boolean(!licenseStatus.licensed && demo && !demo.demoExpired),
+		isSubscriptionActive: Boolean(subscription.isActive),
+		subscription
+	};
+}
+
 // ========== NAVBAR ========== 
 function createNavbar() {
 	let nav = document.getElementById('mainNavbar');
@@ -156,8 +240,9 @@ function createNavbar() {
 	
 	nav.style = 'position:fixed;top:0;left:0;width:100vw;height:50px;background:#1a1d24;color:#fff;z-index:1100;display:flex;align-items:center;box-shadow:0 2px 8px #000;border-bottom:2px solid #2ecc71;';
 	nav.innerHTML = `
-		<div style='display:flex;align-items:center;font-size:22px;font-weight:bold;margin-left:20px;color:#2ecc71;'>
-			🥽 VHR DASHBOARD PRO
+		<div style='display:flex;align-items:center;font-weight:bold;margin-left:20px;gap:10px;'>
+			<img src='/assets/logo-vd.svg' alt='VHR Dashboard' style='height:32px;width:auto;object-fit:contain;filter:drop-shadow(0 0 6px rgba(0,0,0,0.45));'>
+			<span style='color:#2ecc71;font-size:20px;'>VHR DASHBOARD PRO</span>
 		</div>
 		<div style='flex:1'></div>
 		<button id="toggleViewBtn" style="margin-right:15px;background:#2ecc71;color:#000;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
@@ -214,7 +299,8 @@ function removeUser(user) {
 }
 
 function setUserRole(user, role) {
-	userRoles[user] = role;
+	const normalizedRole = normalizeRoleForUser(user, role);
+	userRoles[user] = normalizedRole;
 	saveUserList();
 	updateUserUI();
 }
@@ -222,8 +308,8 @@ function setUserRole(user, role) {
 function updateUserUI() {
 	let userDiv = document.getElementById('navbarUser');
 	if (!userDiv) return;
-	let role = userRoles[currentUser] || 'user';
-	let roleColor = role==='admin' ? '#ff9800' : '#2196f3';
+	let role = getDisplayedRole(currentUser);
+	let roleColor = role==='admin' ? '#ff9800' : role==='guest' ? '#95a5a6' : '#2196f3';
 	userDiv.innerHTML = `
 		<span style='font-size:18px;'>👤</span> 
 		<b style='color:#2ecc71;'>${currentUser || 'Invité'}</b> 
@@ -231,8 +317,13 @@ function updateUserUI() {
 		<button id="changeUserBtn" style='margin-left:8px;'>Changer</button>
 		<button id="userMenuBtn">Menu</button>
 	`;
-	document.getElementById('changeUserBtn').onclick = () => {
-		const name = prompt('Nom d\'utilisateur ?', currentUser);
+	document.getElementById('changeUserBtn').onclick = async () => {
+		const name = await showModalInputPrompt({
+			title: 'Changer d\'utilisateur',
+			message: 'Nom d\'utilisateur',
+			defaultValue: currentUser || '',
+			placeholder: 'Nom d\'utilisateur'
+		});
 		if (name && name.trim()) setUser(name.trim());
 	};
 	document.getElementById('userMenuBtn').onclick = showUserMenu;
@@ -246,8 +337,8 @@ function showUserMenu() {
 	menu.style = 'position:fixed;top:54px;right:16px;background:#1a1d24;color:#fff;padding:18px;z-index:1200;border-radius:8px;box-shadow:0 4px 20px #000;border:2px solid #2ecc71;min-width:280px;';
 	let html = `<b style='font-size:18px;color:#2ecc71;'>Utilisateurs</b><ul style='margin:12px 0;padding:0;list-style:none;'>`;
 	userList.forEach(u => {
-		let role = userRoles[u]||'user';
-		let roleColor = role==='admin' ? '#ff9800' : '#2196f3';
+		let role = getDisplayedRole(u);
+		let roleColor = role==='admin' ? '#ff9800' : role==='guest' ? '#95a5a6' : '#2196f3';
 		const isAuthenticated = authenticatedUsers[u] ? '✅' : '🔒';
 		html += `<li style='margin-bottom:8px;padding:8px;background:#23272f;border-radius:6px;'>
 			<span style='cursor:pointer;color:${u===currentUser?'#2ecc71':'#fff'};font-weight:bold;' onclick='switchToUser("${u}")'>${isAuthenticated} ${u}</span>
@@ -287,9 +378,23 @@ window.switchToUser = function(u) {
 	}
 };
 
-window.setUserRolePrompt = function(u) {
-	const role = prompt('Rôle pour '+u+' ? (admin/user/guest)', userRoles[u]||'user');
-	if (role && role.trim()) setUserRole(u, role.trim());
+window.setUserRolePrompt = async function(u) {
+	const roleOptions = [
+		{ value: 'user', label: 'Utilisateur' },
+		{ value: 'guest', label: 'Invité' }
+	];
+	if (isAdminAllowed(u)) {
+		roleOptions.unshift({ value: 'admin', label: 'Administrateur' });
+	}
+	const defaultRole = getDisplayedRole(u);
+	const role = await showModalInputPrompt({
+		title: 'Modifier le rôle',
+		message: `Rôle pour ${u} ?`,
+		type: 'select',
+		selectOptions: roleOptions,
+		defaultValue: defaultRole
+	});
+	if (role) setUserRole(u, role.trim());
 };
 
 // Show dialog to add a new user with password
@@ -321,7 +426,6 @@ window.showAddUserDialog = function() {
 				<label style='display:block;margin-bottom:5px;color:#95a5a6;'>Rôle</label>
 				<select id='newUserRole' style='width:100%;padding:12px;border:2px solid #34495e;border-radius:8px;background:#23272f;color:#fff;font-size:16px;'>
 					<option value='user'>👤 Utilisateur</option>
-					<option value='admin'>👑 Administrateur</option>
 					<option value='guest'>👥 Invité</option>
 				</select>
 			</div>
@@ -340,6 +444,7 @@ window.createNewUser = async function() {
 	const username = document.getElementById('newUserName').value.trim();
 	const password = document.getElementById('newUserPass').value;
 	const role = document.getElementById('newUserRole').value;
+	const normalizedRole = normalizeRoleForUser(username, role);
 	
 	if (!username) {
 		showToast('❌ Entrez un nom d\'utilisateur', 'error');
@@ -354,7 +459,7 @@ window.createNewUser = async function() {
 		const res = await fetch('/api/dashboard/register', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ username, password, role })
+			body: JSON.stringify({ username, password, role: normalizedRole })
 		});
 		const data = await res.json();
 		
@@ -363,8 +468,8 @@ window.createNewUser = async function() {
 			if (!userList.includes(username)) {
 				userList.push(username);
 			}
-			userRoles[username] = role;
-			authenticatedUsers[username] = { token: data.token, role };
+			userRoles[username] = normalizedRole;
+			authenticatedUsers[username] = { token: data.token, role: normalizedRole };
 			saveUserList();
 			saveAuthUsers();
 			setUser(username);
@@ -692,7 +797,7 @@ window.closeUserMenu = function() {
 window.addDashboardToFavorites = function() {
 	// Add this page to browser bookmarks
 	const url = window.location.href;
-	const title = '🥽 VHR Dashboard PRO';
+	const title = 'VHR Dashboard PRO';
 	
 	if (window.sidebar && window.sidebar.addPanel) {
 		// Firefox
@@ -707,14 +812,17 @@ window.addDashboardToFavorites = function() {
 };
 
 // ========== MON COMPTE PANEL ========== 
-function showAccountPanel() {
+async function showAccountPanel() {
 	let panel = document.getElementById('accountPanel');
 	if (panel) panel.remove();
+	
+	await refreshAccountBillingDetails({ forceSubscription: true, forceDemo: true });
+	const billingDetail = buildBillingDetail();
 	
 	// Récupérer les stats utilisateur
 	const userStats = getUserStats();
 	const userPrefs = getUserPreferences();
-	const role = userRoles[currentUser] || 'user';
+	const role = getDisplayedRole(currentUser);
 	const roleColor = role==='admin' ? '#ff9800' : role==='user' ? '#2196f3' : '#95a5a6';
 	const roleIcon = role==='admin' ? '👑' : role==='user' ? '👤' : '👥';
 	
@@ -865,10 +973,10 @@ function getProfileContent(stats, role) {
 				<div style='background:#23272f;padding:18px;border-radius:8px;'>
 					<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;'>
 						<span style='color:#95a5a6;font-size:13px;'>Statut actuel</span>
-						${getAccessStatusBadge(licenseStatus.demo || licenseStatus)}
+						${getAccessStatusBadge(billingDetail)}
 					</div>
 					<div style='background:#1a1d24;padding:12px;border-radius:6px;'>
-						${buildAccessSummaryHtml(licenseStatus.demo || licenseStatus)}
+						${buildAccessSummaryHtml(billingDetail)}
 					</div>
 				</div>
 			</div>
@@ -925,7 +1033,9 @@ function getStatsContent(stats) {
 			` : ''}
 			${stats.devicesManaged >= 3 ? `
 				<div style='background:#23272f;padding:16px;border-radius:8px;border:2px solid #3498db;text-align:center;'>
-					<div style='font-size:40px;'>🥽</div>
+					<div style='width:40px;height:40px;margin:0 auto;'>
+						<img src='/assets/logo-vd.svg' alt='VHR' style='height:40px;width:auto;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.45));'>
+					</div>
 					<div style='color:#3498db;font-weight:bold;margin-top:8px;'>Collectionneur</div>
 					<div style='color:#95a5a6;font-size:12px;margin-top:4px;'>3+ casques</div>
 				</div>
@@ -939,24 +1049,65 @@ function getStatsContent(stats) {
 	`;
 }
 
+
 function getSettingsContent() {
 	const prefs = getUserPreferences();
+	const detail = buildBillingDetail();
+	const subscriptionStatusLabel = detail.subscriptionStatusLabel || (detail.subscriptionStatus ? detail.subscriptionStatus.replace(/_/g, ' ') : '—');
+	const planName = detail.planName || 'Sans abonnement';
+	const planPrice = detail.planPrice || '—';
+	const statusBadge = detail.accessBlocked
+		? '<span style="color:#e74c3c;font-weight:600;">🔒 Bloqué</span>'
+		: detail.expired
+			? '<span style="color:#f39c12;font-weight:600;">⚠️ Expiré</span>'
+			: '<span style="color:#2ecc71;font-weight:600;">✅ Actif</span>';
+	const renewalSource = detail.nextBillingDate || detail.expirationDate;
+	const renewalLabel = renewalSource
+		? formatLongDate(renewalSource)
+		: Number.isFinite(detail.remainingDays)
+			? `${detail.remainingDays} jour(s)`
+			: '—';
+	const remainingLabel = Number.isFinite(detail.remainingDays)
+		? detail.remainingDays < 0
+			? 'Illimité'
+			: `${detail.remainingDays} jour(s)`
+		: '—';
+	const licenseLabel = detail.hasActiveLicense ? '✅ Oui' : '❌ Non';
+	const planMessage = detail.message || 'Les détails de facturation sont synchronisés avec notre portail sécurisé.';
 	
 	return `
 		<div style='max-width:700px;margin:0 auto;'>
 			<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>💳 Abonnement & Facturation</h3>
 			<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;border-left:4px solid #3498db;'>
-				<div style='margin-bottom:16px;'>
-					<label style='color:#95a5a6;font-size:12px;text-transform:uppercase;letter-spacing:1px;'>Statut</label>
-					<div style='color:#fff;font-size:16px;font-weight:bold;margin-top:4px;'>
-						<span style='color:#2ecc71;'>✓ Plan Actif</span>
-						<span style='color:#95a5a6;margin-left:12px;font-size:13px;'>(29€/mois)</span>
+				<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px;'>
+					<div style='background:#1a1d24;padding:16px;border-radius:8px;border:1px solid #34495e;min-height:120px;'>
+						<div style='color:#95a5a6;font-size:12px;margin-bottom:6px;'>Plan</div>
+						<div style='color:#fff;font-size:16px;font-weight:bold;line-height:1.3;'>${planName}</div>
+						<div style='color:#95a5a6;font-size:12px;margin-top:6px;'>${subscriptionStatusLabel}</div>
+						<div style='color:#2ecc71;font-size:18px;font-weight:bold;margin-top:10px;'>${planPrice}</div>
+					</div>
+					<div style='background:#1a1d24;padding:16px;border-radius:8px;border:1px solid #34495e;min-height:120px;'>
+						<div style='color:#95a5a6;font-size:12px;margin-bottom:6px;'>Statut</div>
+						<div style='font-size:18px;margin-bottom:6px;'>${statusBadge}</div>
+						<div style='color:#95a5a6;font-size:12px;'>${detail.accessBlocked ? 'Accès bloqué' : detail.expired ? 'Licence expirée' : 'Activité en ordre'}</div>
+					</div>
+					<div style='background:#1a1d24;padding:16px;border-radius:8px;border:1px solid #34495e;min-height:120px;'>
+						<div style='color:#95a5a6;font-size:12px;margin-bottom:6px;'>Renouvellement</div>
+						<div style='color:#fff;font-size:16px;font-weight:bold;'>${renewalLabel}</div>
+						<div style='color:#95a5a6;font-size:12px;'>Prochain prélèvement</div>
+					</div>
+					<div style='background:#1a1d24;padding:16px;border-radius:8px;border:1px solid #34495e;min-height:120px;'>
+						<div style='color:#95a5a6;font-size:12px;margin-bottom:6px;'>Jours restants</div>
+						<div style='color:#fff;font-size:16px;font-weight:bold;'>${remainingLabel}</div>
+						<div style='color:#95a5a6;font-size:12px;'>${detail.subscriptionStatus === 'trial' ? 'Essai gratuit' : 'Données synchronisées'}</div>
+					</div>
+					<div style='background:#1a1d24;padding:16px;border-radius:8px;border:1px solid #34495e;min-height:120px;'>
+						<div style='color:#95a5a6;font-size:12px;margin-bottom:6px;'>Licence à vie</div>
+						<div style='color:#fff;font-size:18px;font-weight:bold;'>${licenseLabel}</div>
+						<div style='color:#95a5a6;font-size:12px;'>${detail.hasActiveLicense ? 'Clé activée' : 'Non activée'}</div>
 					</div>
 				</div>
-				<div style='margin-bottom:20px;padding:12px;background:#1a1d24;border-radius:6px;'>
-					<div style='color:#95a5a6;font-size:12px;'>Prochain renouvellement</div>
-					<div style='color:#2ecc71;font-size:14px;font-weight:bold;margin-top:4px;'>15 Janvier 2025</div>
-				</div>
+				<p style='color:#bdc3c7;font-size:14px;margin-bottom:16px;'>${planMessage}</p>
 				<div style='display:flex;gap:10px;flex-wrap:wrap;'>
 					<button onclick='openBillingPortal()' style='flex:1;min-width:150px;background:#3498db;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>📄 Factures</button>
 					<button onclick='openBillingPortal()' style='flex:1;min-width:150px;background:#f39c12;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;'>💳 Méthode de paiement</button>
@@ -1043,7 +1194,7 @@ function getSettingsContent() {
 	`;
 }
 
-window.switchAccountTab = function(tab) {
+window.switchAccountTab = async function(tab) {
 	const tabs = document.querySelectorAll('.account-tab');
 	tabs.forEach(t => {
 		t.style.color = '#95a5a6';
@@ -1061,7 +1212,10 @@ window.switchAccountTab = function(tab) {
 	
 	if (tab === 'profile') content.innerHTML = getProfileContent(stats, userRoles[currentUser] || 'user');
 	else if (tab === 'stats') content.innerHTML = getStatsContent(stats);
-	else if (tab === 'settings') content.innerHTML = getSettingsContent();
+	else if (tab === 'settings') {
+		await refreshAccountBillingDetails();
+		content.innerHTML = getSettingsContent();
+	}
 };
 
 // ========== AUDIO STREAMING (WebRTC) ==========
@@ -1642,8 +1796,12 @@ window.confirmDeleteAccount = function() {
 			showToast('🗑️ Compte supprimé', 'error');
 			
 			// Redémarrer avec un nouveau utilisateur
-			setTimeout(() => {
-				const name = prompt('Nouveau nom d\'utilisateur ?');
+			setTimeout(async () => {
+				const name = await showModalInputPrompt({
+					title: 'Nouveau compte',
+					message: 'Quel nom pour le nouvel utilisateur ?',
+					placeholder: 'Nom d\'utilisateur'
+				});
 				if (name && name.trim()) setUser(name.trim());
 				else setUser('Invité');
 			}, 1000);
@@ -1665,6 +1823,20 @@ function formatDate(isoString) {
 	if (diffDays < 7) return `Il y a ${diffDays} jours`;
 	
 	return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function formatLongDate(isoString) {
+	if (!isoString) return '—';
+	const date = new Date(isoString);
+	if (Number.isNaN(date.getTime())) return isoString;
+	return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+function formatLongDate(isoString) {
+	if (!isoString) return '—';
+	const date = new Date(isoString);
+	if (Number.isNaN(date.getTime())) return isoString;
+	return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
 // UI fallback when popup is blocked: show a fixed banner with the receiver URL
@@ -2743,7 +2915,7 @@ window.showStreamViewer = function(serial) {
 				<canvas id='streamCanvas' style='position:absolute;top:0;left:0;width:100%;height:100%;display:block;'></canvas>
 				<!-- Overlay transparent avec le nom du casque -->
 				<div id='streamDeviceOverlay' style='position:absolute;top:12px;left:12px;background:rgba(0,0,0,0.6);color:#fff;padding:8px 14px;border-radius:8px;font-size:14px;font-weight:bold;z-index:15;backdrop-filter:blur(4px);border:1px solid rgba(46,204,113,0.5);display:flex;align-items:center;gap:8px;'>
-					<span style='color:#2ecc71;'>🥽</span> ${deviceName}
+					<span style='display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;'><img src='/assets/logo-vd.svg' alt='VHR' style='height:28px;width:auto;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.45));'></span> ${deviceName}
 				</div>
 				<div id='streamLoading' style='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;text-align:center;font-size:16px;z-index:10;'>
 					⏳ Connexion au stream...
@@ -3260,12 +3432,19 @@ window.showVoiceAppDialog = function(serial) {
 
 // ========== DEVICE ACTIONS ========== 
 window.renameDevice = async function(device) {
-	const name = prompt('Nouveau nom pour le casque', device.name);
-	if (!name || name === device.name) return;
+	const name = await showModalInputPrompt({
+		title: 'Renommer le casque',
+		message: 'Nom du casque',
+		defaultValue: device.name,
+		placeholder: 'Nom du casque'
+	});
+	if (!name) return;
+	const normalized = name.trim();
+	if (!normalized || normalized === device.name) return;
 	const res = await api('/api/devices/rename', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ serial: device.serial, name })
+		body: JSON.stringify({ serial: device.serial, name: normalized })
 	});
 	if (res.ok) {
 		showToast('✅ Casque renommé !', 'success');
@@ -3807,11 +3986,12 @@ function showTrialBanner(daysRemaining) {
 	}
 }
 
-function buildAccessSummaryHtml(status = {}) {
-	const detail = status.demo || status;
+function buildAccessSummaryHtml(detail = {}) {
 	const demoLabel = detail.demoExpired
 		? 'Expiré'
-		: Number.isFinite(detail.remainingDays) ? `${detail.remainingDays} jour(s)` : 'N/A';
+		: Number.isFinite(detail.remainingDays)
+			? (detail.remainingDays < 0 ? 'Illimité' : `${detail.remainingDays} jour(s)`)
+			: 'N/A';
 	const subscriptionLabel = detail.subscriptionStatus || 'aucun';
 	const licenseLabel = detail.hasPerpetualLicense
 		? `Oui${detail.licenseCount > 1 ? ` (${detail.licenseCount})` : ''}`
@@ -3841,7 +4021,7 @@ function getAccessStatusBadge(detail = {}) {
 	return '<span style="color:#2ecc71;font-weight:600;">✅ Actif</span>';
 }
 
-window.showUnlockModal = function(status = licenseStatus) {
+window.showUnlockModal = function(detailArg) {
 	let modal = document.getElementById('unlockModal');
 	if (modal) modal.remove();
 	
@@ -3849,15 +4029,16 @@ window.showUnlockModal = function(status = licenseStatus) {
 	modal.id = 'unlockModal';
 	modal.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.95);z-index:2000;display:flex;align-items:center;justify-content:center;overflow-y:auto;';
 	
-	// Determine the message based on status
+	const detail = detailArg || buildBillingDetail();
+	// Determine the message based on detail
 	let headerMessage = '<h2 style="color:#e74c3c;">⚠️ Accès refusé</h2>';
 	let bodyMessage = '<p style="color:#95a5a6;">Votre période d\'essai a expiré.<br>Pour continuer à utiliser VHR Dashboard, choisissez une option ci-dessous :</p>';
 	
-	if (status.expired || status.accessBlocked) {
+	if (detail.expired || detail.accessBlocked) {
 		headerMessage = '<h2 style="color:#e74c3c;">⚠️ Essai expiré - Abonnement requis</h2>';
 		bodyMessage = '<p style="color:#95a5a6;">Votre accès à VHR Dashboard a expiré car votre période d\'essai est terminée et aucun abonnement n\'est actif.<br><br>Choisissez une option ci-dessous pour continuer :</p>';
 	}
-	const summaryHtml = buildAccessSummaryHtml(status);
+	const summaryHtml = buildAccessSummaryHtml(detail);
 	
 	modal.innerHTML = `
 		<div style="background:linear-gradient(135deg, #1a1d24, #2c3e50);max-width:700px;width:90%;border-radius:16px;padding:40px;color:#fff;box-shadow:0 8px 32px #000;">
@@ -3909,7 +4090,7 @@ window.showUnlockModal = function(status = licenseStatus) {
 				</button>
 			</div>
 			
-			${status.expired || status.accessBlocked ? '' : `<button onclick="closeUnlockModal()" style="width:100%;background:#7f8c8d;color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;margin-top:12px;">❌ Fermer</button>`}
+			${detail.expired || detail.accessBlocked ? '' : `<button onclick="closeUnlockModal()" style="width:100%;background:#7f8c8d;color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;margin-top:12px;">❌ Fermer</button>`}
 		</div>
 	`;
 	
@@ -3987,7 +4168,7 @@ window.showAuthModal = function(mode = 'login') {
 	modal.innerHTML = `
 		<div style="background:linear-gradient(135deg, #1a1d24, #2c3e50);max-width:500px;width:90%;border-radius:16px;padding:40px;color:#fff;box-shadow:0 8px 32px #000;">
 			<div style="text-align:center;margin-bottom:32px;">
-				<h2 style="color:#2ecc71;margin:0 0 8px 0;font-size:32px;">🥽 VHR Dashboard</h2>
+				<h2 style="color:#2ecc71;margin:0 0 8px 0;font-size:32px;"><span style="display:inline-flex;align-items:center;gap:10px;justify-content:center;"><img src='/assets/logo-vd.svg' alt='VHR' style='height:32px;width:auto;filter:drop-shadow(0 0 6px rgba(0,0,0,0.45));'>VHR Dashboard</span></h2>
 				<p style="color:#95a5a6;margin:0;font-size:14px;">Authentification obligatoire pour commencer</p>
 			</div>
 			

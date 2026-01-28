@@ -1,14 +1,15 @@
 [
   {
     "username": "vhr",
-    "passwordHash": "$2b$10$Bor/ndmm9gAsS1cDr2a14.vh15geun1/R5MCUhggHNULL0Abdy.5G",
+    "passwordHash": "$2b$10$V6RjAh1tA6EaencmADX6SeKBvuTWYU7fTLswqElSr6zjxV0tm.KKK",
     "role": "admin",
     "email": "vhr",
     "stripeCustomerId": null,
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
     "subscriptionStatus": null,
-    "subscriptionId": null
+    "subscriptionId": null,
+    "demoStartDate": null
   },
   {
     "username": "VhrDashboard",
@@ -19,7 +20,8 @@
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
     "subscriptionStatus": null,
-    "subscriptionId": null
+    "subscriptionId": null,
+    "demoStartDate": null
   },
   {
     "username": "testuser_payment",
@@ -30,7 +32,8 @@
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
     "subscriptionStatus": null,
-    "subscriptionId": null
+    "subscriptionId": null,
+    "demoStartDate": null
   },
   {
     "username": "testpay_user",
@@ -41,7 +44,8 @@
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
     "subscriptionStatus": null,
-    "subscriptionId": null
+    "subscriptionId": null,
+    "demoStartDate": null
   },
   {
     "username": "testpay_user3",
@@ -52,7 +56,8 @@
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
     "subscriptionStatus": null,
-    "subscriptionId": null
+    "subscriptionId": null,
+    "demoStartDate": null
   },
   {
     "username": "samsam44410",
@@ -63,7 +68,8 @@
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
     "subscriptionStatus": null,
-    "subscriptionId": null
+    "subscriptionId": null,
+    "demoStartDate": null
   },
   {
     "username": "demo_guest",
@@ -74,6 +80,31 @@
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
     "subscriptionStatus": null,
-    "subscriptionId": null
+    "subscriptionId": null,
+    "demoStartDate": null
+  },
+  {
+    "username": "loulou",
+    "passwordHash": "$2b$10$Uo0JSEbC6aE035Z0t7OJ1.yZD/sMvsMfAaJo7lzAN89GTVk0Vhaeq",
+    "role": "user",
+    "email": "loulou",
+    "stripeCustomerId": null,
+    "latestInvoiceId": null,
+    "lastInvoicePaidAt": null,
+    "subscriptionStatus": null,
+    "subscriptionId": null,
+    "demoStartDate": null
+  },
+  {
+    "username": "leanaregat",
+    "passwordHash": "$2b$10$64u.rIttg3gvQf39ya3iaeEDk05YXDWdGA4z1nPA0h7mlfimYXNb2",
+    "role": "user",
+    "email": "leanaregat",
+    "stripeCustomerId": null,
+    "latestInvoiceId": null,
+    "lastInvoicePaidAt": null,
+    "subscriptionStatus": null,
+    "subscriptionId": null,
+    "demoStartDate": "2026-01-28T00:17:32.935Z"
   }
 ]

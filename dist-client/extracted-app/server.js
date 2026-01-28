@@ -2323,12 +2323,17 @@ function ensureDefaultUsers() {
       updatedAt: new Date().toISOString()
     });
     usersChanged = true;
-  } else if (ADMIN_PASSWORD_PLAIN) {
+  } else {
     const adminUser = users.find(u => u.username === 'vhr');
-    if (adminUser && !bcrypt.compareSync(ADMIN_PASSWORD_PLAIN, adminUser.passwordHash)) {
+    if (ADMIN_PASSWORD_PLAIN && adminUser && !bcrypt.compareSync(ADMIN_PASSWORD_PLAIN, adminUser.passwordHash)) {
       adminUser.passwordHash = resolveAdminPasswordHash(true);
       adminUser.updatedAt = new Date().toISOString();
       console.log('[users] Admin password synchronized from environment');
+      usersChanged = true;
+    } else if (ADMIN_PASSWORD_HASH_OVERRIDE && adminUser && adminUser.passwordHash !== ADMIN_PASSWORD_HASH_OVERRIDE) {
+      adminUser.passwordHash = resolveAdminPasswordHash(true);
+      adminUser.updatedAt = new Date().toISOString();
+      console.log('[users] Admin hash synchronized from override');
       usersChanged = true;
     }
   }

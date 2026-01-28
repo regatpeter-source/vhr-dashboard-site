@@ -1,0 +1,26 @@
+{
+  "name": "vhr-dashboard-site",
+  "version": "1.0.1",
+  "description": "VHR Dashboard - Server and site-vitrine",
+  "main": "electron-main.js",
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "devcert": "^1.2.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "node-fetch": "^2.7.0",
+    "nodemailer": "^7.0.11",
+    "pg": "^8.16.3",
+    "redis": "^4.6.14",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "stripe": "^14.21.0",
+    "unzipper": "^0.10.14",
+    "ws": "^8.19.0",
+    "yargs": "^17.7.2"
+  }
+}

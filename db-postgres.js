@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const bcrypt = require('bcrypt');
 const { Pool } = require('pg');
 
 // Render Postgres typically requires SSL.
@@ -25,6 +26,23 @@ pool.on('error', (err) => {
 });
 
 let initPromise = null;
+
+const ADMIN_PASSWORD_PLAIN = (process.env.ADMIN_PASSWORD || '').trim();
+const ADMIN_PASSWORD_HASH_OVERRIDE = (process.env.ADMIN_PASSWORD_HASH || '').trim();
+const DEFAULT_ADMIN_PASSWORD_HASH = '$2b$10$AlrD74akc7cp9EbVLJKzcOlPzJbypzSt7a8Sg85KEjpFGM/ofxdLm';
+let cachedAdminPasswordHash = null;
+
+function resolveAdminPasswordHash(forceRehash = false) {
+  if (!forceRehash && cachedAdminPasswordHash) return cachedAdminPasswordHash;
+  if (ADMIN_PASSWORD_HASH_OVERRIDE) {
+    cachedAdminPasswordHash = ADMIN_PASSWORD_HASH_OVERRIDE;
+  } else if (ADMIN_PASSWORD_PLAIN) {
+    cachedAdminPasswordHash = bcrypt.hashSync(ADMIN_PASSWORD_PLAIN, 10);
+  } else {
+    cachedAdminPasswordHash = DEFAULT_ADMIN_PASSWORD_HASH;
+  }
+  return cachedAdminPasswordHash;
+}
 
 async function initDatabase() {
   if (initPromise) return initPromise;
@@ -231,20 +249,38 @@ async function importMessagesIfNeeded(client) {
 
 async function ensureDefaultUsers(client) {
   // Match the JSON fallback default users used in server.js
-  const hasAdmin = await client.query('SELECT 1 FROM users WHERE username = $1 LIMIT 1', ['vhr']);
-  if (hasAdmin.rowCount === 0) {
+  const adminRes = await client.query('SELECT passwordhash FROM users WHERE username = $1 LIMIT 1', ['vhr']);
+  const adminHash = resolveAdminPasswordHash();
+  if (adminRes.rowCount === 0) {
     await client.query(
       'INSERT INTO users (id, username, passwordhash, email, role, emailverified) VALUES ($1, $2, $3, $4, $5, $6)',
       [
         'admin_vhr',
         'vhr',
-        '$2b$10$ov9F32cIWWXhvNumETtB1urvsdD5Y4Wl6wXlSHoCy.f4f03kRGcf2',
+        adminHash,
         'admin@example.local',
         'admin',
         true
       ]
     );
     console.log('[DB] [32m[1m✓[0m Admin user created');
+  } else {
+    const currentHash = adminRes.rows[0].passwordhash || '';
+    if (ADMIN_PASSWORD_PLAIN && !bcrypt.compareSync(ADMIN_PASSWORD_PLAIN, currentHash)) {
+      const updatedHash = resolveAdminPasswordHash(true);
+      await client.query('UPDATE users SET passwordhash = $1, updatedat = CURRENT_TIMESTAMP WHERE username = $2', [
+        updatedHash,
+        'vhr'
+      ]);
+      console.log('[DB] [32m[1m✓[0m Admin password synchronized from environment');
+    } else if (ADMIN_PASSWORD_HASH_OVERRIDE && currentHash !== ADMIN_PASSWORD_HASH_OVERRIDE) {
+      const overrideHash = resolveAdminPasswordHash(true);
+      await client.query('UPDATE users SET passwordhash = $1, updatedat = CURRENT_TIMESTAMP WHERE username = $2', [
+        overrideHash,
+        'vhr'
+      ]);
+      console.log('[DB] [32m[1m✓[0m Admin hash synchronized from override');
+    }
   }
 
   const hasDemo = await client.query('SELECT 1 FROM users WHERE username = $1 LIMIT 1', ['VhrDashboard']);

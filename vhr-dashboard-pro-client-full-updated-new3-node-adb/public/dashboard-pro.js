@@ -84,6 +84,7 @@ let userRoles = JSON.parse(localStorage.getItem('vhr_user_roles') || '{}');
 let licenseKey = localStorage.getItem('vhr_license_key') || '';
 let licenseStatus = { licensed: false, trial: false, expired: false };
 let latestDemoStatus = null; // Dernier statut essai/abonnement connu depuis l'API
+const DEFAULT_DEMO_DAYS = 7;
 const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
 
 // Anti-double clic pour scrcpy
@@ -3859,7 +3860,7 @@ async function checkLicense() {
 		if (uname === 'vhr') {
 			licenseStatus.licensed = true;
 			licenseStatus.expired = false;
-			showTrialBanner(0);
+			showTrialBanner({ hasValidSubscription: true });
 			return true;
 		}
 
@@ -3885,7 +3886,7 @@ async function checkLicense() {
 		
 		// Demo is still valid - show banner with remaining days
 		if (!demoStatus.demoExpired) {
-			showTrialBanner(demoStatus.remainingDays);
+			showTrialBanner(demoStatus);
 			return true; // Allow access
 		}
 		
@@ -3896,6 +3897,7 @@ async function checkLicense() {
 			showUnlockModal({
 				expired: true,
 				accessBlocked: true,
+				demo: demoStatus,
 				subscriptionStatus: demoStatus.subscriptionStatus,
 				trialAvailable: false
 			});
@@ -3903,7 +3905,7 @@ async function checkLicense() {
 		} else {
 			// Has valid Stripe subscription
 			console.log('[license] Access granted: user has active subscription');
-			showTrialBanner(0); // Show banner indicating active subscription
+			showTrialBanner(demoStatus); // Show banner indicating active subscription
 			return true; // Allow access
 		}
 	} catch (e) {
@@ -3912,7 +3914,79 @@ async function checkLicense() {
 	}
 }
 
-function showTrialBanner(daysRemaining) {
+function normalizeDemoStatus(rawStatus) {
+	if (!rawStatus && !latestDemoStatus) return null;
+	let info = null;
+	if (rawStatus && typeof rawStatus === 'object') {
+		info = { ...rawStatus };
+	} else if (typeof rawStatus === 'number') {
+		info = { remainingDays: rawStatus };
+	} else if (latestDemoStatus) {
+		info = { ...latestDemoStatus };
+	}
+	if (!info) return null;
+	const totalDays = Number(info.totalDays) || DEFAULT_DEMO_DAYS;
+	const remainingDays = typeof info.remainingDays === 'number'
+		? Math.max(0, info.remainingDays)
+		: Math.max(0, totalDays - (typeof info.demoUsedDays === 'number' ? info.demoUsedDays : 0));
+	const demoUsedDays = typeof info.demoUsedDays === 'number'
+		? info.demoUsedDays
+		: Math.max(0, totalDays - remainingDays);
+	const progressPercent = typeof info.demoProgressPercent === 'number'
+		? Math.min(100, Math.max(0, Math.round(info.demoProgressPercent)))
+		: totalDays > 0
+			? Math.min(100, Math.max(0, Math.round((demoUsedDays / totalDays) * 100)))
+			: 100;
+	return {
+		...info,
+		totalDays,
+		remainingDays,
+		demoUsedDays,
+		demoProgressPercent: progressPercent
+	};
+}
+
+function renderTrialProgressBlock(info) {
+	if (!info) return '';
+	const percent = typeof info.demoProgressPercent === 'number' ? info.demoProgressPercent : 0;
+	const used = Number.isFinite(info.demoUsedDays) ? info.demoUsedDays : 0;
+	const total = Number.isFinite(info.totalDays) ? info.totalDays : DEFAULT_DEMO_DAYS;
+	return `
+		<div style="margin-top:10px;text-align:left;">
+			<div style="display:flex;justify-content:space-between;font-size:12px;color:#ecf0f1;">
+				<span>${used}/${total} jour(s) utilisés</span>
+				<span>${percent}%</span>
+			</div>
+			<div style="height:8px;margin-top:6px;border-radius:4px;background:rgba(255,255,255,0.08);overflow:hidden;border:1px solid rgba(255,255,255,0.18);">
+				<div style="width:${percent}%;height:100%;background:linear-gradient(90deg,#2ecc71,#27ae60);border-radius:4px;"></div>
+			</div>
+		</div>
+	`;
+}
+
+function buildTrialSummaryCard(info) {
+	if (!info) return '';
+	const isTrialActive = !info.demoExpired && info.remainingDays > 0;
+	const expirationText = info.expirationDate ? formatDate(info.expirationDate) : '—';
+	return `
+		<div style="margin-top:16px;padding:16px;border-radius:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.12);">
+			<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:14px;font-weight:bold;">
+				<span style="color:#fff;">${isTrialActive ? 'Essai en cours' : 'Essai expiré'}</span>
+				<span style="font-size:12px;color:#95a5a6;">${isTrialActive ? `${info.remainingDays} jour(s) restants` : 'Plus d’essai disponible'}</span>
+			</div>
+			<div style="font-size:12px;color:#bdc3c7;margin-top:6px;">
+				Utilisé : <strong>${info.demoUsedDays}/${info.totalDays}</strong> jour(s)
+			</div>
+			${renderTrialProgressBlock(info)}
+			<div style="font-size:11px;color:#95a5a6;margin-top:10px;">
+				Expiration : ${expirationText}
+			</div>
+		</div>
+	`;
+}
+
+function showTrialBanner(rawStatus) {
+	const info = normalizeDemoStatus(rawStatus);
 	let banner = document.getElementById('trialBanner');
 	const alreadyExists = !!banner;
 	if (!banner) {
@@ -3920,29 +3994,34 @@ function showTrialBanner(daysRemaining) {
 		banner.id = 'trialBanner';
 	}
 	
+	const daysRemaining = info ? info.remainingDays : 0;
+	const isTrialActive = info ? !info.demoExpired && daysRemaining > 0 : false;
+	const hasSubscription = info ? Boolean(info.hasValidSubscription) : false;
 	let bannerText = '';
-	let bgColor = 'linear-gradient(135deg, #f39c12, #e67e22)'; // Orange for trial
-	
-	if (daysRemaining > 0) {
-		// Trial in progress
+	let bgColor = 'linear-gradient(135deg, #f39c12, #e67e22)';
+	if (isTrialActive) {
 		bannerText = `⏱️ Essai gratuit - <b>${daysRemaining} jour(s)</b> restant(s)`;
-	} else {
-		// Active subscription
-		bgColor = 'linear-gradient(135deg, #2ecc71, #27ae60)'; // Green for active
+	} else if (hasSubscription) {
 		bannerText = `✅ Abonnement actif`;
+		bgColor = 'linear-gradient(135deg, #2ecc71, #27ae60)';
+	} else {
+		bannerText = `⏱️ Essai gratuit - statut inconnu`;
 	}
-	
+	const progressHtml = isTrialActive ? renderTrialProgressBlock(info) : '';
+	const actionButton = isTrialActive
+		? `<button onclick="openOfficialBillingPage()" style="margin-left:20px;background:#2ecc71;color:#000;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
+			🚀 Débloquer maintenant
+		</button>`
+		: '';
 	banner.style = `position:fixed;top:56px;left:0;width:100vw;background:${bgColor};color:#fff;padding:10px 20px;text-align:center;z-index:1050;font-weight:bold;box-shadow:0 2px 8px #000;`;
 	banner.innerHTML = `
-		${bannerText}
-		${daysRemaining > 0 ? `<button onclick="openOfficialBillingPage()" style="margin-left:20px;background:#2ecc71;color:#000;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
-			🚀 Débloquer maintenant
-		</button>` : ''}
+		<div style="display:flex;flex-direction:column;gap:6px;align-items:center;justify-content:center;">
+			<div>${bannerText}${actionButton}</div>
+			${progressHtml}
+		</div>
 	`;
 	if (!alreadyExists) document.body.appendChild(banner);
-	document.body.style.paddingTop = '106px'; // 56 navbar + 50 banner
-	
-	// Add margin-top to deviceGrid to prevent overlap with headers
+	document.body.style.paddingTop = '106px';
 	const deviceGrid = document.getElementById('deviceGrid');
 	if (deviceGrid) {
 		deviceGrid.style.marginTop = '20px';
@@ -3976,11 +4055,15 @@ window.showUnlockModal = function(status = licenseStatus) {
 		headerMessage = '<h2 style="color:#e74c3c;">⚠️ Essai expiré - Abonnement requis</h2>';
 		bodyMessage = '<p style="color:#95a5a6;">Votre accès à VHR Dashboard a expiré car votre période d\'essai est terminée et aucun abonnement n\'est actif.<br><br>Choisissez une option ci-dessous pour continuer :</p>';
 	}
+
+	const trialInfo = normalizeDemoStatus(status.demo) || normalizeDemoStatus(latestDemoStatus);
+	const trialSummaryHtml = trialInfo ? buildTrialSummaryCard(trialInfo) : '';
 	
 	modal.innerHTML = `
 		<div style="background:linear-gradient(135deg, #1a1d24, #2c3e50);max-width:700px;width:90%;border-radius:16px;padding:40px;color:#fff;box-shadow:0 8px 32px #000;">
 			${headerMessage}
 			${bodyMessage}
+			${trialSummaryHtml}
 			
 			<!-- Option 1: Abonnement mensuel (Stripe) -->
 			<div style="background:#2c3e50;padding:24px;border-radius:12px;margin:20px 0;border:2px solid #3498db;">
@@ -4115,7 +4198,7 @@ window.resetMyTrial = async function() {
 			latestDemoStatus = demo;
 			showToast(`✅ Essai réinitialisé : ${demo.remainingDays} jour(s) restant(s)`, 'success');
 			closeUnlockModal();
-			showTrialBanner(demo.remainingDays);
+			showTrialBanner(demo);
 			await checkLicense();
 			return;
 		}
@@ -4140,7 +4223,7 @@ window.startTrialNow = async function() {
 			if (!demo.demoExpired) {
 				showToast(`✅ Essai activé : ${demo.remainingDays} jour(s) restant(s)`, 'success');
 				closeUnlockModal();
-				showTrialBanner(demo.remainingDays);
+				showTrialBanner(demo);
 				await checkLicense();
 				return;
 			}
@@ -4151,7 +4234,7 @@ window.startTrialNow = async function() {
 			if (demo.hasValidSubscription) {
 				showToast('✅ Abonnement actif détecté', 'success');
 				closeUnlockModal();
-				showTrialBanner(0);
+				showTrialBanner(demo);
 				await checkLicense();
 				return;
 			}

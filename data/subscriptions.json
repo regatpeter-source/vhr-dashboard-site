@@ -1,16 +1,30 @@
 [
   {
     "id": 1,
-    "userId": "auto_VhrDashboard_1768336316699",
-    "username": "VhrDashboard",
+    "userId": "auto_leanaregat_1769457716961",
+    "username": "leanaregat",
     "email": null,
     "stripeSubscriptionId": null,
     "stripePriceId": null,
     "status": "trial",
     "planName": "auto-provision",
-    "startDate": "2026-01-13T20:31:56.699Z",
+    "startDate": "2026-01-26T20:01:56.962Z",
     "endDate": null,
-    "createdAt": "2026-01-13T20:31:56.699Z",
-    "updatedAt": "2026-01-13T20:31:56.699Z"
+    "createdAt": "2026-01-26T20:01:56.962Z",
+    "updatedAt": "2026-01-26T20:01:56.962Z"
+  },
+  {
+    "id": 2,
+    "userId": "auto_loulou_1769457859778",
+    "username": "loulou",
+    "email": null,
+    "stripeSubscriptionId": null,
+    "stripePriceId": null,
+    "status": "trial",
+    "planName": "auto-provision",
+    "startDate": "2026-01-26T20:04:19.779Z",
+    "endDate": null,
+    "createdAt": "2026-01-26T20:04:19.779Z",
+    "updatedAt": "2026-01-26T20:04:19.779Z"
   }
 ]

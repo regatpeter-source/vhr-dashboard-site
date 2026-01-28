@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lancement du Dashboard - VHR DASHBOARD</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 50px 40px;
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+        }
+
+        .logo {
+            font-size: 48px;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 28px;
+        }
+
+        .status-message {
+            color: #666;
+            font-size: 16px;
+            margin-bottom: 40px;
+            line-height: 1.6;
+        }
+
+        .loader {
+            display: inline-block;
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 30px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .progress-steps {
+            display: flex;
+            justify-content: space-between;
+            margin: 40px 0;
+            gap: 10px;
+        }
+
+        .step {
+            flex: 1;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 10px;
+            font-size: 13px;
+            color: #666;
+            transition: all 0.3s ease;
+        }
+
+        .step.active {
+            background: #667eea;
+            color: white;
+            font-weight: bold;
+        }
+
+        .step.completed {
+            background: #4caf50;
+            color: white;
+        }
+
+        .step.completed::after {
+            content: " ✓";
+        }
+
+        .error-box {
+            background: #ffebee;
+            border-left: 4px solid #f44336;
+            padding: 20px;
+            margin-top: 30px;
+            border-radius: 5px;
+            text-align: left;
+            display: none;
+        }
+
+        .error-box.show {
+            display: block;
+        }
+
+        .error-box h3 {
+            color: #c62828;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+
+        .error-box p {
+            color: #d32f2f;
+            font-size: 14px;
+            line-height: 1.6;
+            margin: 5px 0;
+        }
+
+        .error-box .solution {
+            color: #f57c00;
+            background: #fff3e0;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+
+        .tips {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin-top: 30px;
+            border-radius: 5px;
+            text-align: left;
+            font-size: 13px;
+            color: #1565c0;
+        }
+
+        .tips strong {
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        .tips ul {
+            margin-left: 20px;
+        }
+
+        .tips li {
+            margin: 5px 0;
+        }
+
+        .status-code {
+            font-family: 'Courier New', monospace;
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .desktop-only {
+            font-size: 12px;
+            color: #999;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo" id="logo">🚀</div>
+        <h1 id="title">Lancement en cours...</h1>
+        
+        <div class="loader" id="loader"></div>
+
+        <div class="status-message" id="statusMsg">
+              Téléchargement / démarrage local : suivez les étapes ci-dessous.<br>
+              Cela peut prendre quelques secondes...
+        </div>
+
+        <div class="progress-steps">
+            <div class="step active" id="step1">Démarrage</div>
+            <div class="step" id="step2">Serveur</div>
+            <div class="step" id="step3">Dashboard</div>
+        </div>
+
+        <div class="error-box" id="errorBox">
+            <h3 id="errorTitle">Problème détecté</h3>
+            <p id="errorDesc"></p>
+            <div class="solution" id="errorSolution"></div>
+        </div>
+
+        <div class="tips">
+            <strong>💡 Conseils:</strong>
+            <ul>
+                 <li>Ne fermez pas la fenêtre du terminal</li>
+                 <li>Après extraction, lancez <code>client-pack/start-dashboard-pro.bat</code> (ou .ps1)</li>
+                <li>Si rien ne se passe après 30 secondes, <a href="javascript:location.reload()">cliquez ici</a></li>
+            </ul>
+        </div>
+
+        <div class="desktop-only">
+            Cette page est destinée à être utilisée sur Windows avec un terminal PowerShell.
+        </div>
+    </div>
+
+    <script>
+        const port = 3000;
+        const maxRetries = 60;  // 60 * 500ms = 30 seconds
+        let retries = 0;
+        let step = 1;
+
+        // Update progress steps
+        function updateStep(newStep) {
+            if (newStep > step) {
+                document.getElementById(`step${step}`).classList.remove('active');
+                document.getElementById(`step${step}`).classList.add('completed');
+                
+                step = newStep;
+                if (step <= 3) {
+                    document.getElementById(`step${step}`).classList.add('active');
+                }
+            }
+        }
+
+        // Check if server is ready
+        async function checkServer() {
+            try {
+                const response = await fetch(`http://localhost:${port}/ping`, {
+                    method: 'GET',
+                    cache: 'no-store'
+                });
+
+                if (response.ok) {
+                    // Server is ready!
+                    updateStep(2);
+                    document.getElementById('statusMsg').textContent = 
+                        'Serveur prêt ! Redirection vers le dashboard...';
+                    document.getElementById('title').textContent = '✓ Prêt !';
+                    document.getElementById('logo').textContent = '✅';
+                    document.getElementById('loader').style.display = 'none';
+                    
+                    updateStep(3);
+                    
+                    // Wait 1 second then redirect
+                    setTimeout(() => {
+                        window.location.href = `http://localhost:${port}/vhr-dashboard-pro.html`;
+                    }, 1000);
+                    return;
+                }
+            } catch (error) {
+                // Server not ready yet
+            }
+
+            retries++;
+            
+            if (retries >= maxRetries) {
+                // Timeout
+                showError(
+                    'Le serveur n\'a pas démarré',
+                    'Après 30 secondes, le serveur n\'a toujours pas répondu.',
+                    'Vérifications à faire:\n' +
+                    '1. Node.js est-il installé? (https://nodejs.org)\n' +
+                    '2. Y a-t-il une erreur dans la fenêtre du terminal?\n' +
+                    '3. Un autre service utilise-t-il le port 3000?'
+                );
+                return;
+            }
+
+            if (retries % 10 === 0) {
+                updateStep(2);
+            }
+
+            // Try again in 500ms
+            setTimeout(checkServer, 500);
+        }
+
+        function showError(title, description, solution) {
+            document.getElementById('loader').style.display = 'none';
+            document.getElementById('statusMsg').style.display = 'none';
+            document.getElementById('title').textContent = '⚠️ Erreur';
+            document.getElementById('logo').textContent = '❌';
+
+            const errorBox = document.getElementById('errorBox');
+            document.getElementById('errorTitle').textContent = title;
+            document.getElementById('errorDesc').textContent = description;
+            document.getElementById('errorSolution').innerHTML = 
+                '<strong>Solution:</strong><br>' + solution.replace(/\n/g, '<br>');
+            errorBox.classList.add('show');
+
+            document.getElementById('step3').classList.remove('active');
+            document.getElementById('step3').style.background = '#f44336';
+            document.getElementById('step3').style.color = 'white';
+        }
+
+        // Start checking immediately
+        updateStep(1);
+        checkServer();
+    </script>
+</body>
+</html>
