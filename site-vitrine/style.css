@@ -183,6 +183,69 @@ nav ul li a.cta-nav:hover {
   background: linear-gradient(135deg, #0b1220 0%, #0f172a 60%, #111827 100%);
 }
 
+.demo-dashboard {
+  background: #0b1227;
+  color: #f1f5f9;
+  margin: 48px auto;
+  padding: 48px 32px;
+  border-radius: 20px;
+  max-width: 1200px;
+  box-shadow: 0 20px 55px rgba(11, 23, 39, 0.5);
+}
+
+.demo-dashboard-content {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 32px;
+  align-items: center;
+}
+
+.demo-dashboard-text {
+  text-align: left;
+}
+
+.demo-dashboard-text .eyebrow {
+  font-size: 0.85em;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #38bdf8;
+  margin-bottom: 12px;
+}
+
+.demo-dashboard-text h2 {
+  margin-top: 0;
+  font-size: 2.3em;
+}
+
+.demo-dashboard-text ul {
+  padding-left: 1.05em;
+  line-height: 1.8;
+  margin: 16px 0 18px;
+}
+
+.demo-dashboard-text ul li {
+  margin-bottom: 8px;
+}
+
+.demo-dashboard-actions {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.demo-dashboard-text .trial-note {
+  font-size: 0.95em;
+  color: #cbd5f5;
+}
+
+.demo-dashboard-image img {
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.6);
+}
+
 /* Download/Demo section */
 .download-demo {
   background: #f9f9f9;
