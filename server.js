@@ -137,6 +137,8 @@ const HAS_SYNC_TARGETS = SYNC_TARGET_BASE_URLS.length > 0;
 
 const AUTH_API_BASE = (process.env.AUTH_API_BASE || 'https://www.vhr-dashboard-site.com').replace(/\/+$/, '');
 const REMOTE_SYNC_TIMEOUT_MS = Math.max(1000, Number.parseInt(process.env.REMOTE_SYNC_TIMEOUT_MS || '5000', 10) || 5000);
+const REMOTE_SYNC_COOLDOWN_MS = Math.max(1000, Number.parseInt(process.env.REMOTE_SYNC_COOLDOWN_MS || '60000', 10) || 60000);
+const remoteSyncCooldown = new Map();
 
 const FORCE_HTTP = process.env.FORCE_HTTP === '1';
 const NO_BROWSER_FALLBACK = process.env.NO_BROWSER_FALLBACK === '1';
@@ -3138,6 +3140,14 @@ async function fetchRemoteAccessSnapshot(token) {
 
 async function syncLocalUserWithRemoteAccess(user, identifier, password) {
   if (!user || !password) return user;
+  const now = Date.now();
+  const cooldownKey = (user.username || identifier || '').toLowerCase();
+  const lastSync = remoteSyncCooldown.get(cooldownKey) || 0;
+  if (now - lastSync < REMOTE_SYNC_COOLDOWN_MS) {
+    console.log(`[remote-sync] cooldown active for ${cooldownKey}, skipping remote fetch (${now - lastSync}ms)`);
+    return user;
+  }
+  remoteSyncCooldown.set(cooldownKey, now);
   const remoteAuth = await attemptRemoteDashboardLogin(identifier, password);
   if (!remoteAuth || !remoteAuth.token) return user;
   const remoteSnapshot = await fetchRemoteAccessSnapshot(remoteAuth.token);
