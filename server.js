@@ -2963,7 +2963,7 @@ function buildAuthCookieOptions(req, overrides = {}) {
 const runningAppState = {}; // { serial: [pkg1, pkg2, ...] }
 
 // --- Middleware de vérification du token ---
-function authMiddleware(req, res, next) {
+async function authMiddleware(req, res, next) {
   // Accept token from querystring, Authorization header (Bearer), or cookie 'vhr_token'
   let token = null;
   const queryToken = (req.query && (req.query.token || req.query.vhr_token)) || null;
@@ -2981,10 +2981,7 @@ function authMiddleware(req, res, next) {
     if (!username) {
       return res.status(401).json({ ok: false, error: 'Token invalide (utilisateur manquant)' });
     }
-    if (!USE_POSTGRES && !dbEnabled) {
-      reloadUsers();
-    }
-    const storedUser = getUserByUsername(username);
+    const storedUser = await findUserByUsernameAsync(username);
     if (!storedUser) {
       if (isUsernameDeleted(username)) {
         return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
