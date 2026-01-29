@@ -1007,6 +1007,63 @@ if (emailUser && emailPass) {
   console.warn('[email] Configure: BREVO_SMTP_USER/EMAIL_USER and BREVO_SMTP_PASS/EMAIL_PASS');
 }
 
+function buildUserAccessSummary(user, options = {}) {
+  const normalized = normalizeUserRecord(user);
+  const licenses = options.licenses || loadLicenses();
+  const username = (normalized?.username || '').toLowerCase();
+  const activeLicenses = (licenses || [])
+    .filter(l => (l.status || '').toLowerCase() === 'active')
+    .filter(l => l.username && l.username.toLowerCase() === username)
+    .map(l => ({
+      key: l.key,
+      type: l.type || null,
+      status: l.status || null,
+      createdAt: l.createdAt || l.issuedAt || null
+    }));
+
+  if (!normalized) {
+    return {
+      demoStartDate: null,
+      demoExpiresAt: null,
+      demoRemainingDays: demoConfig.DEMO_DAYS,
+      demoExpired: false,
+      hasDemo: false,
+      subscriptionStatus: 'none',
+      hasActiveSubscription: false,
+      hasPerpetualLicense: false,
+      hasSubscriptionLicense: false,
+      licenseCount: 0,
+      licenseTypes: [],
+      activeLicenses: []
+    };
+  }
+
+  const demoStartDateValue = normalized.demoStartDate ? new Date(normalized.demoStartDate) : null;
+  const demoExpiresAt = demoStartDateValue
+    ? new Date(demoStartDateValue.getTime() + demoConfig.DEMO_DURATION_MS).toISOString()
+    : null;
+  const subscriptionStatus = (normalized.subscriptionStatus || 'none').toLowerCase();
+  const hasActiveSubscription = subscriptionStatus === 'active';
+  const demoRemainingDays = getDemoRemainingDays(normalized);
+  const demoExpired = isDemoExpired(normalized);
+  const licenseTypes = Array.from(new Set(activeLicenses.map(l => (l.type || '').toLowerCase()).filter(Boolean)));
+
+  return {
+    demoStartDate: normalized.demoStartDate || null,
+    demoExpiresAt,
+    demoRemainingDays,
+    demoExpired,
+    hasDemo: Boolean(normalized.demoStartDate),
+    subscriptionStatus,
+    hasActiveSubscription,
+    hasPerpetualLicense: hasPerpetualLicense(normalized),
+    hasSubscriptionLicense: licenseTypes.includes('subscription') || activeLicenses.some(l => (l.type || '').toLowerCase() === 'subscription'),
+    licenseCount: activeLicenses.length,
+    licenseTypes,
+    activeLicenses
+  };
+}
+
 // ========== LICENSE SYSTEM ==========
 const LICENSE_SECRET = process.env.LICENSE_SECRET || 'vhr-dashboard-secret-key-2025';
 
@@ -3044,7 +3101,8 @@ async function attemptRemoteDashboardLogin(identifier, password) {
       });
       const data = await response.json().catch(() => null);
       if (response.ok && data && data.ok) {
-        return { data, endpoint: attempt.path };
+        const token = data.token || data.accessToken || data.jwt || null;
+        return { data, endpoint: attempt.path, token };
       }
       console.warn(`[remote-auth] ${attempt.path} did not authenticate (status ${response.status})`);
     } catch (error) {
@@ -3052,6 +3110,68 @@ async function attemptRemoteDashboardLogin(identifier, password) {
     }
   }
   return null;
+}
+
+async function fetchRemoteAccessSnapshot(token) {
+  if (!AUTH_API_BASE || !token) return null;
+  try {
+    const meUrl = new URL(`${AUTH_API_BASE}/api/me`);
+    meUrl.searchParams.set('includeAccess', '1');
+    const response = await fetch(meUrl.toString(), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    if (!response.ok) {
+      console.warn('[remote-sync] /api/me returned', response.status);
+      return null;
+    }
+    const data = await response.json().catch(() => null);
+    return data?.user || null;
+  } catch (err) {
+    console.warn('[remote-sync] error fetching access snapshot:', err && err.message ? err.message : err);
+    return null;
+  }
+}
+
+async function syncLocalUserWithRemoteAccess(user, identifier, password) {
+  if (!user || !password) return user;
+  const remoteAuth = await attemptRemoteDashboardLogin(identifier, password);
+  if (!remoteAuth || !remoteAuth.token) return user;
+  const remoteSnapshot = await fetchRemoteAccessSnapshot(remoteAuth.token);
+  if (!remoteSnapshot) return user;
+
+  const accessSummary = remoteSnapshot.accessSummary || {};
+  const updates = { ...user };
+  let changed = false;
+
+  const remoteDemoStart = accessSummary.demoStartDate || remoteSnapshot.demoStartDate;
+  if (remoteDemoStart && remoteDemoStart !== user.demoStartDate) {
+    updates.demoStartDate = remoteDemoStart;
+    changed = true;
+  }
+
+  const remoteSubscriptionStatus = accessSummary.subscriptionStatus || remoteSnapshot.subscriptionStatus;
+  if (remoteSubscriptionStatus && remoteSubscriptionStatus !== user.subscriptionStatus) {
+    updates.subscriptionStatus = remoteSubscriptionStatus;
+    changed = true;
+  }
+
+  const remoteSubscriptionId = accessSummary.subscriptionId || remoteSnapshot.subscriptionId;
+  if (remoteSubscriptionId && remoteSubscriptionId !== user.subscriptionId) {
+    updates.subscriptionId = remoteSubscriptionId;
+    changed = true;
+  }
+
+  if (changed) {
+    updates.updatedAt = new Date().toISOString();
+    persistUser(updates);
+    console.log(`[remote-sync] local user ${user.username} refreshed depuis ${AUTH_API_BASE}`);
+    return updates;
+  }
+
+  return user;
 }
 
 async function ensureLocalUserFromRemote(remoteUser = {}, password = '', fallbackUsername = '') {
@@ -3126,6 +3246,8 @@ app.post('/api/login', async (req, res) => {
     console.log('[api/login] password mismatch');
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
   }
+
+  user = await syncLocalUserWithRemoteAccess(user, loginIdentifier, password) || user;
 
   const demoStatus = await buildDemoStatusForUser(user);
   if (demoStatus.accessBlocked) {
@@ -3719,15 +3841,18 @@ app.get('/api/admin/diagnose', authMiddleware, async (req, res) => {
 // Return authenticated user info (uses auth middleware)
 app.get('/api/me', authMiddleware, async (req, res) => {
   const dbUser = await findUserByUsernameAsync(req.user.username);
-  const user = dbUser ? {
-    username: dbUser.username,
-    role: dbUser.role,
-    email: dbUser.email || null,
-    emailVerified: isEmailVerified(dbUser)
-  } : {
-    username: req.user.username,
-    role: req.user.role,
-    emailVerified: !!req.user.emailVerified
+  const normalizedUser = normalizeUserRecord(dbUser || req.user);
+  const licenses = loadLicenses();
+  const accessSummary = buildUserAccessSummary(normalizedUser, { licenses });
+  const user = {
+    username: normalizedUser.username,
+    role: normalizedUser.role,
+    email: normalizedUser.email || null,
+    emailVerified: normalizedUser.emailVerified ?? false,
+    demoStartDate: normalizedUser.demoStartDate || null,
+    subscriptionStatus: normalizedUser.subscriptionStatus || 'none',
+    subscriptionId: normalizedUser.subscriptionId || null,
+    accessSummary
   };
   res.json({ ok: true, user });
 });
