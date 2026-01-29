@@ -136,6 +136,7 @@ const SYNC_TARGET_BASE_URLS = SYNC_TARGETS.map(t => t.url);
 const HAS_SYNC_TARGETS = SYNC_TARGET_BASE_URLS.length > 0;
 
 const AUTH_API_BASE = (process.env.AUTH_API_BASE || 'https://www.vhr-dashboard-site.com').replace(/\/+$/, '');
+const REMOTE_SYNC_TIMEOUT_MS = Math.max(1000, Number.parseInt(process.env.REMOTE_SYNC_TIMEOUT_MS || '5000', 10) || 5000);
 
 const FORCE_HTTP = process.env.FORCE_HTTP === '1';
 const NO_BROWSER_FALLBACK = process.env.NO_BROWSER_FALLBACK === '1';
@@ -3094,11 +3095,11 @@ async function attemptRemoteDashboardLogin(identifier, password) {
   ];
   for (const attempt of attempts) {
     try {
-      const response = await fetch(AUTH_API_BASE + attempt.path, {
+      const response = await promiseWithTimeout(fetch(AUTH_API_BASE + attempt.path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(attempt.payload)
-      });
+      }), REMOTE_SYNC_TIMEOUT_MS);
       const data = await response.json().catch(() => null);
       if (response.ok && data && data.ok) {
         const token = data.token || data.accessToken || data.jwt || null;
@@ -3117,12 +3118,12 @@ async function fetchRemoteAccessSnapshot(token) {
   try {
     const meUrl = new URL(`${AUTH_API_BASE}/api/me`);
     meUrl.searchParams.set('includeAccess', '1');
-    const response = await fetch(meUrl.toString(), {
+    const response = await promiseWithTimeout(fetch(meUrl.toString(), {
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json'
       }
-    });
+    }), REMOTE_SYNC_TIMEOUT_MS);
     if (!response.ok) {
       console.warn('[remote-sync] /api/me returned', response.status);
       return null;
