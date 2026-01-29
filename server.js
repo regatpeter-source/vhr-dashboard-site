@@ -4319,7 +4319,7 @@ app.post('/api/admin/revoke-subscription', authMiddleware, async (req, res) => {
 // Get demo/trial status - also check Stripe subscription status
 app.get('/api/demo/status', authMiddleware, async (req, res) => {
   try {
-    const user = getUserByUsername(req.user.username);
+    const user = await findUserByUsernameAsync(req.user.username);
     if (!user) {
       return res.status(404).json({ ok: false, error: 'Utilisateur non trouvé', code: 'user_not_found' });
     }
