@@ -3199,12 +3199,13 @@ async function ensureLocalUserFromRemote(remoteUser = {}, password = '', fallbac
 app.post('/api/login', async (req, res) => {
   console.log('[api/login] request received:', req.body);
   const { username, password } = req.body;
-  console.log('[api/login] attempting login for:', username);
+  const loginIdentifier = (username || '').toString().trim();
+  console.log('[api/login] attempting login for:', loginIdentifier);
   if (!USE_POSTGRES) {
     reloadUsers();
   }
   
-  let user = await findUserByUsernameAsync(username);
+  let user = await findUserByUsernameAsync(loginIdentifier);
   if (!user && USE_POSTGRES) {
     console.log('[api/login] user from PostgreSQL: not found');
   } else {
@@ -3216,11 +3217,11 @@ app.post('/api/login', async (req, res) => {
       return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
     }
     console.log('[api/login] user not found locally, trying remote auth');
-    const remoteAuth = await attemptRemoteDashboardLogin(username, password);
+    const remoteAuth = await attemptRemoteDashboardLogin(loginIdentifier, password);
     if (remoteAuth && remoteAuth.data && remoteAuth.data.ok) {
       console.log('[api/login] remote auth succeeded, syncing local user');
       await ensureLocalUserFromRemote(remoteAuth.data.user || {}, password, username);
-      user = await findUserByUsernameAsync((remoteAuth.data.user?.username || remoteAuth.data.user?.name || username).trim());
+      user = await findUserByUsernameAsync((remoteAuth.data.user?.username || remoteAuth.data.user?.name || loginIdentifier).trim());
     }
     if (!user) {
       console.log('[api/login] remote auth failed or no user created');
