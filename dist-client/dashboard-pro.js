@@ -3889,7 +3889,7 @@ function showSetupNotice() {
 		<p>Avant de lancer le Dashboard PRO, placez toujours le dossier <strong>platform-tools</strong> dans votre variable <strong>PATH</strong>. Si l'appareil sur lequel l'application est installée a déplacé ou extrait les fichiers ailleurs, cette notice explique pourquoi les casques peuvent rester invisibles même après la première installation.</p>
 		<h3 style='color:#2ecc71;'>1. Ajouter platform-tools au PATH</h3>
 		<ol style='padding-left:16px;line-height:1.6;'>
-			<li>Ouvrez l'Explorateur et localisez le dossier <code>platform-tools</code> (souvent dans <code>client-pack\platform-tools</code> ou dans l'archive du dashboard).</li>
+			<li>Ouvrez l'Explorateur et localisez le dossier <code>platform-tools</code> (il se trouve dans le répertoire d'installation de VHR Dashboard, par exemple <code>C:\\Program Files\\VHR Dashboard\\platform-tools</code>).</li>
 			<li>Copiez le chemin complet du dossier (clic droit → « Copier l'adresse en tant que texte »).</li>
 			<li>Ouvrez le Panneau de configuration → Système → Paramètres système avancés → Variables d'environnement.</li>
 			<li>Dans la variable <strong>PATH</strong>, ajoutez ce dossier. Séparez les entrées par un point-virgule (;) et validez.</li>

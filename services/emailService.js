@@ -160,6 +160,17 @@ async function sendPurchaseSuccessEmail(user, purchaseData) {
         <div class="license-key">${licenseKey}</div>
         <p style="margin-bottom: 0; color: #666; font-size: 12px; text-align: center; margin-top: 10px;">Durée: ${purchaseData.licenseDuration}</p>
       </div>
+
+      <h2 style="color: #2ecc71; margin-top: 30px;">📦 Installer VHR Dashboard</h2>
+      <p>Utilisez l'installateur Windows <strong>VHR.Dashboard.Setup.1.0.1.exe</strong> pour lancer la plateforme sur votre poste.</p>
+      <div style="text-align: center; margin: 20px 0;">
+        <a href="${downloadLink}" class="button">Télécharger l'installateur VHR.Dashboard.Setup.1.0.1.exe</a>
+      </div>
+      <ul style="padding-left: 18px; color: #333; line-height: 1.6;">
+        <li>Téléchargez le fichier, lancez-le et validez les avertissements SmartScreen (Informations complémentaires → Exécuter quand même).</li>
+        <li>Suivez l’assistant (Next → Install → Finish) : un raccourci « VHR Dashboard Pro » est créé sur le bureau et dans le menu Démarrer.</li>
+        <li>Ouvrez ce raccourci ou rendez-vous sur <code>http://localhost:3000</code> pour vous connecter avec vos identifiants ci-dessus.</li>
+      </ul>
       
       <h2 style="color: #2ecc71; margin-top: 30px;">📋 Prochaines Étapes</h2>
       <ol class="steps-list">
