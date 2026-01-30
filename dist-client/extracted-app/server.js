@@ -396,6 +396,21 @@ function startBundledAdbServer() {
   }
 }
 
+const GLOBAL_CONTEXT = (() => {
+  if (typeof globalThis !== 'undefined') return globalThis;
+  if (typeof global !== 'undefined') return global;
+  if (typeof window !== 'undefined') return window;
+  return null;
+})();
+
+if (GLOBAL_CONTEXT) {
+  try {
+    GLOBAL_CONTEXT.startBundledAdbServer = GLOBAL_CONTEXT.startBundledAdbServer || startBundledAdbServer;
+  } catch (exposureError) {
+    console.warn('[ADB] Unable to expose startBundledAdbServer globally:', exposureError && exposureError.message ? exposureError.message : exposureError);
+  }
+}
+
 // ========== PROCESS TRACKING & CLEANUP =========
 // Track all spawned processes for proper cleanup
 const trackedProcesses = new Map(); // pid -> { process, type, serial, startTime }
@@ -7381,7 +7396,11 @@ io.on('connection', socket => {
   }
   // Init ADB tracking only when not skipping ADB
   if (process.env.NO_ADB !== '1') {
-    startBundledAdbServer();
+    if (typeof startBundledAdbServer === 'function') {
+      startBundledAdbServer();
+    } else {
+      console.warn('[server] startBundledAdbServer implementation missing, skipping ADB auto-start.');
+    }
     (async function initServer() {
       try {
         refreshDevices();
