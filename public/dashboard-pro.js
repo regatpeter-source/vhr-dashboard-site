@@ -4250,6 +4250,57 @@ window.switchAuthTab = function(tab) {
 	document.getElementById('registerForm').style.display = isLogin ? 'none' : 'block';
 };
 
+async function fetchCentralAccessSnapshot() {
+	if (!AUTH_API_BASE) return null;
+	try {
+		const url = new URL(`${AUTH_API_BASE}/api/me`);
+		url.searchParams.set('includeAccess', '1');
+		const response = await fetch(url.toString(), {
+			method: 'GET',
+			credentials: 'include',
+			headers: { 'Content-Type': 'application/json' }
+		});
+		if (!response.ok) {
+			console.warn('[remote-status] /api/me failed', response.status);
+			return null;
+		}
+		const payload = await response.json().catch(() => null);
+		return payload?.user || null;
+	} catch (err) {
+		console.warn('[remote-status] unable to fetch access snapshot', err);
+		return null;
+	}
+}
+
+function hydrateLicenseStatusFromRemoteUser(remoteUser) {
+	if (!remoteUser) return null;
+	const accessSummary = remoteUser.accessSummary || {};
+	const demoInfo = accessSummary.demo || remoteUser.demo || {};
+	if (!demoInfo || Object.keys(demoInfo).length === 0) {
+		return null;
+	}
+	licenseStatus.demo = {
+		...(licenseStatus.demo || {}),
+		...demoInfo
+	};
+	licenseStatus.subscriptionStatus = accessSummary.subscriptionStatus || demoInfo.subscriptionStatus || licenseStatus.subscriptionStatus;
+	licenseStatus.hasPerpetualLicense = Boolean(accessSummary.hasPerpetualLicense || demoInfo.hasPerpetualLicense);
+	licenseStatus.licenseCount = accessSummary.licenseCount || demoInfo.licenseCount || licenseStatus.licenseCount;
+	licenseStatus.hasActiveLicense = Boolean(accessSummary.hasActiveLicense || demoInfo.hasActiveLicense || licenseStatus.hasActiveLicense);
+	licenseStatus.accessBlocked = Boolean(demoInfo.accessBlocked);
+	licenseStatus.trial = !demoInfo.demoExpired;
+	licenseStatus.expired = Boolean(demoInfo.demoExpired);
+	licenseStatus.licensed = Boolean(demoInfo.hasValidSubscription || demoInfo.hasPerpetualLicense || !demoInfo.demoExpired || licenseStatus.subscriptionStatus === 'admin');
+	licenseStatus.message = demoInfo.message || accessSummary.message || licenseStatus.message;
+	latestDemoFetchedAt = Date.now();
+	return demoInfo;
+}
+
+async function syncCentralAccessStatus() {
+	const snapshot = await fetchCentralAccessSnapshot();
+	return hydrateLicenseStatusFromRemoteUser(snapshot);
+}
+
 window.loginUser = async function() {
 	const identifierInput = document.getElementById('loginIdentifier') || document.getElementById('loginUserName');
 	const passwordInput = document.getElementById('loginPassword') || document.getElementById('loginUserPass');
@@ -4340,6 +4391,8 @@ window.loginUser = async function() {
 			const modal = document.getElementById('authModal');
 			if (modal) modal.remove();
 			
+			await syncCentralAccessStatus();
+			
 			setTimeout(() => {
 				showDashboardContent();
 				createNavbar();
@@ -4428,6 +4481,8 @@ window.registerUser = async function() {
 			const modal = document.getElementById('authModal');
 			if (modal) modal.remove();
 			
+				await syncCentralAccessStatus();
+				
 			// Initialize dashboard
 			setTimeout(() => {
 				showDashboardContent();
