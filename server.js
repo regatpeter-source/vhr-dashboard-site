@@ -181,11 +181,16 @@ function normalizeRemoteAddress(address) {
   return address;
 }
 
-function isLocalRequest(req) {
+function getRequestAddress(req) {
   const forwardedFor = (req.headers && req.headers['x-forwarded-for']) || '';
   const candidate = forwardedFor.split(',')[0].trim() || req.socket?.remoteAddress;
   const normalized = normalizeRemoteAddress(candidate);
-  return LOCAL_LOOPBACK_ADDRESSES.has(normalized);
+  return normalized || 'unknown';
+}
+
+function isLocalRequest(req) {
+  const candidate = getRequestAddress(req);
+  return LOCAL_LOOPBACK_ADDRESSES.has(candidate);
 }
 
 function normalizeSyncTargetEntry(entry) {
@@ -3796,9 +3801,12 @@ app.post('/api/admin/sync-user', async (req, res) => {
 
 // Fournit aux clients locaux le secret de synchronisation actif (pour éviter les builds figés)
 app.get('/api/admin/sync-config', (req, res) => {
+  const clientAddress = getRequestAddress(req);
   if (!isLocalRequest(req)) {
+    console.warn(`[sync-config] blocked request from ${clientAddress}`);
     return res.status(403).json({ ok: false, error: 'Accessible uniquement depuis localhost' });
   }
+  console.info(`[sync-config] allowed local request from ${clientAddress}`);
   res.json({
     ok: true,
     syncSecret: SYNC_USERS_SECRET || null,
