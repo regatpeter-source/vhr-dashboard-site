@@ -3221,6 +3221,16 @@ app.get('/api/admin/sync-config', (req, res) => {
   });
 });
 
+app.get('/.well-known/traffic-advice', (req, res) => {
+  console.info('[traffic-advice] served advisory payload.');
+  res.json({
+    ok: true,
+    message: 'Traffic advice endpoint reached',
+    timestamp: new Date().toISOString(),
+    host: req.hostname || 'localhost'
+  });
+});
+
 // Diagnostic endpoint to check database and user status (admin only)
 app.get('/api/admin/diagnose', authMiddleware, async (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;

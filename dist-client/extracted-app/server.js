@@ -307,6 +307,26 @@ function elevateAdminIfAllowlisted(user) {
   return user;
 }
 
+const LOCAL_LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+function normalizeRemoteAddress(address) {
+  if (!address) return '';
+  if (address.startsWith('::ffff:')) {
+    return address.slice(7);
+  }
+  return address;
+}
+
+function getRequestAddress(req) {
+  const forwardedFor = (req.headers && req.headers['x-forwarded-for']) || '';
+  const candidate = forwardedFor.split(',')[0].trim() || req.socket?.remoteAddress;
+  const normalized = normalizeRemoteAddress(candidate);
+  return normalized || 'unknown';
+}
+
+function isLocalRequest(req) {
+  return LOCAL_LOOPBACK_ADDRESSES.has(getRequestAddress(req));
+}
+
 // Anti-rafale scrcpy
 const SCRCPY_LAUNCH_DEBOUNCE_MS = Number(process.env.SCRCPY_LAUNCH_DEBOUNCE_MS || 10000);
 const SCRCPY_GLOBAL_LOCK_MS = Number(process.env.SCRCPY_GLOBAL_LOCK_MS || 5000);
@@ -3148,6 +3168,30 @@ app.post('/api/admin/sync-user', async (req, res) => {
     console.error('[api/admin/sync-user] error:', e && e.message ? e.message : e);
     return res.status(500).json({ ok: false, error: e.message || 'Server error' });
   }
+});
+
+app.get('/api/admin/sync-config', (req, res) => {
+  const clientAddress = getRequestAddress(req);
+  if (!isLocalRequest(req)) {
+    console.warn(`[sync-config] blocked request from ${clientAddress}`);
+    return res.status(403).json({ ok: false, error: 'Accessible uniquement depuis localhost' });
+  }
+  console.info(`[sync-config] allowed local request from ${clientAddress}`);
+  res.json({
+    ok: true,
+    syncSecret: SYNC_USERS_SECRET || null,
+    syncUserEndpoint: SYNC_USER_ENDPOINT
+  });
+});
+
+app.get('/.well-known/traffic-advice', (req, res) => {
+  console.info('[traffic-advice] served advisory payload.');
+  res.json({
+    ok: true,
+    message: 'Traffic advice endpoint reached',
+    timestamp: new Date().toISOString(),
+    host: req.hostname || 'localhost'
+  });
 });
 
 // Diagnostic endpoint to check database and user status (admin only)
