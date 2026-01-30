@@ -172,6 +172,22 @@ function ensureAllowedAdmin(req, res) {
   return true;
 }
 
+const LOCAL_LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+function normalizeRemoteAddress(address) {
+  if (!address) return '';
+  if (address.startsWith('::ffff:')) {
+    return address.slice(7);
+  }
+  return address;
+}
+
+function isLocalRequest(req) {
+  const forwardedFor = (req.headers && req.headers['x-forwarded-for']) || '';
+  const candidate = forwardedFor.split(',')[0].trim() || req.socket?.remoteAddress;
+  const normalized = normalizeRemoteAddress(candidate);
+  return LOCAL_LOOPBACK_ADDRESSES.has(normalized);
+}
+
 function normalizeSyncTargetEntry(entry) {
   if (!entry) return null;
   const link = (entry.url || entry.target || entry.baseUrl || '').toString().trim();
@@ -3780,6 +3796,9 @@ app.post('/api/admin/sync-user', async (req, res) => {
 
 // Fournit aux clients locaux le secret de synchronisation actif (pour éviter les builds figés)
 app.get('/api/admin/sync-config', (req, res) => {
+  if (!isLocalRequest(req)) {
+    return res.status(403).json({ ok: false, error: 'Accessible uniquement depuis localhost' });
+  }
   res.json({
     ok: true,
     syncSecret: SYNC_USERS_SECRET || null,
