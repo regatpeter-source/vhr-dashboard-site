@@ -2312,6 +2312,17 @@ let subscriptionIdCounter = 1;
 const SUBSCRIPTION_RECONCILE_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 let subscriptionReconcileTimer = null;
 
+const PLACEHOLDER_SUBSCRIPTION_PATTERNS = [
+  /^sub_admin/, // internal admin/grant placeholders
+  /placeholder/ // legacy placeholder IDs
+];
+
+function isPlaceholderSubscriptionId(id) {
+  if (!id) return false;
+  const normalized = String(id).toLowerCase();
+  return PLACEHOLDER_SUBSCRIPTION_PATTERNS.some(pattern => pattern.test(normalized));
+}
+
 async function reconcilePendingSubscriptions() {
   if (!stripe) return;
   let dirty = false;
@@ -2321,7 +2332,7 @@ async function reconcilePendingSubscriptions() {
     // Ignore placeholder or fake IDs to avoid noisy 404s
     const subId = String(user.subscriptionId || '').trim();
     if (!subId.startsWith('sub_')) continue;
-    if (subId.includes('placeholder')) {
+    if (isPlaceholderSubscriptionId(subId)) {
       console.warn('[subscription] Detected placeholder subscriptionId, clearing:', subId);
       user.subscriptionId = null;
       user.subscriptionStatus = null;
