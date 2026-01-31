@@ -3185,6 +3185,28 @@ async function fetchRemoteAccessSnapshot(token) {
   }
 }
 
+async function fetchRemoteDemoStatus(token) {
+  if (!AUTH_API_BASE || !token) return null;
+  try {
+    const endpoint = `${AUTH_API_BASE}/api/demo/status`;
+    const response = await promiseWithTimeout(fetch(endpoint, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    }), REMOTE_SYNC_TIMEOUT_MS);
+    if (!response.ok) {
+      console.warn('[remote-demo] /api/demo/status returned', response.status);
+      return null;
+    }
+    const payload = await response.json().catch(() => null);
+    return payload?.demo || null;
+  } catch (err) {
+    console.warn('[remote-demo] error fetching demo status:', err && err.message ? err.message : err);
+    return null;
+  }
+}
+
 async function syncLocalUserWithRemoteAccess(user, identifier, password) {
   if (!user || !password) return user;
   const now = Date.now();
@@ -3199,24 +3221,25 @@ async function syncLocalUserWithRemoteAccess(user, identifier, password) {
   if (!remoteAuth || !remoteAuth.token) return user;
   const remoteSnapshot = await fetchRemoteAccessSnapshot(remoteAuth.token);
   if (!remoteSnapshot) return user;
+  const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.token);
 
   const accessSummary = remoteSnapshot.accessSummary || {};
   const updates = { ...user };
   let changed = false;
 
-  const remoteDemoStart = accessSummary.demoStartDate || remoteSnapshot.demoStartDate;
+  const remoteDemoStart = remoteDemo?.demoStartDate || accessSummary.demoStartDate || remoteSnapshot.demoStartDate;
   if (remoteDemoStart && remoteDemoStart !== user.demoStartDate) {
     updates.demoStartDate = remoteDemoStart;
     changed = true;
   }
 
-  const remoteSubscriptionStatus = accessSummary.subscriptionStatus || remoteSnapshot.subscriptionStatus;
+  const remoteSubscriptionStatus = remoteDemo?.subscriptionStatus || accessSummary.subscriptionStatus || remoteSnapshot.subscriptionStatus;
   if (remoteSubscriptionStatus && remoteSubscriptionStatus !== user.subscriptionStatus) {
     updates.subscriptionStatus = remoteSubscriptionStatus;
     changed = true;
   }
 
-  const remoteSubscriptionId = accessSummary.subscriptionId || remoteSnapshot.subscriptionId;
+  const remoteSubscriptionId = remoteDemo?.subscriptionId || accessSummary.subscriptionId || remoteSnapshot.subscriptionId;
   if (remoteSubscriptionId && remoteSubscriptionId !== user.subscriptionId) {
     updates.subscriptionId = remoteSubscriptionId;
     changed = true;
