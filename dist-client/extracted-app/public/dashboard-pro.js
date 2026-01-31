@@ -64,104 +64,48 @@ window.addEventListener('beforeunload', () => {
 
 // ========== HELPER FUNCTIONS ========== 
 // Toggle password visibility in forms
-window.toggleDashboardPassword = function(inputId) {
-	const input = document.getElementById(inputId);
-	if (!input) return;
-	if (input.type === 'password') {
-		input.type = 'text';
-	} else {
-		input.type = 'password';
+window.showAuthModal = function(mode = 'login') {
+	let modal = document.getElementById('authModal');
+	if (modal) modal.remove();
+	const overlay = document.getElementById('authOverlay');
+	if (overlay) {
+		overlay.style.display = 'none';
 	}
-};
 
-function showModalInputPrompt(options = {}) {
-	const {
-		title,
-		message,
-		defaultValue = '',
-		placeholder = '',
-		confirmText = 'Valider',
-		cancelText = 'Annuler',
-		type = 'text',
-		selectOptions = []
-	} = options || {};
-	const normalizedDefault = defaultValue != null ? defaultValue : '';
-	return new Promise(resolve => {
-		const existing = document.getElementById('vhrInputPromptOverlay');
-		if (existing) existing.remove();
-		const overlay = document.createElement('div');
-		overlay.id = 'vhrInputPromptOverlay';
-		overlay.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;background:rgba(4,6,13,0.75);backdrop-filter:blur(6px);padding:20px;z-index:5500;';
-		const dialog = document.createElement('div');
-		dialog.style = 'background:#11131a;border-radius:16px;padding:24px;width:100%;max-width:420px;border:2px solid #2ecc71;box-shadow:0 25px 70px rgba(0,0,0,0.65);';
-		if (title) {
-			const titleEl = document.createElement('h3');
-			titleEl.textContent = title;
-			titleEl.style = 'margin:0 0 8px;color:#2ecc71;font-size:22px;';
-			dialog.appendChild(titleEl);
-		}
-		if (message) {
-			const messageEl = document.createElement('p');
-			messageEl.textContent = message;
-			messageEl.style = 'margin:0 0 12px;color:#b0b7c4;font-size:14px;';
-			dialog.appendChild(messageEl);
-		}
-		let inputElement;
-		if (Array.isArray(selectOptions) && selectOptions.length) {
-			inputElement = document.createElement('select');
-			inputElement.style = 'width:100%;padding:12px;border-radius:8px;border:1px solid #34495e;background:#182026;color:#fff;font-size:16px;';
-			selectOptions.forEach(option => {
-				const optionEl = document.createElement('option');
-				if (typeof option === 'string') {
-					optionEl.value = option;
-					optionEl.textContent = option;
-				} else {
-					optionEl.value = option.value;
-					optionEl.textContent = option.label || option.value;
-					if (option.disabled) optionEl.disabled = true;
-				}
-				if (String(optionEl.value) === String(normalizedDefault)) {
-					optionEl.selected = true;
-				}
-				inputElement.appendChild(optionEl);
-			});
-			if (!inputElement.value && selectOptions[0]) {
-				inputElement.value = selectOptions[0].value;
-			}
-		} else {
-			inputElement = document.createElement('input');
-			inputElement.type = type;
-			inputElement.placeholder = placeholder;
-			inputElement.value = normalizedDefault;
-			inputElement.style = 'width:100%;padding:12px;border-radius:8px;border:1px solid #34495e;background:#182026;color:#fff;font-size:16px;';
-		}
-		inputElement.setAttribute('autocomplete', 'off');
-		inputElement.setAttribute('aria-label', message || title || 'Saisie');
-		dialog.appendChild(inputElement);
-		const actions = document.createElement('div');
-		actions.style = 'display:flex;justify-content:flex-end;gap:12px;margin-top:20px;';
-		const cancelBtn = document.createElement('button');
-		cancelBtn.type = 'button';
-		cancelBtn.textContent = cancelText;
-		cancelBtn.style = 'background:#1a1d24;color:#fff;border:1px solid #34495e;padding:10px 18px;border-radius:8px;cursor:pointer;';
-		const confirmBtn = document.createElement('button');
-		confirmBtn.type = 'button';
-		confirmBtn.textContent = confirmText;
-		confirmBtn.style = 'background:#2ecc71;color:#000;border:none;padding:10px 18px;border-radius:8px;font-weight:bold;cursor:pointer;';
-		actions.appendChild(cancelBtn);
-		actions.appendChild(confirmBtn);
-		dialog.appendChild(actions);
-		overlay.appendChild(dialog);
-		document.body.appendChild(overlay);
-		inputElement.focus();
-		let resolved = false;
-		const handleKeyDown = (event) => {
-			if (event.key === 'Escape') {
-				event.preventDefault();
-				close(null);
-			}
-			if (event.key === 'Enter') {
-				event.preventDefault();
+	modal = document.createElement('div');
+	modal.id = 'authModal';
+	modal.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.95);z-index:3000;display:flex;align-items:center;justify-content:center;';
+
+	modal.innerHTML = `
+		<div style="background:linear-gradient(135deg, #1a1d24, #2c3e50);max-width:500px;width:90%;border-radius:16px;padding:40px;color:#fff;box-shadow:0 8px 32px #000;">
+			<div style="text-align:center;margin-bottom:32px;">
+				<h2 style="color:#2ecc71;margin:0;font-size:32px;">🥽 VHR Dashboard</h2>
+				<p style="color:#95a5a6;margin:0;font-size:14px;">Authentification obligatoire pour commencer</p>
+			</div>
+
+			<div style="margin-bottom:16px;">
+				<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Email ou nom d'utilisateur</label>
+				<input type="text" id="loginIdentifier" placeholder="email ou utilisateur" style="width:100%;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+			</div>
+			<div style="margin-bottom:20px;">
+				<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Mot de passe</label>
+				<div style="display:flex;gap:8px;align-items:center;">
+					<input type="password" id="loginPassword" placeholder="••••••••" style="flex:1;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+					<button type="button" onclick="toggleDashboardPassword('loginPassword')" style="background:none;border:none;cursor:pointer;font-size:18px;padding:8px;color:#fff;" title="Afficher/masquer">👁️</button>
+				</div>
+			</div>
+			<button onclick="loginUser()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
+				🔐 Se connecter
+			</button>
+			<p style="margin-top:16px;text-align:center;color:#95a5a6;font-size:12px;line-height:1.6;">
+				Les comptes sont fournis via le <a href="https://www.vhr-dashboard-site.com/account.html" target="_blank" rel="noreferrer" style="color:#2ecc71;font-weight:bold;">site central</a>.
+				Si vous n'avez pas encore reçu d'accès, contactez votre administrateur ou visitez la page du compte.
+			</p>
+		</div>
+	`;
+
+	document.body.appendChild(modal);
+};
 				handleConfirm();
 			}
 		};
@@ -405,30 +349,6 @@ window.switchToUser = function(u) {
 	if (authenticatedUsers[u]) {
 		setUser(u);
 		showToast(`✅ Connecté en tant que ${u}`, 'success');
-	} else {
-		showLoginDialogForUser(u);
-	}
-};
-
-window.setUserRolePrompt = async function(u) {
-	const role = await showModalInputPrompt({
-		title: 'Modifier le rôle',
-		message: `Rôle pour ${u} ?`,
-		type: 'select',
-		selectOptions: [
-			{ value: 'admin', label: 'Administrateur' },
-			{ value: 'user', label: 'Utilisateur' },
-			{ value: 'guest', label: 'Invité' }
-		],
-		defaultValue: userRoles[u] || 'user'
-	});
-	if (role) setUserRole(u, role.trim());
-};
-
-// Show dialog to add a new user with password
-window.showAddUserDialog = function() {
-	closeUserMenu();
-	let dialog = document.getElementById('addUserDialog');
 	if (dialog) dialog.remove();
 	
 	dialog = document.createElement('div');
@@ -3948,6 +3868,21 @@ window.openOfficialBillingPage = function() {
 	if (modal) modal.remove();
 };
 
+function applyDemoStatusSnapshot(demoStatus) {
+	if (!demoStatus) return;
+	licenseStatus.demo = demoStatus;
+	licenseStatus.subscriptionStatus = demoStatus.subscriptionStatus || 'unknown';
+	licenseStatus.hasPerpetualLicense = Boolean(demoStatus.hasPerpetualLicense);
+	licenseStatus.licenseCount = demoStatus.licenseCount || 0;
+	licenseStatus.accessBlocked = Boolean(demoStatus.accessBlocked);
+	licenseStatus.trial = !demoStatus.demoExpired;
+	licenseStatus.expired = Boolean(demoStatus.demoExpired);
+	licenseStatus.licensed = Boolean(demoStatus.hasValidSubscription || demoStatus.hasPerpetualLicense || !demoStatus.demoExpired || demoStatus.subscriptionStatus === 'admin');
+	if (typeof demoStatus.message === 'string') {
+		licenseStatus.message = demoStatus.message;
+	}
+}
+
 async function checkLicense() {
 	try {
 		// Admin = accès illimité (bypass paywall/licence)
@@ -3980,6 +3915,7 @@ async function checkLicense() {
 		
 		const demoStatus = res.demo;
 		console.log('[license] Demo status:', demoStatus);
+		applyDemoStatusSnapshot(demoStatus);
 		licenseStatus.demo = demoStatus;
 		licenseStatus.subscriptionStatus = demoStatus.subscriptionStatus || 'unknown';
 		licenseStatus.hasPerpetualLicense = Boolean(demoStatus.hasPerpetualLicense);
@@ -4225,96 +4161,40 @@ window.showAuthModal = function(mode = 'login') {
 	if (overlay) {
 		overlay.style.display = 'none';
 	}
-	
+
 	modal = document.createElement('div');
 	modal.id = 'authModal';
 	modal.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.95);z-index:3000;display:flex;align-items:center;justify-content:center;';
-	
-	const isLogin = mode === 'login';
-	
+
 	modal.innerHTML = `
 		<div style="background:linear-gradient(135deg, #1a1d24, #2c3e50);max-width:500px;width:90%;border-radius:16px;padding:40px;color:#fff;box-shadow:0 8px 32px #000;">
 			<div style="text-align:center;margin-bottom:32px;">
-				<h2 style="color:#2ecc71;margin:0 0 8px 0;font-size:32px;">🥽 VHR Dashboard</h2>
+				<h2 style="color:#2ecc71;margin:0;font-size:32px;">🥽 VHR Dashboard</h2>
 				<p style="color:#95a5a6;margin:0;font-size:14px;">Authentification obligatoire pour commencer</p>
 			</div>
-			
-			<!-- Tabs -->
-			<div style="display:flex;margin-bottom:24px;gap:12px;">
-				<button onclick="switchAuthTab('login')" id="loginTab" style="flex:1;padding:12px;background:${isLogin ? '#2ecc71' : '#34495e'};color:${isLogin ? '#000' : '#fff'};border:none;border-radius:8px;cursor:pointer;font-weight:bold;transition:all 0.3s;">
-					🔐 Connexion
-				</button>
-				<button onclick="switchAuthTab('register')" id="registerTab" style="flex:1;padding:12px;background:${isLogin ? '#34495e' : '#2ecc71'};color:${isLogin ? '#fff' : '#000'};border:none;border-radius:8px;cursor:pointer;font-weight:bold;transition:all 0.3s;">
-					📝 Inscription
-				</button>
+
+			<div style="margin-bottom:16px;">
+				<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Email ou nom d'utilisateur</label>
+				<input type="text" id="loginIdentifier" placeholder="email ou utilisateur" style="width:100%;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
 			</div>
-			
-			<!-- Login Form -->
-			<div id="loginForm" style="display:${isLogin ? 'block' : 'none'};">
-				<div style="margin-bottom:16px;">
-					<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Email ou nom d'utilisateur</label>
-					<input type="text" id="loginIdentifier" placeholder="email ou utilisateur" style="width:100%;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
-				</div>
-				<div style="margin-bottom:20px;">
-					<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Mot de passe</label>
-					<div style="display:flex;gap:8px;align-items:center;">
-						<input type="password" id="loginPassword" placeholder="••••••••" style="flex:1;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
-						<button type="button" onclick="toggleDashboardPassword('loginPassword')" style="background:none;border:none;cursor:pointer;font-size:18px;padding:8px;color:#fff;" title="Afficher/masquer">👁️</button>
-					</div>
-				</div>
-				<button onclick="loginUser()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
-					🔐 Se connecter
-				</button>
-				<div style="margin-top:12px;text-align:center;color:#95a5a6;font-size:12px;">
-					Pas encore inscrit ? <span style="color:#2ecc71;cursor:pointer;" onclick="switchAuthTab('register')">Créer un compte</span>
+			<div style="margin-bottom:20px;">
+				<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Mot de passe</label>
+				<div style="display:flex;gap:8px;align-items:center;">
+					<input type="password" id="loginPassword" placeholder="••••••••" style="flex:1;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+					<button type="button" onclick="toggleDashboardPassword('loginPassword')" style="background:none;border:none;cursor:pointer;font-size:18px;padding:8px;color:#fff;" title="Afficher/masquer">👁️</button>
 				</div>
 			</div>
-			
-			<!-- Register Form -->
-			<div id="registerForm" style="display:${isLogin ? 'none' : 'block'};">
-				<div style="margin-bottom:16px;">
-					<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Nom d'utilisateur</label>
-					<input type="text" id="registerUsername" placeholder="Mon nom" style="width:100%;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
-				</div>
-				<div style="margin-bottom:16px;">
-					<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Email</label>
-					<input type="email" id="registerEmail" placeholder="votre@email.com" style="width:100%;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
-				</div>
-				<div style="margin-bottom:20px;">
-					<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Mot de passe</label>
-					<div style="display:flex;gap:8px;align-items:center;">
-						<input type="password" id="registerPassword" placeholder="••••••••" style="flex:1;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
-						<button type="button" onclick="toggleDashboardPassword('registerPassword')" style="background:none;border:none;cursor:pointer;font-size:18px;padding:8px;color:#fff;" title="Afficher/masquer">👁️</button>
-					</div>
-				</div>
-				<button onclick="registerUser()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
-					📝 S'inscrire
-				</button>
-				<div style="margin-top:12px;text-align:center;color:#95a5a6;font-size:12px;">
-					Déjà inscrit ? <span style="color:#2ecc71;cursor:pointer;" onclick="switchAuthTab('login')">Se connecter</span>
-				</div>
-			</div>
-			
-			<!-- Trial Info -->
-			<div style="margin-top:24px;padding:16px;background:#34495e;border-radius:8px;border-left:4px solid #f39c12;">
-				<p style="margin:0;color:#f39c12;font-size:13px;font-weight:bold;">⏱️ Essai gratuit : 7 jours après inscription</p>
-				<p style="margin:6px 0 0 0;color:#95a5a6;font-size:12px;">Accès complet pendant 7 jours. Puis choisir abonnement ou licence.</p>
-			</div>
+			<button onclick="loginUser()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
+				🔐 Se connecter
+			</button>
+			<p style="margin-top:16px;text-align:center;color:#95a5a6;font-size:12px;line-height:1.6;">
+				Les comptes sont fournis via the <a href="https://www.vhr-dashboard-site.com/account.html" target="_blank" rel="noreferrer" style="color:#2ecc71;font-weight:bold;">site central</a>.
+				Si vous n'avez pas encore reçu d'accès, contactez votre administrateur ou visitez la page du compte.
+			</p>
 		</div>
 	`;
-	
-	document.body.appendChild(modal);
-};
 
-window.switchAuthTab = function(tab) {
-	const isLogin = tab === 'login';
-	document.getElementById('loginTab').style.background = isLogin ? '#2ecc71' : '#34495e';
-	document.getElementById('loginTab').style.color = isLogin ? '#000' : '#fff';
-	document.getElementById('registerTab').style.background = isLogin ? '#34495e' : '#2ecc71';
-	document.getElementById('registerTab').style.color = isLogin ? '#fff' : '#000';
-	
-	document.getElementById('loginForm').style.display = isLogin ? 'block' : 'none';
-	document.getElementById('registerForm').style.display = isLogin ? 'none' : 'block';
+	document.body.appendChild(modal);
 };
 
 window.loginUser = async function() {
@@ -4431,6 +4311,9 @@ window.loginUser = async function() {
 			showToast('✅ Connecté avec succès !', 'success');
 			currentUser = data.user?.name || data.user?.username || data.user?.email || identifier;
 			localStorage.setItem('vhr_current_user', currentUser);
+			if (data.demo) {
+				applyDemoStatusSnapshot(data.demo);
+			}
 			
 			const modal = document.getElementById('authModal');
 			if (modal) modal.remove();
@@ -4465,80 +4348,6 @@ window.loginUser = async function() {
 	} catch (e) {
 		console.error('[auth] login error:', e);
 		showToast('❌ Erreur de connexion', 'error');
-	}
-};
-
-window.registerUser = async function() {
-	const OFFICIAL_HOSTS = ['vhr-dashboard-site.onrender.com', 'www.vhr-dashboard-site.com', 'vhr-dashboard-site.com', 'dev.mydashboard.dev'];
-	const ACCOUNT_URL = 'https://www.vhr-dashboard-site.com/account.html?action=register';
-
-	// Hors domaine officiel : on redirige vers la page compte du site vitrine (sauf mocks)
-	if (!USE_MOCK_AUTH && !OFFICIAL_HOSTS.includes(window.location.hostname)) {
-		window.open(ACCOUNT_URL, '_blank');
-		return;
-	}
-
-	const username = document.getElementById('registerUsername').value.trim();
-	const email = document.getElementById('registerEmail').value.trim();
-	const password = document.getElementById('registerPassword').value;
-	
-	if (!username || !email || !password) {
-		showToast('❌ Tous les champs sont requis', 'error');
-		return;
-	}
-	
-	if (password.length < 6) {
-		showToast('❌ Le mot de passe doit contenir au moins 6 caractères', 'error');
-		return;
-	}
-	
-	showToast('📝 Création de compte...', 'info');
-	
-	try {
-		const res = await fetch(`${AUTH_API_BASE}/api/auth/register`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			credentials: 'include', // Important: send cookies
-			body: JSON.stringify({ username, email, password })
-		});
-		
-		const data = await res.json();
-		
-		if (res.ok && data.ok) {
-			if (data.token) {
-				saveAuthToken(data.token);
-			}
-			// JWT token is now in httpOnly cookie
-			// Trial period starts now (set by server)
-			const trialStart = new Date();
-			localStorage.setItem('vhr_trial_start_' + username, trialStart.toISOString());
-			
-			showToast('✅ Compte créé ! Essai 7 jours activé 🎉', 'success');
-			
-			// Set the username
-			currentUser = username;
-			localStorage.setItem('vhr_current_user', currentUser);
-			
-			// Close auth modal
-			const modal = document.getElementById('authModal');
-			if (modal) modal.remove();
-			
-			// Initialize dashboard
-			setTimeout(() => {
-				showDashboardContent();
-				createNavbar();
-				checkLicense().then(hasAccess => {
-					if (hasAccess) {
-						loadGamesCatalog().finally(() => loadDevices());
-					}
-				});
-			}, 200);
-		} else {
-			showToast('❌ ' + (data.error || 'Inscription échouée'), 'error');
-		}
-	} catch (e) {
-		console.error('[auth] register error:', e);
-		showToast('❌ Erreur lors de l\'inscription', 'error');
 	}
 };
 

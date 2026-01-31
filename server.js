@@ -3359,7 +3359,7 @@ app.post('/api/login', async (req, res) => {
   const cookieOptions = buildAuthCookieOptions(req);
   res.cookie('vhr_token', token, cookieOptions);
   console.log('[api/login] cookie set with secure=' + cookieOptions.secure + ', sameSite=' + cookieOptions.sameSite + ', maxAge=' + cookieOptions.maxAge);
-  res.json({ ok: true, token, userId: elevatedUser.id, username: elevatedUser.username, role: elevatedUser.role, email: elevatedUser.email || null, emailVerified: emailVerifiedFlag });
+  res.json({ ok: true, token, userId: elevatedUser.id, username: elevatedUser.username, role: elevatedUser.role, email: elevatedUser.email || null, emailVerified: emailVerifiedFlag, demo: demoStatus });
 });
 
 // --- Route de logout (optionnelle, côté client il suffit de supprimer le token) ---
