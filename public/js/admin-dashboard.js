@@ -17,6 +17,81 @@ async function authFetch(url, options = {}) {
   });
 }
 
+function buildUserModalContent(user) {
+  const createdDate = user.createdAt ? new Date(user.createdAt).toLocaleString('fr-FR') : 'N/A';
+  const updatedDate = user.updatedAt ? new Date(user.updatedAt).toLocaleString('fr-FR') : 'N/A';
+  const lastLogin = user.lastLogin ? new Date(user.lastLogin).toLocaleString('fr-FR') : 'N/A';
+  const lastActivity = user.lastActivity ? new Date(user.lastActivity).toLocaleString('fr-FR') : 'N/A';
+  const subStatusLabel = user.subscriptionStatus || 'None';
+  const access = user.accessSummary || {};
+  const demoStatusLabel = !access.hasDemo
+    ? 'Non initialisé'
+    : access.demoExpired
+      ? 'Expiré'
+      : `${Number.isFinite(access.demoRemainingDays) ? access.demoRemainingDays : 0} jour(s) restant(s)`;
+  const subscriptionDetailLabel = access.subscriptionStatus || subStatusLabel || 'aucun';
+  const licenseDetailLabel = access.hasPerpetualLicense
+    ? `Oui${access.licenseCount > 1 ? ` (${access.licenseCount})` : ''}`
+    : 'Non';
+
+  return `
+    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+      <p style="margin: 0 0 10px 0;"><strong>Username:</strong> ${user.username}</p>
+      <p style="margin: 0 0 10px 0;"><strong>Email:</strong> ${user.email || 'N/A'}</p>
+      <p style="margin: 0 0 10px 0;"><strong>Role:</strong> <span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></p>
+      <p style="margin: 0 0 10px 0;"><strong>Created:</strong> ${createdDate}</p>
+      <p style="margin: 0 0 10px 0;"><strong>Updated:</strong> ${updatedDate}</p>
+      <p style="margin: 0 0 6px 0;"><strong>Dernière connexion:</strong> ${lastLogin}</p>
+      <p style="margin: 0 0 0 0;"><strong>Dernière activité:</strong> ${lastActivity}</p>
+    </div>
+    <div style="padding: 15px; background: #fff; border-radius: 8px; border: 1px solid #e0e0e0;">
+      <h4 style="margin-top: 0;">Subscription Info</h4>
+      <p style="margin: 0 0 5px 0;"><strong>Status:</strong> ${subStatusLabel}</p>
+      <p style="margin: 0;"><strong>Subscription ID:</strong> ${user.subscriptionId || 'N/A'}</p>
+    </div>
+    <div style="margin-top:16px; padding: 14px; background: #f1f5f9; border-radius: 8px; border: 1px dashed #cbd5e0;">
+      <h4 style="margin-top: 0;">Statut d'accès</h4>
+      <p style="margin: 4px 0;"><strong>Essai :</strong> ${demoStatusLabel}</p>
+      <p style="margin: 4px 0;"><strong>Abonnement :</strong> ${subscriptionDetailLabel}</p>
+      <p style="margin: 4px 0;"><strong>Licence à vie :</strong> ${licenseDetailLabel}</p>
+    </div>
+    <div style="margin-top:16px; padding: 14px; background: #f9fafb; border: 1px dashed #cbd5e0; border-radius: 8px; display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="action-btn action-btn-view" style="background:#c6f6d5;color:#22543d;" onclick="manageSubscription('${user.username}','free_month')">Offrir 1 mois gratuit</button>
+      <button class="action-btn action-btn-delete" style="background:#fed7d7;color:#742a2a;" onclick="manageSubscription('${user.username}','cancel')">Annuler l'abonnement</button>
+      <button class="action-btn action-btn-delete" style="background:#fbd38d;color:#7b341e;" onclick="manageSubscription('${user.username}','refund')">Rembourser</button>
+      <button class="action-btn action-btn-view" style="background:#bee3f8;color:#2c5282;" onclick="promptExtendTrial('${user.username}')">Ajouter des jours d'essai</button>
+    </div>
+  `;
+}
+
+function renderUserModal(user) {
+  const modalBody = document.getElementById('messageModalBody');
+  if (!modalBody) return;
+  modalBody.innerHTML = buildUserModalContent(user);
+
+  const modal = document.getElementById('messageModal');
+  if (!modal) return;
+  modal.dataset.currentUser = user.username || '';
+  modal.classList.add('active');
+}
+
+function getCachedUserByUsername(username) {
+  if (!username || !cachedUsers) return null;
+  const normalized = (username || '').toLowerCase();
+  return cachedUsers.find(u => (String(u.username || '').toLowerCase()) === normalized) || null;
+}
+
+function refreshUserModalIfNeeded(username) {
+  if (!username) return;
+  const modal = document.getElementById('messageModal');
+  if (!modal || !modal.classList.contains('active')) return;
+  const current = (modal.dataset.currentUser || '').toLowerCase();
+  if (!current || current !== String(username || '').toLowerCase()) return;
+  const cached = getCachedUserByUsername(username);
+  if (!cached) return;
+  renderUserModal(cached);
+}
+
 // Initialize Android Installer when tab is clicked
 function initializeAndroidInstaller() {
   if (window.androidInstaller) return; // Already initialized
@@ -127,56 +202,9 @@ function applyUserFilters() {
 function renderUsersTable(list) {
   const tbody = document.getElementById('usersList');
   if (!tbody) return;
-  tbody.innerHTML = '';
-
-  if (!list || list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#718096;padding:18px;">Aucun utilisateur pour ces filtres</td></tr>';
-    return;
-  }
-
-  list.forEach(user => {
-    const row = tbody.insertRow();
-    const createdLabel = user.createdAt ? new Date(user.createdAt).toLocaleDateString('fr-FR') : 'N/A';
-    const lastSeenValue = user.lastActivity || user.lastLogin || null;
-    const lastSeenLabel = lastSeenValue ? new Date(lastSeenValue).toLocaleString('fr-FR') : 'N/A';
-    const isProtectedAdmin = user.role === 'admin' && user.username && user.username.toLowerCase() === 'vhr';
-    const access = user.accessSummary || {};
-    const demoDays = Number.isFinite(access.demoRemainingDays) ? access.demoRemainingDays : null;
-    const demoText = access.hasDemo
-      ? (access.demoExpired ? 'Expiré' : `${demoDays ?? 0} jour(s)`) 
-      : 'N/A';
-    const demoBadge = access.demoExpired ? 'badge-inactive' : 'badge-active';
-    const subscriptionState = (access.subscriptionStatus || user.subscriptionStatus || 'none').toLowerCase();
-    const subscriptionBadge = subscriptionState === 'active'
-      ? 'badge-active'
-      : subscriptionState === 'cancelled'
-        ? 'badge-unread'
-        : 'badge-inactive';
-    const subscriptionLabel = subscriptionState === 'none' ? 'aucun' : subscriptionState;
-    const licenseLabel = access.hasPerpetualLicense
-      ? `Oui${access.licenseCount > 1 ? ` (${access.licenseCount})` : ''}`
-      : 'Non';
-    const licenseBadge = access.hasPerpetualLicense ? 'badge-active' : 'badge-inactive';
-    row.innerHTML = `
-      <td>${user.username}</td>
-      <td>${user.email || 'N/A'}</td>
-      <td><span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></td>
-      <td>${createdLabel}</td>
-      <td>${lastSeenLabel}</td>
-      <td><span class="badge ${demoBadge}">${demoText}</span></td>
-      <td><span class="badge ${subscriptionBadge}">${subscriptionLabel}</span></td>
-      <td><span class="badge ${licenseBadge}">${licenseLabel}</span></td>
-      <td>
-        <button class="action-btn action-btn-view" onclick="viewUser('${user.username}')">View</button>
-        ${isProtectedAdmin ? '' : `<button class="action-btn action-btn-delete" onclick="deleteUserAccount('${user.username}')">Delete</button>`}
-      </td>
-    `;
-  });
-}
-
-// Load subscriptions
-async function loadSubscriptions() {
-  try {
+    if (user) {
+      renderUserModal(user);
+    }
     const res = await authFetch(`${API_BASE}/admin/subscriptions`);
     const data = await res.json();
     if (data.ok && data.subscriptions.length > 0) {
@@ -421,6 +449,7 @@ async function manageSubscription(username, action, days) {
     alert('✅ Action effectuée');
     await loadUsers();
     await loadStats();
+    refreshUserModalIfNeeded(normalized);
   } catch (e) {
     console.error('[subs] manage error:', e);
     alert('❌ Erreur: ' + e.message);
@@ -607,7 +636,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const closeBtn = document.getElementById('closeMessageModal');
   if (closeBtn) {
     closeBtn.addEventListener('click', () => {
-      document.getElementById('messageModal').classList.remove('active');
+      const modal = document.getElementById('messageModal');
+      if (modal) {
+        modal.classList.remove('active');
+        delete modal.dataset.currentUser;
+      }
     });
   }
 
