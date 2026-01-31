@@ -567,38 +567,42 @@ async function addSubscription(subscriptionData) {
       totalPaid
     } = subscriptionData;
 
+    const baseColumns = [
+      'username',
+      'userid',
+      'email',
+      'stripesubscriptionid',
+      'stripepriceid',
+      'status',
+      'planname',
+      'startdate',
+      'enddate',
+      'cancelledat',
+      'totalpaid'
+    ];
+    const baseValues = [
+      username || null,
+      userId || null,
+      email || null,
+      stripeSubscriptionId || null,
+      stripePriceId || null,
+      status || 'active',
+      planName || null,
+      startDate ? new Date(startDate) : null,
+      endDate ? new Date(endDate) : null,
+      cancelledAt ? new Date(cancelledAt) : null,
+      totalPaid || 0
+    ];
+
+    const columns = id ? ['id', ...baseColumns] : baseColumns;
+    const values = id ? [id, ...baseValues] : baseValues;
+    const placeholders = columns.map((_, idx) => `$${idx + 1}`);
+
     const result = await pool.query(
       `INSERT INTO subscriptions (
-         id,
-         username,
-         userid,
-         email,
-         stripesubscriptionid,
-         stripepriceid,
-         status,
-         planname,
-         startdate,
-         enddate,
-         cancelledat,
-         totalpaid,
-         createdat,
-         updatedat
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-       RETURNING *`,
-      [
-        id || null,
-        username || null,
-        userId || null,
-        email || null,
-        stripeSubscriptionId || null,
-        stripePriceId || null,
-        status || 'active',
-        planName || null,
-        startDate ? new Date(startDate) : null,
-        endDate ? new Date(endDate) : null,
-        cancelledAt ? new Date(cancelledAt) : null,
-        totalPaid || 0
-      ]
+         ${columns.join(', ')}
+       ) VALUES (${placeholders.join(', ')}) RETURNING *`,
+      values
     );
     return result.rows?.[0] || null;
   } catch (err) {
