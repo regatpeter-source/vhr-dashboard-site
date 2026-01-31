@@ -202,9 +202,56 @@ function applyUserFilters() {
 function renderUsersTable(list) {
   const tbody = document.getElementById('usersList');
   if (!tbody) return;
-    if (user) {
-      renderUserModal(user);
-    }
+  tbody.innerHTML = '';
+
+  if (!list || list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#718096;padding:18px;">Aucun utilisateur pour ces filtres</td></tr>';
+    return;
+  }
+
+  list.forEach(user => {
+    const row = tbody.insertRow();
+    const createdLabel = user.createdAt ? new Date(user.createdAt).toLocaleDateString('fr-FR') : 'N/A';
+    const lastSeenValue = user.lastActivity || user.lastLogin || null;
+    const lastSeenLabel = lastSeenValue ? new Date(lastSeenValue).toLocaleString('fr-FR') : 'N/A';
+    const isProtectedAdmin = user.role === 'admin' && user.username && user.username.toLowerCase() === 'vhr';
+    const access = user.accessSummary || {};
+    const demoDays = Number.isFinite(access.demoRemainingDays) ? access.demoRemainingDays : null;
+    const demoText = access.hasDemo
+      ? (access.demoExpired ? 'Expiré' : `${demoDays ?? 0} jour(s)`)
+      : 'N/A';
+    const demoBadge = access.demoExpired ? 'badge-inactive' : 'badge-active';
+    const subscriptionState = (access.subscriptionStatus || user.subscriptionStatus || 'none').toLowerCase();
+    const subscriptionBadge = subscriptionState === 'active'
+      ? 'badge-active'
+      : subscriptionState === 'cancelled'
+        ? 'badge-unread'
+        : 'badge-inactive';
+    const subscriptionLabel = subscriptionState === 'none' ? 'aucun' : subscriptionState;
+    const licenseLabel = access.hasPerpetualLicense
+      ? `Oui${access.licenseCount > 1 ? ` (${access.licenseCount})` : ''}`
+      : 'Non';
+    const licenseBadge = access.hasPerpetualLicense ? 'badge-active' : 'badge-inactive';
+    row.innerHTML = `
+      <td>${user.username}</td>
+      <td>${user.email || 'N/A'}</td>
+      <td><span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></td>
+      <td>${createdLabel}</td>
+      <td>${lastSeenLabel}</td>
+      <td><span class="badge ${demoBadge}">${demoText}</span></td>
+      <td><span class="badge ${subscriptionBadge}">${subscriptionLabel}</span></td>
+      <td><span class="badge ${licenseBadge}">${licenseLabel}</span></td>
+      <td>
+        <button class="action-btn action-btn-view" onclick="viewUser('${user.username}')">View</button>
+        ${isProtectedAdmin ? '' : `<button class="action-btn action-btn-delete" onclick="deleteUserAccount('${user.username}')">Delete</button>`}
+      </td>
+    `;
+  });
+}
+
+// Load subscriptions
+async function loadSubscriptions() {
+  try {
     const res = await authFetch(`${API_BASE}/admin/subscriptions`);
     const data = await res.json();
     if (data.ok && data.subscriptions.length > 0) {

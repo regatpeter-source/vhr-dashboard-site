@@ -1,5 +1,9 @@
-const API_BASE = '/api';
+const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
+const API_BASE = OFFICIAL_HOSTS.includes(window.location.hostname)
+  ? '/api'
+  : 'https://www.vhr-dashboard-site.com/api';
 let currentUser = null;
+let cachedUsers = [];
 
 // Helper to make authenticated fetch requests with cookies
 async function authFetch(url, options = {}) {
@@ -11,6 +15,81 @@ async function authFetch(url, options = {}) {
       ...options.headers
     }
   });
+}
+
+function buildUserModalContent(user) {
+  const createdDate = user.createdAt ? new Date(user.createdAt).toLocaleString('fr-FR') : 'N/A';
+  const updatedDate = user.updatedAt ? new Date(user.updatedAt).toLocaleString('fr-FR') : 'N/A';
+  const lastLogin = user.lastLogin ? new Date(user.lastLogin).toLocaleString('fr-FR') : 'N/A';
+  const lastActivity = user.lastActivity ? new Date(user.lastActivity).toLocaleString('fr-FR') : 'N/A';
+  const subStatusLabel = user.subscriptionStatus || 'None';
+  const access = user.accessSummary || {};
+  const demoStatusLabel = !access.hasDemo
+    ? 'Non initialisé'
+    : access.demoExpired
+      ? 'Expiré'
+      : `${Number.isFinite(access.demoRemainingDays) ? access.demoRemainingDays : 0} jour(s) restant(s)`;
+  const subscriptionDetailLabel = access.subscriptionStatus || subStatusLabel || 'aucun';
+  const licenseDetailLabel = access.hasPerpetualLicense
+    ? `Oui${access.licenseCount > 1 ? ` (${access.licenseCount})` : ''}`
+    : 'Non';
+
+  return `
+    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+      <p style="margin: 0 0 10px 0;"><strong>Username:</strong> ${user.username}</p>
+      <p style="margin: 0 0 10px 0;"><strong>Email:</strong> ${user.email || 'N/A'}</p>
+      <p style="margin: 0 0 10px 0;"><strong>Role:</strong> <span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></p>
+      <p style="margin: 0 0 10px 0;"><strong>Created:</strong> ${createdDate}</p>
+      <p style="margin: 0 0 10px 0;"><strong>Updated:</strong> ${updatedDate}</p>
+      <p style="margin: 0 0 6px 0;"><strong>Dernière connexion:</strong> ${lastLogin}</p>
+      <p style="margin: 0 0 0 0;"><strong>Dernière activité:</strong> ${lastActivity}</p>
+    </div>
+    <div style="padding: 15px; background: #fff; border-radius: 8px; border: 1px solid #e0e0e0;">
+      <h4 style="margin-top: 0;">Subscription Info</h4>
+      <p style="margin: 0 0 5px 0;"><strong>Status:</strong> ${subStatusLabel}</p>
+      <p style="margin: 0;"><strong>Subscription ID:</strong> ${user.subscriptionId || 'N/A'}</p>
+    </div>
+    <div style="margin-top:16px; padding: 14px; background: #f1f5f9; border-radius: 8px; border: 1px dashed #cbd5e0;">
+      <h4 style="margin-top: 0;">Statut d'accès</h4>
+      <p style="margin: 4px 0;"><strong>Essai :</strong> ${demoStatusLabel}</p>
+      <p style="margin: 4px 0;"><strong>Abonnement :</strong> ${subscriptionDetailLabel}</p>
+      <p style="margin: 4px 0;"><strong>Licence à vie :</strong> ${licenseDetailLabel}</p>
+    </div>
+    <div style="margin-top:16px; padding: 14px; background: #f9fafb; border: 1px dashed #cbd5e0; border-radius: 8px; display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="action-btn action-btn-view" style="background:#c6f6d5;color:#22543d;" onclick="manageSubscription('${user.username}','free_month')">Offrir 1 mois gratuit</button>
+      <button class="action-btn action-btn-delete" style="background:#fed7d7;color:#742a2a;" onclick="manageSubscription('${user.username}','cancel')">Annuler l'abonnement</button>
+      <button class="action-btn action-btn-delete" style="background:#fbd38d;color:#7b341e;" onclick="manageSubscription('${user.username}','refund')">Rembourser</button>
+      <button class="action-btn action-btn-view" style="background:#bee3f8;color:#2c5282;" onclick="promptExtendTrial('${user.username}')">Ajouter des jours d'essai</button>
+    </div>
+  `;
+}
+
+function renderUserModal(user) {
+  const modalBody = document.getElementById('messageModalBody');
+  if (!modalBody) return;
+  modalBody.innerHTML = buildUserModalContent(user);
+
+  const modal = document.getElementById('messageModal');
+  if (!modal) return;
+  modal.dataset.currentUser = user.username || '';
+  modal.classList.add('active');
+}
+
+function getCachedUserByUsername(username) {
+  if (!username || !cachedUsers) return null;
+  const normalized = (username || '').toLowerCase();
+  return cachedUsers.find(u => (String(u.username || '').toLowerCase()) === normalized) || null;
+}
+
+function refreshUserModalIfNeeded(username) {
+  if (!username) return;
+  const modal = document.getElementById('messageModal');
+  if (!modal || !modal.classList.contains('active')) return;
+  const current = (modal.dataset.currentUser || '').toLowerCase();
+  if (!current || current !== String(username || '').toLowerCase()) return;
+  const cached = getCachedUserByUsername(username);
+  if (!cached) return;
+  renderUserModal(cached);
 }
 
 // Initialize Android Installer when tab is clicked
@@ -60,46 +139,15 @@ async function loadUsers() {
     const res = await authFetch(`${API_BASE}/admin/users`);
     const data = await res.json();
     if (data.ok && data.users.length > 0) {
-      const tbody = document.getElementById('usersList');
-      tbody.innerHTML = '';
-      data.users.forEach(user => {
-        const createdAt = user.createdAt ? new Date(user.createdAt) : null;
-        const lastActivity = user.lastActivity || user.lastLogin || user.updatedAt || null;
-        const lastActivityLabel = lastActivity ? new Date(lastActivity).toLocaleString() : 'N/A';
-        const createdLabel = createdAt ? createdAt.toLocaleDateString() : 'N/A';
-        const access = user.accessSummary || {};
-        const demoDays = Number.isFinite(access.demoRemainingDays) ? access.demoRemainingDays : 0;
-        const demoText = access.hasDemo
-          ? (access.demoExpired ? 'Expiré' : `${demoDays} jour(s)`)
-          : 'N/A';
-        const demoBadge = access.demoExpired ? 'badge-inactive' : 'badge-active';
-        const subscriptionState = (access.subscriptionStatus || user.subscriptionStatus || 'none').toLowerCase();
-        const subscriptionLabel = subscriptionState === 'none' ? 'aucun' : subscriptionState;
-        const subscriptionBadge = subscriptionState === 'active'
-          ? 'badge-active'
-          : subscriptionState === 'cancelled'
-            ? 'badge-unread'
-            : 'badge-inactive';
-        const licenseLabel = access.hasPerpetualLicense
-          ? `Oui${access.licenseCount > 1 ? ` (${access.licenseCount})` : ''}`
-          : 'Non';
-        const licenseBadge = access.hasPerpetualLicense ? 'badge-active' : 'badge-inactive';
-        const isProtectedAdmin = user.role === 'admin' && user.username && user.username.toLowerCase() === 'vhr';
-        const row = tbody.insertRow();
-        row.innerHTML = `
-          <td>${user.username}</td>
-          <td>${user.email || 'N/A'}</td>
-          <td><span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></td>
-          <td>${createdLabel}</td>
-          <td>${lastActivityLabel}</td>
-          <td><span class="badge ${demoBadge}">${demoText}</span></td>
-          <td><span class="badge ${subscriptionBadge}">${subscriptionLabel}</span></td>
-          <td><span class="badge ${licenseBadge}">${licenseLabel}</span></td>
-          <td>
-            <button class="action-btn action-btn-view" onclick="viewUser('${user.username}')">View</button>
-          </td>
-        `;
-      });
+      cachedUsers = data.users.map(u => ({
+        ...u,
+        createdAt: u.createdAt || u.createdat || u.created || u.updatedAt || null,
+        updatedAt: u.updatedAt || u.updatedat || null,
+        lastLogin: u.lastLogin || u.lastlogin || u.last_connection || null,
+        lastActivity: u.lastActivity || u.lastactivity || u.last_active || null
+      }));
+
+      applyUserFilters();
     } else {
       document.getElementById('usersMessage').innerHTML = '<div class="empty-state"><p>No users found</p></div>';
     }
@@ -107,6 +155,98 @@ async function loadUsers() {
     console.error('Error loading users:', e);
     document.getElementById('usersMessage').innerHTML = `<div class="error">Error loading users</div>`;
   }
+}
+
+// Apply filters to cached users and render
+function applyUserFilters() {
+  const search = (document.getElementById('filterUserSearch')?.value || '').toLowerCase().trim();
+  const role = (document.getElementById('filterUserRole')?.value || '').toLowerCase();
+  const verified = (document.getElementById('filterUserVerified')?.value || '').toLowerCase();
+  const dateFromRaw = document.getElementById('filterUserDateFrom')?.value || '';
+  const dateToRaw = document.getElementById('filterUserDateTo')?.value || '';
+
+  const dateFrom = dateFromRaw ? new Date(dateFromRaw) : null;
+  const dateTo = dateToRaw ? new Date(dateToRaw) : null;
+  if (dateTo) {
+    // include end date fully
+    dateTo.setHours(23,59,59,999);
+  }
+
+  const filtered = (cachedUsers || []).filter(u => {
+    const uname = (u.username || '').toLowerCase();
+    const mail = (u.email || '').toLowerCase();
+    const roleMatch = role ? (String(u.role || '').toLowerCase() === role) : true;
+    const searchMatch = search ? (uname.includes(search) || mail.includes(search)) : true;
+    const verifFlag = u.emailVerified ?? u.emailverified;
+    const verifiedMatch = verified === 'verified'
+      ? verifFlag === true || verifFlag === 1
+      : verified === 'unverified'
+        ? verifFlag === false || verifFlag === 0 || verifFlag === undefined
+        : true;
+
+    const createdAt = u.createdAt ? new Date(u.createdAt) : null;
+    const dateMatch = (() => {
+      if (!createdAt || isNaN(createdAt)) return true;
+      if (dateFrom && createdAt < dateFrom) return false;
+      if (dateTo && createdAt > dateTo) return false;
+      return true;
+    })();
+
+    return roleMatch && searchMatch && verifiedMatch && dateMatch;
+  });
+
+  renderUsersByMonth(filtered);
+  renderUsersTable(filtered);
+}
+
+function renderUsersTable(list) {
+  const tbody = document.getElementById('usersList');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  if (!list || list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#718096;padding:18px;">Aucun utilisateur pour ces filtres</td></tr>';
+    return;
+  }
+
+  list.forEach(user => {
+    const row = tbody.insertRow();
+    const createdLabel = user.createdAt ? new Date(user.createdAt).toLocaleDateString('fr-FR') : 'N/A';
+    const lastSeenValue = user.lastActivity || user.lastLogin || null;
+    const lastSeenLabel = lastSeenValue ? new Date(lastSeenValue).toLocaleString('fr-FR') : 'N/A';
+    const isProtectedAdmin = user.role === 'admin' && user.username && user.username.toLowerCase() === 'vhr';
+    const access = user.accessSummary || {};
+    const demoDays = Number.isFinite(access.demoRemainingDays) ? access.demoRemainingDays : null;
+    const demoText = access.hasDemo
+      ? (access.demoExpired ? 'Expiré' : `${demoDays ?? 0} jour(s)`)
+      : 'N/A';
+    const demoBadge = access.demoExpired ? 'badge-inactive' : 'badge-active';
+    const subscriptionState = (access.subscriptionStatus || user.subscriptionStatus || 'none').toLowerCase();
+    const subscriptionBadge = subscriptionState === 'active'
+      ? 'badge-active'
+      : subscriptionState === 'cancelled'
+        ? 'badge-unread'
+        : 'badge-inactive';
+    const subscriptionLabel = subscriptionState === 'none' ? 'aucun' : subscriptionState;
+    const licenseLabel = access.hasPerpetualLicense
+      ? `Oui${access.licenseCount > 1 ? ` (${access.licenseCount})` : ''}`
+      : 'Non';
+    const licenseBadge = access.hasPerpetualLicense ? 'badge-active' : 'badge-inactive';
+    row.innerHTML = `
+      <td>${user.username}</td>
+      <td>${user.email || 'N/A'}</td>
+      <td><span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></td>
+      <td>${createdLabel}</td>
+      <td>${lastSeenLabel}</td>
+      <td><span class="badge ${demoBadge}">${demoText}</span></td>
+      <td><span class="badge ${subscriptionBadge}">${subscriptionLabel}</span></td>
+      <td><span class="badge ${licenseBadge}">${licenseLabel}</span></td>
+      <td>
+        <button class="action-btn action-btn-view" onclick="viewUser('${user.username}')">View</button>
+        ${isProtectedAdmin ? '' : `<button class="action-btn action-btn-delete" onclick="deleteUserAccount('${user.username}')">Delete</button>`}
+      </td>
+    `;
+  });
 }
 
 // Load subscriptions
@@ -239,17 +379,18 @@ async function viewUser(username) {
     const user = data.users.find(u => u.username === username);
     if (user) {
       const modalBody = document.getElementById('messageModalBody');
-      const createdDate = new Date(user.createdAt).toLocaleString();
-      const updatedDate = new Date(user.updatedAt).toLocaleString();
-      const lastLogin = user.lastLogin ? new Date(user.lastLogin).toLocaleString() : 'N/A';
-      const lastActivity = user.lastActivity ? new Date(user.lastActivity).toLocaleString() : 'N/A';
+      const createdDate = user.createdAt ? new Date(user.createdAt).toLocaleString('fr-FR') : 'N/A';
+      const updatedDate = user.updatedAt ? new Date(user.updatedAt).toLocaleString('fr-FR') : 'N/A';
+      const lastLogin = user.lastLogin ? new Date(user.lastLogin).toLocaleString('fr-FR') : 'N/A';
+      const lastActivity = user.lastActivity ? new Date(user.lastActivity).toLocaleString('fr-FR') : 'N/A';
+      const subStatusLabel = user.subscriptionStatus || 'None';
       const access = user.accessSummary || {};
       const demoStatusLabel = !access.hasDemo
         ? 'Non initialisé'
         : access.demoExpired
           ? 'Expiré'
           : `${Number.isFinite(access.demoRemainingDays) ? access.demoRemainingDays : 0} jour(s) restant(s)`;
-      const subscriptionDetailLabel = access.subscriptionStatus || user.subscriptionStatus || 'aucun';
+      const subscriptionDetailLabel = access.subscriptionStatus || subStatusLabel || 'aucun';
       const licenseDetailLabel = access.hasPerpetualLicense
         ? `Oui${access.licenseCount > 1 ? ` (${access.licenseCount})` : ''}`
         : 'Non';
@@ -260,20 +401,26 @@ async function viewUser(username) {
           <p style="margin: 0 0 10px 0;"><strong>Email:</strong> ${user.email || 'N/A'}</p>
           <p style="margin: 0 0 10px 0;"><strong>Role:</strong> <span class="badge ${user.role === 'admin' ? 'badge-active' : 'badge-inactive'}">${user.role}</span></p>
           <p style="margin: 0 0 10px 0;"><strong>Created:</strong> ${createdDate}</p>
-          <p style="margin: 0 0 6px 0;"><strong>Updated:</strong> ${updatedDate}</p>
+          <p style="margin: 0 0 10px 0;"><strong>Updated:</strong> ${updatedDate}</p>
           <p style="margin: 0 0 6px 0;"><strong>Dernière connexion:</strong> ${lastLogin}</p>
           <p style="margin: 0 0 0 0;"><strong>Dernière activité:</strong> ${lastActivity}</p>
         </div>
         <div style="padding: 15px; background: #fff; border-radius: 8px; border: 1px solid #e0e0e0;">
           <h4 style="margin-top: 0;">Subscription Info</h4>
-          <p style="margin: 0 0 5px 0;"><strong>Status:</strong> ${subscriptionDetailLabel}</p>
+          <p style="margin: 0 0 5px 0;"><strong>Status:</strong> ${subStatusLabel}</p>
           <p style="margin: 0;"><strong>Subscription ID:</strong> ${user.subscriptionId || 'N/A'}</p>
         </div>
-        <div style="margin-top:16px; padding: 14px; background: #f1f5f9; border-radius: 8px; border: 1px dashed #cbd5e0;">
-          <h4 style="margin-top: 0;">Statut d'accès</h4>
-          <p style="margin: 4px 0;"><strong>Essai :</strong> ${demoStatusLabel}</p>
-          <p style="margin: 4px 0;"><strong>Abonnement :</strong> ${subscriptionDetailLabel}</p>
-          <p style="margin: 4px 0;"><strong>Licence à vie :</strong> ${licenseDetailLabel}</p>
+          <div style="margin-top:16px; padding: 14px; background: #f1f5f9; border-radius: 8px; border: 1px dashed #cbd5e0;">
+            <h4 style="margin-top: 0;">Statut d'accès</h4>
+            <p style="margin: 4px 0;"><strong>Essai :</strong> ${demoStatusLabel}</p>
+            <p style="margin: 4px 0;"><strong>Abonnement :</strong> ${subscriptionDetailLabel}</p>
+            <p style="margin: 4px 0;"><strong>Licence à vie :</strong> ${licenseDetailLabel}</p>
+          </div>
+        <div style="margin-top:16px; padding: 14px; background: #f9fafb; border: 1px dashed #cbd5e0; border-radius: 8px; display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="action-btn action-btn-view" style="background:#c6f6d5;color:#22543d;" onclick="manageSubscription('${user.username}','free_month')">Offrir 1 mois gratuit</button>
+          <button class="action-btn action-btn-delete" style="background:#fed7d7;color:#742a2a;" onclick="manageSubscription('${user.username}','cancel')">Annuler l'abonnement</button>
+          <button class="action-btn action-btn-delete" style="background:#fbd38d;color:#7b341e;" onclick="manageSubscription('${user.username}','refund')">Rembourser</button>
+          <button class="action-btn action-btn-view" style="background:#bee3f8;color:#2c5282;" onclick="promptExtendTrial('${user.username}')">Ajouter des jours d'essai</button>
         </div>
       `;
       document.getElementById('messageModal').classList.add('active');
@@ -282,6 +429,85 @@ async function viewUser(username) {
     console.error('Error viewing user:', e);
     alert('Error loading user details');
   }
+}
+
+// Delete a user (admin only)
+async function deleteUserAccount(username) {
+  const normalized = String(username || '').trim();
+
+  if (!normalized) {
+    alert('Nom d\'utilisateur manquant');
+    return;
+  }
+
+  if (currentUser && currentUser.username && currentUser.username.toLowerCase() === normalized.toLowerCase()) {
+    alert('Vous ne pouvez pas supprimer votre propre compte depuis cette page.');
+    return;
+  }
+
+  const confirmed = confirm(`Supprimer l'utilisateur "${normalized}" ? Cette action est définitive.`);
+  if (!confirmed) return;
+
+  try {
+    const res = await authFetch(`${API_BASE}/admin/users/${encodeURIComponent(normalized)}`, { method: 'DELETE' });
+    const data = await res.json();
+
+    if (!res.ok || !data.ok) {
+      const message = (data && data.error) ? data.error : 'Erreur serveur';
+      alert('❌ ' + message);
+      return;
+    }
+
+    alert('✅ Utilisateur supprimé avec succès');
+    await loadUsers();
+    await loadStats();
+  } catch (e) {
+    console.error('[users] delete error:', e);
+    alert('❌ Erreur lors de la suppression: ' + e.message);
+  }
+}
+
+async function manageSubscription(username, action, days) {
+  const normalized = String(username || '').trim();
+  const actionLabel = {
+    cancel: "annuler l'abonnement",
+    refund: 'rembourser',
+    free_month: 'offrir 1 mois gratuit',
+    extend_trial: "ajouter des jours d'essai"
+  }[action] || action;
+
+  if (!normalized || !action) return alert('Paramètres manquants');
+
+  if (!confirm(`Confirmer: ${actionLabel} pour ${normalized} ?`)) return;
+
+  try {
+    const res = await authFetch(`${API_BASE}/admin/subscription/manage`, {
+      method: 'POST',
+      body: JSON.stringify({ username: normalized, action, days })
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      const message = data && data.error ? data.error : 'Erreur serveur';
+      alert('❌ ' + message);
+      return;
+    }
+
+    alert('✅ Action effectuée');
+    await loadUsers();
+    await loadStats();
+    refreshUserModalIfNeeded(normalized);
+  } catch (e) {
+    console.error('[subs] manage error:', e);
+    alert('❌ Erreur: ' + e.message);
+  }
+}
+
+function promptExtendTrial(username) {
+  const extra = prompt("Combien de jours d'essai supplémentaires ?", '7');
+  const days = Number(extra || 0);
+  if (Number.isNaN(days) || days <= 0) return alert('Nombre de jours invalide');
+  manageSubscription(username, 'extend_trial', days);
 }
 
 // View message detail
@@ -457,7 +683,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const closeBtn = document.getElementById('closeMessageModal');
   if (closeBtn) {
     closeBtn.addEventListener('click', () => {
-      document.getElementById('messageModal').classList.remove('active');
+      const modal = document.getElementById('messageModal');
+      if (modal) {
+        modal.classList.remove('active');
+        delete modal.dataset.currentUser;
+      }
     });
   }
 
@@ -472,7 +702,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize
   init();
+
+  // Filters
+  const searchInput = document.getElementById('filterUserSearch');
+  const roleSelect = document.getElementById('filterUserRole');
+  const verifiedSelect = document.getElementById('filterUserVerified');
+  const dateFromInput = document.getElementById('filterUserDateFrom');
+  const dateToInput = document.getElementById('filterUserDateTo');
+  const resetBtn = document.getElementById('filterUserReset');
+
+  if (searchInput) searchInput.addEventListener('input', debounce(applyUserFilters, 150));
+  if (roleSelect) roleSelect.addEventListener('change', applyUserFilters);
+  if (verifiedSelect) verifiedSelect.addEventListener('change', applyUserFilters);
+  if (dateFromInput) dateFromInput.addEventListener('change', applyUserFilters);
+  if (dateToInput) dateToInput.addEventListener('change', applyUserFilters);
+  if (resetBtn) resetBtn.addEventListener('click', () => {
+    if (searchInput) searchInput.value = '';
+    if (roleSelect) roleSelect.value = '';
+    if (verifiedSelect) verifiedSelect.value = '';
+    if (dateFromInput) dateFromInput.value = '';
+    if (dateToInput) dateToInput.value = '';
+    applyUserFilters();
+  });
 });
+
+// Simple debounce to avoid spamming filter while typing
+function debounce(fn, wait = 200) {
+  let t;
+  return (...args) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn.apply(null, args), wait);
+  };
+}
 
 // Initialize
 async function init() {
@@ -485,4 +746,57 @@ async function init() {
   console.log('[admin-dashboard] Users loaded');
   await loadMessages();
   console.log('[admin-dashboard] Messages loaded - Init complete');
+}
+
+// Render monthly grouping of users
+function renderUsersByMonth(users) {
+  const container = document.getElementById('usersByMonth');
+  if (!container) return;
+
+  if (!users || users.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>Aucun utilisateur</p></div>';
+    return;
+  }
+
+  const groups = new Map();
+  users.forEach(u => {
+    const created = u.createdAt || u.createdat || u.created || u.updatedAt || null;
+    const date = created ? new Date(created) : null;
+    const key = date && !isNaN(date) ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}` : 'unknown';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(u);
+  });
+
+  const sortedKeys = Array.from(groups.keys()).sort((a, b) => {
+    if (a === 'unknown') return 1;
+    if (b === 'unknown') return -1;
+    return a < b ? 1 : -1; // desc
+  }).slice(0, 12); // show latest 12 months/entries
+
+  container.innerHTML = '';
+
+  sortedKeys.forEach(key => {
+    const list = groups.get(key) || [];
+    const label = key === 'unknown'
+      ? 'Date inconnue'
+      : new Date(`${key}-01T00:00:00Z`).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+
+    const card = document.createElement('div');
+    card.className = 'month-card';
+    card.innerHTML = `
+      <h4>${label}</h4>
+      <div class="month-count">${list.length} utilisateur(s)</div>
+      <div class="chip-wrap"></div>
+    `;
+
+    const wrap = card.querySelector('.chip-wrap');
+    list.forEach(u => {
+      const chip = document.createElement('div');
+      chip.className = 'user-chip';
+      chip.innerHTML = `${u.username}${u.email ? `<span>${u.email}</span>` : ''}`;
+      wrap.appendChild(chip);
+    });
+
+    container.appendChild(card);
+  });
 }
