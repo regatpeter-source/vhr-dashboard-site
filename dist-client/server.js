@@ -1607,19 +1607,29 @@ app.get('/admin-dashboard.html', authMiddleware, async (req, res) => {
   }
 });
 
+const siteVitrineDir = path.join(__dirname, 'site-vitrine');
+
+function resolvePublicHtml(fileName) {
+  const direct = path.join(__dirname, fileName);
+  if (fs.existsSync(direct)) return direct;
+  const fallback = path.join(siteVitrineDir, fileName);
+  if (fs.existsSync(fallback)) return fallback;
+  return direct;
+}
+
 // Serve top-level HTML files that are not in public (excluding admin dashboard which is protected above)
 const exposedTopFiles = ['index.html', 'pricing.html', 'features.html', 'contact.html', 'account.html', 'START-HERE.html', 'developer-setup.html', 'mentions.html'];
 exposedTopFiles.forEach(f => {
   app.get(`/${f}`, (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    return res.sendFile(path.join(__dirname, f));
+    return res.sendFile(resolvePublicHtml(f));
   });
 });
 
 // Serve the index on root so PaaS/load balancers that request '/' get the homepage
 app.get('/', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.sendFile(path.join(__dirname, 'index.html'));
+  res.sendFile(resolvePublicHtml('index.html'));
 });
 
 // Fallback route removed - using launcher system instead
