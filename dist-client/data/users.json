@@ -95,16 +95,5 @@
     "subscriptionId": null,
     "demoStartDate": null
   },
-  {
-    "username": "leanaregat",
-    "passwordHash": "$2b$10$64u.rIttg3gvQf39ya3iaeEDk05YXDWdGA4z1nPA0h7mlfimYXNb2",
-    "role": "user",
-    "email": "leanaregat",
-    "stripeCustomerId": null,
-    "latestInvoiceId": null,
-    "lastInvoicePaidAt": null,
-    "subscriptionStatus": null,
-    "subscriptionId": null,
-    "demoStartDate": "2026-01-28T00:17:32.935Z"
   }
 ]
