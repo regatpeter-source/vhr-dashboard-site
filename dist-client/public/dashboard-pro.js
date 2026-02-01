@@ -2040,7 +2040,7 @@ const isLocalAuthContext = isLocalHostname || isElectronUserAgent || isFileProto
 const AUTH_API_BASE = (() => {
 	if (USE_MOCK_AUTH) return '';
 	if (FORCE_LOCAL_AUTH) return '';
-	if (isLocalAuthContext && !FORCE_PROD_AUTH) return '';
+	if (isLocalAuthContext && !FORCE_PROD_AUTH) return PRODUCTION_AUTH_ORIGIN;
 	if (FORCE_PROD_AUTH) return PRODUCTION_AUTH_ORIGIN;
 	return PRODUCTION_AUTH_ORIGIN;
 })();
@@ -4385,19 +4385,40 @@ window.loginUser = async function() {
 			}
 
 			// Obtenir un token local pour les requêtes HTTP/localhost
-			try {
-				const localRes = await fetch('/api/login', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					credentials: 'include',
-					body: JSON.stringify({ username: syncedUsername, password })
-				});
-				const localData = await localRes.json();
-				if (localRes.ok && localData.ok && localData.token) {
-					data.token = localData.token;
+			let localTokenApplied = false;
+			if (isLocalAuthContext) {
+				try {
+					const remoteRes = await fetch('/api/remote-login', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						credentials: 'include',
+						body: JSON.stringify({ identifier: syncedUsername, password })
+					});
+					const remoteData = await remoteRes.json().catch(() => null);
+					if (remoteRes.ok && remoteData && remoteData.ok && remoteData.token) {
+						res = remoteRes;
+						data = remoteData;
+						localTokenApplied = true;
+					}
+				} catch (remoteLoginErr) {
+					console.warn('[loginUser] remote-login after sync failed', remoteLoginErr);
 				}
-			} catch (localLoginErr) {
-				console.warn('[loginUser] local login after sync failed', localLoginErr);
+			}
+			if (!localTokenApplied) {
+				try {
+					const localRes = await fetch('/api/login', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						credentials: 'include',
+						body: JSON.stringify({ username: syncedUsername, password })
+					});
+					const localData = await localRes.json();
+					if (localRes.ok && localData.ok && localData.token) {
+						data.token = localData.token;
+					}
+				} catch (localLoginErr) {
+					console.warn('[loginUser] local login after sync failed', localLoginErr);
+				}
 			}
 		}
 
