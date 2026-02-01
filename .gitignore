@@ -7,6 +7,10 @@ node_modules/
 .env.*.local
 *.pem
 *.key
+dist-client/data/jwt-secret.txt
+dist-client/data/license-secret.txt
+data/jwt-secret.txt
+data/license-secret.txt
 
 # Build / bundles
 dist/

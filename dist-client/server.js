@@ -134,9 +134,8 @@ function resolveAdminPasswordHash(forceRehash = false) {
   return cachedAdminPasswordHash;
 }
 // Shared secret used when syncing users from the prod auth API to the local pack.
-// Fallbacks to the same value embedded in dashboard-pro.js to avoid 403 if the
-// environment variable is missing on local installs.
-const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
+// No hardcoded fallback: if not provided, sync-user is disabled.
+const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || null;
 const SYNC_TARGET_URLS_RAW = process.env.SYNC_TARGET_URLS || process.env.DASHBOARD_SYNC_TARGETS || '';
 const SYNC_TARGET_BASE_URLS = SYNC_TARGET_URLS_RAW
   .split(/[,;\s]+/)
@@ -1196,8 +1195,28 @@ if (emailUser && emailPass) {
   console.warn('[email] Configure: BREVO_SMTP_USER/EMAIL_USER and BREVO_SMTP_PASS/EMAIL_PASS');
 }
 
+// ========== SECRET STORAGE (LOCAL INSTALLS) ==========
+const SECRET_STORE_DIR = process.env.VHR_DATA_DIR || path.join(__dirname, 'data');
+function getOrCreateSecretFile(filename, envValue, bytes = 32) {
+  if (envValue && String(envValue).trim()) return String(envValue).trim();
+  try {
+    fs.mkdirSync(SECRET_STORE_DIR, { recursive: true });
+    const filePath = path.join(SECRET_STORE_DIR, filename);
+    if (fs.existsSync(filePath)) {
+      const existing = fs.readFileSync(filePath, 'utf8').trim();
+      if (existing) return existing;
+    }
+    const generated = crypto.randomBytes(bytes).toString('hex');
+    fs.writeFileSync(filePath, generated, 'utf8');
+    return generated;
+  } catch (e) {
+    console.warn('[secrets] Unable to persist secret file', filename, e && e.message ? e.message : e);
+    return crypto.randomBytes(bytes).toString('hex');
+  }
+}
+
 // ========== LICENSE SYSTEM ==========
-const LICENSE_SECRET = process.env.LICENSE_SECRET || 'vhr-dashboard-secret-key-2025';
+const LICENSE_SECRET = getOrCreateSecretFile('license-secret.txt', process.env.LICENSE_SECRET, 32);
 
 function generateLicenseKey(username) {
   const timestamp = Date.now();
@@ -2672,7 +2691,7 @@ function removeUserByUsername(username) {
   }
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'change_this_secret';
+const JWT_SECRET = getOrCreateSecretFile('jwt-secret.txt', process.env.JWT_SECRET, 32);
 const JWT_EXPIRES = '2h';
 
 function isSecureRequest(req) {
@@ -5307,11 +5326,31 @@ app.get('/api/admin', authMiddleware, (req, res) => {
 
 // --- Admin Routes for Dashboard ---
 // Get all users
-app.get('/api/admin/users', authMiddleware, (req, res) => {
+app.get('/api/admin/users', authMiddleware, async (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;
   try {
     const licenses = loadLicenses();
-    const enrichedUsers = (users || []).map(u => ({
+    let sourceUsers = users || [];
+
+    if (USE_POSTGRES && db && db.getUsers) {
+      const pgUsers = await db.getUsers();
+      if (Array.isArray(pgUsers) && pgUsers.length) {
+        sourceUsers = pgUsers.map(u => ({
+          ...u,
+          passwordHash: u.passwordHash || u.passwordhash,
+          subscriptionStatus: u.subscriptionStatus || u.subscriptionstatus,
+          subscriptionId: u.subscriptionId || u.subscriptionid,
+          stripeCustomerId: u.stripeCustomerId || u.stripecustomerid,
+          demoStartDate: u.demoStartDate || u.demostartdate,
+          demoExtensionDays: u.demoExtensionDays ?? u.demoextensiondays,
+          createdAt: u.createdAt || u.createdat,
+          updatedAt: u.updatedAt || u.updatedat
+        }));
+        users = sourceUsers;
+      }
+    }
+
+    const enrichedUsers = (sourceUsers || []).map(u => ({
       ...u,
       accessSummary: buildUserAccessSummary(u, { licenses })
     }));
