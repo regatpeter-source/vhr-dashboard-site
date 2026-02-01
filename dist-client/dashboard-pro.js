@@ -1989,7 +1989,7 @@ const USE_MOCK_AUTH = (() => {
 	try { return localStorage.getItem('useMockAuth') === '1'; } catch (e) { return false; }
 })();
 
-const PRODUCTION_AUTH_ORIGIN = 'https://vhr-dashboard-site.com';
+const PRODUCTION_AUTH_ORIGIN = 'https://www.vhr-dashboard-site.com';
 const LOCAL_AUTH_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0']);
 const isLocalHostname = (() => {
 	try {

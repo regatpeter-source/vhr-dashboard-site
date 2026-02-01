@@ -3,7 +3,7 @@ const path = require('path');
 const os = require('os');
 const { io } = require('socket.io-client');
 
-const RELAY_URL = process.env.RELAY_URL || process.env.API_BASE_URL || 'https://vhr-dashboard-site.com';
+const RELAY_URL = process.env.RELAY_URL || process.env.API_BASE_URL || 'https://www.vhr-dashboard-site.com';
 const RELAY_NAMESPACE = '/relay';
 const SESSION_STORE = path.join(__dirname, '..', 'data', 'relay-session.json');
 

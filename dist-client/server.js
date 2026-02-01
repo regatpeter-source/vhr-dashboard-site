@@ -33,7 +33,7 @@ const http_module = require('http');
 const unzipper = require('unzipper');
 const fetch = require('node-fetch');
 const os = require('os');
-const REMOTE_AUTH_ORIGIN = process.env.REMOTE_AUTH_ORIGIN || 'https://vhr-dashboard-site.com';
+const REMOTE_AUTH_ORIGIN = process.env.REMOTE_AUTH_ORIGIN || process.env.REMOTE_HOST || process.env.PUBLIC_API_BASE_URL || 'https://www.vhr-dashboard-site.com';
 const REMOTE_AUTH_TIMEOUT_MS = Number(process.env.REMOTE_AUTH_TIMEOUT_MS || '12000');
 const REMOTE_LOGIN_PATHS = ['/api/login', '/api/auth/login'];
 const REMOTE_DEMO_STATUS_PATH = process.env.REMOTE_DEMO_STATUS_PATH || '/api/demo/status';
@@ -2722,6 +2722,7 @@ function authMiddleware(req, res, next) {
 }
 
 const remoteDemoCache = new Map();
+const remoteAuthTokenCache = new Map();
 
 function getCachedRemoteDemo(username) {
   if (!username) return null;
@@ -2737,6 +2738,22 @@ function getCachedRemoteDemo(username) {
 function cacheRemoteDemoStatus(username, demo) {
   if (!username || !demo) return;
   remoteDemoCache.set(username.toLowerCase(), { demo, fetchedAt: Date.now() });
+}
+
+function cacheRemoteAuthToken(username, token) {
+  if (!username || !token) return;
+  remoteAuthTokenCache.set(username.toLowerCase(), { token, fetchedAt: Date.now() });
+}
+
+function getCachedRemoteAuthToken(username) {
+  if (!username) return null;
+  const entry = remoteAuthTokenCache.get(username.toLowerCase());
+  if (!entry) return null;
+  if (Date.now() - entry.fetchedAt > REMOTE_DEMO_CACHE_TTL_MS) {
+    remoteAuthTokenCache.delete(username.toLowerCase());
+    return null;
+  }
+  return entry.token;
 }
 
 async function fetchRemoteDemoStatus(remoteToken, username) {
@@ -2899,6 +2916,7 @@ app.post('/api/remote-login', async (req, res) => {
     }
 
     const elevatedUser = elevateAdminIfAllowlisted(localUser);
+    cacheRemoteAuthToken(elevatedUser.username, remoteAuth.remoteToken);
     const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, elevatedUser.username);
     const token = jwt.sign({ username: elevatedUser.username, role: elevatedUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
     const cookieOptions = buildAuthCookieOptions(req);
@@ -3851,6 +3869,14 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
     if (cachedDemo) {
       console.log('[demo/status] returning cached remote demo for', req.user.username);
       return res.json({ ok: true, demo: cachedDemo, remote: true });
+    }
+    const cachedRemoteToken = getCachedRemoteAuthToken(req.user.username);
+    if (cachedRemoteToken) {
+      const remoteDemo = await fetchRemoteDemoStatus(cachedRemoteToken, req.user.username);
+      if (remoteDemo) {
+        console.log('[demo/status] returning freshly fetched remote demo for', req.user.username);
+        return res.json({ ok: true, demo: remoteDemo, remote: true });
+      }
     }
     let user = getUserByUsername(req.user.username);
 

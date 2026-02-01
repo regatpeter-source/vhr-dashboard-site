@@ -2009,7 +2009,7 @@ const USE_MOCK_AUTH = (() => {
 	try { return localStorage.getItem('useMockAuth') === '1'; } catch (e) { return false; }
 })();
 
-const PRODUCTION_AUTH_ORIGIN = 'https://vhr-dashboard-site.com';
+const PRODUCTION_AUTH_ORIGIN = 'https://www.vhr-dashboard-site.com';
 const LOCAL_AUTH_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0']);
 const isLocalHostname = (() => {
 	try {
@@ -3989,7 +3989,7 @@ socket.on('stream-event', (evt) => {
 });
 
 // ========== LICENSE CHECK & UNLOCK SYSTEM ========== 
-const BILLING_PAGE_URL = 'https://vhr-dashboard-site.com/pricing.html#checkout';
+const BILLING_PAGE_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
 
 function goToOfficialBillingPage() {
 	try {
@@ -4318,7 +4318,7 @@ window.showAuthModal = function(mode = 'login') {
 				� Se connecter
 			</button>
 			<p style="margin-top:16px;text-align:center;color:#95a5a6;font-size:12px;line-height:1.6;">
-				Les comptes sont fournis via le <a href="https://vhr-dashboard-site.com/account.html" target="_blank" rel="noreferrer" style="color:#2ecc71;font-weight:bold;">site central</a>.
+				Les comptes sont fournis via le <a href="https://www.vhr-dashboard-site.com/account.html" target="_blank" rel="noreferrer" style="color:#2ecc71;font-weight:bold;">site central</a>.
 				Si vous n'avez pas encore reçu d'accès, contactez votre administrateur ou visitez la page du compte.
 			</p>
 		</div>
