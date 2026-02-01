@@ -907,30 +907,39 @@ function initializeDemoForUser(user) {
 }
 
 // Vérifier si la démo est expirée pour un utilisateur
+function getDemoExpirationDate(user) {
+  if (!user) return null;
+  const parsedEnd = user.demoEndDate ? new Date(user.demoEndDate) : null;
+  if (parsedEnd && !Number.isNaN(parsedEnd.getTime())) {
+    return parsedEnd;
+  }
+  if (!user.demoStartDate) {
+    return null;
+  }
+  const startDate = new Date(user.demoStartDate);
+  if (Number.isNaN(startDate.getTime())) {
+    return null;
+  }
+  return new Date(startDate.getTime() + demoConfig.DEMO_DURATION_MS);
+}
+
 function isDemoExpired(user) {
-  if (!user || !user.demoStartDate || user.subscriptionStatus === 'active') {
+  if (!user || user.subscriptionStatus === 'active') {
     return false; // Pas de limite si abonnement actif
   }
-  
-  const startDate = new Date(user.demoStartDate);
-  const expirationDate = new Date(startDate.getTime() + demoConfig.DEMO_DURATION_MS);
-  const now = new Date();
-  
-  return now > expirationDate;
+  const expirationDate = getDemoExpirationDate(user);
+  if (!expirationDate) return false;
+  return Date.now() > expirationDate.getTime();
 }
 
 // Obtenir les jours restants pour la démo
 function getDemoRemainingDays(user) {
-  if (!user || !user.demoStartDate) {
+  const expirationDate = getDemoExpirationDate(user);
+  if (!expirationDate) {
     return demoConfig.DEMO_DAYS;
   }
-  
-  const startDate = new Date(user.demoStartDate);
-  const expirationDate = new Date(startDate.getTime() + demoConfig.DEMO_DURATION_MS);
-  const now = new Date();
-  const remainingMs = expirationDate.getTime() - now.getTime();
+  const remainingMs = expirationDate.getTime() - Date.now();
   const remainingDays = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
-  
   return Math.max(0, remainingDays);
 }
 
@@ -942,7 +951,8 @@ function getDemoRemainingDays(user) {
 
   async function buildDemoStatusForUser(user) {
     const normalized = normalizeUserRecord(user);
-    const expirationDate = normalized.demoStartDate ? new Date(new Date(normalized.demoStartDate).getTime() + demoConfig.DEMO_DURATION_MS).toISOString() : null;
+    const demoExpirationDate = getDemoExpirationDate(normalized);
+    const expirationDate = demoExpirationDate ? demoExpirationDate.toISOString() : null;
     const demoExpired = isDemoExpired(normalized);
     const remainingDays = getDemoRemainingDays(normalized);
     const hasLicense = hasPerpetualLicense(normalized);
@@ -951,6 +961,7 @@ function getDemoRemainingDays(user) {
     if (normalized.role === 'admin') {
       return {
         demoStartDate: normalized.demoStartDate || null,
+        demoEndDate: normalized.demoEndDate || expirationDate || null,
         demoExpired: false,
         expired: false,
         remainingDays: -1,
@@ -995,6 +1006,7 @@ function getDemoRemainingDays(user) {
 
     return {
       demoStartDate: normalized.demoStartDate || null,
+      demoEndDate: normalized.demoEndDate || expirationDate || null,
       demoExpired,
       expired: demoExpired,
       remainingDays,
@@ -1093,10 +1105,8 @@ function buildUserAccessSummary(user, options = {}) {
     };
   }
 
-  const demoStartDateValue = normalized.demoStartDate ? new Date(normalized.demoStartDate) : null;
-  const demoExpiresAt = demoStartDateValue
-    ? new Date(demoStartDateValue.getTime() + demoConfig.DEMO_DURATION_MS).toISOString()
-    : null;
+  const demoExpirationDate = getDemoExpirationDate(normalized);
+  const demoExpiresAt = demoExpirationDate ? demoExpirationDate.toISOString() : null;
   const subscriptionStatus = (normalized.subscriptionStatus || 'none').toLowerCase();
   const hasActiveSubscription = subscriptionStatus === 'active';
   const demoRemainingDays = getDemoRemainingDays(normalized);
@@ -1105,6 +1115,7 @@ function buildUserAccessSummary(user, options = {}) {
 
   return {
     demoStartDate: normalized.demoStartDate || null,
+    demoEndDate: normalized.demoEndDate || demoExpiresAt || null,
     demoExpiresAt,
     demoRemainingDays,
     demoExpired,
@@ -2033,6 +2044,7 @@ function normalizeUserRecord(user) {
   normalized.lastLogin = normalized.lastLogin || normalized.lastlogin || null;
   normalized.lastActivity = normalized.lastActivity || normalized.lastactivity || null;
   normalized.demoStartDate = normalized.demoStartDate || normalized.demostartdate || null;
+  normalized.demoEndDate = normalized.demoEndDate || normalized.demoenddate || null;
 
   // Normalize deletion/disable flags
   normalized.status = (normalized.status || normalized.accountStatus || '').toString().toLowerCase() || null;
@@ -2065,6 +2077,7 @@ function saveUsers() {
       createdAt: u.createdAt || null,
       updatedAt: u.updatedAt || null,
       demoStartDate: u.demoStartDate || null,
+      demoEndDate: u.demoEndDate || null,
       emailVerified: u.emailVerified ?? true,
       emailVerificationToken: u.emailVerificationToken || null,
       emailVerificationExpiresAt: u.emailVerificationExpiresAt || null,
@@ -2968,6 +2981,7 @@ function buildSyncPayload(user) {
     subscriptionStatus: normalized.subscriptionStatus || normalized.subscriptionstatus || null,
     subscriptionId: normalized.subscriptionId || normalized.subscriptionid || null,
     demoStartDate: normalized.demoStartDate || normalized.createdAt || null,
+    demoEndDate: normalized.demoEndDate || null,
     emailVerified: isEmailVerified(normalized)
   };
 }
@@ -3256,6 +3270,11 @@ async function syncLocalUserWithRemoteAccess(user, identifier, password) {
   const remoteDemoStart = remoteDemo?.demoStartDate || accessSummary.demoStartDate || remoteSnapshot.demoStartDate;
   if (remoteDemoStart && remoteDemoStart !== user.demoStartDate) {
     updates.demoStartDate = remoteDemoStart;
+    changed = true;
+  }
+  const remoteDemoEnd = remoteDemo?.demoEndDate || accessSummary.demoEndDate || remoteSnapshot.demoEndDate;
+  if (remoteDemoEnd && remoteDemoEnd !== user.demoEndDate) {
+    updates.demoEndDate = remoteDemoEnd;
     changed = true;
   }
 
@@ -5771,7 +5790,9 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
       if (USE_POSTGRES && db && db.updateUser && targetUser.id) {
         await db.updateUser(targetUser.id, {
           subscriptionstatus: targetUser.subscriptionStatus || null,
-          subscriptionid: targetUser.subscriptionId || null
+          subscriptionid: targetUser.subscriptionId || null,
+          demostartdate: targetUser.demoStartDate || null,
+          demoenddate: targetUser.demoEndDate || null
         });
       } else {
         persistUser(targetUser);
@@ -5843,26 +5864,30 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
       }
       case 'extend_trial': {
         const addedMs = extraDays * 24 * 60 * 60 * 1000;
-        const baseStart = targetUser.demoStartDate ? new Date(targetUser.demoStartDate) : now;
-        const newStart = new Date(baseStart.getTime() - addedMs);
-        targetUser.demoStartDate = toIso(newStart);
+        const referenceStart = targetUser.demoStartDate ? new Date(targetUser.demoStartDate) : now;
+        const fallbackExpiration = new Date(referenceStart.getTime() + demoConfig.DEMO_DURATION_MS);
+        const baseExpiration = getDemoExpirationDate(targetUser) || fallbackExpiration;
+        const newExpiration = new Date(baseExpiration.getTime() + addedMs);
+        if (!targetUser.demoStartDate) {
+          targetUser.demoStartDate = toIso(now);
+        }
+        targetUser.demoEndDate = toIso(newExpiration);
         targetUser.subscriptionStatus = targetUser.subscriptionStatus || 'trial';
-
-        const trialEnd = new Date(newStart.getTime() + demoConfig.DEMO_DURATION_MS + addedMs);
+        const subscriptionStart = targetUser.demoStartDate || toIso(now);
 
         if (USE_POSTGRES && db) {
           subscriptionRecord = await upsertPgSubscription({
             status: 'trial',
             planName: 'admin-extended-trial',
-            startDate: toIso(newStart),
-            endDate: toIso(trialEnd)
+            startDate: subscriptionStart,
+            endDate: toIso(newExpiration)
           });
         } else {
           subscriptionRecord = upsertLocalSubscription({
             status: 'trial',
             planName: 'admin-extended-trial',
-            startDate: toIso(newStart),
-            endDate: toIso(trialEnd)
+            startDate: subscriptionStart,
+            endDate: toIso(newExpiration)
           });
         }
         break;
@@ -5880,7 +5905,8 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
         username: targetUser.username,
         subscriptionStatus: targetUser.subscriptionStatus,
         subscriptionId: targetUser.subscriptionId || null,
-        demoStartDate: targetUser.demoStartDate || null
+        demoStartDate: targetUser.demoStartDate || null,
+        demoEndDate: targetUser.demoEndDate || null
       },
       subscription: subscriptionRecord || null
     });
