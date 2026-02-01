@@ -2746,27 +2746,45 @@ async function attemptRemoteAuthentication(identifier, password) {
 }
 
 async function ensureLocalUserFromRemote(remotePayload, identifier, password) {
-  if (!remotePayload || !remotePayload.user) return null;
-  const username = String(remotePayload.user.username || remotePayload.user.name || identifier || '').trim();
-  if (!username) return null;
+  const remoteUser = (remotePayload && remotePayload.user) || {};
+  const normalizedIdentifier = String(identifier || '').trim();
+  const candidateUsernames = [remoteUser.username, remoteUser.name, remoteUser.email, normalizedIdentifier];
+  const username = candidateUsernames.reduce((acc, val) => acc || (String(val || '').trim()), '');
+  if (!username) {
+    console.warn('[remote-login] remote payload did not provide a usable username or identifier', { identifier, remoteUser });
+    return null;
+  }
   const hashedPassword = await bcrypt.hash(password, 10);
   reloadUsers();
   let existing = getUserByUsername(username);
-  const emailCandidate = remotePayload.user.email || (identifier && identifier.includes('@') ? identifier : null);
-  const role = remotePayload.user.role || (existing && existing.role) || 'user';
+  const identifierLooksLikeEmail = normalizedIdentifier.includes('@');
+  const emailCandidate = remoteUser.email || (identifierLooksLikeEmail ? normalizedIdentifier : null);
+  const role = remoteUser.role || (existing && existing.role) || 'user';
   const userToPersist = existing
-    ? { ...existing, passwordHash: hashedPassword, email: emailCandidate || existing.email, role, stripeCustomerId: remotePayload.user.stripeCustomerId || existing.stripeCustomerId, subscriptionStatus: remotePayload.user.subscriptionStatus || existing.subscriptionStatus }
+    ? {
+      ...existing,
+      passwordHash: hashedPassword,
+      email: emailCandidate || existing.email,
+      role,
+      stripeCustomerId: remoteUser.stripeCustomerId || existing.stripeCustomerId,
+      subscriptionStatus: remoteUser.subscriptionStatus || existing.subscriptionStatus
+    }
     : {
-        id: `user_${username}`,
-        username,
-        passwordHash: hashedPassword,
-        email: emailCandidate || null,
-        role,
-        stripeCustomerId: remotePayload.user.stripeCustomerId || null,
-        subscriptionStatus: remotePayload.user.subscriptionStatus || null,
-        createdAt: new Date().toISOString()
-      };
-  persistUser(userToPersist);
+      id: `user_${username}`,
+      username,
+      passwordHash: hashedPassword,
+      email: emailCandidate || null,
+      role,
+      stripeCustomerId: remoteUser.stripeCustomerId || null,
+      subscriptionStatus: remoteUser.subscriptionStatus || null,
+      createdAt: new Date().toISOString()
+    };
+  try {
+    persistUser(userToPersist);
+  } catch (err) {
+    console.error('[remote-login] persistUser failed:', err && err.message ? err.message : err);
+    return null;
+  }
   return getUserByUsername(username);
 }
 
