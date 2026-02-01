@@ -4387,12 +4387,12 @@ window.loginUser = async function() {
 					body: JSON.stringify({ identifier, password })
 				});
 				const remoteData = await remoteRes.json().catch(() => null);
-				if (remoteRes.ok && remoteData && remoteData.ok) {
-					res = remoteRes;
-					data = remoteData;
-				} else if (remoteData && remoteData.error && loginMessage) {
-					loginMessage.textContent = 'Erreur distante : ' + remoteData.error;
-				}
+					if (remoteRes.ok && remoteData && remoteData.ok) {
+						res = remoteRes;
+						data = remoteData;
+					} else if (remoteData && remoteData.error) {
+						showToast('Erreur distante : ' + remoteData.error, 'error');
+					}
 			} catch (remoteErr) {
 				console.warn('[loginUser] remote login failed', remoteErr);
 			}
