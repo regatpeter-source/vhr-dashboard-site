@@ -2708,6 +2708,7 @@ function persistUser(user) {
     if (Object.prototype.hasOwnProperty.call(user, 'emailVerificationSentAt')) updatePayload.emailverificationsentat = user.emailVerificationSentAt || null;
     if (Object.prototype.hasOwnProperty.call(user, 'emailVerifiedAt')) updatePayload.emailverifiedat = user.emailVerifiedAt || null;
     if (Object.prototype.hasOwnProperty.call(user, 'demoStartDate')) updatePayload.demostartdate = user.demoStartDate || null;
+    if (Object.prototype.hasOwnProperty.call(user, 'demoEndDate')) updatePayload.demoenddate = user.demoEndDate || null;
 
     // Save async to PostgreSQL (fire and forget to avoid blocking)
     db.getUserByUsername(user.username)
@@ -2742,6 +2743,34 @@ function persistUser(user) {
     console.log('[users] persistUser: end');
     return true;
   }
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function parseDateInput(value) {
+  if (!value) return null;
+  if (typeof value === 'number') {
+    const candidate = new Date(value);
+    return Number.isNaN(candidate.getTime()) ? null : candidate;
+  }
+  if (typeof value === 'string') {
+    const candidate = new Date(value);
+    if (!Number.isNaN(candidate.getTime())) return candidate;
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
+  }
+  return null;
+}
+
+async function setDemoEndDateForUser(username, isoDate) {
+  if (!username || !isoDate) return null;
+  const user = await findUserByUsernameAsync(username);
+  if (!user) return null;
+  user.demoEndDate = isoDate;
+  user.updatedAt = new Date().toISOString();
+  persistUser(user);
+  return user;
 }
 
 const lastActivityWriteCache = new Map();
@@ -4603,6 +4632,58 @@ app.post('/api/admin/revoke-subscription', authMiddleware, async (req, res) => {
     console.error('[admin] revoke-subscription error:', e);
     res.status(500).json({ ok: false, error: e.message });
   }
+});
+
+app.post('/api/admin/demo-end', authMiddleware, async (req, res) => {
+  if (!ensureAllowedAdmin(req, res)) return;
+  const { targetUsername, demoEndDate, extendDays } = req.body || {};
+  if (!targetUsername) {
+    return res.status(400).json({ ok: false, error: 'targetUsername required' });
+  }
+
+  const normalizedUsername = targetUsername.toString().trim();
+  if (!normalizedUsername) {
+    return res.status(400).json({ ok: false, error: 'targetUsername invalid' });
+  }
+
+  const user = await findUserByUsernameAsync(normalizedUsername);
+  if (!user) {
+    return res.status(404).json({ ok: false, error: `User '${normalizedUsername}' not found` });
+  }
+
+  let candidateDate = parseDateInput(demoEndDate);
+  if (!candidateDate && extendDays != null) {
+    const days = Number(extendDays);
+    if (Number.isNaN(days) || days <= 0) {
+      return res.status(400).json({ ok: false, error: 'extendDays must be a positive number' });
+    }
+    const baseExpiry = parseDateInput(user.demoEndDate) || parseDateInput(user.demoStartDate) || new Date();
+    const baseTime = Math.max(baseExpiry.getTime(), Date.now());
+    candidateDate = new Date(baseTime + Math.round(days) * DAY_MS);
+  }
+
+  if (!candidateDate) {
+    return res.status(400).json({ ok: false, error: 'demoEndDate or extendDays required' });
+  }
+
+  const isoDate = candidateDate.toISOString();
+  const updatedUser = await setDemoEndDateForUser(normalizedUsername, isoDate);
+  if (!updatedUser) {
+    return res.status(500).json({ ok: false, error: 'Unable to persist new demo end date' });
+  }
+
+  const demo = await buildDemoStatusForUser(updatedUser);
+  return res.json({
+    ok: true,
+    message: 'Demo expiration date updated',
+    user: {
+      username: updatedUser.username,
+      demoEndDate: updatedUser.demoEndDate,
+      remainingDays: demo.remainingDays,
+      demoExpired: demo.demoExpired
+    },
+    demo
+  });
 });
 
 // Get demo/trial status - also check Stripe subscription status
