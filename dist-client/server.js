@@ -2712,7 +2712,17 @@ function authMiddleware(req, res, next) {
     }
     const storedUser = getUserByUsername(username);
     if (!storedUser) {
-      return res.status(401).json({ ok: false, error: 'Token invalide (utilisateur non trouvé)' });
+      const requestPath = req.path || req.originalUrl || '';
+      const allowMissingUser = requestPath.startsWith('/api/demo/status');
+      if (!allowMissingUser) {
+        return res.status(401).json({ ok: false, error: 'Token invalide (utilisateur non trouvé)' });
+      }
+      req.user = elevateAdminIfAllowlisted({
+        username,
+        role: decoded?.role || 'user',
+        email: decoded?.email || null
+      });
+      return next();
     }
     req.user = elevateAdminIfAllowlisted(storedUser);
     next();

@@ -175,7 +175,7 @@ async function syncTokenFromCookie() {
 	const existing = readAuthToken();
 	if (existing) return existing;
 	try {
-		const res = await api('/api/check-auth?includeToken=1');
+		const res = await api('/api/check-auth?includeToken=1', { skipAuthHeader: true });
 		if (res && res.ok && res.authenticated && res.token) {
 			return saveAuthToken(res.token);
 		}
@@ -2283,8 +2283,12 @@ async function api(path, opts = {}) {
 		if (!opts.credentials) {
 			opts.credentials = 'include';
 		}
+		const skipAuthHeader = opts.skipAuthHeader === true;
+		if (skipAuthHeader) {
+			delete opts.skipAuthHeader;
+		}
 		const storedToken = readAuthToken();
-		if (storedToken) {
+		if (storedToken && !skipAuthHeader) {
 			opts.headers = {
 				...(opts.headers || {}),
 				Authorization: 'Bearer ' + storedToken
@@ -3927,7 +3931,28 @@ async function checkLicense() {
 		}
 
 		// Check demo/trial status with Stripe subscription verification
-		const res = await api('/api/demo/status');
+		let storedToken = readAuthToken();
+		if (!storedToken) {
+			storedToken = await syncTokenFromCookie();
+		}
+		const authCheck = await api('/api/check-auth?includeToken=1', { skipAuthHeader: true });
+		if (authCheck && authCheck.ok && authCheck.authenticated) {
+			if (authCheck.token) {
+				storedToken = authCheck.token;
+			} else if (!storedToken) {
+				storedToken = readAuthToken();
+			}
+		} else {
+			saveAuthToken('');
+			console.warn('[license] skipped demo check: not authenticated locally');
+			return false;
+		}
+		if (!storedToken) {
+			console.warn('[license] skipped demo check: no auth token');
+			return false;
+		}
+		const demoUrl = `/api/demo/status?token=${encodeURIComponent(storedToken)}`;
+		const res = await api(demoUrl, { skipAuthHeader: true });
 		
 		if (!res || !res.ok) {
 			console.error('[license] demo status check failed');
@@ -4389,9 +4414,11 @@ window.loginUser = async function() {
 			const modal = document.getElementById('authModal');
 			if (modal) modal.remove();
 			
-			setTimeout(() => {
+			setTimeout(async () => {
 				showDashboardContent();
 				createNavbar();
+				const authOk = await checkJWTAuth();
+				if (!authOk) return;
 				checkLicense().then(hasAccess => {
 					if (hasAccess) {
 						loadGamesCatalog().finally(() => loadDevices());
@@ -4481,7 +4508,7 @@ async function ensureInstallationVerified() {
 async function checkJWTAuth() {
 	console.log('[auth] Checking JWT authentication...');
 	try {
-		const res = await api('/api/check-auth');
+		const res = await api('/api/check-auth', { skipAuthHeader: true });
 		console.log('[auth] API response:', res);
 		
 		if (res && res.ok && res.authenticated && res.user) {
@@ -4497,6 +4524,9 @@ async function checkJWTAuth() {
 			if (res.token) {
 				saveAuthToken(res.token);
 			}
+			if (!readAuthToken()) {
+				await syncTokenFromCookie();
+			}
 			// User is authenticated
 			currentUser = res.user.username || res.user.name || res.user.email;
 			localStorage.setItem('vhr_current_user', currentUser);
@@ -4504,6 +4534,7 @@ async function checkJWTAuth() {
 			return true;
 		} else {
 			console.log('[auth] � No valid JWT - authenticated =', res?.authenticated);
+			saveAuthToken('');
 			// Hide the loading overlay immediately
 			const overlay = document.getElementById('authOverlay');
 			if (overlay) {
