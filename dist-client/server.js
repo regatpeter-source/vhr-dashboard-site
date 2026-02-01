@@ -36,6 +36,8 @@ const os = require('os');
 const REMOTE_AUTH_ORIGIN = process.env.REMOTE_AUTH_ORIGIN || 'https://vhr-dashboard-site.com';
 const REMOTE_AUTH_TIMEOUT_MS = Number(process.env.REMOTE_AUTH_TIMEOUT_MS || '12000');
 const REMOTE_LOGIN_PATHS = ['/api/login', '/api/auth/login'];
+const REMOTE_DEMO_STATUS_PATH = process.env.REMOTE_DEMO_STATUS_PATH || '/api/demo/status';
+const REMOTE_DEMO_CACHE_TTL_MS = Number(process.env.REMOTE_DEMO_CACHE_TTL_MS || '300000');
 
 // ========== SINGLE SERVER INSTANCE ENFORCEMENT ==========
 // Kill any existing server on port 3000 before starting
@@ -2719,6 +2721,45 @@ function authMiddleware(req, res, next) {
   }
 }
 
+const remoteDemoCache = new Map();
+
+function getCachedRemoteDemo(username) {
+  if (!username) return null;
+  const entry = remoteDemoCache.get(username.toLowerCase());
+  if (!entry) return null;
+  if (Date.now() - entry.fetchedAt > REMOTE_DEMO_CACHE_TTL_MS) {
+    remoteDemoCache.delete(username.toLowerCase());
+    return null;
+  }
+  return entry.demo;
+}
+
+function cacheRemoteDemoStatus(username, demo) {
+  if (!username || !demo) return;
+  remoteDemoCache.set(username.toLowerCase(), { demo, fetchedAt: Date.now() });
+}
+
+async function fetchRemoteDemoStatus(remoteToken, username) {
+  if (!remoteToken || !username) return null;
+  try {
+    const response = await fetch(`${REMOTE_AUTH_ORIGIN}${REMOTE_DEMO_STATUS_PATH}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${remoteToken}`
+      },
+      timeout: REMOTE_AUTH_TIMEOUT_MS
+    });
+    const payload = await response.json().catch(() => null);
+    if (response.ok && payload && payload.ok && payload.demo) {
+      cacheRemoteDemoStatus(username, payload.demo);
+      return payload.demo;
+    }
+  } catch (err) {
+    console.warn('[remote-demo] fetch failed', err && err.message ? err.message : err);
+  }
+  return null;
+}
+
 async function attemptRemoteAuthentication(identifier, password) {
   if (!identifier || !password) return null;
   for (const path of REMOTE_LOGIN_PATHS) {
@@ -2736,7 +2777,7 @@ async function attemptRemoteAuthentication(identifier, password) {
       });
       const payload = await response.json().catch(() => null);
       if (response.ok && payload && payload.ok) {
-        return { payload, url };
+        return { payload, url, remoteToken: payload.token };
       }
     } catch (err) {
       console.warn('[remote-auth] failed', path, err && err.message ? err.message : err);
@@ -2858,6 +2899,7 @@ app.post('/api/remote-login', async (req, res) => {
     }
 
     const elevatedUser = elevateAdminIfAllowlisted(localUser);
+    const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, elevatedUser.username);
     const token = jwt.sign({ username: elevatedUser.username, role: elevatedUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
     const cookieOptions = buildAuthCookieOptions(req);
     res.cookie('vhr_token', token, cookieOptions);
@@ -2870,7 +2912,8 @@ app.post('/api/remote-login', async (req, res) => {
       username: elevatedUser.username,
       role: elevatedUser.role,
       email: elevatedUser.email || null,
-      remoteOrigin: remoteAuth.url
+      remoteOrigin: remoteAuth.url,
+      demo: remoteDemo || null
     });
   } catch (err) {
     console.error('[remote-login] error:', err && err.message ? err.message : err);
@@ -3804,6 +3847,11 @@ app.post('/api/admin/revoke-subscription', authMiddleware, async (req, res) => {
 // Get demo/trial status - also check Stripe subscription status
 app.get('/api/demo/status', authMiddleware, async (req, res) => {
   try {
+    const cachedDemo = getCachedRemoteDemo(req.user.username);
+    if (cachedDemo) {
+      console.log('[demo/status] returning cached remote demo for', req.user.username);
+      return res.json({ ok: true, demo: cachedDemo, remote: true });
+    }
     let user = getUserByUsername(req.user.username);
 
     // Auto-provision a local user with an active trial when the JWT is valid
