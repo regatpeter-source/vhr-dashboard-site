@@ -817,6 +817,35 @@ if (process.env.NODE_ENV !== 'production' && process.env.RENDER !== 'true') {
   console.log('[Setup] Mode production détecté - Java/Gradle/SDK non nécessaires');
 }
 
+const TRUSTED_CORS_ORIGINS = new Set([
+  'https://www.vhr-dashboard-site.com',
+  'https://vhr-dashboard-site.com',
+  'https://vhr-dashboard-site.onrender.com',
+  'https://www.vhr-dashboard-site.onrender.com',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://192.168.1.3:3000',
+  'http://192.168.1.3',
+  'http://192.168.1.155:3000',
+  'http://192.168.1.155'
+]);
+
+function isTrustedCorsOrigin(origin) {
+  if (!origin) return false;
+  return TRUSTED_CORS_ORIGINS.has(origin);
+}
+
+function corsOptionsDelegate(req, callback) {
+  const origin = req.get('Origin');
+  if (!origin) {
+    return callback(null, { origin: true, credentials: true });
+  }
+  if (isTrustedCorsOrigin(origin)) {
+    return callback(null, { origin, credentials: true });
+  }
+  return callback(null, { origin: false, credentials: true });
+}
+
 const app = express();
 // Helmet avec CSP custom. HSTS désactivé pour éviter les upgrades HTTPS en LAN.
 app.use(helmet({
@@ -842,6 +871,7 @@ app.use(helmet({
         'https://cdn.botpress.cloud',
         'https://www.vhr-dashboard-site.com',
         'https://vhr-dashboard-site.com',
+        'https://vhr-dashboard-site.onrender.com',
         // Autoriser toutes les cibles HTTP (LAN/clients) pour éviter les blocages CSP sur les nouveaux utilisateurs
         'http:',
         // Autoriser le WebSocket local/LAN pour l'audio
@@ -869,7 +899,8 @@ app.use(helmet({
 // Set a friendlier referrer policy - allows third-party services like Google Translate
 // to work without CSP warnings
 app.use(helmet.referrerPolicy({ policy: 'no-referrer-when-downgrade' }));
-app.use(cors({ origin: true, credentials: true }));
+app.use(cors(corsOptionsDelegate));
+app.options('*', cors(corsOptionsDelegate));
 // Ensure webhook route receives raw body for Stripe signature verification
 app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
