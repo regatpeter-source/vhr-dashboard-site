@@ -1058,6 +1058,12 @@ function ensureElectronTrialStarted(user, options = {}) {
   return true;
 }
 
+function getDemoExtensionDays(user) {
+  const raw = user && user.demoExtensionDays;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
 // Vérifier si la démo est expirée pour un utilisateur
 function isDemoExpired(user) {
   if (!user || !user.demoStartDate || user.subscriptionStatus === 'active') {
@@ -1065,7 +1071,9 @@ function isDemoExpired(user) {
   }
   
   const startDate = new Date(user.demoStartDate);
-  const expirationDate = new Date(startDate.getTime() + demoConfig.DEMO_DURATION_MS);
+  const extensionDays = getDemoExtensionDays(user);
+  const extensionMs = extensionDays * 24 * 60 * 60 * 1000;
+  const expirationDate = new Date(startDate.getTime() + demoConfig.DEMO_DURATION_MS + extensionMs);
   const now = new Date();
   
   return now > expirationDate;
@@ -1078,7 +1086,9 @@ function getDemoRemainingDays(user) {
   }
   
   const startDate = new Date(user.demoStartDate);
-  const expirationDate = new Date(startDate.getTime() + demoConfig.DEMO_DURATION_MS);
+  const extensionDays = getDemoExtensionDays(user);
+  const extensionMs = extensionDays * 24 * 60 * 60 * 1000;
+  const expirationDate = new Date(startDate.getTime() + demoConfig.DEMO_DURATION_MS + extensionMs);
   const now = new Date();
   const remainingMs = expirationDate.getTime() - now.getTime();
   const remainingDays = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
@@ -1118,15 +1128,20 @@ function buildUserAccessSummary(user, options = {}) {
   const hasPerpetualLicense = activeLicenses.some(l => l.type === 'perpetual');
   const hasSubscriptionLicense = activeLicenses.some(l => l.type === 'subscription');
   const hasDemo = Boolean(user.demoStartDate);
+  const demoExtensionDays = getDemoExtensionDays(user);
   const demoRemainingDays = getDemoRemainingDays(user);
   const demoExpired = isDemoExpired(user);
-  const demoExpiresAt = user.demoStartDate ? new Date(new Date(user.demoStartDate).getTime() + demoConfig.DEMO_DURATION_MS).toISOString() : null;
+  const demoExpiresAt = user.demoStartDate
+    ? new Date(new Date(user.demoStartDate).getTime() + demoConfig.DEMO_DURATION_MS + (demoExtensionDays * 24 * 60 * 60 * 1000)).toISOString()
+    : null;
   const hasActiveSubscription = (user.subscriptionStatus === 'active') || hasSubscriptionLicense;
 
   return {
     demoStartDate: user.demoStartDate || null,
     demoExpiresAt,
     demoRemainingDays,
+    demoExtensionDays,
+    demoTotalDays: demoConfig.DEMO_DAYS + demoExtensionDays,
     demoExpired,
     hasDemo,
     hasActiveSubscription,
@@ -2233,6 +2248,8 @@ if (USE_POSTGRES && db && db.getUsers) {
           stripeCustomerId: u.stripecustomerid || u.stripeCustomerId || null,
           subscriptionStatus: u.subscriptionstatus || u.subscriptionStatus || null,
           subscriptionId: u.subscriptionid || u.subscriptionId || null,
+          demoStartDate: u.demostartdate || u.demoStartDate || null,
+          demoExtensionDays: u.demoextensiondays || u.demoExtensionDays || null,
           createdAt: u.createdat || u.createdAt || null,
           updatedAt: u.updatedat || u.updatedAt || null
         }));
@@ -2516,6 +2533,8 @@ function reloadUsers() {
           stripeCustomerId: u.stripecustomerid || u.stripeCustomerId || null,
           subscriptionStatus: u.subscriptionstatus || u.subscriptionStatus || null,
           subscriptionId: u.subscriptionid || u.subscriptionId || null,
+          demoStartDate: u.demostartdate || u.demoStartDate || null,
+          demoExtensionDays: u.demoextensiondays || u.demoExtensionDays || null,
           createdAt: u.createdat || u.createdAt || null,
           updatedAt: u.updatedat || u.updatedAt || null
         }));
@@ -2561,6 +2580,8 @@ function persistUser(user) {
     if (user.stripeCustomerId) updatePayload.stripecustomerid = user.stripeCustomerId;
     if (user.subscriptionStatus) updatePayload.subscriptionstatus = user.subscriptionStatus;
     if (user.subscriptionId) updatePayload.subscriptionid = user.subscriptionId;
+    if (user.demoStartDate) updatePayload.demostartdate = user.demoStartDate;
+    if (user.demoExtensionDays !== undefined) updatePayload.demoextensiondays = user.demoExtensionDays;
 
     // Save async to PostgreSQL (fire and forget to avoid blocking)
     db.getUserByUsername(user.username)
@@ -3869,6 +3890,95 @@ app.post('/api/admin/revoke-subscription', authMiddleware, async (req, res) => {
   } catch (e) {
     console.error('[admin] revoke-subscription error:', e);
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/**
+ * POST /api/admin/subscription/manage
+ * Actions: free_month, extend_trial, cancel, refund
+ */
+app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
+  if (!ensureAllowedAdmin(req, res)) return;
+  const { username, action, days } = req.body || {};
+  const normalized = String(username || '').trim();
+  const actionKey = String(action || '').trim().toLowerCase();
+
+  if (!normalized || !actionKey) {
+    return res.status(400).json({ ok: false, error: 'username et action requis' });
+  }
+
+  try {
+    let user = null;
+    if (USE_POSTGRES && db && db.getUserByUsername) {
+      user = await db.getUserByUsername(normalized);
+    } else {
+      reloadUsers();
+      user = getUserByUsername(normalized);
+    }
+
+    if (!user) {
+      return res.status(404).json({ ok: false, error: `User '${normalized}' not found` });
+    }
+
+    const now = new Date();
+    const addTrialDays = (extraDays) => {
+      const safeDays = Math.max(1, Number.parseInt(extraDays, 10) || 0);
+      if (!user.demoStartDate) {
+        user.demoStartDate = now.toISOString();
+      }
+      user.demoExtensionDays = getDemoExtensionDays(user) + safeDays;
+      user.updatedAt = new Date().toISOString();
+      persistUser(user);
+      return safeDays;
+    };
+
+    const updateLocalSubscription = (patch = {}) => {
+      try {
+        const idx = subscriptions.findIndex(s => s.username === user.username);
+        if (idx >= 0) {
+          subscriptions[idx] = { ...subscriptions[idx], ...patch, updatedAt: new Date().toISOString() };
+        } else {
+          const id = subscriptionIdCounter++;
+          subscriptions.push({ id, username: user.username, userId: user.id || null, email: user.email || null, ...patch, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+        }
+        saveSubscriptions();
+      } catch (e) {
+        console.warn('[admin/subscription/manage] local subscription update failed:', e && e.message ? e.message : e);
+      }
+    };
+
+    if (actionKey === 'extend_trial') {
+      const appliedDays = addTrialDays(days);
+      const accessSummary = buildUserAccessSummary(user, { licenses: loadLicenses() });
+      return res.json({ ok: true, message: `✅ ${appliedDays} jour(s) d'essai ajoutés`, accessSummary });
+    }
+
+    if (actionKey === 'free_month') {
+      const appliedDays = addTrialDays(30);
+      const accessSummary = buildUserAccessSummary(user, { licenses: loadLicenses() });
+      return res.json({ ok: true, message: `✅ Mois gratuit offert (${appliedDays} jours)`, accessSummary });
+    }
+
+    if (actionKey === 'cancel') {
+      user.subscriptionStatus = 'cancelled';
+      user.updatedAt = new Date().toISOString();
+      persistUser(user);
+      updateLocalSubscription({ status: 'cancelled', cancelledAt: now.toISOString() });
+      return res.json({ ok: true, message: `✅ Abonnement annulé pour ${normalized}` });
+    }
+
+    if (actionKey === 'refund') {
+      user.subscriptionStatus = 'refunded';
+      user.updatedAt = new Date().toISOString();
+      persistUser(user);
+      updateLocalSubscription({ status: 'refunded', cancelledAt: now.toISOString() });
+      return res.json({ ok: true, message: `✅ Abonnement remboursé pour ${normalized}` });
+    }
+
+    return res.status(400).json({ ok: false, error: `Action non supportée: ${actionKey}` });
+  } catch (e) {
+    console.error('[admin/subscription/manage] error:', e && e.message ? e.message : e);
+    return res.status(500).json({ ok: false, error: 'Server error' });
   }
 });
 

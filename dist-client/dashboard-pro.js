@@ -556,9 +556,8 @@ window.showLoginDialogForUser = function(username) {
 			</div>
 			<div style='display:flex;gap:10px;'>
 				<button onclick='loginUser()' style='flex:1;background:#3498db;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>🔓 Connexion</button>
-				<button onclick='document.getElementById("loginDialog").remove()' style='flex:1;background:#e74c3c;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>� Annuler</button>
+				<button onclick='document.getElementById("loginDialog").remove()' style='flex:1;background:#e74c3c;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>❌ Annuler</button>
 			</div>
-			<p style='text-align:center;color:#95a5a6;font-size:12px;margin-top:15px;'>Pas de compte? <a href='#' onclick='document.getElementById("loginDialog").remove();showAddUserDialog();' style='color:#2ecc71;'>Créer un compte</a></p>
 		</div>
 	`;
 	document.body.appendChild(dialog);
@@ -2167,7 +2166,7 @@ let games = [];
 let favorites = [];
 let runningApps = {}; // Track running apps: { serial: [pkg1, pkg2, ...] }
 let gameMetaMap = {}; // Map packageId -> { name, icon }
-const DEFAULT_GAME_ICON = 'https://cdn-icons-png.flaticon.com/512/1005/1005141.png';
+const DEFAULT_GAME_ICON = '/assets/logo-vd.svg';
 let serverInfoCache = null; // { lanIp, port, host }
 const VOICE_LAN_OVERRIDE_KEY = 'vhr_voice_lan_ip_override';
 
@@ -4092,17 +4091,17 @@ async function checkLicense() {
 
 function showTrialBanner(daysRemaining) {
 	let banner = document.getElementById('trialBanner');
-	if (banner) return;
-	
-	banner = document.createElement('div');
-	banner.id = 'trialBanner';
+	if (!banner) {
+		banner = document.createElement('div');
+		banner.id = 'trialBanner';
+	}
 	
 	let bannerText = '';
 	let bgColor = 'linear-gradient(135deg, #f39c12, #e67e22)'; // Orange for trial
 	
 	if (daysRemaining > 0) {
 		// Trial in progress
-		bannerText = `�� Essai gratuit - <b>${daysRemaining} jour(s)</b> restant(s)`;
+		bannerText = `⏱️ Essai gratuit - <b>${daysRemaining} jour(s)</b> restant(s)`;
 	} else {
 		// Active subscription
 		bgColor = 'linear-gradient(135deg, #2ecc71, #27ae60)'; // Green for active
@@ -4116,7 +4115,9 @@ function showTrialBanner(daysRemaining) {
 			🚀 Débloquer maintenant
 		</button>` : ''}
 	`;
-	document.body.appendChild(banner);
+	if (!banner.parentNode) {
+		document.body.appendChild(banner);
+	}
 	document.body.style.paddingTop = '106px'; // 56 navbar + 50 banner
 	
 	// Add margin-top to deviceGrid to prevent overlap with headers
@@ -4135,11 +4136,11 @@ window.showUnlockModal = function(status = licenseStatus) {
 	modal.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.95);z-index:2000;display:flex;align-items:center;justify-content:center;overflow-y:auto;';
 	
 	// Determine the message based on status
-	let headerMessage = '<h2 style="color:#e74c3c;">⚠� Accès refusé</h2>';
+	let headerMessage = '<h2 style="color:#e74c3c;">⚠️ Accès refusé</h2>';
 	let bodyMessage = '<p style="color:#95a5a6;">Votre période d\'essai a expiré.<br>Pour continuer à utiliser VHR Dashboard, choisissez une option ci-dessous :</p>';
 	
 	if (status.expired || status.accessBlocked) {
-		headerMessage = '<h2 style="color:#e74c3c;">⚠� Essai expiré - Abonnement requis</h2>';
+		headerMessage = '<h2 style="color:#e74c3c;">⚠️ Essai expiré - Abonnement requis</h2>';
 		bodyMessage = '<p style="color:#95a5a6;">Votre accès à VHR Dashboard a expiré car votre période d\'essai est terminée et aucun abonnement n\'est actif.<br><br>Choisissez une option ci-dessous pour continuer :</p>';
 	}
 	
@@ -4178,7 +4179,7 @@ window.showUnlockModal = function(status = licenseStatus) {
 					<li>✅ Fonctionne hors ligne</li>
 				</ul>
 				<button onclick="openOfficialBillingPage()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
-					� Acheter maintenant
+					💎 Acheter maintenant
 				</button>
 			</div>
 			
@@ -4192,7 +4193,7 @@ window.showUnlockModal = function(status = licenseStatus) {
 				</button>
 			</div>
 			
-			${status.expired || status.accessBlocked ? '' : `<button onclick="closeUnlockModal()" style="width:100%;background:#7f8c8d;color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;margin-top:12px;">� Fermer</button>`}
+			${status.expired || status.accessBlocked ? '' : `<button onclick="closeUnlockModal()" style="width:100%;background:#7f8c8d;color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;margin-top:12px;">❌ Fermer</button>`}
 		</div>
 	`;
 	
@@ -4217,7 +4218,7 @@ window.activateLicense = async function() {
 	const key = input.value.trim().toUpperCase();
 	
 	if (!key || !key.startsWith('VHR-')) {
-		showToast('� Clé de licence invalide', 'error');
+		showToast('❌ Clé de licence invalide', 'error');
 		return;
 	}
 	
@@ -4244,11 +4245,11 @@ window.activateLicense = async function() {
 				document.body.style.paddingTop = '56px';
 			}
 		} else {
-			showToast('� ' + (res.error || 'Clé invalide'), 'error');
+			showToast('❌ ' + (res.error || 'Clé invalide'), 'error');
 		}
 	} catch (e) {
 		console.error('[license] activate error:', e);
-		showToast('� Erreur lors de l\'activation', 'error');
+		showToast('❌ Erreur lors de l\'activation', 'error');
 	}
 };
 
@@ -4280,11 +4281,11 @@ window.showAuthModal = function(mode = 'login') {
 				<label style="color:#95a5a6;font-size:12px;display:block;margin-bottom:6px;">Mot de passe</label>
 				<div style="display:flex;gap:8px;align-items:center;">
 					<input type="password" id="loginPassword" placeholder="••••••••" style="flex:1;background:#2c3e50;color:#fff;border:2px solid #34495e;padding:12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
-					<button type="button" onclick="toggleDashboardPassword('loginPassword')" style="background:none;border:none;cursor:pointer;font-size:18px;padding:8px;color:#fff;" title="Afficher/masquer">��</button>
+					<button type="button" onclick="toggleDashboardPassword('loginPassword')" style="background:none;border:none;cursor:pointer;font-size:18px;padding:8px;color:#fff;" title="Afficher/masquer">👁️</button>
 				</div>
 			</div>
 			<button onclick="loginUser()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
-				� Se connecter
+				🔓 Se connecter
 			</button>
 			<p style="margin-top:16px;text-align:center;color:#95a5a6;font-size:12px;line-height:1.6;">
 				Les comptes sont fournis via le <a href="https://vhr-dashboard-site.com/account.html" target="_blank" rel="noreferrer" style="color:#2ecc71;font-weight:bold;">site central</a>.
@@ -4300,14 +4301,14 @@ window.loginUser = async function() {
 	const identifierInput = document.getElementById('loginIdentifier') || document.getElementById('loginUserName');
 	const passwordInput = document.getElementById('loginPassword') || document.getElementById('loginUserPass');
 	if (!identifierInput || !passwordInput) {
-		showToast('� Impossible de trouver les champs de connexion', 'error');
+		showToast('❌ Impossible de trouver les champs de connexion', 'error');
 		return;
 	}
 	const identifier = identifierInput.value.trim();
 	const password = passwordInput.value;
 	
 	if (!identifier || !password) {
-		showToast('� Identifiant et mot de passe requis', 'error');
+		showToast('❌ Identifiant et mot de passe requis', 'error');
 		return;
 	}
 	
@@ -4471,7 +4472,7 @@ window.loginUser = async function() {
 			}, 200);
 		} else {
 			if (data && data.code === 'account_deleted') {
-				showToast('� Ce compte a été supprimé ou désactivé', 'error');
+				showToast('❌ Ce compte a été supprimé ou désactivé', 'error');
 				saveAuthToken('');
 				showAuthModal('login');
 				return;
@@ -4485,11 +4486,11 @@ window.loginUser = async function() {
 				});
 				return;
 			}
-			showToast('� ' + (data?.error || 'Connexion échouée'), 'error');
+			showToast('❌ ' + (data?.error || 'Connexion échouée'), 'error');
 		}
 	} catch (e) {
 		console.error('[auth] login error:', e);
-		showToast('� Erreur de connexion', 'error');
+		showToast('❌ Erreur de connexion', 'error');
 	}
 };
 

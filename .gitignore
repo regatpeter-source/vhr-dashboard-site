@@ -16,6 +16,8 @@ coverage/
 tmp/
 temp/
 backups/
+dist-client/extracted-app/
+dist-client/dist2/
 
 # Logs / diagnostics
 *.log

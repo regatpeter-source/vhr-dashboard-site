@@ -73,7 +73,9 @@ async function initDatabase() {
         { name: 'latestinvoiceid', type: 'VARCHAR(255)' },
         { name: 'lastinvoicepaidat', type: 'TIMESTAMPTZ' },
         { name: 'subscriptionstatus', type: 'VARCHAR(50)' },
-        { name: 'subscriptionid', type: 'VARCHAR(255)' }
+        { name: 'subscriptionid', type: 'VARCHAR(255)' },
+        { name: 'demostartdate', type: 'TIMESTAMPTZ' },
+        { name: 'demoextensiondays', type: 'INTEGER' }
       ];
 
       for (const col of columnChecks) {
@@ -264,7 +266,7 @@ async function deleteMessage(id) {
 async function getUsers() {
   try {
     const result = await pool.query(
-      'SELECT id, username, email, role, createdat, updatedat, subscriptionstatus, subscriptionid, stripecustomerid FROM users ORDER BY createdat DESC'
+      'SELECT id, username, email, role, createdat, updatedat, subscriptionstatus, subscriptionid, stripecustomerid, demostartdate, demoextensiondays FROM users ORDER BY createdat DESC'
     );
     return result.rows || [];
   } catch (err) {
@@ -305,6 +307,8 @@ async function getUserByUsername(username) {
            lastinvoicepaidat,
            subscriptionstatus,
            subscriptionid,
+           demostartdate,
+           demoextensiondays,
            createdat,
            updatedat
          FROM users
@@ -337,6 +341,10 @@ async function getUserByUsername(username) {
       subscriptionStatus: optionalFields.subscriptionstatus || null,
       subscriptionid: optionalFields.subscriptionid || null,
       subscriptionId: optionalFields.subscriptionid || null,
+      demostartdate: optionalFields.demostartdate || null,
+      demoStartDate: optionalFields.demostartdate || null,
+      demoextensiondays: optionalFields.demoextensiondays || null,
+      demoExtensionDays: optionalFields.demoextensiondays || null,
       createdat: optionalFields.createdat || null,
       createdAt: optionalFields.createdat || null,
       updatedat: optionalFields.updatedat || null,
@@ -373,7 +381,9 @@ async function updateUser(id, updates) {
       'latestinvoiceid',
       'lastinvoicepaidat',
       'subscriptionstatus',
-      'subscriptionid'
+      'subscriptionid',
+      'demostartdate',
+      'demoextensiondays'
     ]);
 
     const fields = [];
