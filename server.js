@@ -138,7 +138,9 @@ const HAS_SYNC_TARGETS = SYNC_TARGET_BASE_URLS.length > 0;
 const AUTH_API_BASE = (process.env.AUTH_API_BASE || 'https://www.vhr-dashboard-site.com').replace(/\/+$/, '');
 const REMOTE_SYNC_TIMEOUT_MS = Math.max(1000, Number.parseInt(process.env.REMOTE_SYNC_TIMEOUT_MS || '5000', 10) || 5000);
 const REMOTE_SYNC_COOLDOWN_MS = Math.max(1000, Number.parseInt(process.env.REMOTE_SYNC_COOLDOWN_MS || '60000', 10) || 60000);
+const REMOTE_AUTH_FAILURE_COOLDOWN_MS = Math.max(1000, Number.parseInt(process.env.REMOTE_AUTH_FAILURE_COOLDOWN_MS || '60000', 10) || 60000); // cooldown after remote auth failure to keep logs calm
 const remoteSyncCooldown = new Map();
+const remoteAuthFailureCooldown = new Map();
 
 const FORCE_HTTP = process.env.FORCE_HTTP === '1';
 const NO_BROWSER_FALLBACK = process.env.NO_BROWSER_FALLBACK === '1';
@@ -3304,6 +3306,7 @@ app.post('/api/login', async (req, res) => {
   console.log('[api/login] request received:', req.body);
   const { username, password } = req.body;
   const loginIdentifier = (username || '').toString().trim();
+  const normalizedLoginIdentifier = loginIdentifier.toLowerCase();
   console.log('[api/login] attempting login for:', loginIdentifier);
   if (!USE_POSTGRES) {
     reloadUsers();
@@ -3320,12 +3323,25 @@ app.post('/api/login', async (req, res) => {
     if (isUsernameDeleted(username)) {
       return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
     }
+    const cooldownUntil = remoteAuthFailureCooldown.get(normalizedLoginIdentifier) || 0;
+    const now = Date.now();
+    if (cooldownUntil > now) {
+      const waitSeconds = Math.ceil((cooldownUntil - now) / 1000);
+      console.log(`[api/login] skipping remote auth for ${loginIdentifier} (cooldown ${waitSeconds}s remaining)`);
+      return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
+    }
+    remoteAuthFailureCooldown.delete(normalizedLoginIdentifier);
     console.log('[api/login] user not found locally, trying remote auth');
     const remoteAuth = await attemptRemoteDashboardLogin(loginIdentifier, password);
     if (remoteAuth && remoteAuth.data && remoteAuth.data.ok) {
+      remoteAuthFailureCooldown.delete(normalizedLoginIdentifier);
       console.log('[api/login] remote auth succeeded, syncing local user');
       await ensureLocalUserFromRemote(remoteAuth.data.user || {}, password, username);
       user = await findUserByUsernameAsync((remoteAuth.data.user?.username || remoteAuth.data.user?.name || loginIdentifier).trim());
+    } else {
+      const cooldownExpiry = Date.now() + REMOTE_AUTH_FAILURE_COOLDOWN_MS;
+      remoteAuthFailureCooldown.set(normalizedLoginIdentifier, cooldownExpiry);
+      console.log(`[api/login] remote auth failed, cooldown active until ${new Date(cooldownExpiry).toISOString()} for ${loginIdentifier}`);
     }
     if (!user) {
       console.log('[api/login] remote auth failed or no user created');
