@@ -147,6 +147,20 @@ const SUPPRESS_WARNINGS = process.env.SUPPRESS_WARNINGS === '1';
 
 let useHttps = false;
 
+const REMOTE_AUTH_REFERER = (process.env.REMOTE_AUTH_REFERER || `${AUTH_API_BASE}/account.html`).replace(/\/+$/, '');
+const REMOTE_AUTH_USER_AGENT = process.env.REMOTE_AUTH_USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
+function buildRemoteAuthHeaders(overrides = {}) {
+  return {
+    Accept: 'application/json, text/plain, */*',
+    'Content-Type': 'application/json',
+    Origin: AUTH_API_BASE,
+    Referer: REMOTE_AUTH_REFERER,
+    'User-Agent': REMOTE_AUTH_USER_AGENT,
+    'X-Requested-With': 'XMLHttpRequest',
+    ...overrides
+  };
+}
+
 // Manual email overrides to re-link Stripe customers when the stored email is missing/incorrect.
 // Can be provided via JSON in env USER_EMAIL_OVERRIDES_JSON, e.g. {"pitou":"vhrealityone@gmail.com"}
 const EMAIL_OVERRIDE_MAP = (() => {
@@ -3156,7 +3170,7 @@ async function attemptRemoteDashboardLogin(identifier, password) {
     try {
       const response = await promiseWithTimeout(fetch(AUTH_API_BASE + attempt.path, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildRemoteAuthHeaders(),
         body: JSON.stringify(attempt.payload)
       }), REMOTE_SYNC_TIMEOUT_MS);
       const data = await response.json().catch(() => null);
@@ -3164,7 +3178,7 @@ async function attemptRemoteDashboardLogin(identifier, password) {
         const token = data.token || data.accessToken || data.jwt || null;
         return { data, endpoint: attempt.path, token };
       }
-      console.warn(`[remote-auth] ${attempt.path} did not authenticate (status ${response.status})`);
+      console.warn(`[remote-auth] ${attempt.path} did not authenticate (status ${response.status}):`, data || 'no payload');
     } catch (error) {
       console.warn(`[remote-auth] ${attempt.path} error:`, error && error.message ? error.message : error);
     }
