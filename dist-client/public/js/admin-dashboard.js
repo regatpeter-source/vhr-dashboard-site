@@ -1,7 +1,7 @@
-const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com', 'vhr-dashboard-site.onrender.com'];
+const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
 const API_BASE = OFFICIAL_HOSTS.includes(window.location.hostname)
   ? '/api'
-  : 'https://vhr-dashboard-site.onrender.com/api';
+  : 'https://vhr-dashboard-site.com/api';
 let currentUser = null;
 let cachedUsers = [];
 
@@ -454,7 +454,7 @@ async function deleteUserAccount(username) {
 
     if (!res.ok || !data.ok) {
       const message = (data && data.error) ? data.error : 'Erreur serveur';
-      alert('‚ùå ' + message);
+      alert('‚å ' + message);
       return;
     }
 
@@ -463,7 +463,7 @@ async function deleteUserAccount(username) {
     await loadStats();
   } catch (e) {
     console.error('[users] delete error:', e);
-    alert('‚ùå Erreur lors de la suppression: ' + e.message);
+    alert('‚å Erreur lors de la suppression: ' + e.message);
   }
 }
 
@@ -489,7 +489,7 @@ async function manageSubscription(username, action, days) {
     const data = await res.json();
     if (!res.ok || !data.ok) {
       const message = data && data.error ? data.error : 'Erreur serveur';
-      alert('‚ùå ' + message);
+      alert('‚å ' + message);
       return;
     }
 
@@ -499,7 +499,7 @@ async function manageSubscription(username, action, days) {
     refreshUserModalIfNeeded(normalized);
   } catch (e) {
     console.error('[subs] manage error:', e);
-    alert('‚ùå Erreur: ' + e.message);
+    alert('‚å Erreur: ' + e.message);
   }
 }
 
@@ -519,14 +519,14 @@ async function viewMessage(messageId) {
     
     if (!data.ok || !data.messages) {
       console.error('[viewMessage] Error loading messages:', data.error);
-      alert('‚ùå Error loading messages: ' + (data.error || 'Unknown error'));
+      alert('‚å Error loading messages: ' + (data.error || 'Unknown error'));
       return;
     }
     
     const msg = data.messages.find(m => m.id == messageId);
     if (!msg) {
       console.error('[viewMessage] Message not found with id:', messageId);
-      alert('‚ùå Message not found');
+      alert('‚å Message not found');
       return;
     }
     
@@ -582,7 +582,7 @@ async function viewMessage(messageId) {
     document.getElementById('messageModal').classList.add('active');
   } catch (e) {
     console.error('[viewMessage] Exception:', e);
-    alert('‚ùå Error viewing message:\n' + e.message);
+    alert('‚å Error viewing message:\n' + e.message);
   }
 }
 
@@ -591,13 +591,13 @@ async function respondToMessage(messageId) {
   const responseText = document.getElementById('responseText');
   if (!responseText) {
     console.error('[respond] responseText textarea not found');
-    alert('‚ùå Error: Response field not found. Try refreshing the page.');
+    alert('‚å Error: Response field not found. Try refreshing the page.');
     return;
   }
   
   const response = responseText.value;
   if (!response || response.trim() === '') {
-    alert('‚ùå Please write a response');
+    alert('‚å Please write a response');
     return;
   }
   
@@ -633,12 +633,12 @@ async function respondToMessage(messageId) {
       await loadStats();
     } else {
       console.error('[respond] Error:', data.error);
-      alert('‚ùå Error: ' + (data.error || 'Unknown error'));
+      alert('‚å Error: ' + (data.error || 'Unknown error'));
     }
   } catch (e) {
     console.error('[respond] Exception:', e);
     console.error('[respond] Stack:', e.stack);
-    alert('‚ùå Error sending response:\n' + e.message);
+    alert('‚å Error sending response:\n' + e.message);
   }
 }
 

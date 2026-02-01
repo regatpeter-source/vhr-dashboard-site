@@ -1,9 +1,9 @@
 // Account page client script (moved from inline to comply with CSP)
 (function(){
-  const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com', 'vhr-dashboard-site.onrender.com'];
-  const BILLING_URL = 'https://vhr-dashboard-site.onrender.com/pricing.html#checkout';
+  const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
+  const BILLING_URL = 'https://vhr-dashboard-site.com/pricing.html#checkout';
   // Forcer l'API vers la prod pour que les comptes créés en ligne soient reconnus, même si la page est servie en localhost/LAN.
-  const API_BASE = 'https://vhr-dashboard-site.onrender.com';
+  const API_BASE = 'https://vhr-dashboard-site.com';
   const DEFAULT_SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
   let cachedSyncUsersSecret = DEFAULT_SYNC_USERS_SECRET;
   let syncSecretPromise = null;
@@ -81,11 +81,11 @@
         const input = document.getElementById(targetId);
         if (input.type === 'password') {
           input.type = 'text';
-          btn.textContent = '👁️‍🗨️';
+          btn.textContent = '���🗨�';
           btn.style.opacity = '0.6';
         } else {
           input.type = 'password';
-          btn.textContent = '👁️';
+          btn.textContent = '��';
           btn.style.opacity = '1';
         }
       });
@@ -453,11 +453,11 @@
               document.getElementById('cancelSubscriptionBtn').style.opacity = '0.5';
               setTimeout(() => { loadSubscription(); }, 2000);
             } else {
-              msgDiv.textContent = '❌ Erreur: ' + (cancelRes && cancelRes.error ? cancelRes.error : 'Impossible d\'annuler l\'abonnement');
+              msgDiv.textContent = '� Erreur: ' + (cancelRes && cancelRes.error ? cancelRes.error : 'Impossible d\'annuler l\'abonnement');
               msgDiv.style.color = '#d32f2f';
             }
           } catch (err) {
-            msgDiv.textContent = '❌ Erreur: ' + err.message;
+            msgDiv.textContent = '� Erreur: ' + err.message;
             msgDiv.style.color = '#d32f2f';
           }
         });
@@ -475,7 +475,7 @@
       e.preventDefault();
       
       // Confirmation dialog
-      if (!confirm('⚠️ ATTENTION: Êtes-vous sûr de vouloir supprimer votre compte?\n\nCette action est IRRÉVERSIBLE et toutes vos données seront perdues.')) {
+      if (!confirm('⚠� ATTENTION: Êtes-vous sûr de vouloir supprimer votre compte?\n\nCette action est IRRÉVERSIBLE et toutes vos données seront perdues.')) {
         return;
       }
       
@@ -503,11 +503,11 @@
             window.location.href = '/account.html';
           }, 2000);
         } else {
-          msg.textContent = '❌ Erreur: ' + (res && res.error ? res.error : 'Impossible de supprimer le compte');
+          msg.textContent = '� Erreur: ' + (res && res.error ? res.error : 'Impossible de supprimer le compte');
           msg.style.color = '#d32f2f';
         }
       } catch (err) {
-        msg.textContent = '❌ Erreur: ' + err.message;
+        msg.textContent = '� Erreur: ' + err.message;
         msg.style.color = '#d32f2f';
       }
     });

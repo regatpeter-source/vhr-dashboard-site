@@ -586,7 +586,7 @@ async function ensureJavaAndGradle() {
       console.log('[Setup] ✓ Java trouvé via PATH système');
       javaFound = true;
     } catch (e) {
-      console.log('[Setup] ⚠️ Java non trouvé, tentative d\'installation...');
+      console.log('[Setup] ⚠� Java non trouvé, tentative d\'installation...');
       javaFound = await installJava();
       if (javaFound) {
         console.log('[Setup] ✓ Java installé et configuré');
@@ -615,7 +615,7 @@ async function ensureJavaAndGradle() {
       console.log('[Setup] ✓ Gradle trouvé via PATH système');
       gradleFound = true;
     } catch (e) {
-      console.log('[Setup] ⚠️ Gradle non trouvé, tentative d\'installation...');
+      console.log('[Setup] ⚠� Gradle non trouvé, tentative d\'installation...');
       gradleFound = await installGradle();
       if (gradleFound) {
         console.log('[Setup] ✓ Gradle installé et configuré');
@@ -634,7 +634,7 @@ async function ensureJavaAndGradle() {
   if (success) {
     console.log('[Setup] ✅ Java, Gradle et SDK Android sont disponibles');
   } else {
-    console.error('[Setup] ⚠️ Certains outils manquent (Java: ' + (javaFound ? '✓' : '✗') + ', Gradle: ' + (gradleFound ? '✓' : '✗') + ', SDK: ' + (sdkFound ? '✓' : '✗') + ')');
+    console.error('[Setup] ⚠� Certains outils manquent (Java: ' + (javaFound ? '✓' : '✗') + ', Gradle: ' + (gradleFound ? '✓' : '✗') + ', SDK: ' + (sdkFound ? '✓' : '✗') + ')');
   }
   
   return { success, javaFound, gradleFound };
@@ -689,7 +689,7 @@ async function installJava() {
     return true;
     
   } catch (e) {
-    console.error('[Setup] ❌ Installation automatique Java échouée:', e.message);
+    console.error('[Setup] � Installation automatique Java échouée:', e.message);
     console.log('[Setup] Tentative avec le script PowerShell...');
     
     try {
@@ -755,7 +755,7 @@ async function installGradle() {
     return true;
     
   } catch (e) {
-    console.error('[Setup] ❌ Installation automatique Gradle échouée:', e.message);
+    console.error('[Setup] � Installation automatique Gradle échouée:', e.message);
     console.log('[Setup] Tentative avec le script PowerShell...');
     
     try {
@@ -884,7 +884,7 @@ async function ensureAndroidSDK() {
     return true;
     
   } catch (e) {
-    console.error('[Setup] ❌ Installation Android SDK échouée:', e.message);
+    console.error('[Setup] � Installation Android SDK échouée:', e.message);
     return false;
   }
 }
@@ -930,7 +930,7 @@ function ensureLocalProperties() {
     fs.writeFileSync(localPropsPath, content, 'utf8');
     console.log('[Setup] ✓ local.properties créé');
   } catch (e) {
-    console.error('[Setup] ⚠️ Impossible de créer local.properties:', e.message);
+    console.error('[Setup] ⚠� Impossible de créer local.properties:', e.message);
   }
 }
 
@@ -976,7 +976,7 @@ app.use(helmet({
         'https://api.stripe.com',
         'https://messaging.botpress.cloud',
         'https://cdn.botpress.cloud',
-        'https://vhr-dashboard-site.onrender.com',
+        'https://vhr-dashboard-site.com',
         'https://www.vhr-dashboard-site.com',
         'https://vhr-dashboard-site.com',
         // Autoriser toutes les cibles HTTP (LAN/clients) pour éviter les blocages CSP sur les nouveaux utilisateurs
@@ -1297,7 +1297,7 @@ async function sendReplyToContact(originalMessage, replyText, repliedBy) {
         </div>
         
         <div style="background: #34495e; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3498db;">
-          <h4 style="color: #3498db; margin-top: 0;">📝 Votre message original:</h4>
+          <h4 style="color: #3498db; margin-top: 0;">� Votre message original:</h4>
           <p style="margin: 8px 0;"><strong>Sujet:</strong> ${originalMessage.subject}</p>
           <p style="line-height: 1.6; white-space: pre-wrap; color: #bdc3c7;">${originalMessage.message}</p>
         </div>
@@ -1402,7 +1402,7 @@ async function sendAccountConfirmationEmail(user) {
         </div>
         <p style="line-height: 1.6;">Vous pouvez à tout moment gérer votre abonnement ou passer en offre complète depuis votre espace.</p>
         <p style="text-align:center;margin-top:24px;">
-          <a href="https://vhr-dashboard-site.onrender.com/launch-dashboard.html" style="background:#2ecc71;color:#0d0f14;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:bold;">Ouvrir le dashboard</a>
+          <a href="https://vhr-dashboard-site.com/launch-dashboard.html" style="background:#2ecc71;color:#0d0f14;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:bold;">Ouvrir le dashboard</a>
         </p>
         <p style="color:#95a5a6;font-size:12px;margin-top:30px;text-align:center;">
           Si vous n'êtes pas à l'origine de cette création de compte, ignorez cet email ou contactez le support.
@@ -2873,7 +2873,7 @@ app.post('/api/create-desktop-shortcut', (req, res) => {
   Set fso = CreateObject("Scripting.FileSystemObject")
 
   projectDir = "${projectDir.replace(/\\/g, '\\\\')}"
-  remoteUrl = "https://vhr-dashboard-site.onrender.com/vhr-dashboard-pro.html"
+  remoteUrl = "https://vhr-dashboard-site.com/vhr-dashboard-pro.html"
 
   localIp = GetLocalIPv4()
   If localIp = "" Then
@@ -3734,7 +3734,7 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
           accessBlocked: !hasValidSubscription, // KEY: Block access if no valid subscription
           message: hasValidSubscription 
             ? '✅ Accès accordé via abonnement actif'
-            : '❌ Essai expiré - Abonnement requis pour continuer'
+            : '� Essai expiré - Abonnement requis pour continuer'
         }
       });
     } else {
@@ -3801,7 +3801,7 @@ app.post('/api/download/vhr-app', authMiddleware, async (req, res) => {
         return res.status(403).json({
           ok: false,
           error: 'Access denied',
-          message: '❌ Essai expiré et aucun abonnement actif. Veuillez vous abonner pour continuer.',
+          message: '� Essai expiré et aucun abonnement actif. Veuillez vous abonner pour continuer.',
           needsSubscription: true
         });
       }
@@ -3880,7 +3880,7 @@ app.post('/api/download/vhr-app', authMiddleware, async (req, res) => {
 
 /**
  * POST /api/compile-apk - Compile automatiquement l'APK avec les données vocales
- * ⚠️ REQUIRES AUTHENTICATION - Route automatique après téléchargement
+ * ⚠� REQUIRES AUTHENTICATION - Route automatique après téléchargement
  */
 app.post('/api/compile-apk', authMiddleware, async (req, res) => {
   try {
@@ -5351,7 +5351,7 @@ app.post('/api/contact', async (req, res) => {
     if (emailSent) {
       console.log('[contact] ✓ Email forwarded to admin');
     } else {
-      console.warn('[contact] ⚠️ Email NOT sent (check BREVO_SMTP_* or EMAIL_* and CONTACT_INBOX_EMAIL in .env)');
+      console.warn('[contact] ⚠� Email NOT sent (check BREVO_SMTP_* or EMAIL_* and CONTACT_INBOX_EMAIL in .env)');
     }
     
     res.json({ ok: true, message: 'Message reçu. Nous vous répondrons bientôt.', emailSent: !!emailSent });
@@ -7330,7 +7330,7 @@ io.on('connection', socket => {
         if (session.users.length === 0) {
           // Delete empty session
           collaborativeSessions.delete(socket.sessionCode);
-          console.log(`[Session] 🗑️ Session ${socket.sessionCode} deleted (empty)`);
+          console.log(`[Session] 🗑� Session ${socket.sessionCode} deleted (empty)`);
         } else {
           // Notify remaining users
           io.to(`session-${socket.sessionCode}`).emit('session-updated', {
@@ -7404,7 +7404,7 @@ io.on('connection', socket => {
         
         if (session.users.length === 0) {
           collaborativeSessions.delete(socket.sessionCode);
-          console.log(`[Session] 🗑️ Session ${socket.sessionCode} auto-deleted (all disconnected)`);
+          console.log(`[Session] 🗑� Session ${socket.sessionCode} auto-deleted (all disconnected)`);
         } else {
           io.to(`session-${socket.sessionCode}`).emit('session-updated', {
             sessionCode: socket.sessionCode,
@@ -7476,7 +7476,7 @@ function logServerBanner(initializationFailed = false) {
   console.log(`\nVHR DASHBOARD - Optimisé Anti-Scintillement`);
   console.log(`${protocolEmoji} Server: ${protocol}://localhost:${PORT}`);
   if (lanIp) {
-    console.log(`🌐 Accès LAN: ${protocol}://${lanIp}:${PORT}`);
+    console.log(`� Accès LAN: ${protocol}://${lanIp}:${PORT}`);
     console.log(`   • Dashboard Pro: ${protocol}://${lanIp}:${PORT}/vhr-dashboard-pro.html`);
     console.log(`   • Site vitrine: ${protocol}://${lanIp}:${PORT}/site-vitrine/`);
   }
@@ -8521,7 +8521,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// ⚠️ NOTE: Local Android compilation routes removed
+// ⚠� NOTE: Local Android compilation routes removed
 // Use GitHub Actions for automated builds instead:
 // 1. User downloads APK + Voice via /api/download/vhr-app (authenticated)
 // 2. User executes: git push origin main
