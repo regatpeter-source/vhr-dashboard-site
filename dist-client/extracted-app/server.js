@@ -976,6 +976,7 @@ app.use(helmet({
         'https://api.stripe.com',
         'https://messaging.botpress.cloud',
         'https://cdn.botpress.cloud',
+        'https://vhr-dashboard-site.onrender.com',
         'https://www.vhr-dashboard-site.com',
         'https://vhr-dashboard-site.com',
         // Autoriser toutes les cibles HTTP (LAN/clients) pour éviter les blocages CSP sur les nouveaux utilisateurs
@@ -1401,7 +1402,7 @@ async function sendAccountConfirmationEmail(user) {
         </div>
         <p style="line-height: 1.6;">Vous pouvez à tout moment gérer votre abonnement ou passer en offre complète depuis votre espace.</p>
         <p style="text-align:center;margin-top:24px;">
-          <a href="https://www.vhr-dashboard-site.com/launch-dashboard.html" style="background:#2ecc71;color:#0d0f14;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:bold;">Ouvrir le dashboard</a>
+          <a href="https://vhr-dashboard-site.onrender.com/launch-dashboard.html" style="background:#2ecc71;color:#0d0f14;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:bold;">Ouvrir le dashboard</a>
         </p>
         <p style="color:#95a5a6;font-size:12px;margin-top:30px;text-align:center;">
           Si vous n'êtes pas à l'origine de cette création de compte, ignorez cet email ou contactez le support.
@@ -2872,7 +2873,7 @@ app.post('/api/create-desktop-shortcut', (req, res) => {
   Set fso = CreateObject("Scripting.FileSystemObject")
 
   projectDir = "${projectDir.replace(/\\/g, '\\\\')}"
-  remoteUrl = "https://www.vhr-dashboard-site.com/vhr-dashboard-pro.html"
+  remoteUrl = "https://vhr-dashboard-site.onrender.com/vhr-dashboard-pro.html"
 
   localIp = GetLocalIPv4()
   If localIp = "" Then

@@ -6,8 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "start:dev": "NO_ADB=1 node server.js",
-    "dev:electron": "cross-env API_BASE_URL=https://www.vhr-dashboard-site.com electron .",
-    "build:electron": "set ELECTRON_BUILDER_SKIP_NODE_GYP_REBUILD=1&&cross-env API_BASE_URL=https://www.vhr-dashboard-site.com electron-builder -w",
+    "dev:electron": "dotenv -e .env cross-env electron .",
+    "build:electron": "set ELECTRON_BUILDER_SKIP_NODE_GYP_REBUILD=1&&dotenv -e .env cross-env electron-builder -w",
     "launch": "node launcher.js",
     "build:exe": "pkg launcher.js --target node18-win-x64 --output \"VHR Dashboard.exe\"",
     "fixenc": "node scripts/fix-encodings.js",
@@ -49,6 +49,7 @@
   "devDependencies": {
     "archiver": "^6.0.1",
     "cross-env": "^7.0.3",
+    "dotenv-cli": "^6.0.0",
     "electron": "^29.3.0",
     "electron-builder": "^24.9.1",
     "fs-extra": "^11.1.1",

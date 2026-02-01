@@ -1,9 +1,9 @@
 [
   {
     "username": "vhr",
-    "passwordHash": "$2b$10$V6RjAh1tA6EaencmADX6SeKBvuTWYU7fTLswqElSr6zjxV0tm.KKK",
+    "passwordHash": "$2b$10$AlrD74akc7cp9EbVLJKzcOlPzJbypzSt7a8Sg85KEjpFGM/ofxdLm",
     "role": "admin",
-    "email": "vhr",
+    "email": "admin@example.local",
     "stripeCustomerId": null,
     "latestInvoiceId": null,
     "lastInvoicePaidAt": null,
@@ -22,78 +22,5 @@
     "subscriptionStatus": null,
     "subscriptionId": null,
     "demoStartDate": null
-  },
-  {
-    "username": "testuser_payment",
-    "passwordHash": "$2b$10$l/uyNiF/Pv230FCrTLRuBuQM7z.6De4Sb.3lF16xRwZ2fkWMmPEcu",
-    "role": "user",
-    "email": "test.payment@example.com",
-    "stripeCustomerId": null,
-    "latestInvoiceId": null,
-    "lastInvoicePaidAt": null,
-    "subscriptionStatus": null,
-    "subscriptionId": null,
-    "demoStartDate": null
-  },
-  {
-    "username": "testpay_user",
-    "passwordHash": "$2b$10$2QgUVCHEoWcUuBSShluLU.69flLd4vf51vUxQNpJwLtCa4loXhtMG",
-    "role": "user",
-    "email": "testpay@vhr.local",
-    "stripeCustomerId": null,
-    "latestInvoiceId": null,
-    "lastInvoicePaidAt": null,
-    "subscriptionStatus": null,
-    "subscriptionId": null,
-    "demoStartDate": null
-  },
-  {
-    "username": "testpay_user3",
-    "passwordHash": "$2b$10$8fvj5nBfTP/xE2HayeuOo.MMmsYUCFQmKwoo8D7Mgs2H5ZwMC2.7a",
-    "role": "user",
-    "email": "testpay3@vhr.local",
-    "stripeCustomerId": null,
-    "latestInvoiceId": null,
-    "lastInvoicePaidAt": null,
-    "subscriptionStatus": null,
-    "subscriptionId": null,
-    "demoStartDate": null
-  },
-  {
-    "username": "samsam44410",
-    "passwordHash": "$2b$10$vL0AmczB9SJk5tjtoMDwCeaGLLsVgQwmPhIW4f1..ftKk3j/GBBV.",
-    "role": "user",
-    "email": null,
-    "stripeCustomerId": null,
-    "latestInvoiceId": null,
-    "lastInvoicePaidAt": null,
-    "subscriptionStatus": null,
-    "subscriptionId": null,
-    "demoStartDate": null
-  },
-  {
-    "username": "demo_guest",
-    "passwordHash": "$2b$10$wM3fMsYvhXhyye/I80gpJuAu9M51s2Qm1BjyTuCICXla17aAZEwSq",
-    "role": "user",
-    "email": "demo@vhr-dashboard-site.com",
-    "stripeCustomerId": null,
-    "latestInvoiceId": null,
-    "lastInvoicePaidAt": null,
-    "subscriptionStatus": null,
-    "subscriptionId": null,
-    "demoStartDate": null
-  },
-  {
-    "username": "loulou",
-    "passwordHash": "$2b$10$Uo0JSEbC6aE035Z0t7OJ1.yZD/sMvsMfAaJo7lzAN89GTVk0Vhaeq",
-    "role": "user",
-    "email": "loulou",
-    "stripeCustomerId": null,
-    "latestInvoiceId": null,
-    "lastInvoicePaidAt": null,
-    "subscriptionStatus": null,
-    "subscriptionId": null,
-    "demoStartDate": null
-  },
   }
 ]

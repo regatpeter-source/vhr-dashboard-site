@@ -1,9 +1,9 @@
 // Account page client script (moved from inline to comply with CSP)
 (function(){
-  const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
-  const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
+  const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com', 'vhr-dashboard-site.onrender.com'];
+  const BILLING_URL = 'https://vhr-dashboard-site.onrender.com/pricing.html#checkout';
   // Forcer l'API vers la prod pour que les comptes créés en ligne soient reconnus, même si la page est servie en localhost/LAN.
-  const API_BASE = 'https://www.vhr-dashboard-site.com';
+  const API_BASE = 'https://vhr-dashboard-site.onrender.com';
   const DEFAULT_SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
   let cachedSyncUsersSecret = DEFAULT_SYNC_USERS_SECRET;
   let syncSecretPromise = null;

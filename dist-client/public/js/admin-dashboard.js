@@ -1,7 +1,7 @@
-const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
+const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com', 'vhr-dashboard-site.onrender.com'];
 const API_BASE = OFFICIAL_HOSTS.includes(window.location.hostname)
   ? '/api'
-  : 'https://www.vhr-dashboard-site.com/api';
+  : 'https://vhr-dashboard-site.onrender.com/api';
 let currentUser = null;
 let cachedUsers = [];
 

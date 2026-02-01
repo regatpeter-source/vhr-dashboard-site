@@ -2516,19 +2516,27 @@ function saveSubscriptions() {
 async function initializeApp() {
   if (USE_POSTGRES) {
     console.log('[DB] Initializing PostgreSQL...');
-    await db.initDatabase();
-    console.log('[DB] PostgreSQL initialized successfully');
-    
-    // Skip user migration - users should already be in DB from ensureDefaultUsers()
-    // Or they will be added via /api/admin/init-users endpoint if needed
-    console.log('[STARTUP] PostgreSQL mode - users managed via database');
-  } else {
+    try {
+      await db.initDatabase();
+      console.log('[DB] PostgreSQL initialized successfully');
+      // Skip user migration - users should already be in DB from ensureDefaultUsers()
+      // Or they will be added via /api/admin/init-users endpoint if needed
+      console.log('[STARTUP] PostgreSQL mode - users managed via database');
+    } catch (dbErr) {
+      console.error('[DB] PostgreSQL initialization failed:', dbErr && dbErr.message ? dbErr.message : dbErr);
+      console.log('[DB] Falling back to JSON/SQLite user store for local boot');
+      USE_POSTGRES = false;
+      db = null;
+    }
+  }
+
+  if (!USE_POSTGRES) {
     messages = loadMessages();
     subscriptions = loadSubscriptions();
     users = loadUsers();
     
     console.log('[STARTUP] Messages count after load:', messages.length);
-    console.log('[STARTUP] Messages content:', messages.map(m => ({ id: m.id, subject: m.subject })));
+    console.log('[STARTUP] Messages content:', messages.map(m => ({ id: m.id, subject: m.subject }))); 
     
     // Ensure default users exist (important for Render where filesystem is ephemeral)
     ensureDefaultUsers();

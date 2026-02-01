@@ -87,7 +87,7 @@ function sleep(ms = 200) {
 function startServer() {
   if (serverProcess) return;
   // Allow ADB by default; users can still force relay-only mode by setting NO_ADB=1 externally.
-  const defaultRelayUrl = process.env.RELAY_URL || 'https://www.vhr-dashboard-site.com';
+  const defaultRelayUrl = process.env.RELAY_URL || 'https://vhr-dashboard-site.onrender.com';
   // Propagate defaults to child server AND current Electron process (for relay-client)
   process.env.RELAY_URL = process.env.RELAY_URL || defaultRelayUrl;
   process.env.RELAY_SESSION_ID = process.env.RELAY_SESSION_ID || 'default';
