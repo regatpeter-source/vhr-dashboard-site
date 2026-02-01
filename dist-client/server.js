@@ -33,6 +33,9 @@ const http_module = require('http');
 const unzipper = require('unzipper');
 const fetch = require('node-fetch');
 const os = require('os');
+const REMOTE_AUTH_ORIGIN = process.env.REMOTE_AUTH_ORIGIN || 'https://vhr-dashboard-site.com';
+const REMOTE_AUTH_TIMEOUT_MS = Number(process.env.REMOTE_AUTH_TIMEOUT_MS || '12000');
+const REMOTE_LOGIN_PATHS = ['/api/login', '/api/auth/login'];
 
 // ========== SINGLE SERVER INSTANCE ENFORCEMENT ==========
 // Kill any existing server on port 3000 before starting
@@ -587,7 +590,7 @@ async function ensureJavaAndGradle() {
       console.log('[Setup] ✓ Java trouvé via PATH système');
       javaFound = true;
     } catch (e) {
-      console.log('[Setup] ⚠� Java non trouvé, tentative d\'installation...');
+      console.log('[Setup] ⚠� Java non trouvé, tentative d\'installation...');
       javaFound = await installJava();
       if (javaFound) {
         console.log('[Setup] ✓ Java installé et configuré');
@@ -616,7 +619,7 @@ async function ensureJavaAndGradle() {
       console.log('[Setup] ✓ Gradle trouvé via PATH système');
       gradleFound = true;
     } catch (e) {
-      console.log('[Setup] ⚠� Gradle non trouvé, tentative d\'installation...');
+      console.log('[Setup] ⚠� Gradle non trouvé, tentative d\'installation...');
       gradleFound = await installGradle();
       if (gradleFound) {
         console.log('[Setup] ✓ Gradle installé et configuré');
@@ -635,7 +638,7 @@ async function ensureJavaAndGradle() {
   if (success) {
     console.log('[Setup] ✅ Java, Gradle et SDK Android sont disponibles');
   } else {
-    console.error('[Setup] ⚠� Certains outils manquent (Java: ' + (javaFound ? '✓' : '✗') + ', Gradle: ' + (gradleFound ? '✓' : '✗') + ', SDK: ' + (sdkFound ? '✓' : '✗') + ')');
+    console.error('[Setup] ⚠� Certains outils manquent (Java: ' + (javaFound ? '✓' : '✗') + ', Gradle: ' + (gradleFound ? '✓' : '✗') + ', SDK: ' + (sdkFound ? '✓' : '✗') + ')');
   }
   
   return { success, javaFound, gradleFound };
@@ -690,7 +693,7 @@ async function installJava() {
     return true;
     
   } catch (e) {
-    console.error('[Setup] � Installation automatique Java échouée:', e.message);
+    console.error('[Setup] � Installation automatique Java échouée:', e.message);
     console.log('[Setup] Tentative avec le script PowerShell...');
     
     try {
@@ -756,7 +759,7 @@ async function installGradle() {
     return true;
     
   } catch (e) {
-    console.error('[Setup] � Installation automatique Gradle échouée:', e.message);
+    console.error('[Setup] � Installation automatique Gradle échouée:', e.message);
     console.log('[Setup] Tentative avec le script PowerShell...');
     
     try {
@@ -885,7 +888,7 @@ async function ensureAndroidSDK() {
     return true;
     
   } catch (e) {
-    console.error('[Setup] � Installation Android SDK échouée:', e.message);
+    console.error('[Setup] � Installation Android SDK échouée:', e.message);
     return false;
   }
 }
@@ -931,7 +934,7 @@ function ensureLocalProperties() {
     fs.writeFileSync(localPropsPath, content, 'utf8');
     console.log('[Setup] ✓ local.properties créé');
   } catch (e) {
-    console.error('[Setup] ⚠� Impossible de créer local.properties:', e.message);
+    console.error('[Setup] ⚠� Impossible de créer local.properties:', e.message);
   }
 }
 
@@ -1352,7 +1355,7 @@ async function sendReplyToContact(originalMessage, replyText, repliedBy) {
         </div>
         
         <div style="background: #34495e; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3498db;">
-          <h4 style="color: #3498db; margin-top: 0;">� Votre message original:</h4>
+          <h4 style="color: #3498db; margin-top: 0;">� Votre message original:</h4>
           <p style="margin: 8px 0;"><strong>Sujet:</strong> ${originalMessage.subject}</p>
           <p style="line-height: 1.6; white-space: pre-wrap; color: #bdc3c7;">${originalMessage.message}</p>
         </div>
@@ -2716,6 +2719,57 @@ function authMiddleware(req, res, next) {
   }
 }
 
+async function attemptRemoteAuthentication(identifier, password) {
+  if (!identifier || !password) return null;
+  for (const path of REMOTE_LOGIN_PATHS) {
+    const url = `${REMOTE_AUTH_ORIGIN}${path}`;
+    const body = path.endsWith('/auth/login')
+      ? { email: identifier, password }
+      : { username: identifier, password };
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        redirect: 'follow',
+        timeout: REMOTE_AUTH_TIMEOUT_MS
+      });
+      const payload = await response.json().catch(() => null);
+      if (response.ok && payload && payload.ok) {
+        return { payload, url };
+      }
+    } catch (err) {
+      console.warn('[remote-auth] failed', path, err && err.message ? err.message : err);
+    }
+  }
+  return null;
+}
+
+async function ensureLocalUserFromRemote(remotePayload, identifier, password) {
+  if (!remotePayload || !remotePayload.user) return null;
+  const username = String(remotePayload.user.username || remotePayload.user.name || identifier || '').trim();
+  if (!username) return null;
+  const hashedPassword = await bcrypt.hash(password, 10);
+  reloadUsers();
+  let existing = getUserByUsername(username);
+  const emailCandidate = remotePayload.user.email || (identifier && identifier.includes('@') ? identifier : null);
+  const role = remotePayload.user.role || (existing && existing.role) || 'user';
+  const userToPersist = existing
+    ? { ...existing, passwordHash: hashedPassword, email: emailCandidate || existing.email, role, stripeCustomerId: remotePayload.user.stripeCustomerId || existing.stripeCustomerId, subscriptionStatus: remotePayload.user.subscriptionStatus || existing.subscriptionStatus }
+    : {
+        id: `user_${username}`,
+        username,
+        passwordHash: hashedPassword,
+        email: emailCandidate || null,
+        role,
+        stripeCustomerId: remotePayload.user.stripeCustomerId || null,
+        subscriptionStatus: remotePayload.user.subscriptionStatus || null,
+        createdAt: new Date().toISOString()
+      };
+  persistUser(userToPersist);
+  return getUserByUsername(username);
+}
+
 // --- Route de login ---
 app.post('/api/login', async (req, res) => {
   console.log('[api/login] request received:', req.body);
@@ -2761,6 +2815,49 @@ app.post('/api/login', async (req, res) => {
   res.cookie('vhr_token', token, cookieOptions);
   console.log('[api/login] cookie set with secure=' + cookieOptions.secure + ', sameSite=' + cookieOptions.sameSite + ', maxAge=' + cookieOptions.maxAge);
   res.json({ ok: true, token, userId: elevatedUser.id, username: elevatedUser.username, role: elevatedUser.role, email: elevatedUser.email || null });
+});
+
+app.post('/api/remote-login', async (req, res) => {
+  const clientAddress = getRequestAddress(req);
+  if (!isLocalRequest(req)) {
+    console.warn(`[remote-login] blocked request from ${clientAddress}`);
+    return res.status(403).json({ ok: false, error: 'Accessible uniquement depuis localhost' });
+  }
+  const { identifier, password } = req.body || {};
+  if (!identifier || !password) {
+    return res.status(400).json({ ok: false, error: 'Identifiant et mot de passe requis' });
+  }
+
+  try {
+    const remoteAuth = await attemptRemoteAuthentication(identifier, password);
+    if (!remoteAuth) {
+      return res.status(401).json({ ok: false, error: 'Identifiants distants invalides' });
+    }
+
+    const localUser = await ensureLocalUserFromRemote(remoteAuth.payload, identifier, password);
+    if (!localUser) {
+      return res.status(500).json({ ok: false, error: 'Impossible de synchroniser le compte local' });
+    }
+
+    const elevatedUser = elevateAdminIfAllowlisted(localUser);
+    const token = jwt.sign({ username: elevatedUser.username, role: elevatedUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    const cookieOptions = buildAuthCookieOptions(req);
+    res.cookie('vhr_token', token, cookieOptions);
+    console.log('[remote-login] authenticated via remote source', remoteAuth.url, elevatedUser.username);
+
+    return res.json({
+      ok: true,
+      token,
+      userId: elevatedUser.id,
+      username: elevatedUser.username,
+      role: elevatedUser.role,
+      email: elevatedUser.email || null,
+      remoteOrigin: remoteAuth.url
+    });
+  } catch (err) {
+    console.error('[remote-login] error:', err && err.message ? err.message : err);
+    return res.status(500).json({ ok: false, error: 'Erreur d\'authentification distante' });
+  }
 });
 
 // --- Route de logout (optionnelle, côté client il suffit de supprimer le token) ---
@@ -3775,7 +3872,7 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
         ? '✅ Licence à vie active'
         : hasValidSubscription
           ? '✅ Accès accordé via abonnement actif'
-          : '� Essai expiré - Abonnement requis pour continuer';
+          : '� Essai expiré - Abonnement requis pour continuer';
       res.json({
         ok: true,
         demo: {
@@ -3863,7 +3960,7 @@ app.post('/api/download/vhr-app', authMiddleware, async (req, res) => {
         return res.status(403).json({
           ok: false,
           error: 'Access denied',
-          message: '� Essai expiré et aucun abonnement actif. Veuillez vous abonner pour continuer.',
+          message: '� Essai expiré et aucun abonnement actif. Veuillez vous abonner pour continuer.',
           needsSubscription: true
         });
       }
@@ -3942,7 +4039,7 @@ app.post('/api/download/vhr-app', authMiddleware, async (req, res) => {
 
 /**
  * POST /api/compile-apk - Compile automatiquement l'APK avec les données vocales
- * ⚠� REQUIRES AUTHENTICATION - Route automatique après téléchargement
+ * ⚠� REQUIRES AUTHENTICATION - Route automatique après téléchargement
  */
 app.post('/api/compile-apk', authMiddleware, async (req, res) => {
   try {
@@ -5385,7 +5482,7 @@ app.post('/api/contact', async (req, res) => {
     if (emailSent) {
       console.log('[contact] ✓ Email forwarded to admin');
     } else {
-      console.warn('[contact] ⚠� Email NOT sent (check BREVO_SMTP_* or EMAIL_* and CONTACT_INBOX_EMAIL in .env)');
+      console.warn('[contact] ⚠� Email NOT sent (check BREVO_SMTP_* or EMAIL_* and CONTACT_INBOX_EMAIL in .env)');
     }
     
     res.json({ ok: true, message: 'Message reçu. Nous vous répondrons bientôt.', emailSent: !!emailSent });
@@ -7364,7 +7461,7 @@ io.on('connection', socket => {
         if (session.users.length === 0) {
           // Delete empty session
           collaborativeSessions.delete(socket.sessionCode);
-          console.log(`[Session] 🗑� Session ${socket.sessionCode} deleted (empty)`);
+          console.log(`[Session] 🗑� Session ${socket.sessionCode} deleted (empty)`);
         } else {
           // Notify remaining users
           io.to(`session-${socket.sessionCode}`).emit('session-updated', {
@@ -7438,7 +7535,7 @@ io.on('connection', socket => {
         
         if (session.users.length === 0) {
           collaborativeSessions.delete(socket.sessionCode);
-          console.log(`[Session] 🗑� Session ${socket.sessionCode} auto-deleted (all disconnected)`);
+          console.log(`[Session] 🗑� Session ${socket.sessionCode} auto-deleted (all disconnected)`);
         } else {
           io.to(`session-${socket.sessionCode}`).emit('session-updated', {
             sessionCode: socket.sessionCode,
@@ -7510,7 +7607,7 @@ function logServerBanner(initializationFailed = false) {
   console.log(`\nVHR DASHBOARD - Optimisé Anti-Scintillement`);
   console.log(`${protocolEmoji} Server: ${protocol}://localhost:${PORT}`);
   if (lanIp) {
-    console.log(`� Accès LAN: ${protocol}://${lanIp}:${PORT}`);
+    console.log(`� Accès LAN: ${protocol}://${lanIp}:${PORT}`);
     console.log(`   • Dashboard Pro: ${protocol}://${lanIp}:${PORT}/vhr-dashboard-pro.html`);
     console.log(`   • Site vitrine: ${protocol}://${lanIp}:${PORT}/site-vitrine/`);
   }
@@ -8555,7 +8652,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// ⚠� NOTE: Local Android compilation routes removed
+// ⚠� NOTE: Local Android compilation routes removed
 // Use GitHub Actions for automated builds instead:
 // 1. User downloads APK + Voice via /api/download/vhr-app (authenticated)
 // 2. User executes: git push origin main
