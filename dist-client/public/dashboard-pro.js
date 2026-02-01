@@ -2938,7 +2938,26 @@ window.showStreamAudioDialog = function(serial, callback) {
 	document.body.appendChild(dialog);
 };
 
+// Prevent multiple Scrcpy launches from rapid clicks
+window.scrcpyLaunchRequests = window.scrcpyLaunchRequests || new Map();
+window.scrcpyLastLaunch = window.scrcpyLastLaunch || new Map();
+const SCRCPY_LAUNCH_DEBOUNCE_MS = 2000;
+
 window.launchStreamWithAudio = async function(serial, audioOutput) {
+	const serialKey = String(serial || '');
+	const now = Date.now();
+	const last = window.scrcpyLastLaunch.get(serialKey) || 0;
+	if (window.scrcpyLaunchRequests.get(serialKey)) {
+		showToast('⏳ Scrcpy déjà en cours de lancement', 'info');
+		return;
+	}
+	if (now - last < SCRCPY_LAUNCH_DEBOUNCE_MS) {
+		showToast('⏳ Scrcpy déjà en cours de lancement', 'info');
+		return;
+	}
+	window.scrcpyLastLaunch.set(serialKey, now);
+	window.scrcpyLaunchRequests.set(serialKey, true);
+
 	// Close dialog
 	const dialog = document.getElementById('streamAudioDialog');
 	if (dialog) dialog.remove();
@@ -2958,6 +2977,7 @@ window.launchStreamWithAudio = async function(serial, audioOutput) {
 	} else {
 		showToast('� Erreur: ' + (res.error || 'inconnue'), 'error');
 	}
+	setTimeout(() => window.scrcpyLaunchRequests.delete(serialKey), 2500);
 	setTimeout(loadDevices, 500);
 };
 
