@@ -96,6 +96,7 @@ async function initDatabase() {
           lastlogin TIMESTAMPTZ,
           lastactivity TIMESTAMPTZ,
           demostartdate TIMESTAMPTZ,
+          demoenddate TIMESTAMPTZ,
           emailverified BOOLEAN DEFAULT FALSE,
           emailverificationtoken TEXT,
           emailverificationexpiresat TIMESTAMPTZ,
@@ -116,6 +117,7 @@ async function initDatabase() {
         { name: 'lastlogin', type: 'TIMESTAMPTZ' },
         { name: 'lastactivity', type: 'TIMESTAMPTZ' },
         { name: 'demostartdate', type: 'TIMESTAMPTZ' },
+        { name: 'demoenddate', type: 'TIMESTAMPTZ' },
         { name: 'emailverified', type: 'BOOLEAN DEFAULT FALSE' },
         { name: 'emailverificationtoken', type: 'TEXT' },
         { name: 'emailverificationexpiresat', type: 'TIMESTAMPTZ' },
@@ -365,7 +367,7 @@ async function deleteMessage(id) {
 async function getUsers() {
   try {
     const result = await pool.query(
-      'SELECT id, username, email, role, createdat, updatedat, lastlogin, lastactivity, demostartdate, subscriptionstatus, subscriptionid, stripecustomerid, emailverified, emailverificationtoken, emailverificationexpiresat, emailverificationsentat, emailverifiedat FROM users ORDER BY createdat DESC'
+      'SELECT id, username, email, role, createdat, updatedat, lastlogin, lastactivity, demostartdate, demoenddate, subscriptionstatus, subscriptionid, stripecustomerid, emailverified, emailverificationtoken, emailverificationexpiresat, emailverificationsentat, emailverifiedat FROM users ORDER BY createdat DESC'
     );
     return result.rows || [];
   } catch (err) {
@@ -409,6 +411,7 @@ async function getUserByUsername(username) {
            lastlogin,
            lastactivity,
            demostartdate,
+           demoenddate,
            createdat,
            updatedat,
            emailverified,
