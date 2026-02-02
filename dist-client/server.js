@@ -1767,35 +1767,79 @@ app.post('/api/device/install-voice-app', async (req, res) => {
     path.join(process.resourcesPath || '', 'public', 'downloads', 'vhr-voice.apk')
   ];
   const apkPath = apkCandidates.find(p => p && fs.existsSync(p));
-  
+
   if (!apkPath) {
     return res.status(404).json({ ok: false, error: 'VHR Voice APK not found on server' });
   }
 
   try {
     console.log(`[install-voice-app] Installing VHR Voice on ${serial}...`);
-    
-    // Install APK via ADB
-    const result = await runAdbCommand(serial, ['install', '-r', apkPath]);
-    
-    if (result.code === 0 || result.stdout.includes('Success')) {
-      console.log(`[install-voice-app] Successfully installed on ${serial}`);
-      res.json({ 
-        ok: true, 
-        message: 'VHR Voice installed successfully',
-        stdout: result.stdout 
+
+    const runAdbInstall = () => new Promise((resolve) => {
+      const adbArgs = ['-s', serial, 'install', '-r', apkPath];
+      const adbExecutable = ADB_BIN || 'adb';
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+
+      const proc = spawn(adbExecutable, adbArgs, { env: { ...process.env } });
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          try { proc.kill('SIGKILL'); } catch (_) {}
+          resolve({ code: 124, stdout, stderr: stderr || 'adb install timeout' });
+        }
+      }, 60000);
+
+      proc.stdout.on('data', d => { stdout += d; });
+      proc.stderr.on('data', d => { stderr += d; });
+      proc.on('close', code => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ code, stdout, stderr });
       });
-    } else {
-      console.error(`[install-voice-app] Failed:`, result.stderr);
-      res.status(500).json({ 
-        ok: false, 
-        error: result.stderr || 'Installation failed',
-        stdout: result.stdout 
+      proc.on('error', err => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ code: 1, stdout, stderr: err && err.message ? err.message : String(err) });
+      });
+    });
+
+    let result = await runAdbInstall();
+    const combined = `${result.stdout || ''}\n${result.stderr || ''}`.toLowerCase();
+    const isOffline = combined.includes('device offline') || combined.includes('offline');
+
+    if (isOffline) {
+      console.warn('[install-voice-app] Device offline detected, restarting adb and retrying...');
+      try {
+        const adbExecutable = ADB_BIN || 'adb';
+        spawn(adbExecutable, ['kill-server']);
+        spawn(adbExecutable, ['start-server']);
+        await new Promise(r => setTimeout(r, 1500));
+      } catch (_) {}
+      result = await runAdbInstall();
+    }
+
+    if (result.code === 0 || (result.stdout || '').includes('Success')) {
+      console.log(`[install-voice-app] Successfully installed on ${serial}`);
+      return res.json({
+        ok: true,
+        message: 'VHR Voice installed successfully',
+        stdout: result.stdout
       });
     }
+
+    console.error(`[install-voice-app] Failed:`, result.stderr);
+    return res.status(500).json({
+      ok: false,
+      error: result.stderr || 'Installation failed',
+      stdout: result.stdout
+    });
   } catch (e) {
     console.error('[install-voice-app] error:', e);
-    res.status(500).json({ ok: false, error: String(e) });
+    return res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
@@ -5794,7 +5838,8 @@ const runAdbCommand = (serial, args, timeout = 30000) => {
     const adbArgs = serial ? ['-s', serial, ...args] : args;
     let proc;
     try {
-      proc = spawn('adb', adbArgs);
+      const adbExecutable = ADB_BIN || 'adb';
+      proc = spawn(adbExecutable, adbArgs, { env: { ...process.env } });
     } catch (spawnError) {
       console.error('[ADB] Spawn error:', spawnError.message);
       return reject(new Error('Failed to spawn adb: ' + spawnError.message));
@@ -5828,6 +5873,48 @@ const runAdbCommand = (serial, args, timeout = 30000) => {
         killed = true;
         reject(err);
       }
+    });
+  });
+};
+
+// Safe ADB command (never throws) for preflight checks
+const runAdbCommandSafe = (serial, args, timeout = 15000) => {
+  return new Promise((resolve) => {
+    const adbArgs = serial ? ['-s', serial, ...args] : args;
+    const adbExecutable = ADB_BIN || 'adb';
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    let proc;
+    try {
+      proc = spawn(adbExecutable, adbArgs, { env: { ...process.env } });
+    } catch (spawnError) {
+      return resolve({ code: 1, stdout: '', stderr: spawnError.message || String(spawnError) });
+    }
+
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        try { proc.kill('SIGKILL'); } catch (_) {}
+        resolve({ code: 124, stdout, stderr: stderr || 'adb timeout' });
+      }
+    }, timeout);
+
+    proc.stdout.on('data', d => { stdout += d; });
+    proc.stderr.on('data', d => { stderr += d; });
+
+    proc.on('close', code => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ code, stdout, stderr });
+    });
+    proc.on('error', err => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ code: 1, stdout, stderr: err && err.message ? err.message : String(err) });
     });
   });
 };
@@ -7308,14 +7395,19 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
       console.log(`[open-audio-receiver] Starting background voice app on ${serial}`);
       
       // First try to start via broadcast (if app is installed)
-      const broadcastResult = await runAdbCommand(serial, [
-        'shell', 'am', 'broadcast',
-        '-a', 'com.vhr.voice.START',
-        '--es', 'serverUrl', server,
-        '--es', 'serial', serial
-      ]);
+      let broadcastResult = null;
+      try {
+        broadcastResult = await runAdbCommand(serial, [
+          'shell', 'am', 'broadcast',
+          '-a', 'com.vhr.voice.START',
+          '--es', 'serverUrl', server,
+          '--es', 'serial', serial
+        ]);
+      } catch (e) {
+        broadcastResult = { code: 1, stdout: '', stderr: e.message || String(e) };
+      }
       
-      if (broadcastResult.code === 0 && !broadcastResult.stderr.includes('No broadcast receiver')) {
+      if (broadcastResult.code === 0 && !String(broadcastResult.stderr || '').includes('No broadcast receiver')) {
         console.log(`[open-audio-receiver] Background app started via broadcast`);
         res.json({ 
           ok: true, 
@@ -7327,13 +7419,18 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
       }
       
       // Fallback: try to launch the app directly
-      const appResult = await runAdbCommand(serial, [
-        'shell', 'am', 'start',
-        '-n', 'com.vhr.voice/.MainActivity',
-        '--es', 'serverUrl', server,
-        '--es', 'serial', serial,
-        '--ez', 'autostart', 'true'
-      ]);
+      let appResult = null;
+      try {
+        appResult = await runAdbCommand(serial, [
+          'shell', 'am', 'start',
+          '-n', 'com.vhr.voice/.MainActivity',
+          '--es', 'serverUrl', server,
+          '--es', 'serial', serial,
+          '--ez', 'autostart', 'true'
+        ]);
+      } catch (e) {
+        appResult = { code: 1, stdout: '', stderr: e.message || String(e) };
+      }
       
       if (appResult.code === 0) {
         console.log(`[open-audio-receiver] Background app launched`);
@@ -7406,17 +7503,22 @@ app.post('/api/device/start-voice-app', async (req, res) => {
     console.log(`[start-voice-app] Starting VHR Voice on ${serial} with URL ${hostUrl}`);
     
     // Launch the app with intent extras for auto-configuration
-    const result = await runAdbCommand(serial, [
-      'shell', 'am', 'start',
-      '-n', 'com.vhr.voice/.MainActivity',
-      '-e', 'serverUrl', hostUrl,
-      '-e', 'serial', serial,
-      '-e', 'adbSerial', serial,
-      '-e', 'cleanSerial', serial.split(':')[0] || serial,
-      '--ez', 'autostart', 'true'
-    ]);
+    let result = null;
+    try {
+      result = await runAdbCommand(serial, [
+        'shell', 'am', 'start',
+        '-n', 'com.vhr.voice/.MainActivity',
+        '-e', 'serverUrl', hostUrl,
+        '-e', 'serial', serial,
+        '-e', 'adbSerial', serial,
+        '-e', 'cleanSerial', serial.split(':')[0] || serial,
+        '--ez', 'autostart', 'true'
+      ]);
+    } catch (e) {
+      result = { code: 1, stdout: '', stderr: e.message || String(e) };
+    }
     
-    if (result.code === 0 || result.stdout.includes('Starting')) {
+    if (result.code === 0 || String(result.stdout || '').includes('Starting')) {
       res.json({ 
         ok: true, 
         message: 'VHR Voice started with auto-configuration',
@@ -7425,9 +7527,14 @@ app.post('/api/device/start-voice-app', async (req, res) => {
       });
     } else {
       // Try just opening the app without extras if first method fails
-      const fallbackResult = await runAdbCommand(serial, [
-        'shell', 'monkey', '-p', 'com.vhr.voice', '-c', 'android.intent.category.LAUNCHER', '1'
-      ]);
+      let fallbackResult = null;
+      try {
+        fallbackResult = await runAdbCommand(serial, [
+          'shell', 'monkey', '-p', 'com.vhr.voice', '-c', 'android.intent.category.LAUNCHER', '1'
+        ]);
+      } catch (e) {
+        fallbackResult = { code: 1, stdout: '', stderr: e.message || String(e) };
+      }
       
       res.json({ 
         ok: fallbackResult.code === 0, 
@@ -8757,7 +8864,7 @@ app.get('/api/audio/session/:sessionId', authMiddleware, (req, res) => {
 });
 
 // ========== SCRCPY GUI LAUNCH ============
-function resolveScrcpyExecutable() {
+function resolveScrcpyBinary() {
   const resourcesPath = (process && process.resourcesPath) ? process.resourcesPath : null;
   const exeDir = path.dirname(process.execPath || '');
   const resourcesAppUnpacked = resourcesPath ? path.join(resourcesPath, 'app.asar.unpacked') : null;
@@ -8771,10 +8878,6 @@ function resolveScrcpyExecutable() {
     path.join(__dirname, 'scrcpy', 'scrcpy.exe'),
     path.join(__dirname, 'scrcpy', 'scrcpy'),
     'C:/ProgramData/chocolatey/lib/scrcpy/tools/scrcpy.exe',
-    resourcesAppUnpacked ? path.join(resourcesAppUnpacked, 'scrcpy', 'scrcpy-noconsole.exe') : null,
-    exeResourcesUnpacked ? path.join(exeResourcesUnpacked, 'scrcpy', 'scrcpy-noconsole.exe') : null,
-    path.join(__dirname, 'scrcpy', 'scrcpy-noconsole.exe'),
-    'C:/ProgramData/chocolatey/lib/scrcpy/tools/scrcpy-noconsole.exe',
     'scrcpy'
   ].filter(Boolean);
 
@@ -8784,7 +8887,32 @@ function resolveScrcpyExecutable() {
     } catch (_) {}
   }
 
-  return 'scrcpy';
+  return null;
+}
+
+function resolveScrcpyLauncher(scrcpyBinaryPath) {
+  if (!scrcpyBinaryPath) return null;
+
+  if (process.env.SCRCPY_FORCE_VBS === '1') {
+    const resourcesPath = (process && process.resourcesPath) ? process.resourcesPath : null;
+    const exeDir = path.dirname(process.execPath || '');
+    const resourcesAppUnpacked = resourcesPath ? path.join(resourcesPath, 'app.asar.unpacked') : null;
+    const exeResourcesUnpacked = exeDir ? path.join(exeDir, 'resources', 'app.asar.unpacked') : null;
+
+    const vbsCandidates = [
+      resourcesAppUnpacked ? path.join(resourcesAppUnpacked, 'scrcpy', 'scrcpy-noconsole.vbs') : null,
+      exeResourcesUnpacked ? path.join(exeResourcesUnpacked, 'scrcpy', 'scrcpy-noconsole.vbs') : null,
+      path.join(__dirname, 'scrcpy', 'scrcpy-noconsole.vbs')
+    ].filter(Boolean);
+
+    for (const vbsPath of vbsCandidates) {
+      try {
+        if (fs.existsSync(vbsPath)) return { type: 'vbs', path: vbsPath };
+      } catch (_) {}
+    }
+  }
+
+  return { type: 'exe', path: scrcpyBinaryPath };
 }
 
 app.post('/api/scrcpy-gui', async (req, res) => {
@@ -8809,7 +8937,34 @@ app.post('/api/scrcpy-gui', async (req, res) => {
   setTimeout(() => { if (Date.now() >= scrcpyGlobalLockUntil) scrcpyGlobalLockUntil = 0; }, SCRCPY_GLOBAL_LOCK_MS + 250);
 
   try {
-    const scrcpyExe = resolveScrcpyExecutable();
+    const scrcpyBinaryPath = resolveScrcpyBinary();
+    const launcher = resolveScrcpyLauncher(scrcpyBinaryPath);
+    if (!launcher || !scrcpyBinaryPath) {
+      scrcpyLaunchLocks.delete(serialKey);
+      scrcpyGlobalLockUntil = Date.now();
+      return res.status(500).json({ ok: false, error: 'scrcpy introuvable. Vérifiez le dossier scrcpy/ dans l’installation.' });
+    }
+
+    const stateResult = await runAdbCommandSafe(serial, ['get-state']);
+    const stateCombined = `${stateResult.stdout || ''}\n${stateResult.stderr || ''}`.toLowerCase();
+    const offline = stateResult.code !== 0 || stateCombined.includes('offline') || stateCombined.includes('unauthorized');
+    if (offline) {
+      // Try one reconnect attempt to recover
+      await runAdbCommandSafe(serial, ['reconnect']);
+      const retryState = await runAdbCommandSafe(serial, ['get-state']);
+      const retryCombined = `${retryState.stdout || ''}\n${retryState.stderr || ''}`.toLowerCase();
+      const stillOffline = retryState.code !== 0 || retryCombined.includes('offline') || retryCombined.includes('unauthorized');
+
+      // If device cache says it's OK, allow scrcpy anyway (avoid false negatives)
+      const cachedDevice = Array.isArray(devices) ? devices.find(d => d && d.serial === serial) : null;
+      const cachedHealthy = cachedDevice && (cachedDevice.status === 'device' || cachedDevice.status === 'streaming');
+
+      if (stillOffline && !cachedHealthy) {
+        scrcpyLaunchLocks.delete(serialKey);
+        scrcpyGlobalLockUntil = Date.now();
+        return res.status(409).json({ ok: false, error: 'Casque offline/unauthorized. Débranchez/rebranchez et acceptez le débogage USB.' });
+      }
+    }
     const scrcpyArgs = ['-s', serial, '--window-width', '640', '--window-height', '360'];
 
     if (audioOutput === 'pc' || audioOutput === 'both') {
@@ -8820,36 +8975,52 @@ app.post('/api/scrcpy-gui', async (req, res) => {
       console.log('[scrcpy] Audio disabled: stays on headset only');
     }
 
-    const scrcpyDir = path.dirname(scrcpyExe);
+    const scrcpyDir = path.dirname(scrcpyBinaryPath || launcher.path);
     const envPath = scrcpyDir ? `${scrcpyDir}${path.delimiter}${process.env.PATH || ''}` : process.env.PATH;
 
-    console.log('[scrcpy] Using executable:', scrcpyExe);
+    console.log('[scrcpy] Using launcher:', launcher.type, launcher.path);
+    console.log('[scrcpy] Using binary:', scrcpyBinaryPath);
     console.log('[scrcpy] Launching with args:', scrcpyArgs);
 
-    const proc = spawn(scrcpyExe, scrcpyArgs, {
+    const command = launcher.type === 'vbs' ? 'wscript.exe' : launcher.path;
+    const args = launcher.type === 'vbs'
+      ? ['//B', launcher.path, scrcpyBinaryPath, ...scrcpyArgs]
+      : scrcpyArgs;
+
+    const proc = spawn(command, args, {
       detached: true,
       stdio: ['ignore', 'ignore', 'pipe'],
-      windowsHide: false,
+      windowsHide: true,
       env: { ...process.env, PATH: envPath },
       cwd: scrcpyDir || process.cwd()
     });
 
     releaseLockLater();
 
-    proc.stderr && proc.stderr.on('data', (chunk) => {
-      const msg = chunk && chunk.toString ? chunk.toString().trim() : '';
-      if (msg) console.warn('[scrcpy] stderr:', msg);
-    });
-
     proc.on('error', (err) => {
       scrcpyLaunchLocks.delete(serialKey);
       console.error('[scrcpy] Process error:', err && err.message ? err.message : err);
     });
 
+    let stderrBuffer = '';
+    if (proc.stderr) {
+      proc.stderr.on('data', (chunk) => {
+        const msg = chunk && chunk.toString ? chunk.toString() : '';
+        if (msg) stderrBuffer += msg;
+      });
+    }
+
     proc.on('exit', (code, signal) => {
       releaseLockLater();
       if (code && code !== 0) {
         console.warn(`[scrcpy] Exit code=${code} signal=${signal || 'null'}`);
+        try {
+          const logDir = process.env.VHR_DATA_DIR || path.join(os.homedir(), '.vhr-dashboard');
+          fs.mkdirSync(logDir, { recursive: true });
+          const logPath = path.join(logDir, 'scrcpy-last-error.log');
+          const payload = `[${new Date().toISOString()}] scrcpy exit code=${code} signal=${signal || 'null'}\n${stderrBuffer || '(no stderr captured)'}\n`;
+          fs.writeFileSync(logPath, payload, 'utf8');
+        } catch (_) {}
       }
     });
 
