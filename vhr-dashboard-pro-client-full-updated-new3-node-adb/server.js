@@ -8223,7 +8223,16 @@ app.post('/api/scrcpy-gui', async (req, res) => {
     // Stop any lingering scrcpy process for this serial before launching a new one (avoid hidden zombies)
     stopScrcpyProcesses(serial);
 
-    const scrcpyExe = resolveScrcpyExecutable();
+    let scrcpyExe = resolveScrcpyExecutable();
+    try {
+      // Prefer the no-console binary when available to avoid terminal popups
+      if (scrcpyExe && scrcpyExe.toLowerCase().endsWith('scrcpy.exe')) {
+        const noconsoleCandidate = path.join(path.dirname(scrcpyExe), 'scrcpy-noconsole.exe');
+        if (fs.existsSync(noconsoleCandidate)) {
+          scrcpyExe = noconsoleCandidate;
+        }
+      }
+    } catch (_) {}
     // Positionner la fenêtre pour éviter qu'elle s'ouvre hors écran (ex. second écran déconnecté)
     const scrcpyArgs = ['-s', serial, '--window-width', '640', '--window-height', '360', '--window-x', '100', '--window-y', '100'];
 
@@ -8256,7 +8265,7 @@ app.post('/api/scrcpy-gui', async (req, res) => {
     const proc = spawn(scrcpyExe, scrcpyArgs, {
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: false,
+      windowsHide: true,
       env: { ...process.env, PATH: envPath },
       cwd: scrcpyDir || process.cwd()
     });

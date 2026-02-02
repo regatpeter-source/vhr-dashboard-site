@@ -1197,7 +1197,7 @@ window.sendVoiceToHeadset = async function(serial) {
 						const openRes = await api('/api/device/open-audio-receiver', {
 							method: 'POST',
 							headers: { 'Content-Type': 'application/json' },
-							body: JSON.stringify({ serial, server: resolvedServerUrl })
+							body: JSON.stringify({ serial, serverUrl: resolvedServerUrl, useBackgroundApp: true })
 						});
 						if (openRes && openRes.ok) {
 							console.log('[voice] Fallback receiver lancé (web)');
@@ -1216,7 +1216,7 @@ window.sendVoiceToHeadset = async function(serial) {
 					const openRes = await api('/api/device/open-audio-receiver', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ serial, server: resolvedServerUrl })
+						body: JSON.stringify({ serial, serverUrl: resolvedServerUrl, useBackgroundApp: true })
 					});
 					if (openRes && openRes.ok) {
 						console.log('[voice] Fallback receiver lancé (web) après échec ADB');
@@ -3210,9 +3210,19 @@ window.installVoiceApp = async function(serial) {
 	}
 };
 
-// Bouton de téléchargement de la voix désactivé (supprimé)
+// Téléchargement de l'APK VHR Voice (fallback manuel si l'installation ADB échoue)
 window.downloadVoiceApk = function() {
-	showToast('❌ Téléchargement désactivé pour la voix.', 'warning');
+	try {
+		const win = window.open('/download/vhr-voice-apk', '_blank');
+		if (!win) {
+			showToast('Autorisez les popups pour télécharger l’APK VHR Voice.', 'info');
+			return;
+		}
+		showToast('📥 Téléchargement de VHR Voice lancé.', 'success');
+	} catch (e) {
+		console.error('[downloadVoiceApk] error:', e);
+		showToast('❌ Impossible de télécharger l’APK VHR Voice.', 'error');
+	}
 };
 
 window.startVoiceApp = async function(serial) {
@@ -3286,10 +3296,24 @@ window.showVoiceAppDialog = function(serial) {
 					align-items: center;
 					gap: 8px;
 				">📲 Installer</button>
+
+				<button onclick="downloadVoiceApk()" style="
+					background: linear-gradient(135deg, #3498db, #2980b9);
+					color: #fff;
+					border: none;
+					padding: 14px 28px;
+					border-radius: 8px;
+					font-size: 16px;
+					font-weight: bold;
+					cursor: pointer;
+					display: inline-flex;
+					align-items: center;
+					gap: 8px;
+				">⬇️ Télécharger APK</button>
 			</div>
 			` : ''}
 			
-			<!-- Bouton téléchargement retiré -->
+			<!-- Téléchargement APK disponible -->
 			
 			<div style="margin-top: 24px; padding: 12px; background: rgba(26, 188, 156, 0.1); border-radius: 8px; border-left: 4px solid #1abc9c;">
 				<p style="color:#95a5a6; font-size: 12px; margin: 0;">
