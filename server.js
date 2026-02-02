@@ -9588,24 +9588,63 @@ app.get('/api/audio/session/:sessionId', authMiddleware, (req, res) => {
 // ========== SCRCPY GUI LAUNCH ============
 function resolveScrcpyExecutable() {
   const candidates = [
+    path.join(__dirname, 'dist-client', 'scrcpy', 'scrcpy.exe'),
+    path.join(__dirname, 'dist-client', 'scrcpy', 'scrcpy'),
     path.join(__dirname, 'scrcpy', 'scrcpy.exe'),
-    path.join(__dirname, 'scrcpy', 'scrcpy'),
-    'C:/ProgramData/chocolatey/lib/scrcpy/tools/scrcpy.exe',
-    'scrcpy'
+    path.join(__dirname, 'scrcpy', 'scrcpy')
   ];
   for (const exe of candidates) {
     try {
       if (fs.existsSync(exe)) return exe;
     } catch (_) {}
   }
-  return 'scrcpy';
+  return null;
+}
+
+function resolveScrcpyLauncher(scrcpyBinaryPath) {
+  if (!scrcpyBinaryPath) return null;
+
+  const allowVbs = process.env.SCRCPY_FORCE_VBS !== '0';
+  if (allowVbs) {
+    const vbsCandidates = [
+      path.join(__dirname, 'dist-client', 'scrcpy', 'scrcpy-noconsole.vbs'),
+      path.join(__dirname, 'scrcpy', 'scrcpy-noconsole.vbs')
+    ];
+
+    for (const vbsPath of vbsCandidates) {
+      try {
+        if (fs.existsSync(vbsPath)) return { type: 'vbs', path: vbsPath };
+      } catch (_) {}
+    }
+  }
+
+  return { type: 'exe', path: scrcpyBinaryPath };
 }
 
 app.post('/api/scrcpy-gui', async (req, res) => {
   const { serial, audioOutput } = req.body || {};
   if (!serial) return res.status(400).json({ ok: false, error: 'serial requis' });
   try {
-    const scrcpyArgs = ['-s', serial, '--window-width', '640', '--window-height', '360'];
+    const renderDriver = (process.env.SCRCPY_RENDER_DRIVER || 'opengl').trim();
+    const maxSize = String(process.env.SCRCPY_MAX_SIZE || '1280');
+    const bitRate = String(process.env.SCRCPY_BITRATE || '4M');
+    const maxFps = String(process.env.SCRCPY_MAX_FPS || '24');
+    const videoBuffer = String(process.env.SCRCPY_VIDEO_BUFFER || '150');
+    const scrcpyArgs = [
+      '-s', serial,
+      '--window-width', '640',
+      '--window-height', '360',
+      '--video-codec=h264',
+      '--verbosity=error',
+      '--max-size', maxSize,
+      '--video-bit-rate', bitRate,
+      '--max-fps', maxFps,
+      '--video-buffer', videoBuffer
+    ];
+
+    if (renderDriver) {
+      scrcpyArgs.push('--render-driver=' + renderDriver);
+    }
 
     if (audioOutput === 'pc' || audioOutput === 'both') {
       scrcpyArgs.push('--audio-codec=opus');
@@ -9616,13 +9655,28 @@ app.post('/api/scrcpy-gui', async (req, res) => {
     }
 
     const scrcpyExe = resolveScrcpyExecutable();
+    const launcher = resolveScrcpyLauncher(scrcpyExe);
+    if (!scrcpyExe || !launcher) {
+      return res.status(500).json({ ok: false, error: 'scrcpy introuvable (bundled missing)' });
+    }
+
+    const scrcpyDir = path.dirname(scrcpyExe);
+    const envPath = scrcpyDir ? `${scrcpyDir}${path.delimiter}${process.env.PATH || ''}` : process.env.PATH;
+
     console.log('[scrcpy] Using executable:', scrcpyExe);
     console.log('[scrcpy] Launching with args:', scrcpyArgs);
 
-    const proc = spawn(scrcpyExe, scrcpyArgs, {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: false
+    const command = launcher.type === 'vbs' ? 'wscript.exe' : launcher.path;
+    const args = launcher.type === 'vbs'
+      ? ['//B', launcher.path, scrcpyExe, ...scrcpyArgs]
+      : scrcpyArgs;
+
+    const proc = spawn(command, args, {
+      detached: false,
+      stdio: ['ignore', 'ignore', 'ignore'],
+      windowsHide: true,
+      env: { ...process.env, PATH: envPath },
+      cwd: scrcpyDir || process.cwd()
     });
 
     proc.unref();
