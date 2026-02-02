@@ -8890,10 +8890,12 @@ function resolveScrcpyBinary() {
   return null;
 }
 
+
 function resolveScrcpyLauncher(scrcpyBinaryPath) {
   if (!scrcpyBinaryPath) return null;
 
-  if (process.env.SCRCPY_FORCE_VBS === '1') {
+  const wantsVbs = process.env.SCRCPY_FORCE_VBS === '1' || (process.platform === 'win32' && process.env.SCRCPY_FORCE_VBS !== '0');
+  if (wantsVbs) {
     const resourcesPath = (process && process.resourcesPath) ? process.resourcesPath : null;
     const exeDir = path.dirname(process.execPath || '');
     const resourcesAppUnpacked = resourcesPath ? path.join(resourcesPath, 'app.asar.unpacked') : null;

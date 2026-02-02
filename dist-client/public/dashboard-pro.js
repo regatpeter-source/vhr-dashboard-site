@@ -2982,13 +2982,11 @@ window.launchStreamWithAudio = async function(serial, audioOutput) {
 };
 
 window.startStreamFromTable = async function(serial) {
-	// Show audio output selection dialog
-	window.showStreamAudioDialog(serial);
+	window.launchStreamWithAudio(serial, 'both');
 };
 
 window.startStreamFromCard = async function(serial) {
-	// Show audio output selection dialog  
-	window.showStreamAudioDialog(serial);
+	window.launchStreamWithAudio(serial, 'both');
 };
 
 window.startStreamJSMpeg = async function(serial) {
