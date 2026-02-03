@@ -38,6 +38,25 @@ if (VHR_BROADCAST_CHANNEL) {
 	};
 }
 
+// Notify other tabs when audio starts/stops
+function broadcastAudioState(type, serial) {
+	if (VHR_BROADCAST_CHANNEL) {
+		VHR_BROADCAST_CHANNEL.postMessage({ type, tabId: VHR_TAB_ID, serial });
+	}
+}
+
+// Clean up on page unload
+window.addEventListener('beforeunload', () => {
+	if (activeAudioStream) {
+		broadcastAudioState('audio-stopped', activeAudioSerial);
+		try {
+			if (activeAudioStream.localStream) {
+				activeAudioStream.localStream.getTracks().forEach(t => t.stop());
+			}
+		} catch (e) { /* ignore */ }
+	}
+});
+
 // ========== CONFIGURATION ========== 
 let viewMode = localStorage.getItem('vhr_view_mode') || 'table'; // 'table' ou 'cards'
 let currentUser = localStorage.getItem('vhr_user') || '';
@@ -1412,21 +1431,49 @@ window.sendVoiceToHeadset = async function(serial) {
 					showToast('📱 App VHR Voice lancée sur le casque', 'success');
 				} else {
 					console.warn('[voice] Voice app launch failed:', startRes?.error);
-					// Fallback: ouvrir le récepteur web via ADB pour garantir le lien émetteur/récepteur
+					let installed = false;
 					try {
-						const openRes = await api('/api/device/open-audio-receiver', {
+						showToast('📲 Installation VHR Voice en cours...', 'info');
+						const installRes = await api('/api/device/install-voice-app', {
 							method: 'POST',
 							headers: { 'Content-Type': 'application/json' },
-							body: JSON.stringify({ serial, server: resolvedServerUrl })
+							body: JSON.stringify({ serial }),
+							timeout: 60000
 						});
-						if (openRes && openRes.ok) {
-							console.log('[voice] Fallback receiver lancé (web)');
-							showToast('🔊 Récepteur voix ouvert en fallback', 'info');
-						} else {
-							console.warn('[voice] Fallback receiver non lancé:', openRes?.error);
+						if (installRes && installRes.ok) {
+							installed = true;
+							showToast('✅ VHR Voice installé. Lancement...', 'success');
+							const retryRes = await api('/api/device/start-voice-app', {
+								method: 'POST',
+								headers: { 'Content-Type': 'application/json' },
+								body: JSON.stringify({ serial, serverUrl: resolvedServerUrl })
+							});
+							if (retryRes && retryRes.ok) {
+								console.log('[voice] Voice app launched after install');
+								showToast('📱 App VHR Voice lancée sur le casque', 'success');
+								return;
+							}
 						}
-					} catch (fallbackOpenErr) {
-						console.warn('[voice] Erreur ouverture fallback receiver:', fallbackOpenErr);
+					} catch (installErr) {
+						console.warn('[voice] Voice app install failed:', installErr);
+					}
+					if (!installed) {
+						// Fallback: ouvrir le récepteur web via ADB pour garantir le lien émetteur/récepteur
+						try {
+							const openRes = await api('/api/device/open-audio-receiver', {
+								method: 'POST',
+								headers: { 'Content-Type': 'application/json' },
+								body: JSON.stringify({ serial, serverUrl: resolvedServerUrl, useBackgroundApp: true })
+							});
+							if (openRes && openRes.ok) {
+								console.log('[voice] Fallback receiver lancé (web)');
+								showToast('🔊 Récepteur voix ouvert en fallback', 'info');
+							} else {
+								console.warn('[voice] Fallback receiver non lancé:', openRes?.error);
+							}
+						} catch (fallbackOpenErr) {
+							console.warn('[voice] Erreur ouverture fallback receiver:', fallbackOpenErr);
+						}
 					}
 				}
 			} catch (adbLaunchErr) {
@@ -1436,7 +1483,7 @@ window.sendVoiceToHeadset = async function(serial) {
 					const openRes = await api('/api/device/open-audio-receiver', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ serial, server: resolvedServerUrl })
+						body: JSON.stringify({ serial, serverUrl: resolvedServerUrl, useBackgroundApp: true })
 					});
 					if (openRes && openRes.ok) {
 						console.log('[voice] Fallback receiver lancé (web) après échec ADB');

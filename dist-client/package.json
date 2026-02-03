@@ -72,12 +72,18 @@
       {
         "from": "platform-tools",
         "to": "platform-tools"
+      },
+      {
+        "from": "scrcpy",
+        "to": "scrcpy"
       }
     ],
     "files": [
       "**/*",
       "!dist{,/**}",
       "!dist-client{,/**}",
+      "!dist-build{,/**}",
+      "!dist2{,/**}",
       "!dist-fresh{,/**}",
       "!dist-new{,/**}",
       "!dist-new2{,/**}",

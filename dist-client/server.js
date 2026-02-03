@@ -335,8 +335,23 @@ function elevateAdminIfAllowlisted(user) {
 // Anti-rafale scrcpy
 const SCRCPY_LAUNCH_DEBOUNCE_MS = Number(process.env.SCRCPY_LAUNCH_DEBOUNCE_MS || 10000);
 const SCRCPY_GLOBAL_LOCK_MS = Number(process.env.SCRCPY_GLOBAL_LOCK_MS || 5000);
+const SCRCPY_RELAUNCH_COOLDOWN_MS = Number(process.env.SCRCPY_RELAUNCH_COOLDOWN_MS || 15000);
 const scrcpyLaunchLocks = new Map();
 let scrcpyGlobalLockUntil = 0;
+const scrcpyActiveProcesses = new Map(); // serial -> pid
+const scrcpyRecentLaunches = new Map(); // serial -> timestamp
+
+function isScrcpyRunning(serialKey) {
+  const pid = scrcpyActiveProcesses.get(serialKey);
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (_) {
+    scrcpyActiveProcesses.delete(serialKey);
+    return false;
+  }
+}
 
 const normalizeSerialKey = (serial) => String(serial || '').trim().toLowerCase();
 
@@ -8864,6 +8879,9 @@ app.get('/api/audio/session/:sessionId', authMiddleware, (req, res) => {
 });
 
 // ========== SCRCPY GUI LAUNCH ============
+const envIsSet = (name) => Object.prototype.hasOwnProperty.call(process.env || {}, name);
+const envIsTrue = (name) => String(process.env?.[name] ?? '').trim() === '1';
+
 function ensureScrcpyNoConsole(scrcpyDir) {
   if (!scrcpyDir) return null;
   const noconsoleExe = path.join(scrcpyDir, 'scrcpy-noconsole.exe');
@@ -8904,23 +8922,41 @@ function resolveScrcpyBinary() {
   const exeDir = path.dirname(process.execPath || '');
   const resourcesAppUnpacked = resourcesPath ? path.join(resourcesPath, 'app.asar.unpacked') : null;
   const exeResourcesUnpacked = exeDir ? path.join(exeDir, 'resources', 'app.asar.unpacked') : null;
+  const isPackaged = Boolean(process.resourcesPath && String(process.resourcesPath).toLowerCase().includes('resources'));
 
-  const localBundled = path.join(__dirname, 'scrcpy', 'scrcpy.exe');
-  const localNoConsole = ensureScrcpyNoConsole(path.join(__dirname, 'scrcpy'));
-  if (localNoConsole) return localNoConsole;
-  if (fs.existsSync(localBundled)) {
-    return localBundled;
+  if (!isPackaged) {
+    const localBundled = path.join(__dirname, 'scrcpy', 'scrcpy.exe');
+    const localNoConsoleExe = path.join(__dirname, 'scrcpy', 'scrcpy-noconsole.exe');
+    if (fs.existsSync(localNoConsoleExe)) return localNoConsoleExe;
+    const localNoConsole = ensureScrcpyNoConsole(path.join(__dirname, 'scrcpy'));
+    if (localNoConsole) return localNoConsole;
+    if (fs.existsSync(localBundled)) {
+      return localBundled;
+    }
+  }
+
+  const preferredCandidates = [
+    resourcesAppUnpacked ? path.join(resourcesAppUnpacked, 'scrcpy', 'scrcpy-noconsole.exe') : null,
+    exeResourcesUnpacked ? path.join(exeResourcesUnpacked, 'scrcpy', 'scrcpy-noconsole.exe') : null,
+    resourcesAppUnpacked ? ensureScrcpyNoConsole(path.join(resourcesAppUnpacked, 'scrcpy')) : null,
+    exeResourcesUnpacked ? ensureScrcpyNoConsole(path.join(exeResourcesUnpacked, 'scrcpy')) : null
+  ].filter(Boolean).filter(p => {
+    try { return fs.existsSync(p); } catch (_) { return false; }
+  });
+
+  if (isPackaged && preferredCandidates.length > 0) {
+    return preferredCandidates[0];
   }
 
   const candidates = [
-    resourcesAppUnpacked ? ensureScrcpyNoConsole(path.join(resourcesAppUnpacked, 'scrcpy')) : null,
-    exeResourcesUnpacked ? ensureScrcpyNoConsole(path.join(exeResourcesUnpacked, 'scrcpy')) : null,
+    ...preferredCandidates,
     resourcesAppUnpacked ? path.join(resourcesAppUnpacked, 'scrcpy', 'scrcpy.exe') : null,
     resourcesAppUnpacked ? path.join(resourcesAppUnpacked, 'scrcpy', 'scrcpy') : null,
     exeResourcesUnpacked ? path.join(exeResourcesUnpacked, 'scrcpy', 'scrcpy.exe') : null,
     exeResourcesUnpacked ? path.join(exeResourcesUnpacked, 'scrcpy', 'scrcpy') : null,
-    path.join(__dirname, 'scrcpy', 'scrcpy.exe'),
-    path.join(__dirname, 'scrcpy', 'scrcpy')
+    !isPackaged ? path.join(__dirname, 'scrcpy', 'scrcpy-noconsole.exe') : null,
+    !isPackaged ? path.join(__dirname, 'scrcpy', 'scrcpy.exe') : null,
+    !isPackaged ? path.join(__dirname, 'scrcpy', 'scrcpy') : null
   ].filter(Boolean);
 
   for (const exe of candidates) {
@@ -8935,20 +8971,23 @@ function resolveScrcpyBinary() {
 function resolveScrcpyLauncher(scrcpyBinaryPath) {
   if (!scrcpyBinaryPath) return null;
 
+  const isPackaged = Boolean(process.resourcesPath && String(process.resourcesPath).toLowerCase().includes('resources'));
+
   // Force direct exe launch (no wrapper) if requested
-  const forceExe = process.env.SCRCPY_FORCE_EXE === '1';
+  const forceExe = envIsTrue('SCRCPY_FORCE_EXE');
   if (forceExe) {
     return { type: 'exe', path: scrcpyBinaryPath };
   }
 
   // Plan D: launch via cmd start with hidden console
-  const forceCmd = process.env.SCRCPY_FORCE_CMD === '1';
+  const forceCmd = envIsTrue('SCRCPY_FORCE_CMD');
   if (forceCmd) {
     return { type: 'cmd', path: scrcpyBinaryPath };
   }
 
   // Prefer VBS launcher when explicitly enabled (best for no-console)
-  const allowVbs = process.env.SCRCPY_FORCE_VBS === '1';
+  const allowVbs = envIsTrue('SCRCPY_FORCE_VBS')
+    || (!envIsSet('SCRCPY_FORCE_VBS') && !envIsTrue('SCRCPY_FORCE_PS1') && !forceExe && !forceCmd);
   if (allowVbs) {
     const resourcesPath = (process && process.resourcesPath) ? process.resourcesPath : null;
     const exeDir = path.dirname(process.execPath || '');
@@ -8969,7 +9008,7 @@ function resolveScrcpyLauncher(scrcpyBinaryPath) {
   }
 
   // Prefer PowerShell hidden launcher when explicitly enabled
-  const allowPs1 = process.env.SCRCPY_FORCE_PS1 === '1';
+  const allowPs1 = envIsTrue('SCRCPY_FORCE_PS1');
   if (allowPs1) {
     const ps1Candidates = [
       path.join(__dirname, 'scrcpy', 'scrcpy-hidden.ps1')
@@ -8982,6 +9021,10 @@ function resolveScrcpyLauncher(scrcpyBinaryPath) {
     }
   }
 
+  if (isPackaged) {
+    return { type: 'ps1-start', path: scrcpyBinaryPath };
+  }
+
   return { type: 'exe', path: scrcpyBinaryPath };
 }
 
@@ -8989,8 +9032,19 @@ app.post('/api/scrcpy-gui', async (req, res) => {
   const { serial, audioOutput } = req.body || {};
   if (!serial) return res.status(400).json({ ok: false, error: 'serial requis' });
 
+  const isPackaged = Boolean(process.resourcesPath && String(process.resourcesPath).toLowerCase().includes('resources'));
+
   const serialKey = normalizeSerialKey(serial);
   const now = Date.now();
+
+  const lastLaunch = scrcpyRecentLaunches.get(serialKey) || 0;
+  if (now - lastLaunch < SCRCPY_RELAUNCH_COOLDOWN_MS) {
+    return res.json({ ok: true, alreadyRunning: true, coolingDown: true });
+  }
+
+  if (isScrcpyRunning(serialKey)) {
+    return res.json({ ok: true, alreadyRunning: true, running: true });
+  }
 
   if (now < scrcpyGlobalLockUntil) {
     return res.json({ ok: true, alreadyRunning: true, globalLock: true });
@@ -9007,8 +9061,11 @@ app.post('/api/scrcpy-gui', async (req, res) => {
   setTimeout(() => { if (Date.now() >= scrcpyGlobalLockUntil) scrcpyGlobalLockUntil = 0; }, SCRCPY_GLOBAL_LOCK_MS + 250);
 
   try {
-    const scrcpyBinaryPath = resolveScrcpyBinary();
-    const launcher = resolveScrcpyLauncher(scrcpyBinaryPath);
+    const localNoConsolePath = path.join(__dirname, 'scrcpy', 'scrcpy-noconsole.exe');
+    const scrcpyBinaryPath = (localNoConsolePath && fs.existsSync(localNoConsolePath))
+      ? localNoConsolePath
+      : resolveScrcpyBinary();
+    const launcher = resolveScrcpyLauncher(scrcpyBinaryPath) || { type: 'exe', path: scrcpyBinaryPath };
     if (!launcher || !scrcpyBinaryPath) {
       scrcpyLaunchLocks.delete(serialKey);
       scrcpyGlobalLockUntil = Date.now();
@@ -9040,17 +9097,19 @@ app.post('/api/scrcpy-gui', async (req, res) => {
     const bitRate = String(process.env.SCRCPY_BITRATE || '4M');
     const maxFps = String(process.env.SCRCPY_MAX_FPS || '30');
     const videoBuffer = String(process.env.SCRCPY_VIDEO_BUFFER || '0');
+    const alwaysOnTop = envIsTrue('SCRCPY_ALWAYS_ON_TOP') || !envIsSet('SCRCPY_ALWAYS_ON_TOP');
+    const windowTitle = (process.env.SCRCPY_WINDOW_TITLE || 'VHR SCRCPY').trim();
     const scrcpyArgs = [
       '-s', serial,
       '--window-width', '640',
       '--window-height', '360',
-      '--window-x', '120',
-      '--window-y', '120',
       '--video-codec=h264',
       '--verbosity=error',
       '--max-size', maxSize,
       '--video-bit-rate', bitRate,
       '--max-fps', maxFps,
+      ...(windowTitle ? ['--window-title', windowTitle] : []),
+      ...(alwaysOnTop ? ['--always-on-top'] : []),
       ...(Number(videoBuffer) > 0 ? ['--video-buffer', videoBuffer] : [])
     ];
     if (renderDriver) {
@@ -9065,48 +9124,88 @@ app.post('/api/scrcpy-gui', async (req, res) => {
       console.log('[scrcpy] Audio disabled: stays on headset only');
     }
 
-    const scrcpyDir = path.dirname(scrcpyBinaryPath || launcher.path);
+    const toUnpacked = (p) => {
+      if (!p) return p;
+      return p.replace(/app\.asar([/\\])scrcpy/i, 'app.asar.unpacked$1scrcpy');
+    };
+
+    const scrcpyBinaryResolved = toUnpacked(scrcpyBinaryPath || launcher.path);
+    const scrcpyDir = path.dirname(scrcpyBinaryResolved || launcher.path);
+    const scrcpyExePath = scrcpyDir ? path.join(scrcpyDir, 'scrcpy.exe') : null;
+    const scrcpyLaunchBinary = scrcpyBinaryResolved || scrcpyExePath;
     const envPath = scrcpyDir ? `${scrcpyDir}${path.delimiter}${process.env.PATH || ''}` : process.env.PATH;
+
+    const logDir = process.env.VHR_DATA_DIR || path.join(os.homedir(), '.vhr-dashboard');
+    const launchLogPath = path.join(logDir, 'scrcpy-launch.log');
+    try { fs.mkdirSync(logDir, { recursive: true }); } catch (_) {}
+    const logLine = (label, value) => {
+      try {
+        fs.appendFileSync(launchLogPath, `[${new Date().toISOString()}] ${label}: ${value}\n`, 'utf8');
+      } catch (_) {}
+    };
 
     console.log('[scrcpy] Using launcher:', launcher.type, launcher.path);
     console.log('[scrcpy] Using binary:', scrcpyBinaryPath);
+    console.log('[scrcpy] Launch binary:', scrcpyLaunchBinary);
     console.log('[scrcpy] Launching with args:', scrcpyArgs);
+    logLine('launcher', `${launcher.type} ${launcher.path}`);
+    logLine('binary', scrcpyBinaryPath || '(null)');
+    logLine('launchBinary', scrcpyLaunchBinary || '(null)');
+    logLine('args', JSON.stringify(scrcpyArgs));
+    logLine('cwd', scrcpyDir || process.cwd());
+
+    const psQuote = (value) => {
+      const str = String(value ?? '');
+      return `'${str.replace(/'/g, "''")}'`;
+    };
 
     const buildLaunch = (args, forceExe = false) => {
       let command = launcher.path;
       let launchArgs = args;
       if (!forceExe && launcher.type === 'vbs') {
         command = 'wscript.exe';
-        launchArgs = ['//B', launcher.path, scrcpyBinaryPath, ...args];
+        launchArgs = ['//B', launcher.path, scrcpyLaunchBinary, ...args];
       } else if (!forceExe && launcher.type === 'ps1') {
         command = 'powershell.exe';
-        launchArgs = ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', launcher.path, scrcpyBinaryPath, ...args];
+        launchArgs = ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', launcher.path, scrcpyLaunchBinary, ...args];
+      } else if (!forceExe && launcher.type === 'ps1-start') {
+        command = 'powershell.exe';
+        const argList = args.map(a => psQuote(a)).join(', ');
+        const startCmd = `Start-Process -FilePath ${psQuote(scrcpyLaunchBinary)} -ArgumentList ${argList || "''"} -WorkingDirectory ${psQuote(scrcpyDir)} -WindowStyle Hidden`;
+        launchArgs = ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', startCmd];
       } else if (!forceExe && launcher.type === 'cmd') {
         command = 'cmd.exe';
-        launchArgs = ['/c', 'start', '""', scrcpyBinaryPath, ...args];
+        launchArgs = ['/c', 'start', '""', scrcpyLaunchBinary, ...args];
       } else {
-        command = scrcpyBinaryPath;
+        command = scrcpyLaunchBinary;
         launchArgs = args;
       }
       return { command, launchArgs };
     };
 
-    const hideConsole = process.env.SCRCPY_HIDE_CONSOLE === '1';
+    const hideConsole = envIsTrue('SCRCPY_HIDE_CONSOLE')
+      || (!envIsSet('SCRCPY_HIDE_CONSOLE') && isPackaged);
     const spawnScrcpy = (args, forceExe = false) => {
       const { command, launchArgs } = buildLaunch(args, forceExe);
       const isExe = forceExe || launcher.type === 'exe';
       const isCmd = launcher.type === 'cmd';
-      const shouldHide = hideConsole && isExe;
+      const isGuiScrcpy = (scrcpyLaunchBinary || '').toLowerCase().endsWith('scrcpy.exe');
+      const shouldHide = hideConsole && (isExe || isCmd);
       return spawn(command, launchArgs, {
         detached: true,
         stdio: (isExe || isCmd) ? 'ignore' : ['ignore', 'pipe', 'pipe'],
-        windowsHide: (isCmd || shouldHide) ? true : (isExe ? false : true),
+        windowsHide: shouldHide ? true : false,
         env: { ...process.env, PATH: envPath },
         cwd: scrcpyDir || process.cwd()
       });
     };
 
     const proc = spawnScrcpy(scrcpyArgs);
+
+    if (proc && proc.pid) {
+      scrcpyActiveProcesses.set(serialKey, proc.pid);
+    }
+    scrcpyRecentLaunches.set(serialKey, now);
 
     releaseLockLater();
 
@@ -9132,6 +9231,7 @@ app.post('/api/scrcpy-gui', async (req, res) => {
 
     proc.on('exit', (code, signal) => {
       releaseLockLater();
+      scrcpyActiveProcesses.delete(serialKey);
       try {
         const logDir = process.env.VHR_DATA_DIR || path.join(os.homedir(), '.vhr-dashboard');
         fs.mkdirSync(logDir, { recursive: true });
@@ -9151,7 +9251,7 @@ app.post('/api/scrcpy-gui', async (req, res) => {
     // If scrcpy exits immediately, retry with minimal args (no render/buffer)
     // Skip retry when using a wrapper exe (scrcpy-noconsole.exe) to avoid double windows.
     const scrcpyBase = (scrcpyBinaryPath || '').toLowerCase();
-    const shouldRetry = scrcpyBase.endsWith('scrcpy.exe');
+    const shouldRetry = scrcpyBase.endsWith('scrcpy.exe') && !isPackaged;
     if (shouldRetry) {
       setTimeout(() => {
         try {
