@@ -4209,6 +4209,7 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
   try {
     const demoUserAgent = String(req.headers['user-agent'] || '').toLowerCase();
     const demoIsElectron = demoUserAgent.includes('electron') || String(req.headers['x-vhr-electron'] || '').toLowerCase() === 'electron';
+    const bypassRemoteReturn = demoIsElectron;
     const cachedDemo = getCachedRemoteDemo(req.user.username);
     if (cachedDemo) {
       console.log('[demo/status] returning cached remote demo for', req.user.username);
@@ -4222,7 +4223,9 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
           }
         }
       }
-      return res.json({ ok: true, demo: cachedDemo, remote: true });
+      if (!bypassRemoteReturn) {
+        return res.json({ ok: true, demo: cachedDemo, remote: true });
+      }
     }
     const cachedRemoteToken = getCachedRemoteAuthToken(req.user.username);
     if (cachedRemoteToken) {
@@ -4239,7 +4242,9 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
             }
           }
         }
-        return res.json({ ok: true, demo: remoteDemo, remote: true });
+        if (!bypassRemoteReturn) {
+          return res.json({ ok: true, demo: remoteDemo, remote: true });
+        }
       }
     }
     let user = getUserByUsername(req.user.username);
