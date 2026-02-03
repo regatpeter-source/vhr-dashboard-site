@@ -4207,12 +4207,20 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
 // Get demo/trial status - also check Stripe subscription status
 app.get('/api/demo/status', authMiddleware, async (req, res) => {
   try {
+    const demoUserAgent = String(req.headers['user-agent'] || '').toLowerCase();
+    const demoIsElectron = demoUserAgent.includes('electron') || String(req.headers['x-vhr-electron'] || '').toLowerCase() === 'electron';
     const cachedDemo = getCachedRemoteDemo(req.user.username);
     if (cachedDemo) {
       console.log('[demo/status] returning cached remote demo for', req.user.username);
       const cachedUser = getUserByUsername(req.user.username);
       if (cachedUser) {
         applyRemoteDemoToUser(cachedUser, cachedDemo, { reason: 'demo-cache' });
+        if (demoIsElectron) {
+          const started = ensureElectronTrialStarted(cachedUser, { reason: 'demo-status-electron-cache' });
+          if (started && !cachedDemo.demoStartDate) {
+            cachedDemo.demoStartDate = cachedUser.demoStartDate;
+          }
+        }
       }
       return res.json({ ok: true, demo: cachedDemo, remote: true });
     }
@@ -4224,6 +4232,12 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
         const remoteUser = getUserByUsername(req.user.username);
         if (remoteUser) {
           applyRemoteDemoToUser(remoteUser, remoteDemo, { reason: 'demo-fetch' });
+          if (demoIsElectron) {
+            const started = ensureElectronTrialStarted(remoteUser, { reason: 'demo-status-electron-fetch' });
+            if (started && !remoteDemo.demoStartDate) {
+              remoteDemo.demoStartDate = remoteUser.demoStartDate;
+            }
+          }
         }
         return res.json({ ok: true, demo: remoteDemo, remote: true });
       }
@@ -4253,8 +4267,6 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
       ensureUserSubscription(user, { planName: 'auto-provision', status: 'trial' });
     }
 
-    const demoUserAgent = String(req.headers['user-agent'] || '').toLowerCase();
-    const demoIsElectron = demoUserAgent.includes('electron') || String(req.headers['x-vhr-electron'] || '').toLowerCase() === 'electron';
     if (demoIsElectron) {
       ensureElectronTrialStarted(user, { reason: 'demo-status-electron' });
     }

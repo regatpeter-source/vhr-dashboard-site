@@ -1241,7 +1241,7 @@ window.switchAccountTab = async function(tab) {
 let activeAudioStream = null;  // Global audio stream instance
 let activeAudioSerial = null;  // Serial of device receiving audio
 
-console.log('[voice] dashboard-pro.js build stamp: 2026-01-26 22:00');
+console.log('[voice] dashboard-pro.js build stamp: 2026-02-03 23:45');
 
 // Keep panel always compact (no fullscreen overlay)
 function setAudioPanelMinimized() {
@@ -2307,10 +2307,18 @@ async function api(path, opts = {}) {
 			opts.credentials = 'include';
 		}
 		const storedToken = readAuthToken();
+		const isElectron = typeof navigator !== 'undefined' && /electron/i.test(navigator.userAgent || '');
+		const electronHeader = isElectron ? { 'x-vhr-electron': 'electron' } : {};
 		if (storedToken) {
 			opts.headers = {
 				...(opts.headers || {}),
-				Authorization: 'Bearer ' + storedToken
+				Authorization: 'Bearer ' + storedToken,
+				...electronHeader
+			};
+		} else if (Object.keys(electronHeader).length) {
+			opts.headers = {
+				...(opts.headers || {}),
+				...electronHeader
 			};
 		}
 
@@ -4271,6 +4279,9 @@ window.loginUser = async function() {
 	}
 	const identifier = identifierInput.value.trim();
 	const password = passwordInput.value;
+	const electronAuthHeader = (typeof navigator !== 'undefined' && /electron/i.test(navigator.userAgent || ''))
+		? { 'x-vhr-electron': 'electron' }
+		: {};
 	
 	if (!identifier || !password) {
 		showToast('❌ Identifiant et mot de passe requis', 'error');
@@ -4284,7 +4295,7 @@ window.loginUser = async function() {
 		// 1) Auth prod par username
 		res = await fetch(`${AUTH_API_BASE}/api/login`, {
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
+			headers: { 'Content-Type': 'application/json', ...electronAuthHeader },
 			credentials: 'include',
 			body: JSON.stringify({ username: identifier, password })
 		});
@@ -4294,7 +4305,7 @@ window.loginUser = async function() {
 		if (!(res.ok && data.ok)) {
 			res = await fetch(`${AUTH_API_BASE}/api/auth/login`, {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
+				headers: { 'Content-Type': 'application/json', ...electronAuthHeader },
 				credentials: 'include',
 				body: JSON.stringify({ email: identifier, password })
 			});
@@ -4309,7 +4320,7 @@ window.loginUser = async function() {
 			try {
 				const localRes = await fetch('/api/login', {
 					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
+					headers: { 'Content-Type': 'application/json', ...electronAuthHeader },
 					credentials: 'include',
 					body: JSON.stringify({ username: syncedUsername, password })
 				});
@@ -4327,7 +4338,7 @@ window.loginUser = async function() {
 			try {
 				const localRes = await fetch('/api/login', {
 					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
+					headers: { 'Content-Type': 'application/json', ...electronAuthHeader },
 					credentials: 'include',
 					body: JSON.stringify({ username: identifier, password })
 				});
