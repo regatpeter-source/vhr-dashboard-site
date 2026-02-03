@@ -22,6 +22,7 @@ temp/
 backups/
 dist-client/extracted-app/
 dist-client/dist2/
+dist-client/locked-release/
 
 # Logs / diagnostics
 *.log

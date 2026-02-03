@@ -929,11 +929,12 @@ const emailService = require('./services/emailService');
 // Initialize email service
 emailService.initEmailTransporter();
 
-// Ajouter un champ demoStartDate lors de l'inscription
+// Prépare le champ de démo (l'essai démarre au 1er login Electron)
 function initializeDemoForUser(user) {
-  if (!user.demoStartDate && demoConfig.MODE === 'database') {
-    user.demoStartDate = new Date().toISOString();
-  }
+  if (!user) return user;
+  if (demoConfig.MODE !== 'database') return user;
+  if (user.demoStartDate) return user;
+  if (!user.demoStartSource) user.demoStartSource = 'pending';
   return user;
 }
 
@@ -3048,7 +3049,9 @@ function buildSyncPayload(user) {
     stripeCustomerId: normalized.stripeCustomerId || normalized.stripecustomerid || null,
     subscriptionStatus: normalized.subscriptionStatus || normalized.subscriptionstatus || null,
     subscriptionId: normalized.subscriptionId || normalized.subscriptionid || null,
-    demoStartDate: normalized.demoStartDate || normalized.createdAt || null,
+    demoStartDate: normalized.demoStartDate || null,
+    demoExtensionDays: normalized.demoExtensionDays || normalized.demoextensiondays || null,
+    demoStartSource: normalized.demoStartSource || null,
     demoEndDate: normalized.demoEndDate || null,
     emailVerified: isEmailVerified(normalized)
   };
@@ -3895,7 +3898,7 @@ app.post('/api/admin/sync-user', async (req, res) => {
     payload.email = authUser.email || null;
   }
 
-  const { email, role = 'user', password, passwordHash, stripeCustomerId, subscriptionStatus, demoStartDate } = payload;
+  const { email, role = 'user', password, passwordHash, stripeCustomerId, subscriptionStatus, demoStartDate, demoExtensionDays, demoStartSource } = payload;
   const username = payload.username;
   if (!username) {
     return res.status(400).json({ ok: false, error: 'username requis' });
@@ -3931,6 +3934,9 @@ app.post('/api/admin/sync-user', async (req, res) => {
         if (demoStartDate) {
           updates.demostartdate = demoStartDate;
         }
+        if (demoExtensionDays !== undefined) {
+          updates.demoextensiondays = demoExtensionDays;
+        }
         await db.updateUser(existing.id, updates);
         return res.json({ ok: true, action: 'updated', mode: 'postgres' });
       }
@@ -3953,6 +3959,8 @@ app.post('/api/admin/sync-user', async (req, res) => {
       if (stripeCustomerId !== undefined) user.stripeCustomerId = stripeCustomerId;
       if (subscriptionStatus !== undefined) user.subscriptionStatus = subscriptionStatus;
       if (demoStartDate !== undefined) user.demoStartDate = demoStartDate;
+      if (demoExtensionDays !== undefined) user.demoExtensionDays = demoExtensionDays;
+      if (demoStartSource !== undefined) user.demoStartSource = demoStartSource;
     } else {
       user = {
         id: `user_${username}`,
@@ -3963,7 +3971,9 @@ app.post('/api/admin/sync-user', async (req, res) => {
         stripeCustomerId: stripeCustomerId || null,
         subscriptionStatus: subscriptionStatus || null,
         createdAt: new Date().toISOString(),
-        demoStartDate: demoStartDate || (demoConfig.MODE === 'database' ? new Date().toISOString() : null)
+        demoStartDate: demoStartDate || null,
+        demoExtensionDays: demoExtensionDays || 0,
+        demoStartSource: demoStartSource || null
       };
     }
 
@@ -9068,8 +9078,10 @@ app.post('/api/register', async (req, res) => {
       emailVerificationExpiresAt: null,
       emailVerificationSentAt: null,
       stripeCustomerId: null,
-      demoStartDate: new Date().toISOString() // Initialize demo start date
+      demoStartDate: null,
+      demoStartSource: 'pending'
     };
+    initializeDemoForUser(newUser);
     // persist to database
     if (USE_POSTGRES) {
       await db.createUser(newUser.id, newUser.username, newUser.passwordHash, newUser.email, newUser.role);

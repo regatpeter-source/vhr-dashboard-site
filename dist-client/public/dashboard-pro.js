@@ -1496,42 +1496,12 @@ window.sendVoiceToHeadset = async function(serial) {
 						console.warn('[voice] Voice app install failed:', installErr);
 					}
 					if (!installed) {
-						// Fallback: ouvrir le récepteur web via ADB pour garantir le lien émetteur/récepteur
-						try {
-							const openRes = await api('/api/device/open-audio-receiver', {
-								method: 'POST',
-								headers: { 'Content-Type': 'application/json' },
-								body: JSON.stringify({ serial, serverUrl: resolvedServerUrl, useBackgroundApp: true })
-							});
-							if (openRes && openRes.ok) {
-								console.log('[voice] Fallback receiver lancé (web)');
-								showToast('🔊 Récepteur voix ouvert en fallback', 'info');
-							} else {
-								console.warn('[voice] Fallback receiver non lancé:', openRes?.error);
-							}
-						} catch (fallbackOpenErr) {
-							console.warn('[voice] Erreur ouverture fallback receiver:', fallbackOpenErr);
-						}
+						showToast('⚠️ Impossible de lancer VHR Voice. Vérifiez l’APK ou lancez l’app manuellement.', 'warning');
 					}
 				}
 			} catch (adbLaunchErr) {
 				console.warn('[voice] ADB launch voice app error:', adbLaunchErr);
-				// Second fallback if l'appel ADB échoue directement
-				try {
-					const openRes = await api('/api/device/open-audio-receiver', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ serial, serverUrl: resolvedServerUrl, useBackgroundApp: true })
-					});
-					if (openRes && openRes.ok) {
-						console.log('[voice] Fallback receiver lancé (web) après échec ADB');
-						showToast('🔊 Récepteur voix ouvert (fallback)', 'info');
-					} else {
-						console.warn('[voice] Fallback receiver non lancé:', openRes?.error);
-					}
-				} catch (fallbackOpenErr) {
-					console.warn('[voice] Erreur ouverture fallback receiver (post-ADB):', fallbackOpenErr);
-				}
+				showToast('⚠️ ADB indisponible, app VHR Voice non lancée.', 'warning');
 			}
 
 			// Ne pas forcer l'ouverture via ADB pour éviter qu'une page prenne le focus dans le casque

@@ -149,6 +149,52 @@ const SYNC_USER_ENDPOINT = SYNC_USER_ENDPOINT_RAW.startsWith('/')
 const SYNC_TARGET_TIMEOUT_MS = Math.max(2000, Number.parseInt(process.env.SYNC_TARGET_TIMEOUT_MS || '6000', 10) || 6000);
 const HAS_SYNC_TARGETS = SYNC_TARGET_BASE_URLS.length > 0;
 
+async function syncUserToTargets(user, options = {}) {
+  if (!user || !SYNC_USERS_SECRET || !HAS_SYNC_TARGETS) return false;
+  const passwordHash = user.passwordHash || user.passwordhash || null;
+  if (!passwordHash) {
+    console.warn('[sync-user] passwordHash missing for', user && user.username);
+    return false;
+  }
+  const payload = {
+    username: user.username,
+    email: user.email || null,
+    role: user.role || 'user',
+    passwordHash,
+    stripeCustomerId: user.stripeCustomerId || user.stripecustomerid || null,
+    subscriptionStatus: user.subscriptionStatus || user.subscriptionstatus || null,
+    demoStartDate: user.demoStartDate || user.demostartdate || null,
+    demoExtensionDays: user.demoExtensionDays || user.demoextensiondays || null,
+    demoStartSource: user.demoStartSource || null,
+    reason: options.reason || undefined
+  };
+
+  const results = [];
+  for (const baseUrl of SYNC_TARGET_BASE_URLS) {
+    try {
+      const targetUrl = `${baseUrl}${SYNC_USER_ENDPOINT}`;
+      const response = await fetch(targetUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-sync-secret': SYNC_USERS_SECRET
+        },
+        body: JSON.stringify(payload),
+        timeout: SYNC_TARGET_TIMEOUT_MS
+      });
+      const data = await response.json().catch(() => null);
+      results.push({ ok: response.ok, url: targetUrl, data });
+      if (!response.ok) {
+        console.warn('[sync-user] target rejected', targetUrl, data && data.error ? data.error : response.status);
+      }
+    } catch (err) {
+      console.warn('[sync-user] target error', baseUrl, err && err.message ? err.message : err);
+      results.push({ ok: false, url: baseUrl, error: err && err.message ? err.message : String(err) });
+    }
+  }
+  return results.every(r => r.ok);
+}
+
 const FORCE_HTTP = process.env.FORCE_HTTP === '1';
 const NO_BROWSER_FALLBACK = process.env.NO_BROWSER_FALLBACK === '1';
 const QUIET_MODE = process.env.QUIET_MODE === '1';
@@ -237,6 +283,8 @@ const candidatePlatformToolsDirs = (() => {
     dirs.push(sanitizePath(path.join(process.resourcesPath, 'app.asar.unpacked', 'platform-tools')));
     dirs.push(sanitizePath(path.join(process.resourcesPath, 'app.asar.unpacked', 'local', 'platform-tools')));
     dirs.push(sanitizePath(path.join(process.resourcesPath, 'app', 'platform-tools')));
+    dirs.push(sanitizePath(path.join(process.resourcesPath, 'platform-tools')));
+    dirs.push(sanitizePath(path.join(process.resourcesPath, 'local', 'platform-tools')));
   }
 
   if (process.env.ADB_HOME) {
@@ -249,7 +297,8 @@ const candidatePlatformToolsDirs = (() => {
     dirs.push(sanitizePath(path.join(process.env.ANDROID_SDK_ROOT, 'platform-tools')));
   }
 
-  return Array.from(new Set(dirs.filter(Boolean)));
+  const unique = Array.from(new Set(dirs.filter(Boolean)));
+  return unique.filter(dir => !/app\.asar(?!\.unpacked)/i.test(dir));
 })();
 
 const locateBundledAdb = () => {
@@ -1055,19 +1104,29 @@ const emailService = require('./services/emailService');
 // Initialize email service
 emailService.initEmailTransporter();
 
-// Ajouter un champ demoStartDate lors de l'inscription
+// Prépare le champ de démo (l'essai démarre au 1er login Electron)
 function initializeDemoForUser(user) {
-  if (!user.demoStartDate && demoConfig.MODE === 'database') {
-    user.demoStartDate = new Date().toISOString();
-  }
+  if (!user) return user;
+  if (demoConfig.MODE !== 'database') return user;
+  if (user.demoStartDate) return user;
+  if (!user.demoStartSource) user.demoStartSource = 'pending';
   return user;
 }
 
 function ensureElectronTrialStarted(user, options = {}) {
   if (!user || demoConfig.MODE !== 'database') return false;
-  if (user.demoStartDate && !options.force) return false;
+  const source = String(user.demoStartSource || '').toLowerCase();
+  const alreadyElectron = source === 'electron';
+  const hasStart = Boolean(user.demoStartDate);
+  if (alreadyElectron && hasStart && !options.force) return false;
+  // Démarre l'essai au 1er login Electron (même si une date précédente sans source existe)
+  if (hasStart && source && !alreadyElectron && !options.force) return false;
   user.demoStartDate = new Date().toISOString();
+  user.demoStartSource = 'electron';
+  user.demoStartReason = options.reason || 'electron login';
+  user.demoStartAt = user.demoStartDate;
   persistUser(user);
+  syncUserToTargets(user, { reason: options.reason || 'electron login' });
   console.log(`[demo] Trial start recorded for ${user.username} (${options.reason || 'electron login'})`);
   return true;
 }
@@ -1825,6 +1884,10 @@ app.post('/api/device/install-voice-app', async (req, res) => {
     let result = await runAdbInstall();
     const combined = `${result.stdout || ''}\n${result.stderr || ''}`.toLowerCase();
     const isOffline = combined.includes('device offline') || combined.includes('offline');
+    const needsReinstall = combined.includes('install_failed_update_incompatible')
+      || combined.includes('install_failed_version_downgrade')
+      || combined.includes('install_failed_signature')
+      || combined.includes('install_parse_failed');
 
     if (isOffline) {
       console.warn('[install-voice-app] Device offline detected, restarting adb and retrying...');
@@ -1844,6 +1907,26 @@ app.post('/api/device/install-voice-app', async (req, res) => {
         message: 'VHR Voice installed successfully',
         stdout: result.stdout
       });
+    }
+
+    if (needsReinstall) {
+      console.warn('[install-voice-app] Detected incompatible/old signature, uninstalling then retrying...');
+      try {
+        const adbExecutable = ADB_BIN || 'adb';
+        await execp(`"${adbExecutable}" -s ${serial} uninstall com.vhr.voice`, { timeout: 30000 });
+      } catch (e) {
+        console.warn('[install-voice-app] Uninstall failed (continuing):', e && e.message ? e.message : e);
+      }
+
+      result = await runAdbInstall();
+      if (result.code === 0 || (result.stdout || '').includes('Success')) {
+        console.log(`[install-voice-app] Successfully installed after reinstall on ${serial}`);
+        return res.json({
+          ok: true,
+          message: 'VHR Voice installed successfully (reinstall)',
+          stdout: result.stdout
+        });
+      }
     }
 
     console.error(`[install-voice-app] Failed:`, result.stderr);
@@ -2854,6 +2937,40 @@ function cacheRemoteAuthToken(username, token) {
   remoteAuthTokenCache.set(username.toLowerCase(), { token, fetchedAt: Date.now() });
 }
 
+function applyRemoteDemoToUser(user, remoteDemo, options = {}) {
+  if (!user || !remoteDemo) return false;
+  let changed = false;
+  const remoteStart = remoteDemo.demoStartDate || remoteDemo.demostartdate || null;
+  if (remoteStart && user.demoStartDate !== remoteStart) {
+    user.demoStartDate = remoteStart;
+    changed = true;
+  } else if (!user.demoStartDate && remoteDemo.expirationDate && Number.isFinite(remoteDemo.totalDays)) {
+    const exp = new Date(remoteDemo.expirationDate);
+    if (!Number.isNaN(exp.getTime())) {
+      const startMs = exp.getTime() - (remoteDemo.totalDays * 24 * 60 * 60 * 1000);
+      const inferred = new Date(startMs).toISOString();
+      user.demoStartDate = inferred;
+      changed = true;
+    }
+  }
+
+  if (remoteDemo.subscriptionStatus && user.subscriptionStatus !== remoteDemo.subscriptionStatus) {
+    user.subscriptionStatus = remoteDemo.subscriptionStatus;
+    changed = true;
+  } else if (remoteDemo.hasValidSubscription && user.subscriptionStatus !== 'active') {
+    user.subscriptionStatus = 'active';
+    changed = true;
+  }
+
+  if (changed) {
+    persistUser(user);
+    if (options.syncTargets) {
+      syncUserToTargets(user, { reason: options.reason || 'remote-demo' });
+    }
+  }
+  return changed;
+}
+
 function getCachedRemoteAuthToken(username) {
   if (!username) return null;
   const entry = remoteAuthTokenCache.get(username.toLowerCase());
@@ -3025,8 +3142,16 @@ app.post('/api/remote-login', async (req, res) => {
     }
 
     const elevatedUser = elevateAdminIfAllowlisted(localUser);
+    const userAgent = String(req.headers['user-agent'] || '').toLowerCase();
+    const isElectronClient = userAgent.includes('electron') || String(req.headers['x-vhr-electron'] || '').toLowerCase() === 'electron';
+    if (isElectronClient) {
+      ensureElectronTrialStarted(elevatedUser, { reason: 'remote-login-electron' });
+    }
     cacheRemoteAuthToken(elevatedUser.username, remoteAuth.remoteToken);
     const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, elevatedUser.username);
+    if (remoteDemo) {
+      applyRemoteDemoToUser(elevatedUser, remoteDemo, { reason: 'remote-login' });
+    }
     const token = jwt.sign({ username: elevatedUser.username, role: elevatedUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
     const cookieOptions = buildAuthCookieOptions(req);
     res.cookie('vhr_token', token, cookieOptions);
@@ -3088,10 +3213,12 @@ app.post('/api/dashboard/register', async (req, res) => {
       email: `${username}@dashboard.local`,
       passwordHash,
       role: role || 'user',
-      demoStartDate: new Date().toISOString(),
+      demoStartDate: null,
+      demoStartSource: 'pending',
       subscriptionStatus: 'dashboard',
       createdAt: new Date().toISOString()
     };
+    initializeDemoForUser(newUser);
     
     persistUser(newUser);
     console.log('[api/dashboard/register] user created:', username);
@@ -3445,7 +3572,7 @@ app.post('/api/admin/sync-user', async (req, res) => {
     return res.status(403).json({ ok: false, error: 'Secret invalide' });
   }
 
-  const { username, email, role = 'user', password, passwordHash, stripeCustomerId, subscriptionStatus } = req.body || {};
+  const { username, email, role = 'user', password, passwordHash, stripeCustomerId, subscriptionStatus, demoStartDate, demoExtensionDays, demoStartSource } = req.body || {};
   if (!username) {
     return res.status(400).json({ ok: false, error: 'username requis' });
   }
@@ -3468,7 +3595,11 @@ app.post('/api/admin/sync-user', async (req, res) => {
           email: email || existing.email,
           role: role || existing.role,
           stripecustomerid: stripeCustomerId || existing.stripecustomerid || existing.stripeCustomerId || null,
-          subscriptionstatus: subscriptionStatus || existing.subscriptionstatus || existing.subscriptionStatus || null
+          subscriptionstatus: subscriptionStatus || existing.subscriptionstatus || existing.subscriptionStatus || null,
+          demostartdate: demoStartDate || existing.demostartdate || existing.demoStartDate || null,
+          demoextensiondays: (demoExtensionDays !== undefined && demoExtensionDays !== null)
+            ? demoExtensionDays
+            : (existing.demoextensiondays || existing.demoExtensionDays || null)
         });
         return res.json({ ok: true, action: 'updated', mode: 'postgres' });
       }
@@ -3488,6 +3619,9 @@ app.post('/api/admin/sync-user', async (req, res) => {
       if (role) user.role = role;
       if (stripeCustomerId !== undefined) user.stripeCustomerId = stripeCustomerId;
       if (subscriptionStatus !== undefined) user.subscriptionStatus = subscriptionStatus;
+      if (demoStartDate !== undefined) user.demoStartDate = demoStartDate;
+      if (demoExtensionDays !== undefined) user.demoExtensionDays = demoExtensionDays;
+      if (demoStartSource !== undefined) user.demoStartSource = demoStartSource;
     } else {
       user = {
         id: `user_${username}`,
@@ -3498,7 +3632,9 @@ app.post('/api/admin/sync-user', async (req, res) => {
         stripeCustomerId: stripeCustomerId || null,
         subscriptionStatus: subscriptionStatus || null,
         createdAt: new Date().toISOString(),
-        demoStartDate: demoConfig.MODE === 'database' ? new Date().toISOString() : null
+        demoStartDate: demoStartDate || null,
+        demoExtensionDays: demoExtensionDays || 0,
+        demoStartSource: demoStartSource || null
       };
     }
 
@@ -3855,6 +3991,8 @@ app.post('/api/admin/grant-subscription', authMiddleware, async (req, res) => {
       fs.writeFileSync(USERS_FILE, JSON.stringify(allUsers, null, 2));
       console.log(`[admin] Granted active subscription to ${targetUsername}`);
     }
+
+    syncUserToTargets(targetUser, { reason: 'admin-grant-subscription' });
     
     res.json({
       ok: true,
@@ -3955,6 +4093,8 @@ app.post('/api/admin/revoke-subscription', authMiddleware, async (req, res) => {
       fs.writeFileSync(USERS_FILE, JSON.stringify(allUsers, null, 2));
       console.log(`[admin] Revoked subscription for ${targetUsername}`);
     }
+
+    syncUserToTargets(targetUser, { reason: 'admin-revoke-subscription' });
     
     res.json({
       ok: true,
@@ -4028,12 +4168,14 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
     if (actionKey === 'extend_trial') {
       const appliedDays = addTrialDays(days);
       const accessSummary = buildUserAccessSummary(user, { licenses: loadLicenses() });
+      syncUserToTargets(user, { reason: 'admin-extend-trial' });
       return res.json({ ok: true, message: `✅ ${appliedDays} jour(s) d'essai ajoutés`, accessSummary });
     }
 
     if (actionKey === 'free_month') {
       const appliedDays = addTrialDays(30);
       const accessSummary = buildUserAccessSummary(user, { licenses: loadLicenses() });
+      syncUserToTargets(user, { reason: 'admin-free-month' });
       return res.json({ ok: true, message: `✅ Mois gratuit offert (${appliedDays} jours)`, accessSummary });
     }
 
@@ -4042,6 +4184,7 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
       user.updatedAt = new Date().toISOString();
       persistUser(user);
       updateLocalSubscription({ status: 'cancelled', cancelledAt: now.toISOString() });
+      syncUserToTargets(user, { reason: 'admin-cancel-subscription' });
       return res.json({ ok: true, message: `✅ Abonnement annulé pour ${normalized}` });
     }
 
@@ -4050,6 +4193,7 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
       user.updatedAt = new Date().toISOString();
       persistUser(user);
       updateLocalSubscription({ status: 'refunded', cancelledAt: now.toISOString() });
+      syncUserToTargets(user, { reason: 'admin-refund-subscription' });
       return res.json({ ok: true, message: `✅ Abonnement remboursé pour ${normalized}` });
     }
 
@@ -4066,6 +4210,10 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
     const cachedDemo = getCachedRemoteDemo(req.user.username);
     if (cachedDemo) {
       console.log('[demo/status] returning cached remote demo for', req.user.username);
+      const cachedUser = getUserByUsername(req.user.username);
+      if (cachedUser) {
+        applyRemoteDemoToUser(cachedUser, cachedDemo, { reason: 'demo-cache' });
+      }
       return res.json({ ok: true, demo: cachedDemo, remote: true });
     }
     const cachedRemoteToken = getCachedRemoteAuthToken(req.user.username);
@@ -4073,6 +4221,10 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
       const remoteDemo = await fetchRemoteDemoStatus(cachedRemoteToken, req.user.username);
       if (remoteDemo) {
         console.log('[demo/status] returning freshly fetched remote demo for', req.user.username);
+        const remoteUser = getUserByUsername(req.user.username);
+        if (remoteUser) {
+          applyRemoteDemoToUser(remoteUser, remoteDemo, { reason: 'demo-fetch' });
+        }
         return res.json({ ok: true, demo: remoteDemo, remote: true });
       }
     }
@@ -4088,7 +4240,8 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
         username: req.user.username,
         email: req.user.email || null,
         role: req.user.role || 'user',
-        demoStartDate: new Date().toISOString(),
+        demoStartDate: null,
+        demoStartSource: 'pending',
         subscriptionStatus: null,
         subscriptionId: null,
         stripeCustomerId: null,
@@ -4098,6 +4251,12 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
 
       persistUser(user);
       ensureUserSubscription(user, { planName: 'auto-provision', status: 'trial' });
+    }
+
+    const demoUserAgent = String(req.headers['user-agent'] || '').toLowerCase();
+    const demoIsElectron = demoUserAgent.includes('electron') || String(req.headers['x-vhr-electron'] || '').toLowerCase() === 'electron';
+    if (demoIsElectron) {
+      ensureElectronTrialStarted(user, { reason: 'demo-status-electron' });
     }
     const licenses = loadLicenses();
     const accessSnapshot = buildUserAccessSummary(user, { licenses });
@@ -8199,8 +8358,9 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
               role: 'user',
               stripeCustomerId: customerId || null,
               createdAt: new Date().toISOString(),
-              demoStartDate: new Date().toISOString(),
-              demoExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+              demoStartDate: null,
+              demoExpiresAt: null,
+              demoStartSource: 'pending'
             };
             users.push(user);
             saveUsers();
@@ -8385,8 +8545,10 @@ app.post('/api/register', async (req, res) => {
       role: 'user', 
       email: email || null, 
       stripeCustomerId: null,
-      demoStartDate: new Date().toISOString() // Initialize demo start date
+      demoStartDate: null,
+      demoStartSource: 'pending'
     };
+    initializeDemoForUser(newUser);
     // persist to database
     if (USE_POSTGRES) {
       await db.createUser(newUser.id, newUser.username, newUser.passwordHash, newUser.email, newUser.role);
