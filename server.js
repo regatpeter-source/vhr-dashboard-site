@@ -2077,6 +2077,9 @@ function normalizeUserRecord(user) {
   normalized.lastActivity = normalized.lastActivity || normalized.lastactivity || null;
   normalized.demoStartDate = normalized.demoStartDate || normalized.demostartdate || null;
   normalized.demoEndDate = normalized.demoEndDate || normalized.demoenddate || null;
+  normalized.demoStartSource = normalized.demoStartSource || normalized.demostartsource || null;
+  normalized.demoStartReason = normalized.demoStartReason || normalized.demostartreason || null;
+  normalized.demoStartAt = normalized.demoStartAt || normalized.demostartat || normalized.demoStartDate || null;
 
   // Normalize deletion/disable flags
   normalized.status = (normalized.status || normalized.accountStatus || '').toString().toLowerCase() || null;
@@ -2110,6 +2113,9 @@ function saveUsers() {
       updatedAt: u.updatedAt || null,
       demoStartDate: u.demoStartDate || null,
       demoEndDate: u.demoEndDate || null,
+      demoStartSource: u.demoStartSource || null,
+      demoStartReason: u.demoStartReason || null,
+      demoStartAt: u.demoStartAt || u.demoStartDate || null,
       emailVerified: u.emailVerified ?? true,
       emailVerificationToken: u.emailVerificationToken || null,
       emailVerificationExpiresAt: u.emailVerificationExpiresAt || null,

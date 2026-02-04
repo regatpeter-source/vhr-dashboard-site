@@ -1116,11 +1116,17 @@ function initializeDemoForUser(user) {
 function ensureElectronTrialStarted(user, options = {}) {
   if (!user || demoConfig.MODE !== 'database') return false;
   const source = String(user.demoStartSource || '').toLowerCase();
-  const alreadyElectron = source === 'electron';
   const hasStart = Boolean(user.demoStartDate);
-  if (alreadyElectron && hasStart && !options.force) return false;
-  // Démarre l'essai au 1er login Electron (même si une date précédente sans source existe)
-  if (hasStart && source && !alreadyElectron && !options.force) return false;
+  if (hasStart && !options.force) {
+    // Ne jamais écraser une date d'essai déjà définie
+    if (!source) {
+      user.demoStartSource = 'unknown';
+      user.demoStartReason = user.demoStartReason || options.reason || 'existing demo start';
+      user.demoStartAt = user.demoStartAt || user.demoStartDate;
+      persistUser(user);
+    }
+    return false;
+  }
   user.demoStartDate = new Date().toISOString();
   user.demoStartSource = 'electron';
   user.demoStartReason = options.reason || 'electron login';
@@ -2187,7 +2193,10 @@ function saveUsers() {
       lastInvoicePaidAt: u.lastInvoicePaidAt || null,
       subscriptionStatus: u.subscriptionStatus || null,
       subscriptionId: u.subscriptionId || null,
-      demoStartDate: u.demoStartDate || null
+      demoStartDate: u.demoStartDate || null,
+      demoStartSource: u.demoStartSource || null,
+      demoStartAt: u.demoStartAt || null,
+      demoStartReason: u.demoStartReason || null
     }));
     fs.writeFileSync(USERS_FILE, JSON.stringify(toSave, null, 2), 'utf8');
     return true;
@@ -2943,6 +2952,10 @@ function applyRemoteDemoToUser(user, remoteDemo, options = {}) {
   const remoteStart = remoteDemo.demoStartDate || remoteDemo.demostartdate || null;
   if (remoteStart && user.demoStartDate !== remoteStart) {
     user.demoStartDate = remoteStart;
+    if (!user.demoStartSource) {
+      user.demoStartSource = 'remote';
+    }
+    user.demoStartAt = user.demoStartAt || user.demoStartDate;
     changed = true;
   } else if (!user.demoStartDate && remoteDemo.expirationDate && Number.isFinite(remoteDemo.totalDays)) {
     const exp = new Date(remoteDemo.expirationDate);
@@ -2950,6 +2963,10 @@ function applyRemoteDemoToUser(user, remoteDemo, options = {}) {
       const startMs = exp.getTime() - (remoteDemo.totalDays * 24 * 60 * 60 * 1000);
       const inferred = new Date(startMs).toISOString();
       user.demoStartDate = inferred;
+      if (!user.demoStartSource) {
+        user.demoStartSource = 'remote';
+      }
+      user.demoStartAt = user.demoStartAt || user.demoStartDate;
       changed = true;
     }
   }
