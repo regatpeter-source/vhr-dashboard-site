@@ -3477,6 +3477,137 @@ window.renameDevice = async function(device) {
 	} else showToast('❌ Erreur: ' + (res.error || 'inconnue'), 'error');
 };
 
+window.selectAllAppTargets = function(selected) {
+	const boxes = Array.from(document.querySelectorAll('.app-target-checkbox'));
+	boxes.forEach(box => {
+		box.checked = !!selected;
+	});
+};
+
+window.getSelectedAppTargets = function(defaultSerial) {
+	const boxes = Array.from(document.querySelectorAll('.app-target-checkbox'));
+	const selected = boxes
+		.filter(box => box.checked)
+		.map(box => box.dataset.serial)
+		.filter(Boolean);
+	if (selected.length) return selected;
+	return defaultSerial ? [defaultSerial] : [];
+};
+
+window.getDeviceLabelForSerial = function(serial) {
+	const list = Array.isArray(devices) ? devices : [];
+	const found = list.find(d => d && d.serial === serial);
+	return found ? (found.name || found.serial) : serial;
+};
+
+window.showMissingAppDialog = function(pkg, missingSerials) {
+	if (!Array.isArray(missingSerials) || missingSerials.length === 0) return;
+	const serialsJson = JSON.stringify(missingSerials || []);
+	const rows = missingSerials.map(serial => {
+		const label = window.getDeviceLabelForSerial(serial);
+		const safeLabel = String(label || serial || '').replace(/"/g, '&quot;');
+		const safeSerial = String(serial || '').replace(/"/g, '&quot;');
+		return `
+			<div style='display:flex;justify-content:space-between;align-items:center;gap:10px;background:#0f1117;padding:8px 10px;border-radius:8px;border:1px solid #2c3e50;'>
+				<div style='color:#ecf0f1;font-size:13px;min-width:0;'>${safeLabel}</div>
+				<button onclick='showStorageDialog({serial:"${safeSerial}",name:"${safeLabel}"})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:11px;'>💾 Stockage</button>
+			</div>
+		`;
+	}).join('');
+	const safePkg = String(pkg || '').replace(/"/g, '&quot;');
+	const html = `
+		<h3 style='color:#e67e22;margin-top:0;'>App non installée</h3>
+		<p style='color:#bdc3c7;font-size:13px;margin:6px 0 12px 0;'>${safePkg} est absente sur ces casques :</p>
+		<div style='margin:6px 0 12px 0;'>
+			<button onclick='installDevGameOnHeadsets(${serialsJson})' style='background:#9b59b6;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>📦 Installer APK sur ces casques</button>
+		</div>
+		<div style='display:flex;flex-direction:column;gap:8px;'>${rows}</div>
+		<p style='color:#95a5a6;font-size:12px;margin-top:12px;'>Installez l'app sur les casques manquants (APK) puis relancez.</p>
+	`;
+	showModal(html);
+};
+
+window.launchAppMulti = async function(serials, pkg, refreshSerial) {
+	const uniqueSerials = Array.from(new Set((serials || []).filter(Boolean)));
+	if (uniqueSerials.length === 0) return;
+	showToast(`📱 Lancement sur ${uniqueSerials.length} casque(s)...`, 'info');
+	let success = 0;
+	let failed = 0;
+	const missing = [];
+	const checkFailed = [];
+
+	for (const serial of uniqueSerials) {
+		try {
+			let isInstalled = null;
+			try {
+				const listRes = await api(`/api/apps/${serial}`, { timeout: 12000 });
+				if (listRes && listRes.ok && Array.isArray(listRes.apps)) {
+					isInstalled = listRes.apps.includes(pkg);
+				}
+			} catch (e) {
+				isInstalled = null;
+			}
+			if (isInstalled === false) {
+				missing.push(serial);
+				continue;
+			}
+			const res = await api(`/api/apps/${serial}/launch`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ package: pkg })
+			});
+			if (res && res.ok) {
+				success += 1;
+				if (!runningApps[serial]) runningApps[serial] = [];
+				if (!runningApps[serial].includes(pkg)) {
+					runningApps[serial].push(pkg);
+				}
+				api('/api/apps/running/mark', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ serial, package: pkg, action: 'add' })
+				}).catch(() => {});
+			} else {
+				failed += 1;
+				if (isInstalled === null) checkFailed.push(serial);
+			}
+		} catch (e) {
+			failed += 1;
+			checkFailed.push(serial);
+		}
+	}
+
+	if (missing.length) {
+		window.showMissingAppDialog(pkg, missing);
+	}
+	if (checkFailed.length) {
+		showToast(`⚠️ Impossible de vérifier l’installation pour ${checkFailed.length} casque(s)`, 'warning');
+	}
+
+	if (success && !failed && missing.length === 0) {
+		showToast('✅ App lancée sur tous les casques', 'success');
+	} else if (success) {
+		showToast(`⚠️ App lancée sur ${success}/${uniqueSerials.length} casques`, 'warning');
+	} else if (missing.length) {
+		showToast(`ℹ️ App absente sur ${missing.length} casque(s)`, 'info');
+	} else {
+		showToast('❌ Échec lancement app', 'error');
+	}
+
+	renderDevices();
+	const device = { serial: refreshSerial || uniqueSerials[0], name: 'Device' };
+	showAppsDialog(device);
+};
+
+window.launchAppOnSelectedTargets = async function(defaultSerial, pkg) {
+	const targets = window.getSelectedAppTargets(defaultSerial);
+	if (!targets.length) {
+		showToast('⚠️ Sélectionnez au moins un casque', 'warning');
+		return;
+	}
+	return window.launchAppMulti(targets, pkg, defaultSerial);
+};
+
 window.showAppsDialog = async function(device) {
 	const res = await api(`/api/apps/${device.serial}`);
 	if (!res.ok) {
@@ -3490,17 +3621,54 @@ window.showAppsDialog = async function(device) {
 	await syncFavorites();
 	const apps = res.apps || [];
 	const running = runningApps[device.serial] || [];
-	let html = `<h3 style='color:#2ecc71;'>Apps installées sur ${device.name}</h3>`;
+	const selectableDevices = (Array.isArray(devices) ? devices : [])
+		.filter(d => d && d.serial && (typeof isRelayDevice !== 'function' || !isRelayDevice(d)));
+	const hasMultiTargets = selectableDevices.length > 1;
+	const targetListHtml = hasMultiTargets ? selectableDevices.map(d => {
+		const safeDeviceName = (d.name || d.serial).replace(/"/g, '&quot;');
+		const safeSerial = String(d.serial).replace(/"/g, '&quot;');
+		const checked = d.serial === device.serial ? 'checked' : '';
+		return `<label style='display:flex;align-items:center;gap:6px;background:#0f1117;padding:6px 8px;border-radius:6px;border:1px solid #2c3e50;font-size:12px;cursor:pointer;'>
+			<input type='checkbox' class='app-target-checkbox' data-serial="${safeSerial}" ${checked} style='accent-color:#2ecc71;' />
+			<span style='color:#ecf0f1;'>${safeDeviceName}</span>
+		</label>`;
+	}).join('') : '';
+	const targetSelector = hasMultiTargets ? `
+		<div style='margin:10px 0 12px;background:#111620;border:1px solid #2ecc71;border-radius:8px;padding:10px;'>
+			<div style='display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;'>
+				<div style='color:#bdc3c7;font-size:12px;'>Lancer sur :</div>
+				<div style='display:flex;gap:6px;'>
+					<button onclick='selectAllAppTargets(true)' style='background:#2ecc71;color:#000;border:none;padding:4px 8px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:11px;'>Tout</button>
+					<button onclick='selectAllAppTargets(false)' style='background:#34495e;color:#fff;border:none;padding:4px 8px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:11px;'>Aucun</button>
+				</div>
+			</div>
+			<div style='display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;'>${targetListHtml}</div>
+		</div>
+	` : '';
+	let html = `<h3 style='color:#2ecc71;'>Apps installées sur ${device.name}</h3>${targetSelector}`;
 	html += `<div style='max-height:400px;overflow-y:auto;'>`;
 	apps.forEach(pkg => {
 		const isFav = favorites.some(f => f.packageId === pkg);
 		const isRunning = running.includes(pkg);
 		const statusBg = isRunning ? '#27ae60' : '#23272f';
-		const statusIndicator = isRunning ? '🟢 En cours' : '';
+		const meta = getGameMeta(pkg);
+		const safeName = (meta.name || pkg).replace(/"/g, '&quot;');
+		const statusIndicator = isRunning ? `<span style='color:#b9f3c1;font-size:11px;'>🟢 En cours</span>` : '';
 		html += `<div style='padding:8px;margin:4px 0;background:${statusBg};border-radius:6px;display:flex;justify-content:space-between;align-items:center;border-left:4px solid ${isRunning ? '#2ecc71' : '#555'};'>
-			<span style='color:#fff;flex:1;'>${pkg}${statusIndicator ? ' ' + statusIndicator : ''}</span>
-			<button onclick="toggleFavorite('${device.serial}','${pkg}')" style='background:${isFav ? '#f39c12' : '#555'};color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-weight:bold;margin-right:4px;'>⭐</button>
-			${isRunning ? `<button onclick="stopGame('${device.serial}','${pkg}')" style='background:#e74c3c;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;'>⏹️ Stop</button>` : `<button onclick="launchApp('${device.serial}','${pkg}')" style='background:#2ecc71;color:#000;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;margin-right:4px;'>▶️ Lancer</button>`}
+			<div style='display:flex;align-items:center;gap:10px;flex:1;min-width:0;'>
+				<img src="${meta.icon}" alt="${safeName}" style='width:34px;height:34px;border-radius:8px;object-fit:cover;border:1px solid #2ecc71;flex:0 0 auto;' onerror="this.onerror=null;this.src='${DEFAULT_GAME_ICON}'" />
+				<div style='display:flex;flex-direction:column;gap:4px;min-width:0;'>
+					<div style='display:flex;align-items:center;gap:6px;min-width:0;'>
+						<span style='color:#fff;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>${safeName}</span>
+						${statusIndicator}
+					</div>
+					<span style='color:#95a5a6;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>${pkg}</span>
+				</div>
+			</div>
+			<div style='display:flex;align-items:center;gap:6px;'>
+				<button onclick="toggleFavorite('${device.serial}','${pkg}')" style='background:${isFav ? '#f39c12' : '#555'};color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-weight:bold;'>⭐</button>
+				${isRunning ? `<button onclick="stopGame('${device.serial}','${pkg}')" style='background:#e74c3c;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;'>⏹️ Stop</button>` : `<button onclick="launchAppOnSelectedTargets('${device.serial}','${pkg}')" style='background:#2ecc71;color:#000;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;'>▶️ Lancer</button>`}
+			</div>
 		</div>`;
 	});
 	html += `</div>`;
@@ -3813,6 +3981,84 @@ window.uploadDevGameToHeadset = async function(serial, deviceName) {
 	input.click();
 };
 
+window.installDevGameOnHeadsets = async function(serials) {
+	const uniqueSerials = Array.from(new Set((serials || []).filter(Boolean)));
+	if (uniqueSerials.length === 0) {
+		showToast('⚠️ Aucun casque sélectionné', 'warning');
+		return;
+	}
+	const input = document.createElement('input');
+	input.type = 'file';
+	input.accept = '.apk';
+	input.onchange = async (e) => {
+		const file = e.target.files[0];
+		if (!file) return;
+
+		const uploadUrl = (typeof resolveApiUrl === 'function')
+			? resolveApiUrl('/api/upload-dev-game')
+			: '/api/upload-dev-game';
+		showToast(`📤 Envoi de l'APK vers ${uniqueSerials.length} casque(s)...`, 'info');
+		const uploaded = [];
+		const uploadFailed = [];
+
+		for (const serial of uniqueSerials) {
+			const formData = new FormData();
+			formData.append('serial', serial);
+			formData.append('apk', file);
+			try {
+				const res = await fetch(uploadUrl, {
+					method: 'POST',
+					body: formData
+				});
+				const data = await res.json().catch(() => null);
+				if (data && data.ok) {
+					uploaded.push(serial);
+				} else {
+					uploadFailed.push(serial);
+				}
+			} catch (error) {
+				uploadFailed.push(serial);
+			}
+		}
+
+		if (!uploaded.length) {
+			showToast('❌ Envoi APK échoué', 'error');
+			return;
+		}
+
+		if (uploadFailed.length) {
+			showToast(`⚠️ APK envoyé sur ${uploaded.length}/${uniqueSerials.length} casque(s)`, 'warning');
+		} else {
+			showToast('✅ APK envoyé sur tous les casques', 'success');
+		}
+
+		showToast('⚙️ Installation en cours...', 'info');
+		let installed = 0;
+		const installFailed = [];
+
+		for (const serial of uploaded) {
+			try {
+				const res = await api('/api/install-dev-game', { serial });
+				if (res && res.ok) {
+					installed += 1;
+				} else {
+					installFailed.push(serial);
+				}
+			} catch (error) {
+				installFailed.push(serial);
+			}
+		}
+
+		if (installed) {
+			showToast(`✅ APK installé sur ${installed}/${uniqueSerials.length} casque(s)`, installed === uniqueSerials.length ? 'success' : 'warning');
+		}
+		if (installFailed.length) {
+			showToast(`❌ Échec installation sur ${installFailed.length} casque(s)`, 'error');
+		}
+	};
+	input.click();
+};
+
 window.installDevGameOnHeadset = async function(serial, deviceName) {
 	try {
 		showToast('⚙️ Installation en cours...', 'info');
@@ -3998,7 +4244,7 @@ function showTrialBanner(daysRemaining) {
 	banner.innerHTML = `
 		${bannerText}
 		${daysRemaining > 0 ? `<button onclick="openOfficialBillingPage()" style="margin-left:20px;background:#2ecc71;color:#000;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
-			🚀 Débloquer maintenant
+			Débloquer maintenant
 		</button>` : ''}
 	`;
 	document.body.appendChild(banner);
