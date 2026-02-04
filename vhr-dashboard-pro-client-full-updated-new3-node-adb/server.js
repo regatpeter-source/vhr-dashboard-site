@@ -2598,6 +2598,25 @@ app.post('/api/login', async (req, res) => {
     console.log('[api/login] password mismatch');
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
   }
+
+  // Best-effort remote sync to keep status aligned with site vitrine
+  try {
+    const remoteAuth = await attemptRemoteAuthentication(username, password);
+    if (remoteAuth && remoteAuth.remoteToken) {
+      cacheRemoteAuthToken(user.username, remoteAuth.remoteToken);
+      const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, user.username);
+      if (remoteDemo) {
+        applyRemoteDemoToUser(user, remoteDemo, { reason: 'login-remote-sync' });
+      }
+      const remoteUser = (remoteAuth.payload && remoteAuth.payload.user) || null;
+      if (remoteUser && remoteUser.subscriptionStatus && user.subscriptionStatus !== remoteUser.subscriptionStatus) {
+        user.subscriptionStatus = remoteUser.subscriptionStatus;
+        persistUser(user);
+      }
+    }
+  } catch (e) {
+    console.warn('[remote-sync] login sync failed:', e && e.message ? e.message : e);
+  }
   console.log('[api/login] login successful for:', username);
   const elevatedUser = elevateAdminIfAllowlisted(user);
   const token = jwt.sign({ username: elevatedUser.username, role: elevatedUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
