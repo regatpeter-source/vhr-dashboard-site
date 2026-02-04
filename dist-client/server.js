@@ -3202,7 +3202,7 @@ async function ensureLocalUserFromRemote(remotePayload, identifier, password) {
 }
 
 // --- Route de login ---
-app.post('/api/login', async (req, res) => {
+async function handleApiLogin(req, res) {
   console.log('[api/login] request received:', req.body);
   const identifier = String(req.body?.username || req.body?.email || '').trim();
   const password = req.body?.password;
@@ -3279,7 +3279,10 @@ app.post('/api/login', async (req, res) => {
   res.cookie('vhr_token', token, cookieOptions);
   console.log('[api/login] cookie set with secure=' + cookieOptions.secure + ', sameSite=' + cookieOptions.sameSite + ', maxAge=' + cookieOptions.maxAge);
   res.json({ ok: true, token, userId: elevatedUser.id, username: elevatedUser.username, role: elevatedUser.role, email: elevatedUser.email || null });
-});
+}
+
+app.post('/api/login', handleApiLogin);
+app.post('/api/dashboard/login', handleApiLogin);
 
 app.post('/api/remote-login', async (req, res) => {
   const clientAddress = getRequestAddress(req);
