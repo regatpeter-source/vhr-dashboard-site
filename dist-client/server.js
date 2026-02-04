@@ -4409,6 +4409,46 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
   }
 });
 
+// Diagnostic: expose local demo fields + cached remote snapshot
+app.get('/api/demo/diagnose', authMiddleware, async (req, res) => {
+  try {
+    const user = getUserByUsername(req.user.username);
+    if (!user) {
+      return res.status(404).json({ ok: false, error: 'Utilisateur non trouvé', code: 'user_not_found' });
+    }
+    const licenses = loadLicenses();
+    const accessSnapshot = buildUserAccessSummary(user, { licenses });
+    const cachedRemote = getCachedRemoteDemo(req.user.username);
+    return res.json({
+      ok: true,
+      user: {
+        username: user.username,
+        email: user.email || null,
+        role: user.role || 'user',
+        demoStartDate: user.demoStartDate || null,
+        demoStartSource: user.demoStartSource || null,
+        demoStartReason: user.demoStartReason || null,
+        demoStartAt: user.demoStartAt || user.demoStartDate || null
+      },
+      local: {
+        demoStartDate: accessSnapshot.demoStartDate || null,
+        demoExpiresAt: accessSnapshot.demoExpiresAt || null,
+        demoRemainingDays: accessSnapshot.demoRemainingDays,
+        demoExpired: accessSnapshot.demoExpired,
+        subscriptionStatus: accessSnapshot.subscriptionStatus,
+        hasActiveSubscription: accessSnapshot.hasActiveSubscription,
+        hasPerpetualLicense: accessSnapshot.hasPerpetualLicense,
+        licenseCount: accessSnapshot.licenseCount,
+        licenseTypes: accessSnapshot.licenseTypes
+      },
+      cachedRemote
+    });
+  } catch (e) {
+    console.error('[demo] diagnose error:', e);
+    return res.status(500).json({ ok: false, error: 'Server error', details: e.message });
+  }
+});
+
 // Génère un jeton JWT pour un utilisateur invité en démonstration 7 jours
 app.post('/api/demo/activate-guest', (req, res) => {
   res.status(403).json({ ok: false, error: 'Activation de démo invité désactivée. Connectez-vous avec un compte réel.' });

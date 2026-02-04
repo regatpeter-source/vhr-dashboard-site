@@ -4761,6 +4761,37 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
   }
 });
 
+// Diagnostic: expose local demo fields for current user
+app.get('/api/demo/diagnose', authMiddleware, async (req, res) => {
+  try {
+    const user = await findUserByUsernameAsync(req.user.username);
+    if (!user) {
+      return res.status(404).json({ ok: false, error: 'Utilisateur non trouvé', code: 'user_not_found' });
+    }
+    if (isUserDeletedOrDisabled(user)) {
+      return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+    }
+    const demo = await buildDemoStatusForUser(user);
+    return res.json({
+      ok: true,
+      user: {
+        username: user.username,
+        email: user.email || null,
+        role: user.role || 'user',
+        demoStartDate: user.demoStartDate || null,
+        demoStartSource: user.demoStartSource || null,
+        demoStartReason: user.demoStartReason || null,
+        demoStartAt: user.demoStartAt || user.demoStartDate || null,
+        demoEndDate: user.demoEndDate || null
+      },
+      demo
+    });
+  } catch (e) {
+    console.error('[demo] diagnose error:', e);
+    return res.status(500).json({ ok: false, error: 'Server error', details: e.message });
+  }
+});
+
 // ========== PROTECTED DOWNLOADS (VHR PRO) ==========
 
 // Download APK/Voice file - requires authentication and valid subscription or active demo
