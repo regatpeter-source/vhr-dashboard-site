@@ -38,6 +38,8 @@ const REMOTE_AUTH_TIMEOUT_MS = Number(process.env.REMOTE_AUTH_TIMEOUT_MS || '120
 const REMOTE_LOGIN_PATHS = ['/api/login', '/api/auth/login'];
 const REMOTE_DEMO_STATUS_PATH = process.env.REMOTE_DEMO_STATUS_PATH || '/api/demo/status';
 const REMOTE_DEMO_CACHE_TTL_MS = Number(process.env.REMOTE_DEMO_CACHE_TTL_MS || '300000');
+const REMOTE_DEMO_SYNC_INTERVAL_MS = Number(process.env.REMOTE_DEMO_SYNC_INTERVAL_MS || '600000');
+const REMOTE_AUTH_TOKEN_TTL_MS = Number(process.env.REMOTE_AUTH_TOKEN_TTL_MS || '7200000');
 
 // ========== SINGLE SERVER INSTANCE ENFORCEMENT ==========
 // Kill any existing server on port 3000 before starting
@@ -2944,6 +2946,51 @@ function cacheRemoteDemoStatus(username, demo) {
 function cacheRemoteAuthToken(username, token) {
   if (!username || !token) return;
   remoteAuthTokenCache.set(username.toLowerCase(), { token, fetchedAt: Date.now() });
+  try {
+    const stored = getUserByUsername(username);
+    if (stored) {
+      stored.remoteAuthToken = token;
+      stored.remoteAuthTokenIssuedAt = new Date().toISOString();
+      persistUser(stored);
+    }
+  } catch (e) {
+    console.warn('[remote-auth] persist token failed:', e && e.message ? e.message : e);
+  }
+}
+
+function clearRemoteAuthToken(username) {
+  if (!username) return;
+  remoteAuthTokenCache.delete(username.toLowerCase());
+  try {
+    const stored = getUserByUsername(username);
+    if (stored && (stored.remoteAuthToken || stored.remoteAuthTokenIssuedAt)) {
+      delete stored.remoteAuthToken;
+      delete stored.remoteAuthTokenIssuedAt;
+      persistUser(stored);
+    }
+  } catch (e) {
+    console.warn('[remote-auth] clear token failed:', e && e.message ? e.message : e);
+  }
+}
+
+function getPersistedRemoteAuthToken(username) {
+  if (!username) return null;
+  try {
+    const stored = getUserByUsername(username);
+    if (!stored || !stored.remoteAuthToken) return null;
+    const issuedAt = stored.remoteAuthTokenIssuedAt ? new Date(stored.remoteAuthTokenIssuedAt).getTime() : null;
+    if (issuedAt && Number.isFinite(issuedAt)) {
+      if (Date.now() - issuedAt > REMOTE_AUTH_TOKEN_TTL_MS) {
+        clearRemoteAuthToken(username);
+        return null;
+      }
+    }
+    remoteAuthTokenCache.set(username.toLowerCase(), { token: stored.remoteAuthToken, fetchedAt: Date.now() });
+    return stored.remoteAuthToken;
+  } catch (e) {
+    console.warn('[remote-auth] read token failed:', e && e.message ? e.message : e);
+    return null;
+  }
 }
 
 function applyRemoteDemoToUser(user, remoteDemo, options = {}) {
@@ -2994,9 +3041,52 @@ function getCachedRemoteAuthToken(username) {
   if (!entry) return null;
   if (Date.now() - entry.fetchedAt > REMOTE_DEMO_CACHE_TTL_MS) {
     remoteAuthTokenCache.delete(username.toLowerCase());
-    return null;
+    const persisted = getPersistedRemoteAuthToken(username);
+    return persisted || null;
   }
   return entry.token;
+}
+
+let remoteDemoSyncInFlight = false;
+async function syncRemoteDemoForAllUsers() {
+  if (remoteDemoSyncInFlight) return;
+  remoteDemoSyncInFlight = true;
+  try {
+    if (!USE_POSTGRES && !dbEnabled) reloadUsers();
+    const allUsers = typeof loadUsers === 'function' ? loadUsers() : users;
+    if (!Array.isArray(allUsers) || allUsers.length === 0) return;
+
+    let syncedCount = 0;
+    for (const u of allUsers) {
+      const username = u && u.username;
+      if (!username) continue;
+      const token = getCachedRemoteAuthToken(username);
+      if (!token) continue;
+      const remoteDemo = await fetchRemoteDemoStatus(token, username);
+      if (remoteDemo) {
+        applyRemoteDemoToUser(u, remoteDemo, { reason: 'periodic-remote-sync' });
+        syncedCount += 1;
+      }
+    }
+
+    if (syncedCount > 0) {
+      console.log(`[remote-demo] periodic sync completed: ${syncedCount} user(s)`);
+    }
+  } catch (err) {
+    console.warn('[remote-demo] periodic sync failed:', err && err.message ? err.message : err);
+  } finally {
+    remoteDemoSyncInFlight = false;
+  }
+}
+
+function scheduleRemoteDemoSync() {
+  if (!Number.isFinite(REMOTE_DEMO_SYNC_INTERVAL_MS) || REMOTE_DEMO_SYNC_INTERVAL_MS <= 0) {
+    console.log('[remote-demo] periodic sync disabled (interval <= 0)');
+    return;
+  }
+  setInterval(syncRemoteDemoForAllUsers, REMOTE_DEMO_SYNC_INTERVAL_MS);
+  syncRemoteDemoForAllUsers().catch(() => {});
+  console.log(`[remote-demo] periodic sync enabled every ${Math.round(REMOTE_DEMO_SYNC_INTERVAL_MS / 60000)} min`);
 }
 
 async function fetchRemoteDemoStatus(remoteToken, username) {
@@ -3010,6 +3100,9 @@ async function fetchRemoteDemoStatus(remoteToken, username) {
       timeout: REMOTE_AUTH_TIMEOUT_MS
     });
     const payload = await response.json().catch(() => null);
+    if (response.status === 401 || response.status === 403) {
+      clearRemoteAuthToken(username);
+    }
     if (response.ok && payload && payload.ok && payload.demo) {
       cacheRemoteDemoStatus(username, payload.demo);
       return payload.demo;
@@ -3131,8 +3224,28 @@ app.post('/api/login', async (req, res) => {
   }
 
   if (!user) {
-    console.log('[api/login] user not found');
-    return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
+    console.log('[api/login] user not found locally, attempting remote auth');
+    try {
+      const remoteAuth = await attemptRemoteAuthentication(identifier, password);
+      if (!remoteAuth || !remoteAuth.remoteToken) {
+        return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
+      }
+
+      const localUser = await ensureLocalUserFromRemote(remoteAuth.payload, identifier, password);
+      if (!localUser) {
+        return res.status(500).json({ ok: false, error: 'Impossible de synchroniser le compte local' });
+      }
+
+      user = localUser;
+      cacheRemoteAuthToken(user.username, remoteAuth.remoteToken);
+      const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, user.username);
+      if (remoteDemo) {
+        applyRemoteDemoToUser(user, remoteDemo, { reason: 'login-remote-autoprovision' });
+      }
+    } catch (err) {
+      console.warn('[remote-sync] login autoprovision failed:', err && err.message ? err.message : err);
+      return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
+    }
   }
 
   const valid = await bcrypt.compare(password, user.passwordHash || user.passwordhash);
@@ -3144,6 +3257,19 @@ app.post('/api/login', async (req, res) => {
   console.log('[api/login] login successful for:', user.username);
   const userAgent = String(req.headers['user-agent'] || '').toLowerCase();
   const isElectronClient = userAgent.includes('electron') || String(req.headers['x-vhr-electron'] || '').toLowerCase() === 'electron';
+  // Best-effort remote sync to keep demo/subscription aligned with site vitrine
+  try {
+    const remoteAuth = await attemptRemoteAuthentication(identifier, password);
+    if (remoteAuth && remoteAuth.remoteToken) {
+      cacheRemoteAuthToken(user.username, remoteAuth.remoteToken);
+      const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, user.username);
+      if (remoteDemo) {
+        applyRemoteDemoToUser(user, remoteDemo, { reason: 'login-remote-sync' });
+      }
+    }
+  } catch (e) {
+    console.warn('[remote-sync] login sync failed:', e && e.message ? e.message : e);
+  }
   if (isElectronClient) {
     ensureElectronTrialStarted(user, { reason: 'login-electron' });
   }
@@ -3963,8 +4089,31 @@ app.post('/api/auth/login', async (req, res) => {
   }
 
   if (!user) {
-    console.log('[api/auth/login] user not found by email');
-    return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
+    console.log('[api/auth/login] user not found by email, attempting remote auth');
+    try {
+      let remoteAuth = await attemptRemoteAuthentication(email, password);
+      if (!remoteAuth) {
+        remoteAuth = await attemptRemoteAuthentication(String(email || '').trim(), password);
+      }
+      if (!remoteAuth || !remoteAuth.remoteToken) {
+        return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
+      }
+
+      const localUser = await ensureLocalUserFromRemote(remoteAuth.payload, email, password);
+      if (!localUser) {
+        return res.status(500).json({ ok: false, error: 'Impossible de synchroniser le compte local' });
+      }
+
+      user = localUser;
+      cacheRemoteAuthToken(user.username, remoteAuth.remoteToken);
+      const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, user.username);
+      if (remoteDemo) {
+        applyRemoteDemoToUser(user, remoteDemo, { reason: 'auth-login-remote-autoprovision' });
+      }
+    } catch (err) {
+      console.warn('[remote-sync] auth login autoprovision failed:', err && err.message ? err.message : err);
+      return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
+    }
   }
   
   const valid = await bcrypt.compare(password, user.passwordhash || user.passwordHash);
@@ -3974,6 +4123,22 @@ app.post('/api/auth/login', async (req, res) => {
   }
   
   console.log('[api/auth/login] login successful for:', user.username);
+  // Best-effort remote sync to keep demo/subscription aligned with site vitrine
+  try {
+    let remoteAuth = await attemptRemoteAuthentication(email, password);
+    if (!remoteAuth && user && user.username) {
+      remoteAuth = await attemptRemoteAuthentication(user.username, password);
+    }
+    if (remoteAuth && remoteAuth.remoteToken) {
+      cacheRemoteAuthToken(user.username, remoteAuth.remoteToken);
+      const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, user.username);
+      if (remoteDemo) {
+        applyRemoteDemoToUser(user, remoteDemo, { reason: 'auth-login-remote-sync' });
+      }
+    }
+  } catch (e) {
+    console.warn('[remote-sync] auth login sync failed:', e && e.message ? e.message : e);
+  }
   const userAgent = String(req.headers['user-agent'] || '').toLowerCase();
   const isElectronClient = userAgent.includes('electron') || String(req.headers['x-vhr-electron'] || '').toLowerCase() === 'electron';
   if (isElectronClient) {
@@ -4284,6 +4449,28 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
         }
         if (!bypassRemoteReturn) {
           return res.json({ ok: true, demo: remoteDemo, remote: true });
+        }
+      }
+    }
+    if (!cachedRemoteToken) {
+      const persistedToken = getPersistedRemoteAuthToken(req.user.username);
+      if (persistedToken) {
+        const remoteDemo = await fetchRemoteDemoStatus(persistedToken, req.user.username);
+        if (remoteDemo) {
+          console.log('[demo/status] returning persisted-token remote demo for', req.user.username);
+          const remoteUser = getUserByUsername(req.user.username);
+          if (remoteUser) {
+            applyRemoteDemoToUser(remoteUser, remoteDemo, { reason: 'demo-fetch' });
+            if (demoIsElectron) {
+              const started = ensureElectronTrialStarted(remoteUser, { reason: 'demo-status-electron-fetch' });
+              if (started && !remoteDemo.demoStartDate) {
+                remoteDemo.demoStartDate = remoteUser.demoStartDate;
+              }
+            }
+          }
+          if (!bypassRemoteReturn) {
+            return res.json({ ok: true, demo: remoteDemo, remote: true });
+          }
         }
       }
     }
@@ -8215,6 +8402,8 @@ io.on('connection', socket => {
   } else {
     console.warn('[server] NO_ADB=1 set: skipping ADB device tracking & streaming features (good for dev/test).');
   }
+
+  scheduleRemoteDemoSync();
 })();
 
 const PORT = process.env.PORT || 3000;
