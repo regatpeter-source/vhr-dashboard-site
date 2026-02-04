@@ -3581,12 +3581,16 @@ app.post('/api/admin/init-users', async (req, res) => {
 // Usage: POST /api/admin/sync-user avec en-tête x-sync-secret ou body.secret = SYNC_USERS_SECRET
 // Payload attendu: { username, email, role, passwordHash?, password?, stripeCustomerId?, subscriptionStatus? }
 app.post('/api/admin/sync-user', async (req, res) => {
-  if (!SYNC_USERS_SECRET) {
-    return res.status(403).json({ ok: false, error: 'SYNC_USERS_SECRET non configuré' });
-  }
   const providedSecret = req.headers['x-sync-secret'] || req.body?.secret || req.query?.secret;
-  if (providedSecret !== SYNC_USERS_SECRET) {
-    return res.status(403).json({ ok: false, error: 'Secret invalide' });
+  const secretValid = SYNC_USERS_SECRET && providedSecret === SYNC_USERS_SECRET;
+  if (!secretValid) {
+    if (!SYNC_USERS_SECRET) {
+      if (!isLocalRequest(req)) {
+        return res.status(403).json({ ok: false, error: 'SYNC_USERS_SECRET non configuré' });
+      }
+    } else {
+      return res.status(403).json({ ok: false, error: 'Secret invalide' });
+    }
   }
 
   const { username, email, role = 'user', password, passwordHash, stripeCustomerId, subscriptionStatus, demoStartDate, demoExtensionDays, demoStartSource } = req.body || {};
