@@ -29,6 +29,11 @@ const http_module = require('http');
 const unzipper = require('unzipper');
 const fetch = require('node-fetch');
 const os = require('os');
+const REMOTE_AUTH_ORIGIN = process.env.REMOTE_AUTH_ORIGIN || process.env.REMOTE_HOST || process.env.PUBLIC_API_BASE_URL || 'https://www.vhr-dashboard-site.com';
+const REMOTE_AUTH_TIMEOUT_MS = Number(process.env.REMOTE_AUTH_TIMEOUT_MS || '12000');
+const REMOTE_LOGIN_PATHS = ['/api/login', '/api/auth/login'];
+const REMOTE_DEMO_STATUS_PATH = process.env.REMOTE_DEMO_STATUS_PATH || '/api/demo/status';
+const REMOTE_DEMO_CACHE_TTL_MS = Number(process.env.REMOTE_DEMO_CACHE_TTL_MS || '300000');
 
 // ========== SINGLE SERVER INSTANCE ENFORCEMENT ==========
 // Kill any existing server on port 3000 before starting
@@ -2314,6 +2319,138 @@ function buildAuthCookieOptions(req, overrides = {}) {
   };
 }
 
+const LOCAL_LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+function normalizeRemoteAddress(address) {
+  if (!address) return '';
+  if (address.startsWith('::ffff:')) {
+    return address.slice(7);
+  }
+  return address;
+}
+
+function getRequestAddress(req) {
+  const forwardedFor = (req.headers && req.headers['x-forwarded-for']) || '';
+  const candidate = forwardedFor.split(',')[0].trim() || req.socket?.remoteAddress;
+  const normalized = normalizeRemoteAddress(candidate);
+  return normalized || 'unknown';
+}
+
+function isLocalRequest(req) {
+  const candidate = getRequestAddress(req);
+  return LOCAL_LOOPBACK_ADDRESSES.has(candidate);
+}
+
+const remoteDemoCache = new Map();
+const remoteAuthTokenCache = new Map();
+
+function getCachedRemoteDemo(username) {
+  if (!username) return null;
+  const entry = remoteDemoCache.get(username.toLowerCase());
+  if (!entry) return null;
+  if (Date.now() - entry.fetchedAt > REMOTE_DEMO_CACHE_TTL_MS) {
+    remoteDemoCache.delete(username.toLowerCase());
+    return null;
+  }
+  return entry.demo;
+}
+
+function cacheRemoteDemoStatus(username, demo) {
+  if (!username || !demo) return;
+  remoteDemoCache.set(username.toLowerCase(), { demo, fetchedAt: Date.now() });
+}
+
+function cacheRemoteAuthToken(username, token) {
+  if (!username || !token) return;
+  remoteAuthTokenCache.set(username.toLowerCase(), { token, fetchedAt: Date.now() });
+}
+
+function getCachedRemoteAuthToken(username) {
+  if (!username) return null;
+  const entry = remoteAuthTokenCache.get(username.toLowerCase());
+  if (!entry) return null;
+  if (Date.now() - entry.fetchedAt > REMOTE_DEMO_CACHE_TTL_MS) {
+    remoteAuthTokenCache.delete(username.toLowerCase());
+    return null;
+  }
+  return entry.token;
+}
+
+function applyRemoteDemoToUser(user, remoteDemo, options = {}) {
+  if (!user || !remoteDemo) return false;
+  let changed = false;
+  const remoteStart = remoteDemo.demoStartDate || remoteDemo.demostartdate || null;
+  if (remoteStart && user.demoStartDate !== remoteStart) {
+    user.demoStartDate = remoteStart;
+    user.demoStartSource = user.demoStartSource || 'remote';
+    user.demoStartAt = user.demoStartAt || user.demoStartDate;
+    changed = true;
+  }
+
+  const remoteSubscriptionStatus = remoteDemo.subscriptionStatus || null;
+  if (remoteSubscriptionStatus && user.subscriptionStatus !== remoteSubscriptionStatus) {
+    user.subscriptionStatus = remoteSubscriptionStatus;
+    changed = true;
+  } else if (remoteDemo.hasValidSubscription && user.subscriptionStatus !== 'active') {
+    user.subscriptionStatus = 'active';
+    changed = true;
+  }
+
+  if (changed) {
+    persistUser(user);
+    if (options.syncTargets) {
+      syncUserToTargets?.(user, { reason: options.reason || 'remote-demo' });
+    }
+  }
+  return changed;
+}
+
+async function fetchRemoteDemoStatus(remoteToken, username) {
+  if (!remoteToken || !username) return null;
+  try {
+    const response = await fetch(`${REMOTE_AUTH_ORIGIN}${REMOTE_DEMO_STATUS_PATH}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${remoteToken}`
+      },
+      timeout: REMOTE_AUTH_TIMEOUT_MS
+    });
+    const payload = await response.json().catch(() => null);
+    if (response.ok && payload && payload.ok && payload.demo) {
+      cacheRemoteDemoStatus(username, payload.demo);
+      return payload.demo;
+    }
+  } catch (err) {
+    console.warn('[remote-demo] fetch failed', err && err.message ? err.message : err);
+  }
+  return null;
+}
+
+async function attemptRemoteAuthentication(identifier, password) {
+  if (!identifier || !password) return null;
+  for (const path of REMOTE_LOGIN_PATHS) {
+    const url = `${REMOTE_AUTH_ORIGIN}${path}`;
+    const body = path.endsWith('/auth/login')
+      ? { email: identifier, password }
+      : { username: identifier, password };
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        redirect: 'follow',
+        timeout: REMOTE_AUTH_TIMEOUT_MS
+      });
+      const payload = await response.json().catch(() => null);
+      if (response.ok && payload && payload.ok) {
+        return { payload, url, remoteToken: payload.token };
+      }
+    } catch (err) {
+      console.warn('[remote-auth] failed', path, err && err.message ? err.message : err);
+    }
+  }
+  return null;
+}
+
 // Suivi des jeux lancés (persistance en mémoire côté serveur)
 const runningAppState = {}; // { serial: [pkg1, pkg2, ...] }
 
@@ -2338,6 +2475,103 @@ function authMiddleware(req, res, next) {
     return res.status(401).json({ ok: false, error: 'Token invalide' });
   }
 }
+
+app.post('/api/remote-login', async (req, res) => {
+  const clientAddress = getRequestAddress(req);
+  if (!isLocalRequest(req)) {
+    console.warn(`[remote-login] blocked request from ${clientAddress}`);
+    return res.status(403).json({ ok: false, error: 'Accessible uniquement depuis localhost' });
+  }
+  const { identifier, password } = req.body || {};
+  if (!identifier || !password) {
+    return res.status(400).json({ ok: false, error: 'Identifiant et mot de passe requis' });
+  }
+
+  try {
+    const remoteAuth = await attemptRemoteAuthentication(identifier, password);
+    if (!remoteAuth) {
+      return res.status(401).json({ ok: false, error: 'Identifiants distants invalides' });
+    }
+
+    const remoteUser = (remoteAuth.payload && remoteAuth.payload.user) || {};
+    const normalizedUsername = String(remoteUser.username || remoteUser.name || identifier || '').trim();
+    if (!normalizedUsername) {
+      return res.status(500).json({ ok: false, error: 'Impossible de déterminer le nom d’utilisateur distant' });
+    }
+
+    reloadUsers();
+    let localUser = getUserByUsername(normalizedUsername);
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const demoStartDate = remoteUser.demoStartDate || remoteUser.demostartdate || null;
+    const demoStartSource = remoteUser.demoStartSource || null;
+    const demoStartReason = remoteUser.demoStartReason || null;
+    const demoStartAt = remoteUser.demoStartAt || demoStartDate || null;
+    const demoEndDate = remoteUser.demoEndDate || remoteUser.demoenddate || null;
+    const demoExtensionDays = remoteUser.demoExtensionDays ?? remoteUser.demoextensiondays ?? null;
+
+    if (localUser) {
+      localUser.passwordHash = hashedPassword;
+      localUser.email = remoteUser.email || localUser.email;
+      localUser.role = remoteUser.role || localUser.role || 'user';
+      localUser.stripeCustomerId = remoteUser.stripeCustomerId || localUser.stripeCustomerId || null;
+      localUser.subscriptionStatus = remoteUser.subscriptionStatus || localUser.subscriptionStatus || null;
+      localUser.demoStartDate = localUser.demoStartDate || demoStartDate || null;
+      localUser.demoStartSource = localUser.demoStartSource || demoStartSource || null;
+      localUser.demoStartReason = localUser.demoStartReason || demoStartReason || null;
+      localUser.demoStartAt = localUser.demoStartAt || demoStartAt || null;
+      localUser.demoEndDate = localUser.demoEndDate || demoEndDate || null;
+      localUser.demoExtensionDays = localUser.demoExtensionDays ?? demoExtensionDays ?? null;
+    } else {
+      localUser = {
+        id: `user_${normalizedUsername}`,
+        username: normalizedUsername,
+        passwordHash: hashedPassword,
+        email: remoteUser.email || null,
+        role: remoteUser.role || 'user',
+        stripeCustomerId: remoteUser.stripeCustomerId || null,
+        subscriptionStatus: remoteUser.subscriptionStatus || null,
+        demoStartDate: demoStartDate || null,
+        demoStartSource: demoStartSource || null,
+        demoStartReason: demoStartReason || null,
+        demoStartAt: demoStartAt || null,
+        demoEndDate: demoEndDate || null,
+        demoExtensionDays: demoExtensionDays ?? null,
+        createdAt: new Date().toISOString()
+      };
+    }
+
+    const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, normalizedUsername);
+    if (remoteDemo) {
+      applyRemoteDemoToUser(localUser, remoteDemo, { reason: 'remote-login' });
+    }
+
+    if (!localUser.demoStartDate) {
+      initializeDemoForUser(localUser);
+    }
+
+    persistUser(localUser);
+    cacheRemoteAuthToken(localUser.username, remoteAuth.remoteToken);
+
+    const elevatedUser = elevateAdminIfAllowlisted(localUser);
+    const token = jwt.sign({ username: elevatedUser.username, role: elevatedUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    const cookieOptions = buildAuthCookieOptions(req);
+    res.cookie('vhr_token', token, cookieOptions);
+
+    return res.json({
+      ok: true,
+      token,
+      userId: elevatedUser.id,
+      username: elevatedUser.username,
+      role: elevatedUser.role,
+      email: elevatedUser.email || null,
+      remoteOrigin: remoteAuth.url,
+      demo: remoteDemo || null
+    });
+  } catch (err) {
+    console.error('[remote-login] error:', err && err.message ? err.message : err);
+    return res.status(500).json({ ok: false, error: 'Erreur d\'authentification distante' });
+  }
+});
 
 // --- Route de login ---
 app.post('/api/login', async (req, res) => {
@@ -3247,6 +3481,25 @@ app.post('/api/admin/revoke-subscription', authMiddleware, async (req, res) => {
 // Get demo/trial status - also check Stripe subscription status
 app.get('/api/demo/status', authMiddleware, async (req, res) => {
   try {
+    const cachedDemo = getCachedRemoteDemo(req.user.username);
+    if (cachedDemo) {
+      const cachedUser = getUserByUsername(req.user.username);
+      if (cachedUser) {
+        applyRemoteDemoToUser(cachedUser, cachedDemo, { reason: 'demo-cache' });
+      }
+      return res.json({ ok: true, demo: cachedDemo, remote: true });
+    }
+    const cachedRemoteToken = getCachedRemoteAuthToken(req.user.username);
+    if (cachedRemoteToken) {
+      const remoteDemo = await fetchRemoteDemoStatus(cachedRemoteToken, req.user.username);
+      if (remoteDemo) {
+        const remoteUser = getUserByUsername(req.user.username);
+        if (remoteUser) {
+          applyRemoteDemoToUser(remoteUser, remoteDemo, { reason: 'demo-fetch' });
+        }
+        return res.json({ ok: true, demo: remoteDemo, remote: true });
+      }
+    }
     let user = getUserByUsername(req.user.username);
 
     // Auto-provision a local user with an active trial when the JWT is valid

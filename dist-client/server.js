@@ -3061,6 +3061,13 @@ async function ensureLocalUserFromRemote(remotePayload, identifier, password) {
   const identifierLooksLikeEmail = normalizedIdentifier.includes('@');
   const emailCandidate = remoteUser.email || (identifierLooksLikeEmail ? normalizedIdentifier : null);
   const role = remoteUser.role || (existing && existing.role) || 'user';
+  const remoteDemoStart = remoteUser.demoStartDate || remoteUser.demostartdate || null;
+  const remoteDemoEnd = remoteUser.demoEndDate || remoteUser.demoenddate || null;
+  const remoteDemoSource = remoteUser.demoStartSource || null;
+  const remoteDemoReason = remoteUser.demoStartReason || null;
+  const remoteDemoAt = remoteUser.demoStartAt || remoteUser.demoStartDate || null;
+  const remoteDemoExtensionDays = remoteUser.demoExtensionDays ?? remoteUser.demoextensiondays ?? null;
+
   const userToPersist = existing
     ? {
       ...existing,
@@ -3068,7 +3075,13 @@ async function ensureLocalUserFromRemote(remotePayload, identifier, password) {
       email: emailCandidate || existing.email,
       role,
       stripeCustomerId: remoteUser.stripeCustomerId || existing.stripeCustomerId,
-      subscriptionStatus: remoteUser.subscriptionStatus || existing.subscriptionStatus
+      subscriptionStatus: remoteUser.subscriptionStatus || existing.subscriptionStatus,
+      demoStartDate: existing.demoStartDate || remoteDemoStart || null,
+      demoStartSource: existing.demoStartSource || remoteDemoSource || null,
+      demoStartReason: existing.demoStartReason || remoteDemoReason || null,
+      demoStartAt: existing.demoStartAt || remoteDemoAt || null,
+      demoEndDate: existing.demoEndDate || remoteDemoEnd || null,
+      demoExtensionDays: existing.demoExtensionDays ?? remoteDemoExtensionDays ?? null
     }
     : {
       id: `user_${username}`,
@@ -3078,6 +3091,12 @@ async function ensureLocalUserFromRemote(remotePayload, identifier, password) {
       role,
       stripeCustomerId: remoteUser.stripeCustomerId || null,
       subscriptionStatus: remoteUser.subscriptionStatus || null,
+      demoStartDate: remoteDemoStart || null,
+      demoStartSource: remoteDemoSource || null,
+      demoStartReason: remoteDemoReason || null,
+      demoStartAt: remoteDemoAt || null,
+      demoEndDate: remoteDemoEnd || null,
+      demoExtensionDays: remoteDemoExtensionDays ?? null,
       createdAt: new Date().toISOString()
     };
   try {
@@ -3161,13 +3180,13 @@ app.post('/api/remote-login', async (req, res) => {
     const elevatedUser = elevateAdminIfAllowlisted(localUser);
     const userAgent = String(req.headers['user-agent'] || '').toLowerCase();
     const isElectronClient = userAgent.includes('electron') || String(req.headers['x-vhr-electron'] || '').toLowerCase() === 'electron';
-    if (isElectronClient) {
-      ensureElectronTrialStarted(elevatedUser, { reason: 'remote-login-electron' });
-    }
     cacheRemoteAuthToken(elevatedUser.username, remoteAuth.remoteToken);
     const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, elevatedUser.username);
     if (remoteDemo) {
       applyRemoteDemoToUser(elevatedUser, remoteDemo, { reason: 'remote-login' });
+    }
+    if (isElectronClient && !elevatedUser.demoStartDate) {
+      ensureElectronTrialStarted(elevatedUser, { reason: 'remote-login-electron' });
     }
     const token = jwt.sign({ username: elevatedUser.username, role: elevatedUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
     const cookieOptions = buildAuthCookieOptions(req);
