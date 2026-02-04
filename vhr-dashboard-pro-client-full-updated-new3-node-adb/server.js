@@ -34,6 +34,7 @@ const REMOTE_AUTH_TIMEOUT_MS = Number(process.env.REMOTE_AUTH_TIMEOUT_MS || '120
 const REMOTE_LOGIN_PATHS = ['/api/login', '/api/auth/login'];
 const REMOTE_DEMO_STATUS_PATH = process.env.REMOTE_DEMO_STATUS_PATH || '/api/demo/status';
 const REMOTE_DEMO_CACHE_TTL_MS = Number(process.env.REMOTE_DEMO_CACHE_TTL_MS || '300000');
+const REMOTE_DEMO_SYNC_INTERVAL_MS = Number(process.env.REMOTE_DEMO_SYNC_INTERVAL_MS || '600000');
 
 // ========== SINGLE SERVER INSTANCE ENFORCEMENT ==========
 // Kill any existing server on port 3000 before starting
@@ -2375,6 +2376,48 @@ function getCachedRemoteAuthToken(username) {
   return entry.token;
 }
 
+let remoteDemoSyncInFlight = false;
+async function syncRemoteDemoForAllUsers() {
+  if (remoteDemoSyncInFlight) return;
+  remoteDemoSyncInFlight = true;
+  try {
+    reloadUsers();
+    const allUsers = typeof loadUsers === 'function' ? loadUsers() : users;
+    if (!Array.isArray(allUsers) || allUsers.length === 0) return;
+
+    let syncedCount = 0;
+    for (const u of allUsers) {
+      const username = u && u.username;
+      if (!username) continue;
+      const token = getCachedRemoteAuthToken(username);
+      if (!token) continue;
+      const remoteDemo = await fetchRemoteDemoStatus(token, username);
+      if (remoteDemo) {
+        applyRemoteDemoToUser(u, remoteDemo, { reason: 'periodic-remote-sync' });
+        syncedCount += 1;
+      }
+    }
+
+    if (syncedCount > 0) {
+      console.log(`[remote-demo] periodic sync completed: ${syncedCount} user(s)`);
+    }
+  } catch (err) {
+    console.warn('[remote-demo] periodic sync failed:', err && err.message ? err.message : err);
+  } finally {
+    remoteDemoSyncInFlight = false;
+  }
+}
+
+function scheduleRemoteDemoSync() {
+  if (!Number.isFinite(REMOTE_DEMO_SYNC_INTERVAL_MS) || REMOTE_DEMO_SYNC_INTERVAL_MS <= 0) {
+    console.log('[remote-demo] periodic sync disabled (interval <= 0)');
+    return;
+  }
+  setInterval(syncRemoteDemoForAllUsers, REMOTE_DEMO_SYNC_INTERVAL_MS);
+  syncRemoteDemoForAllUsers().catch(() => {});
+  console.log(`[remote-demo] periodic sync enabled every ${Math.round(REMOTE_DEMO_SYNC_INTERVAL_MS / 60000)} min`);
+}
+
 function applyRemoteDemoToUser(user, remoteDemo, options = {}) {
   if (!user || !remoteDemo) return false;
   let changed = false;
@@ -2590,8 +2633,51 @@ app.post('/api/login', async (req, res) => {
   }
   
   if (!user) {
-    console.log('[api/login] user not found');
-    return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
+    console.log('[api/login] user not found locally, attempting remote auth');
+    try {
+      const remoteAuth = await attemptRemoteAuthentication(username, password);
+      if (remoteAuth && remoteAuth.remoteToken) {
+        const remoteUser = (remoteAuth.payload && remoteAuth.payload.user) || {};
+        const normalizedUsername = String(remoteUser.username || remoteUser.name || username || '').trim();
+        if (!normalizedUsername) {
+          return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+        user = {
+          id: `user_${normalizedUsername}`,
+          username: normalizedUsername,
+          passwordHash: hashedPassword,
+          email: remoteUser.email || null,
+          role: remoteUser.role || 'user',
+          stripeCustomerId: remoteUser.stripeCustomerId || null,
+          subscriptionStatus: remoteUser.subscriptionStatus || null,
+          demoStartDate: remoteUser.demoStartDate || remoteUser.demostartdate || null,
+          demoStartSource: remoteUser.demoStartSource || null,
+          demoStartReason: remoteUser.demoStartReason || null,
+          demoStartAt: remoteUser.demoStartAt || remoteUser.demoStartDate || null,
+          demoEndDate: remoteUser.demoEndDate || remoteUser.demoenddate || null,
+          demoExtensionDays: remoteUser.demoExtensionDays ?? remoteUser.demoextensiondays ?? null,
+          createdAt: new Date().toISOString()
+        };
+
+        const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, normalizedUsername);
+        if (remoteDemo) {
+          applyRemoteDemoToUser(user, remoteDemo, { reason: 'login-remote-autoprovision' });
+        }
+        if (!user.demoStartDate) {
+          initializeDemoForUser(user);
+        }
+
+        persistUser(user);
+        cacheRemoteAuthToken(user.username, remoteAuth.remoteToken);
+      } else {
+        return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
+      }
+    } catch (e) {
+      console.warn('[remote-sync] login autoprovision failed:', e && e.message ? e.message : e);
+      return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
+    }
   }
   const valid = await bcrypt.compare(password, user.passwordhash || user.passwordHash);
   if (!valid) {
@@ -3318,14 +3404,87 @@ app.post('/api/auth/login', async (req, res) => {
   }
 
   if (!user) {
-    console.log('[api/auth/login] user not found by email');
-    return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
+    console.log('[api/auth/login] user not found by email, attempting remote auth');
+    try {
+      let remoteAuth = await attemptRemoteAuthentication(email, password);
+      if (!remoteAuth) {
+        remoteAuth = await attemptRemoteAuthentication(String(email || '').trim(), password);
+      }
+      if (!remoteAuth) {
+        return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
+      }
+
+      const remoteUser = (remoteAuth.payload && remoteAuth.payload.user) || {};
+      const normalizedUsername = String(remoteUser.username || remoteUser.name || email || '').trim();
+      if (!normalizedUsername) {
+        return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      user = {
+        id: `user_${normalizedUsername}`,
+        username: normalizedUsername,
+        passwordHash: hashedPassword,
+        email: remoteUser.email || email || null,
+        role: remoteUser.role || 'user',
+        stripeCustomerId: remoteUser.stripeCustomerId || null,
+        subscriptionStatus: remoteUser.subscriptionStatus || null,
+        demoStartDate: remoteUser.demoStartDate || remoteUser.demostartdate || null,
+        demoStartSource: remoteUser.demoStartSource || null,
+        demoStartReason: remoteUser.demoStartReason || null,
+        demoStartAt: remoteUser.demoStartAt || remoteUser.demoStartDate || null,
+        demoEndDate: remoteUser.demoEndDate || remoteUser.demoenddate || null,
+        demoExtensionDays: remoteUser.demoExtensionDays ?? remoteUser.demoextensiondays ?? null,
+        createdAt: new Date().toISOString()
+      };
+
+      const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, normalizedUsername);
+      if (remoteDemo) {
+        applyRemoteDemoToUser(user, remoteDemo, { reason: 'auth-login-remote-autoprovision' });
+      }
+      if (!user.demoStartDate) {
+        initializeDemoForUser(user);
+      }
+
+      persistUser(user);
+      cacheRemoteAuthToken(user.username, remoteAuth.remoteToken);
+    } catch (e) {
+      console.warn('[remote-sync] auth login autoprovision failed:', e && e.message ? e.message : e);
+      return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
+    }
   }
   
   const valid = await bcrypt.compare(password, user.passwordhash || user.passwordHash);
   if (!valid) {
     console.log('[api/auth/login] password mismatch for:', user.username);
     return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
+  }
+
+  // Best-effort remote sync to keep demo/subscription aligned with site vitrine
+  try {
+    let remoteAuth = await attemptRemoteAuthentication(email, password);
+    if (!remoteAuth && user && user.username) {
+      remoteAuth = await attemptRemoteAuthentication(user.username, password);
+    }
+    if (remoteAuth && remoteAuth.remoteToken) {
+      cacheRemoteAuthToken(user.username, remoteAuth.remoteToken);
+      const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, user.username);
+      if (remoteDemo) {
+        applyRemoteDemoToUser(user, remoteDemo, { reason: 'auth-login-remote-sync' });
+      }
+      const remoteUser = (remoteAuth.payload && remoteAuth.payload.user) || null;
+      if (remoteUser) {
+        if (remoteUser.email) user.email = remoteUser.email;
+        if (remoteUser.role) user.role = remoteUser.role;
+        if (remoteUser.stripeCustomerId) user.stripeCustomerId = remoteUser.stripeCustomerId;
+        if (remoteUser.subscriptionStatus && user.subscriptionStatus !== remoteUser.subscriptionStatus) {
+          user.subscriptionStatus = remoteUser.subscriptionStatus;
+        }
+      }
+      persistUser(user);
+    }
+  } catch (e) {
+    console.warn('[remote-sync] auth login sync failed:', e && e.message ? e.message : e);
   }
   
   console.log('[api/auth/login] login successful for:', user.username);
@@ -7381,6 +7540,8 @@ io.on('connection', socket => {
   } else {
     console.warn('[server] NO_ADB=1 set: skipping ADB device tracking & streaming features (good for dev/test).');
   }
+
+  scheduleRemoteDemoSync();
 })();
 
 const PORT = process.env.PORT || 3000;
