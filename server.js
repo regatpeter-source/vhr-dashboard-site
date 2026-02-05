@@ -6743,7 +6743,9 @@ const runAdbCommand = (serial, args, timeout = 30000) => {
 // ---------- Helpers ----------
 // Parse 'adb devices -l' output into [{ serial, model, status }]
 const parseAdbDevices = stdout => {
-  console.log('[DEBUG] Sortie brute adb devices -l:\n' + stdout)
+  if (process.env.DEBUG_ADB === '1') {
+    console.log('[DEBUG] Sortie brute adb devices -l:\n' + stdout)
+  }
   return stdout.split('\n')
     .map(l => l.trim())
     .filter(l => l && !l.startsWith('List of devices'))
