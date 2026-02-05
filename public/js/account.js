@@ -458,12 +458,27 @@
       const sub = res.subscription || {};
 
       const normalizedStatus = String(sub.status || '').trim().toLowerCase();
-      const hasId = !!sub.subscriptionId;
+      const inactiveStatuses = ['canceled', 'cancelled', 'refunded', 'inactive', 'expired'];
       const statusOk = ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired'].includes(normalizedStatus);
-      const isActive = sub.isActive || statusOk || hasId;
+      const isActive = Boolean(sub.isActive || statusOk) && !inactiveStatuses.includes(normalizedStatus);
 
       if (!isActive) {
-        document.getElementById('subscriptionContent').innerHTML = '<p>Pas d\'abonnement actif actuellement.</p>';
+        let trialHtml = '<p>Pas d\'abonnement actif actuellement.</p>';
+        try {
+          const demoRes = await api('/api/demo/status');
+          if (demoRes && demoRes.ok && demoRes.demo) {
+            const demoEnd = demoRes.demo.demoEndDate || demoRes.demo.expirationDate || null;
+            const endLabel = demoEnd ? new Date(demoEnd).toLocaleDateString('fr-FR') : '—';
+            trialHtml = `
+              <div style="background: white; padding: 12px; border-radius: 4px; margin-bottom: 12px;">
+                <p><strong>Plan:</strong> Sans abonnement</p>
+                <p><strong>Statut:</strong> Inactif</p>
+                <p><strong>Fin de l'essai prévue le:</strong> ${endLabel}</p>
+              </div>
+            `;
+          }
+        } catch (e) {}
+        document.getElementById('subscriptionContent').innerHTML = trialHtml;
         return;
       }
       
