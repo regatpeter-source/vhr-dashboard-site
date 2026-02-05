@@ -3742,10 +3742,11 @@ window.showAppsDialog = async function(device) {
 	await syncFavorites();
 	const apps = res.apps || [];
 	const running = runningApps[device.serial] || [];
-	const selectableDevices = (Array.isArray(devices) ? devices : [])
+	const rawDevices = Array.isArray(devices) ? devices : [];
+	const selectableDevices = rawDevices
 		.filter(d => d && d.serial && (typeof isRelayDevice !== 'function' || !isRelayDevice(d)));
 	const hasMultiTargets = selectableDevices.length > 1;
-	const targetListHtml = hasMultiTargets ? selectableDevices.map(d => {
+	const targetListHtml = selectableDevices.map(d => {
 		const safeDeviceName = (d.name || d.serial).replace(/"/g, '&quot;');
 		const safeSerial = String(d.serial).replace(/"/g, '&quot;');
 		const checked = d.serial === device.serial ? 'checked' : '';
@@ -3753,8 +3754,8 @@ window.showAppsDialog = async function(device) {
 			<input type='checkbox' class='app-target-checkbox' data-serial="${safeSerial}" ${checked} style='accent-color:#2ecc71;' />
 			<span style='color:#ecf0f1;'>${safeDeviceName}</span>
 		</label>`;
-	}).join('') : '';
-	const targetSelector = hasMultiTargets ? `
+	}).join('');
+	const targetSelector = `
 		<div style='margin:10px 0 12px;background:#111620;border:1px solid #2ecc71;border-radius:8px;padding:10px;'>
 			<div style='display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;'>
 				<div style='color:#bdc3c7;font-size:12px;'>Lancer sur :</div>
@@ -3763,9 +3764,14 @@ window.showAppsDialog = async function(device) {
 					<button onclick='selectAllAppTargets(false)' style='background:#34495e;color:#fff;border:none;padding:4px 8px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:11px;'>Aucun</button>
 				</div>
 			</div>
-			<div style='display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;'>${targetListHtml}</div>
+			${selectableDevices.length
+				? `<div style='display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;'>${targetListHtml}</div>`
+				: `<div style='color:#95a5a6;font-size:12px;margin-top:8px;'>Actions locales indisponibles (mode relais)</div>`}
+			${!hasMultiTargets && selectableDevices.length === 1
+				? `<div style='color:#7f8c8d;font-size:11px;margin-top:6px;'>Un seul casque disponible pour l’instant.</div>`
+				: ''}
 		</div>
-	` : '';
+	`;
 	let html = `<h3 style='color:#2ecc71;'>Apps installées sur ${device.name}</h3>${targetSelector}`;
 	html += `<div style='max-height:400px;overflow-y:auto;'>`;
 	apps.forEach(pkg => {
@@ -3975,10 +3981,11 @@ window.showFavoritesDialog = async function(device) {
 	const res = await api('/api/favorites');
 	if (!res.ok) return showToast('❌ Erreur chargement favoris', 'error');
 	const favs = res.favorites || [];
-	const selectableDevices = (Array.isArray(devices) ? devices : [])
+	const rawDevices = Array.isArray(devices) ? devices : [];
+	const selectableDevices = rawDevices
 		.filter(d => d && d.serial && (typeof isRelayDevice !== 'function' || !isRelayDevice(d)));
 	const hasMultiTargets = selectableDevices.length > 1;
-	const targetListHtml = hasMultiTargets ? selectableDevices.map(d => {
+	const targetListHtml = selectableDevices.map(d => {
 		const safeDeviceName = (d.name || d.serial).replace(/"/g, '&quot;');
 		const safeSerial = String(d.serial).replace(/"/g, '&quot;');
 		const checked = d.serial === device.serial ? 'checked' : '';
@@ -3986,8 +3993,8 @@ window.showFavoritesDialog = async function(device) {
 			<input type='checkbox' class='app-target-checkbox' data-serial="${safeSerial}" ${checked} style='accent-color:#2ecc71;' />
 			<span style='color:#ecf0f1;'>${safeDeviceName}</span>
 		</label>`;
-	}).join('') : '';
-	const targetSelector = hasMultiTargets ? `
+	}).join('');
+	const targetSelector = `
 		<div style='margin:10px 0 12px;background:#111620;border:1px solid #2ecc71;border-radius:8px;padding:10px;'>
 			<div style='display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;'>
 				<div style='color:#bdc3c7;font-size:12px;'>Lancer sur :</div>
@@ -3996,9 +4003,14 @@ window.showFavoritesDialog = async function(device) {
 					<button onclick='selectAllAppTargets(false)' style='background:#34495e;color:#fff;border:none;padding:4px 8px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:11px;'>Aucun</button>
 				</div>
 			</div>
-			<div style='display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;'>${targetListHtml}</div>
+			${selectableDevices.length
+				? `<div style='display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;'>${targetListHtml}</div>`
+				: `<div style='color:#95a5a6;font-size:12px;margin-top:8px;'>Actions locales indisponibles (mode relais)</div>`}
+			${!hasMultiTargets && selectableDevices.length === 1
+				? `<div style='color:#7f8c8d;font-size:11px;margin-top:6px;'>Un seul casque disponible pour l’instant.</div>`
+				: ''}
 		</div>
-	` : '';
+	`;
 	let html = `<h3 style='color:#2ecc71;'>Favoris pour ${device.name}</h3>${targetSelector}`;
 	html += `<div style='max-height:400px;overflow-y:auto;'>`;
 	if (favs.length === 0) {
