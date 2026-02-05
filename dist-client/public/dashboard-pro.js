@@ -3975,7 +3975,31 @@ window.showFavoritesDialog = async function(device) {
 	const res = await api('/api/favorites');
 	if (!res.ok) return showToast('❌ Erreur chargement favoris', 'error');
 	const favs = res.favorites || [];
-	let html = `<h3 style='color:#2ecc71;'>Favoris pour ${device.name}</h3>`;
+	const selectableDevices = (Array.isArray(devices) ? devices : [])
+		.filter(d => d && d.serial && (typeof isRelayDevice !== 'function' || !isRelayDevice(d)));
+	const hasMultiTargets = selectableDevices.length > 1;
+	const targetListHtml = hasMultiTargets ? selectableDevices.map(d => {
+		const safeDeviceName = (d.name || d.serial).replace(/"/g, '&quot;');
+		const safeSerial = String(d.serial).replace(/"/g, '&quot;');
+		const checked = d.serial === device.serial ? 'checked' : '';
+		return `<label style='display:flex;align-items:center;gap:6px;background:#0f1117;padding:6px 8px;border-radius:6px;border:1px solid #2c3e50;font-size:12px;cursor:pointer;'>
+			<input type='checkbox' class='app-target-checkbox' data-serial="${safeSerial}" ${checked} style='accent-color:#2ecc71;' />
+			<span style='color:#ecf0f1;'>${safeDeviceName}</span>
+		</label>`;
+	}).join('') : '';
+	const targetSelector = hasMultiTargets ? `
+		<div style='margin:10px 0 12px;background:#111620;border:1px solid #2ecc71;border-radius:8px;padding:10px;'>
+			<div style='display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;'>
+				<div style='color:#bdc3c7;font-size:12px;'>Lancer sur :</div>
+				<div style='display:flex;gap:6px;'>
+					<button onclick='selectAllAppTargets(true)' style='background:#2ecc71;color:#000;border:none;padding:4px 8px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:11px;'>Tout</button>
+					<button onclick='selectAllAppTargets(false)' style='background:#34495e;color:#fff;border:none;padding:4px 8px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:11px;'>Aucun</button>
+				</div>
+			</div>
+			<div style='display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;'>${targetListHtml}</div>
+		</div>
+	` : '';
+	let html = `<h3 style='color:#2ecc71;'>Favoris pour ${device.name}</h3>${targetSelector}`;
 	html += `<div style='max-height:400px;overflow-y:auto;'>`;
 	if (favs.length === 0) {
 		html += `<div style='padding:12px;color:#95a5a6;text-align:center;'>Aucun favori pour ce casque.</div>`;
@@ -3983,6 +4007,7 @@ window.showFavoritesDialog = async function(device) {
 		favs.forEach(fav => {
 			const meta = getGameMeta(fav.packageId || fav.name || '');
 			const safeName = (meta.name || fav.name || fav.packageId || 'Favori').replace(/"/g, '&quot;');
+			const safePkg = (fav.packageId || '').replace(/"/g, '&quot;');
 			html += `<div style='padding:10px;margin:6px 0;background:#23272f;border-radius:8px;display:flex;align-items:center;gap:10px;border-left:4px solid #2ecc71;'>
 				<img src="${meta.icon}" alt="${safeName}" style='width:38px;height:38px;border-radius:8px;object-fit:cover;border:1px solid #2ecc71;' onerror="this.onerror=null;this.src='${DEFAULT_GAME_ICON}'" />
 				<div style='flex:1;display:flex;flex-direction:column;gap:4px;'>
@@ -3990,8 +4015,8 @@ window.showFavoritesDialog = async function(device) {
 					<span style='color:#95a5a6;font-size:11px;'>${fav.packageId || ''}</span>
 				</div>
 				<div style='display:flex;gap:6px;'>
-					<button onclick="launchApp('${device.serial}','${fav.packageId}')" style='background:#e67e22;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-weight:bold;'>⭐ Lancer</button>
-					<button onclick="stopGame('${device.serial}','${fav.packageId}')" style='background:#e74c3c;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-weight:bold;'>⏹️ Stop</button>
+					<button onclick="launchAppOnSelectedTargets('${device.serial}','${safePkg}')" style='background:#e67e22;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-weight:bold;'>⭐ Lancer</button>
+					<button onclick="stopGame('${device.serial}','${safePkg}')" style='background:#e74c3c;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-weight:bold;'>⏹️ Stop</button>
 				</div>
 			</div>`;
 		});

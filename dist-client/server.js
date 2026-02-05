@@ -1241,7 +1241,30 @@ function buildUserAccessSummary(user, options = {}) {
 }
 
 // ========== DATA DIRECTORY (LOCAL INSTALLS) ==========
-const DATA_DIR = process.env.VHR_DATA_DIR || path.join(__dirname, 'data');
+function resolveWritableDataDir() {
+  const candidates = [];
+  if (process.env.VHR_DATA_DIR) candidates.push(process.env.VHR_DATA_DIR);
+  if (process.env.APPDATA) candidates.push(path.join(process.env.APPDATA, 'VHR-Dashboard'));
+  if (process.env.LOCALAPPDATA) candidates.push(path.join(process.env.LOCALAPPDATA, 'VHR-Dashboard'));
+  if (os.homedir()) candidates.push(path.join(os.homedir(), '.vhr-dashboard'));
+  candidates.push(path.join(__dirname, 'data'));
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      fs.mkdirSync(candidate, { recursive: true });
+      const probe = path.join(candidate, '.write_test');
+      fs.writeFileSync(probe, 'ok', 'utf8');
+      fs.unlinkSync(probe);
+      return candidate;
+    } catch (e) {
+      continue;
+    }
+  }
+  return path.join(__dirname, 'data');
+}
+
+const DATA_DIR = resolveWritableDataDir();
 
 const LICENSES_FILE = path.join(DATA_DIR, 'licenses.json');
 
