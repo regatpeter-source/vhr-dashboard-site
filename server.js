@@ -3478,6 +3478,16 @@ app.post('/api/login', async (req, res) => {
 
   user = await syncLocalUserWithRemoteAccess(user, loginIdentifier, password) || user;
 
+  if (demoConfig.MODE === 'database' && !user.demoStartDate) {
+    const nowIso = new Date().toISOString();
+    user.demoStartDate = nowIso;
+    user.demoStartSource = user.demoStartSource || 'app-login';
+    user.demoStartReason = user.demoStartReason || 'first_login_app';
+    user.demoStartAt = user.demoStartAt || nowIso;
+    user.updatedAt = nowIso;
+    persistUser(user);
+  }
+
   const demoStatus = await buildDemoStatusForUser(user);
   if (demoStatus.accessBlocked) {
     return res.status(403).json({
