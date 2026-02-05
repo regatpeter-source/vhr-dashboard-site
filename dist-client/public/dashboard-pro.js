@@ -2046,6 +2046,15 @@ const API_BASE = '/api';
 const ENABLE_GUEST_DEMO = false;
 let cachedSyncUsersSecret = DEFAULT_SYNC_USERS_SECRET;
 let syncSecretPromise = null;
+const REMOTE_AUTH_STORAGE_KEY = 'vhr_remote_token';
+
+function getRemoteAuthToken() {
+	try {
+		return localStorage.getItem(REMOTE_AUTH_STORAGE_KEY) || '';
+	} catch (e) {
+		return '';
+	}
+}
 
 function getSyncUsersSecret() {
 	if (syncSecretPromise) return syncSecretPromise;
@@ -2393,6 +2402,7 @@ async function api(path, opts = {}) {
 			delete opts.skipAuthHeader;
 		}
 		const storedToken = readAuthToken();
+		const remoteToken = getRemoteAuthToken();
 		const electronHeader = isElectronUserAgent ? { 'x-vhr-electron': 'electron' } : {};
 		if (storedToken && !skipAuthHeader) {
 			opts.headers = {
@@ -2404,6 +2414,12 @@ async function api(path, opts = {}) {
 			opts.headers = {
 				...(opts.headers || {}),
 				...electronHeader
+			};
+		}
+		if (remoteToken && typeof path === 'string' && path.startsWith('/api/demo/status')) {
+			opts.headers = {
+				...(opts.headers || {}),
+				'x-remote-auth': remoteToken
 			};
 		}
 
@@ -4282,6 +4298,20 @@ window.openOfficialBillingPage = function() {
 
 function applyDemoStatusSnapshot(demoStatus) {
 	if (!demoStatus) return;
+	try {
+		const startRaw = demoStatus.demoStartDate || demoStatus.demoStartAt || null;
+		const endRaw = demoStatus.demoEndDate || demoStatus.expirationDate || null;
+		if (startRaw && endRaw) {
+			const startMs = new Date(startRaw).getTime();
+			const endMs = new Date(endRaw).getTime();
+			if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs) {
+				const derivedDays = Math.ceil((endMs - startMs) / (24 * 60 * 60 * 1000));
+				if (Number.isFinite(derivedDays) && derivedDays > 0) {
+					demoStatus.totalDays = derivedDays;
+				}
+			}
+		}
+	} catch (e) {}
 	licenseStatus.demo = demoStatus;
 	licenseStatus.subscriptionStatus = demoStatus.subscriptionStatus || 'unknown';
 	licenseStatus.hasPerpetualLicense = Boolean(demoStatus.hasPerpetualLicense);
@@ -4334,6 +4364,18 @@ async function checkLicense() {
 		
 		if (!res || !res.ok) {
 			console.error('[license] demo status check failed');
+			if (res && res.error === 'remote_demo_required') {
+				showToast(res.message || '🔒 Vérification centrale requise pour la période d\'essai', 'warning');
+				showUnlockModal({
+					expired: true,
+					accessBlocked: true,
+					subscriptionStatus: res?.demo?.subscriptionStatus || 'unknown',
+					reason: res.error,
+					message: res.message,
+					demo: res.demo
+				});
+				return false;
+			}
 			// Bloquer l'accès par défaut si la vérification échoue (éviter l'accès sans abo)
 			showUnlockModal({ expired: true, accessBlocked: true, subscriptionStatus: res?.demo?.subscriptionStatus || 'unknown' });
 			return false;
@@ -4420,9 +4462,12 @@ function showTrialBanner(daysRemaining) {
 
 function buildAccessSummaryHtml(status = {}) {
 	const detail = status.demo || status;
-	const demoLabel = detail.demoExpired
-		? 'Expiré'
-		: Number.isFinite(detail.remainingDays) ? `${detail.remainingDays} jour(s)` : 'N/A';
+	const isRemoteRequired = status.reason === 'remote_demo_required' || status.error === 'remote_demo_required';
+	const demoLabel = isRemoteRequired
+		? 'Vérification requise'
+		: detail.demoExpired
+			? 'Expiré'
+			: Number.isFinite(detail.remainingDays) ? `${detail.remainingDays} jour(s)` : 'N/A';
 	const subscriptionLabel = detail.subscriptionStatus || 'aucun';
 	const licenseLabel = detail.hasPerpetualLicense
 		? `Oui${detail.licenseCount > 1 ? ` (${detail.licenseCount})` : ''}`
@@ -4464,7 +4509,13 @@ window.showUnlockModal = function(status = licenseStatus) {
 	let headerMessage = '<h2 style="color:#e74c3c;">⚠️ Accès refusé</h2>';
 	let bodyMessage = '<p style="color:#95a5a6;">Votre période d\'essai a expiré.<br>Pour continuer à utiliser VHR Dashboard, choisissez une option ci-dessous :</p>';
 	
-	if (status.expired || status.accessBlocked) {
+	const isRemoteRequired = status.reason === 'remote_demo_required' || status.error === 'remote_demo_required';
+	if (isRemoteRequired) {
+		headerMessage = '<h2 style="color:#e74c3c;">🔒 Vérification centrale requise</h2>';
+		bodyMessage = `<p style="color:#95a5a6;">${status.message || 'La vérification de votre essai doit être validée par le serveur central. Vérifiez votre connexion Internet et reconnectez-vous.'}</p>`;
+	}
+
+	if (!isRemoteRequired && (status.expired || status.accessBlocked)) {
 		headerMessage = '<h2 style="color:#e74c3c;">⚠️ Essai expiré - Abonnement requis</h2>';
 		bodyMessage = '<p style="color:#95a5a6;">Votre accès à VHR Dashboard a expiré car votre période d\'essai est terminée et aucun abonnement n\'est actif.<br><br>Choisissez une option ci-dessous pour continuer :</p>';
 	}
@@ -4666,6 +4717,11 @@ window.loginUser = async function() {
 
 		// 3) Si prod OK, synchroniser vers backend local + cookie local
 		if (res.ok && data.ok) {
+			if (data.token) {
+				try {
+					localStorage.setItem(REMOTE_AUTH_STORAGE_KEY, data.token);
+				} catch (e) {}
+			}
 			const syncedUsername = data.user?.username || data.user?.name || identifier;
 			const syncedEmail = data.user?.email || identifier;
 			try {

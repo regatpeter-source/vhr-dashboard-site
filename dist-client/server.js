@@ -40,6 +40,7 @@ const REMOTE_DEMO_STATUS_PATH = process.env.REMOTE_DEMO_STATUS_PATH || '/api/dem
 const REMOTE_DEMO_CACHE_TTL_MS = Number(process.env.REMOTE_DEMO_CACHE_TTL_MS || '300000');
 const REMOTE_DEMO_SYNC_INTERVAL_MS = Number(process.env.REMOTE_DEMO_SYNC_INTERVAL_MS || '600000');
 const REMOTE_AUTH_TOKEN_TTL_MS = Number(process.env.REMOTE_AUTH_TOKEN_TTL_MS || '7200000');
+const FORCE_REMOTE_DEMO = String(process.env.FORCE_REMOTE_DEMO || '1').trim() !== '0';
 
 // ========== SINGLE SERVER INSTANCE ENFORCEMENT ==========
 // Kill any existing server on port 3000 before starting
@@ -1239,7 +1240,10 @@ function buildUserAccessSummary(user, options = {}) {
   };
 }
 
-const LICENSES_FILE = path.join(__dirname, 'data', 'licenses.json');
+// ========== DATA DIRECTORY (LOCAL INSTALLS) ==========
+const DATA_DIR = process.env.VHR_DATA_DIR || path.join(__dirname, 'data');
+
+const LICENSES_FILE = path.join(DATA_DIR, 'licenses.json');
 
 // ========== EMAIL CONFIGURATION ==========
 // Support both Brevo and Gmail configurations
@@ -1278,7 +1282,7 @@ if (emailUser && emailPass) {
 }
 
 // ========== SECRET STORAGE (LOCAL INSTALLS) ==========
-const SECRET_STORE_DIR = process.env.VHR_DATA_DIR || path.join(__dirname, 'data');
+const SECRET_STORE_DIR = DATA_DIR;
 function getOrCreateSecretFile(filename, envValue, bytes = 32) {
   if (envValue && String(envValue).trim()) return String(envValue).trim();
   try {
@@ -1642,7 +1646,7 @@ app.get('/test-dashboard', (req, res) => {
 // No-cache for the main dashboard bundles to avoid stale builds
 app.use((req, res, next) => {
   const p = req.path || '';
-  if (p.endsWith('/dashboard-pro.js') || p.endsWith('/vhr-audio-stream.js')) {
+  if (p.endsWith('/dashboard-pro.js') || p.endsWith('/vhr-audio-stream.js') || p.endsWith('/js/admin-dashboard.js')) {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
@@ -2170,15 +2174,15 @@ app.post('/create-checkout-session', async (req, res) => {
 });
 
 // --- Utilisateurs (simple persistence JSON: replace with a proper DB in production) ---
-const USERS_FILE = path.join(__dirname, 'data', 'users.json');
-const DEMO_STATE_FILE = path.join(__dirname, 'data', 'demo-state.json');
-const INSTALLATION_STATE_FILE = path.join(__dirname, 'data', 'installation.json');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const DEMO_STATE_FILE = path.join(DATA_DIR, 'demo-state.json');
+const INSTALLATION_STATE_FILE = path.join(DATA_DIR, 'installation.json');
 const DEMO_TRIAL_DAYS = Math.max(1, Number.parseInt(process.env.DEMO_TRIAL_DAYS || '7', 10) || 7);
 let cachedDemoState = null;
 let cachedInstallationState = null;
 
 function ensureDataDir() {
-  try { fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true }); } catch (e) { }
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { }
 }
 
 function saveUsers() {
@@ -2434,8 +2438,8 @@ if (USE_POSTGRES && db && db.getUsers) {
 }
 
 // --- Messages & Subscriptions (in-memory storage with JSON persistence) ---
-const MESSAGES_FILE = path.join(__dirname, 'data', 'messages.json');
-const SUBSCRIPTIONS_FILE = path.join(__dirname, 'data', 'subscriptions.json');
+const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
+const SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'subscriptions.json');
 
 let messages = [];
 let subscriptions = [];
@@ -2677,7 +2681,7 @@ function ensureDefaultUsers() {
 // --- DB wrapper helpers (use SQLite adapter when enabled) ---
 let dbEnabled = false;
 try {
-  const dbFile = process.env.DB_SQLITE_FILE || path.join(__dirname, 'data', 'vhr.db');
+  const dbFile = process.env.DB_SQLITE_FILE || path.join(DATA_DIR, 'vhr.db');
   dbEnabled = require('./db').initSqlite(dbFile);
   if (dbEnabled) {
     console.log('[db] SQLite adapter initialized, migrating JSON users into DB');
@@ -3018,6 +3022,21 @@ function applyRemoteDemoToUser(user, remoteDemo, options = {}) {
     }
   }
 
+  const remoteExtensionRaw = remoteDemo.demoExtensionDays ?? remoteDemo.demoextensiondays ?? remoteDemo.extensionDays ?? remoteDemo.extension ?? null;
+  const hasExplicitExtension = remoteExtensionRaw !== null && remoteExtensionRaw !== undefined && remoteExtensionRaw !== '';
+  let remoteExtension = Number.parseInt(remoteExtensionRaw, 10);
+  if (!Number.isFinite(remoteExtension) && Number.isFinite(remoteDemo.totalDays)) {
+    const baseDays = Number.isFinite(demoConfig?.DEMO_DAYS) ? demoConfig.DEMO_DAYS : 0;
+    const computed = Number.parseInt(remoteDemo.totalDays, 10) - baseDays;
+    if (Number.isFinite(computed) && computed > 0) {
+      remoteExtension = computed;
+    }
+  }
+  if (Number.isFinite(remoteExtension) && remoteExtension >= 0 && (hasExplicitExtension || remoteExtension > 0) && user.demoExtensionDays !== remoteExtension) {
+    user.demoExtensionDays = remoteExtension;
+    changed = true;
+  }
+
   if (remoteDemo.subscriptionStatus && user.subscriptionStatus !== remoteDemo.subscriptionStatus) {
     user.subscriptionStatus = remoteDemo.subscriptionStatus;
     changed = true;
@@ -3255,8 +3274,6 @@ async function handleApiLogin(req, res) {
   }
 
   console.log('[api/login] login successful for:', user.username);
-  const userAgent = String(req.headers['user-agent'] || '').toLowerCase();
-  const isElectronClient = userAgent.includes('electron') || String(req.headers['x-vhr-electron'] || '').toLowerCase() === 'electron';
   // Best-effort remote sync to keep demo/subscription aligned with site vitrine
   try {
     const remoteAuth = await attemptRemoteAuthentication(identifier, password);
@@ -3270,8 +3287,8 @@ async function handleApiLogin(req, res) {
   } catch (e) {
     console.warn('[remote-sync] login sync failed:', e && e.message ? e.message : e);
   }
-  if (isElectronClient) {
-    ensureElectronTrialStarted(user, { reason: 'login-electron' });
+  if (!FORCE_REMOTE_DEMO) {
+    ensureElectronTrialStarted(user, { reason: 'login' });
   }
   const elevatedUser = elevateAdminIfAllowlisted(user);
   const token = jwt.sign({ username: elevatedUser.username, role: elevatedUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
@@ -3307,15 +3324,13 @@ app.post('/api/remote-login', async (req, res) => {
     }
 
     const elevatedUser = elevateAdminIfAllowlisted(localUser);
-    const userAgent = String(req.headers['user-agent'] || '').toLowerCase();
-    const isElectronClient = userAgent.includes('electron') || String(req.headers['x-vhr-electron'] || '').toLowerCase() === 'electron';
     cacheRemoteAuthToken(elevatedUser.username, remoteAuth.remoteToken);
     const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, elevatedUser.username);
     if (remoteDemo) {
       applyRemoteDemoToUser(elevatedUser, remoteDemo, { reason: 'remote-login' });
     }
-    if (isElectronClient && !elevatedUser.demoStartDate) {
-      ensureElectronTrialStarted(elevatedUser, { reason: 'remote-login-electron' });
+    if (!FORCE_REMOTE_DEMO) {
+      ensureElectronTrialStarted(elevatedUser, { reason: 'remote-login' });
     }
     const token = jwt.sign({ username: elevatedUser.username, role: elevatedUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
     const cookieOptions = buildAuthCookieOptions(req);
@@ -4142,10 +4157,8 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (e) {
     console.warn('[remote-sync] auth login sync failed:', e && e.message ? e.message : e);
   }
-  const userAgent = String(req.headers['user-agent'] || '').toLowerCase();
-  const isElectronClient = userAgent.includes('electron') || String(req.headers['x-vhr-electron'] || '').toLowerCase() === 'electron';
-  if (isElectronClient) {
-    ensureElectronTrialStarted(user, { reason: 'auth-electron' });
+  if (!FORCE_REMOTE_DEMO) {
+    ensureElectronTrialStarted(user, { reason: 'auth-login' });
   }
   
   const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
@@ -4417,15 +4430,16 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
   try {
     const demoUserAgent = String(req.headers['user-agent'] || '').toLowerCase();
     const demoIsElectron = demoUserAgent.includes('electron') || String(req.headers['x-vhr-electron'] || '').toLowerCase() === 'electron';
-    const bypassRemoteReturn = demoIsElectron;
+    const bypassRemoteReturn = FORCE_REMOTE_DEMO ? false : demoIsElectron;
+    const shouldStartTrialOnAccess = FORCE_REMOTE_DEMO ? false : true;
     const cachedDemo = getCachedRemoteDemo(req.user.username);
     if (cachedDemo) {
       console.log('[demo/status] returning cached remote demo for', req.user.username);
       const cachedUser = getUserByUsername(req.user.username);
       if (cachedUser) {
         applyRemoteDemoToUser(cachedUser, cachedDemo, { reason: 'demo-cache' });
-        if (demoIsElectron) {
-          const started = ensureElectronTrialStarted(cachedUser, { reason: 'demo-status-electron-cache' });
+        if (shouldStartTrialOnAccess) {
+          const started = ensureElectronTrialStarted(cachedUser, { reason: 'demo-status-cache' });
           if (started && !cachedDemo.demoStartDate) {
             cachedDemo.demoStartDate = cachedUser.demoStartDate;
           }
@@ -4435,7 +4449,29 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
         return res.json({ ok: true, demo: cachedDemo, remote: true });
       }
     }
+    const providedRemoteTokenRaw = req.headers['x-remote-auth'] || req.headers['x-remote-token'] || '';
+    const providedRemoteToken = String(providedRemoteTokenRaw || '').trim();
     const cachedRemoteToken = getCachedRemoteAuthToken(req.user.username);
+    if (providedRemoteToken) {
+      const remoteDemo = await fetchRemoteDemoStatus(providedRemoteToken, req.user.username);
+      if (remoteDemo) {
+        cacheRemoteAuthToken(req.user.username, providedRemoteToken);
+        console.log('[demo/status] returning provided-token remote demo for', req.user.username);
+        const remoteUser = getUserByUsername(req.user.username);
+        if (remoteUser) {
+          applyRemoteDemoToUser(remoteUser, remoteDemo, { reason: 'demo-provided-token' });
+          if (shouldStartTrialOnAccess) {
+            const started = ensureElectronTrialStarted(remoteUser, { reason: 'demo-status-provided' });
+            if (started && !remoteDemo.demoStartDate) {
+              remoteDemo.demoStartDate = remoteUser.demoStartDate;
+            }
+          }
+        }
+        if (!bypassRemoteReturn) {
+          return res.json({ ok: true, demo: remoteDemo, remote: true });
+        }
+      }
+    }
     if (cachedRemoteToken) {
       const remoteDemo = await fetchRemoteDemoStatus(cachedRemoteToken, req.user.username);
       if (remoteDemo) {
@@ -4443,8 +4479,8 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
         const remoteUser = getUserByUsername(req.user.username);
         if (remoteUser) {
           applyRemoteDemoToUser(remoteUser, remoteDemo, { reason: 'demo-fetch' });
-          if (demoIsElectron) {
-            const started = ensureElectronTrialStarted(remoteUser, { reason: 'demo-status-electron-fetch' });
+          if (shouldStartTrialOnAccess) {
+            const started = ensureElectronTrialStarted(remoteUser, { reason: 'demo-status-fetch' });
             if (started && !remoteDemo.demoStartDate) {
               remoteDemo.demoStartDate = remoteUser.demoStartDate;
             }
@@ -4464,8 +4500,8 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
           const remoteUser = getUserByUsername(req.user.username);
           if (remoteUser) {
             applyRemoteDemoToUser(remoteUser, remoteDemo, { reason: 'demo-fetch' });
-            if (demoIsElectron) {
-              const started = ensureElectronTrialStarted(remoteUser, { reason: 'demo-status-electron-fetch' });
+            if (shouldStartTrialOnAccess) {
+              const started = ensureElectronTrialStarted(remoteUser, { reason: 'demo-status-fetch' });
               if (started && !remoteDemo.demoStartDate) {
                 remoteDemo.demoStartDate = remoteUser.demoStartDate;
               }
@@ -4476,6 +4512,18 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
           }
         }
       }
+    }
+    if (FORCE_REMOTE_DEMO) {
+      return res.status(403).json({
+        ok: false,
+        error: 'remote_demo_required',
+        message: 'Vérification centrale requise pour la période d\'essai',
+        demo: {
+          demoExpired: false,
+          accessBlocked: true,
+          subscriptionStatus: 'unknown'
+        }
+      });
     }
     let user = getUserByUsername(req.user.username);
 
@@ -4502,8 +4550,8 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
       ensureUserSubscription(user, { planName: 'auto-provision', status: 'trial' });
     }
 
-    if (demoIsElectron) {
-      ensureElectronTrialStarted(user, { reason: 'demo-status-electron' });
+    if (shouldStartTrialOnAccess) {
+      ensureElectronTrialStarted(user, { reason: 'demo-status' });
     }
     const licenses = loadLicenses();
     const accessSnapshot = buildUserAccessSummary(user, { licenses });
@@ -4517,7 +4565,8 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
           demoStartDate: null,
           demoExpired: false,
           remainingDays: -1, // Unlimited
-          totalDays: demoConfig.DEMO_DAYS,
+          totalDays: accessSnapshot.demoTotalDays || demoConfig.DEMO_DAYS,
+          demoExtensionDays: accessSnapshot.demoExtensionDays || 0,
           expirationDate: null,
           hasValidSubscription: true,
           subscriptionStatus: 'admin',
@@ -4575,7 +4624,8 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
           demoStartDate: accessSnapshot.demoStartDate,
           demoExpired: true,
           remainingDays: 0,
-          totalDays: demoConfig.DEMO_DAYS,
+          totalDays: accessSnapshot.demoTotalDays || demoConfig.DEMO_DAYS,
+          demoExtensionDays: accessSnapshot.demoExtensionDays || 0,
           expirationDate: expirationDate,
           hasValidSubscription: hasValidSubscription,
           subscriptionStatus: subscriptionStatus,
@@ -4599,7 +4649,8 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
           demoStartDate: accessSnapshot.demoStartDate,
           demoExpired: false,
           remainingDays: remainingDays,
-          totalDays: demoConfig.DEMO_DAYS,
+          totalDays: accessSnapshot.demoTotalDays || demoConfig.DEMO_DAYS,
+          demoExtensionDays: accessSnapshot.demoExtensionDays || 0,
           expirationDate: expirationDate,
           hasValidSubscription: hasValidSubscription,
           subscriptionStatus: subscriptionStatus,
@@ -6428,7 +6479,6 @@ const refreshDevices = async () => {
 
 // ---------- Persistence ----------
 // Placer les fichiers persistants dans un dossier en écriture (évite l'échec en binaire/asar)
-const DATA_DIR = process.env.VHR_DATA_DIR || path.join(os.homedir(), '.vhr-dashboard');
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
 const NAMES_FILE = path.join(DATA_DIR, 'names.json');
 const GAMES_FILE = path.join(DATA_DIR, 'games.json');
