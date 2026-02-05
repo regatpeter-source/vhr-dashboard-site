@@ -985,6 +985,17 @@ function getDemoRemainingDays(user) {
     const normalized = normalizeUserRecord(user);
     const demoExpirationDate = getDemoExpirationDate(normalized);
     const expirationDate = demoExpirationDate ? demoExpirationDate.toISOString() : null;
+    let totalDays = demoConfig.DEMO_DAYS;
+    try {
+      const startMs = normalized?.demoStartDate ? new Date(normalized.demoStartDate).getTime() : null;
+      const endMs = demoExpirationDate ? demoExpirationDate.getTime() : null;
+      if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs) {
+        const computed = Math.ceil((endMs - startMs) / (24 * 60 * 60 * 1000));
+        if (Number.isFinite(computed) && computed > 0) {
+          totalDays = computed;
+        }
+      }
+    } catch (e) {}
     const demoExpired = isDemoExpired(normalized);
     const remainingDays = getDemoRemainingDays(normalized);
     const hasLicense = hasPerpetualLicense(normalized);
@@ -997,7 +1008,7 @@ function getDemoRemainingDays(user) {
         demoExpired: false,
         expired: false,
         remainingDays: -1,
-        totalDays: demoConfig.DEMO_DAYS,
+        totalDays,
         expirationDate,
         hasValidSubscription: true,
         subscriptionStatus: 'admin',
@@ -1042,7 +1053,7 @@ function getDemoRemainingDays(user) {
       demoExpired,
       expired: demoExpired,
       remainingDays,
-      totalDays: demoConfig.DEMO_DAYS,
+      totalDays,
       expirationDate,
       hasValidSubscription,
       subscriptionStatus,
