@@ -317,6 +317,20 @@ const locateBundledAdb = () => {
 };
 
 const BUNDLED_ADB_PATH = locateBundledAdb();
+const HAS_BUNDLED_ADB = Boolean(BUNDLED_ADB_PATH && fs.existsSync(BUNDLED_ADB_PATH));
+const ADB_BIN = HAS_BUNDLED_ADB ? BUNDLED_ADB_PATH : ADB_FILENAME;
+
+if (HAS_BUNDLED_ADB) {
+  try {
+    const adbDir = path.dirname(BUNDLED_ADB_PATH);
+    if (adbDir && !process.env.PATH.includes(adbDir)) {
+      process.env.PATH = `${adbDir}${path.delimiter}${process.env.PATH || ''}`;
+      console.log(`[ADB] Binaire embarqué détecté: ${ADB_BIN}. Ajouté au PATH.`);
+    }
+  } catch (e) {
+    console.warn('[ADB] Impossible d\'ajouter le binaire au PATH:', e && e.message ? e.message : e);
+  }
+}
 
 
 const LOCAL_LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
@@ -326,6 +340,13 @@ function normalizeRemoteAddress(address) {
     return address.slice(7);
   }
   return address;
+}
+
+function getRequestAddress(req) {
+  const forwardedFor = (req.headers && req.headers['x-forwarded-for']) || '';
+  const candidate = forwardedFor.split(',')[0].trim() || req.socket?.remoteAddress;
+  const normalized = normalizeRemoteAddress(candidate);
+  return normalized || 'unknown';
 }
 
 
@@ -2921,6 +2942,27 @@ function authMiddleware(req, res, next) {
     next();
   } catch (e) {
     return res.status(401).json({ ok: false, error: 'Token invalide' });
+  }
+}
+
+// Variante tolérante : renvoie l'utilisateur décodé ou null (ne renvoie pas de 401)
+function tryDecodeUser(req) {
+  let token = null;
+  const queryToken = (req.query && (req.query.token || req.query.vhr_token)) || null;
+  if (queryToken) {
+    token = queryToken;
+  } else if (req.headers && req.headers.authorization && req.headers.authorization.split(' ')[1]) {
+    token = req.headers.authorization.split(' ')[1];
+  } else if (req.cookies && req.cookies.vhr_token) {
+    token = req.cookies.vhr_token;
+  }
+  if (!token) return null;
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const elevated = elevateAdminIfAllowlisted(decoded);
+    return elevated || decoded;
+  } catch (e) {
+    return null;
   }
 }
 
