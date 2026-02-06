@@ -3401,6 +3401,19 @@ function getRemoteStatusTokenFromRequest(req) {
   return '';
 }
 
+function shouldProxyRemoteStatus(req) {
+  if (!FORCE_REMOTE_USER_STATUS) return false;
+  if (!AUTH_API_BASE) return false;
+  try {
+    const target = new URL(AUTH_API_BASE);
+    const hostHeader = (req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+    if (!hostHeader) return true;
+    return target.host && target.host !== hostHeader;
+  } catch (e) {
+    return true;
+  }
+}
+
 async function proxyRemoteUserStatus(req, res, pathOverride) {
   if (!AUTH_API_BASE) {
     return res.status(503).json({ ok: false, error: 'Remote status unavailable' });
@@ -4227,7 +4240,7 @@ app.get('/api/admin/diagnose', authMiddleware, async (req, res) => {
 
 // Return authenticated user info (uses auth middleware)
 app.get('/api/me', authMiddleware, async (req, res) => {
-  if (FORCE_REMOTE_USER_STATUS) {
+  if (shouldProxyRemoteStatus(req)) {
     return proxyRemoteUserStatus(req, res, req.originalUrl);
   }
   const dbUser = await findUserByUsernameAsync(req.user.username);
@@ -4885,7 +4898,7 @@ app.post('/api/admin/demo-end', authMiddleware, async (req, res) => {
 
 // Get demo/trial status - also check Stripe subscription status
 app.get('/api/demo/status', authMiddleware, async (req, res) => {
-  if (FORCE_REMOTE_USER_STATUS) {
+  if (shouldProxyRemoteStatus(req)) {
     return proxyRemoteUserStatus(req, res, '/api/demo/status');
   }
   try {
@@ -5288,7 +5301,7 @@ app.get('/api/subscriptions/plans', (req, res) => {
 
 // Get current user's subscription status
 app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) => {
-  if (FORCE_REMOTE_USER_STATUS) {
+  if (shouldProxyRemoteStatus(req)) {
     return proxyRemoteUserStatus(req, res, '/api/subscriptions/my-subscription');
   }
   try {
@@ -8957,7 +8970,7 @@ app.post('/api/billing/portal', authMiddleware, async (req, res) => {
 
 // List invoices for current authenticated user
 app.get('/api/billing/invoices', authMiddleware, async (req, res) => {
-  if (FORCE_REMOTE_USER_STATUS) {
+  if (shouldProxyRemoteStatus(req)) {
     return proxyRemoteUserStatus(req, res, '/api/billing/invoices');
   }
   try {
@@ -8997,7 +9010,7 @@ app.get('/api/billing/invoices', authMiddleware, async (req, res) => {
 
 // List subscriptions for current authenticated user
 app.get('/api/billing/subscriptions', authMiddleware, async (req, res) => {
-  if (FORCE_REMOTE_USER_STATUS) {
+  if (shouldProxyRemoteStatus(req)) {
     return proxyRemoteUserStatus(req, res, '/api/billing/subscriptions');
   }
   try {
