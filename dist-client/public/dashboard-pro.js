@@ -2416,11 +2416,21 @@ async function api(path, opts = {}) {
 				...electronHeader
 			};
 		}
-		if (remoteToken && typeof path === 'string' && path.startsWith('/api/demo/status')) {
+		if (remoteToken && typeof path === 'string') {
+			const statusPaths = [
+				'/api/demo/status',
+				'/api/me',
+				'/api/subscriptions/my-subscription',
+				'/api/billing/invoices',
+				'/api/billing/subscriptions'
+			];
+			const shouldAttachRemote = statusPaths.some(p => path.startsWith(p));
+			if (shouldAttachRemote) {
 			opts.headers = {
 				...(opts.headers || {}),
 				'x-remote-auth': remoteToken
 			};
+			}
 		}
 
 		// Timeout support

@@ -426,6 +426,8 @@
         document.getElementById('subscriptionContent').innerHTML = trialHtml;
         return;
       }
+
+      if (trialStatusSection) trialStatusSection.style.display = 'none';
       
       const planName = sub.currentPlan ? sub.currentPlan.name : 'Abonnement actif';
       const startDate = sub.startDate ? new Date(sub.startDate).toLocaleDateString('fr-FR') : 'N/A';
@@ -534,8 +536,8 @@
 
   function buildTrialStatusHtml(info) {
     if (!info) return '<p>Statut de l\'essai indisponible.</p>';
-    const isTrialActive = !info.demoExpired && info.remainingDays > 0;
     const hasSubscription = Boolean(info.hasValidSubscription);
+    const isTrialActive = !hasSubscription && !info.demoExpired && info.remainingDays > 0;
     const statusLabel = isTrialActive
       ? `Essai gratuit : ${info.remainingDays} jour(s) restants`
       : hasSubscription
@@ -569,6 +571,10 @@
         throw new Error(res && res.error ? res.error : 'Impossible de récupérer le statut de l\'essai');
       }
       const info = normalizeDemoStatus(res.demo);
+      if (info && info.hasValidSubscription) {
+        if (trialStatusSection) trialStatusSection.style.display = 'none';
+        return;
+      }
       trialStatusContent.innerHTML = buildTrialStatusHtml(info);
       if (trialStatusSection) trialStatusSection.style.display = 'block';
     } catch (err) {

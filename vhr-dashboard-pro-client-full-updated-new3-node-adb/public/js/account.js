@@ -6,6 +6,7 @@
   const API_BASE = 'https://www.vhr-dashboard-site.com';
   const SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
   const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
+  const DEFAULT_DEMO_DAYS = 7;
 
   // --- Token bootstrap via querystring (to support redirection depuis le site https) ---
   const params = new URLSearchParams(window.location.search || '');
@@ -109,6 +110,8 @@
   const accountName = document.getElementById('accountName');
   const accountRole = document.getElementById('accountRole');
   const logoutBtn = document.getElementById('logoutBtn');
+  const trialStatusSection = document.getElementById('trialStatusSection');
+  const trialStatusContent = document.getElementById('trialStatusContent');
   let hasRedirected = false;
 
   function safeRedirect(target) {
@@ -156,6 +159,7 @@
       showLoggedIn(res.user);
       loadSubscription();
       loadBilling();
+      loadTrialStatus();
       // Si l'utilisateur est déjà connecté et qu'une redirection est demandée, l'appliquer immédiatement
       if (redirectParam) {
         safeRedirect(redirectParam);
@@ -171,11 +175,14 @@
     // populate forms
     document.getElementById('profileUsername').value = user.username || '';
     document.getElementById('profileEmail').value = user.email || '';
+    if (trialStatusSection) trialStatusSection.style.display = 'block';
   }
   function showLoggedOut() {
     clearAuthToken();
     loggedOutBox.style.display = 'block';
     loggedInBox.style.display = 'none';
+    if (trialStatusContent) trialStatusContent.innerHTML = '<p>Connectez-vous pour suivre votre essai gratuit.</p>';
+    if (trialStatusSection) trialStatusSection.style.display = 'none';
   }
 
   if (loginForm) loginForm.addEventListener('submit', async (e) => {
@@ -383,6 +390,8 @@
         document.getElementById('subscriptionContent').innerHTML = '<p>Pas d\'abonnement actif actuellement.</p>';
         return;
       }
+
+      if (trialStatusSection) trialStatusSection.style.display = 'none';
       
       const planName = sub.currentPlan ? sub.currentPlan.name : 'Abonnement actif';
       const startDate = sub.startDate ? new Date(sub.startDate).toLocaleDateString('fr-FR') : 'N/A';
@@ -444,6 +453,103 @@
     } catch (e) {
       console.error('[loadSubscription] error:', e);
       document.getElementById('subscriptionContent').innerHTML = '<p>Erreur lors du chargement de l\'abonnement.</p>';
+    }
+  }
+
+  function normalizeDemoStatus(demo) {
+    const fallback = {
+      remainingDays: 0,
+      demoExpired: true,
+      hasValidSubscription: false
+    };
+    const info = demo && typeof demo === 'object' ? demo : fallback;
+    const totalDays = typeof info.totalDays === 'number'
+      ? info.totalDays
+      : DEFAULT_DEMO_DAYS;
+    const remainingDays = typeof info.remainingDays === 'number'
+      ? Math.max(0, info.remainingDays)
+      : Math.max(0, totalDays - (info.demoUsedDays || 0));
+    const demoUsedDays = typeof info.demoUsedDays === 'number'
+      ? info.demoUsedDays
+      : Math.max(0, totalDays - remainingDays);
+    const demoProgressPercent = typeof info.demoProgressPercent === 'number'
+      ? Math.min(100, Math.max(0, Math.round(info.demoProgressPercent)))
+      : totalDays > 0
+        ? Math.min(100, Math.max(0, Math.round((demoUsedDays / totalDays) * 100)))
+        : 100;
+    return {
+      ...info,
+      totalDays,
+      remainingDays,
+      demoUsedDays,
+      demoProgressPercent
+    };
+  }
+
+  function renderTrialProgressBar(info) {
+    if (!info) return '';
+    const percent = typeof info.demoProgressPercent === 'number' ? info.demoProgressPercent : 0;
+    const used = Number.isFinite(info.demoUsedDays) ? info.demoUsedDays : 0;
+    const total = Number.isFinite(info.totalDays) ? info.totalDays : DEFAULT_DEMO_DAYS;
+    return `
+      <div style="margin-top:12px;">
+        <div style="height:8px;border-radius:999px;background:#e5e7eb;border:1px solid rgba(15,23,42,0.2);overflow:hidden;">
+          <div style="width:${percent}%;height:100%;background:linear-gradient(90deg,#22c55e,#16a34a);"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:#475569;margin-top:6px;">
+          <span>${used}/${total} jour(s) utilisés</span>
+          <span>${percent}%</span>
+        </div>
+      </div>
+    `;
+  }
+
+  function buildTrialStatusHtml(info) {
+    if (!info) return '<p>Statut de l\'essai indisponible.</p>';
+    const hasSubscription = Boolean(info.hasValidSubscription);
+    const isTrialActive = !hasSubscription && !info.demoExpired && info.remainingDays > 0;
+    const statusLabel = isTrialActive
+      ? `Essai gratuit : ${info.remainingDays} jour(s) restants`
+      : hasSubscription
+        ? 'Abonnement actif'
+        : 'Essai expiré';
+    const infoMessage = info.message || (isTrialActive
+      ? 'Profitez d’un accès complet pendant la période d’essai de 7 jours.'
+      : hasSubscription
+        ? 'Votre abonnement est actif.'
+        : 'L’essai est terminé, abonnez-vous pour continuer.');
+    const expiration = info.expirationDate ? new Date(info.expirationDate).toLocaleDateString('fr-FR') : '—';
+    const actionButton = (isTrialActive || !hasSubscription)
+      ? `<a class="cta" href="${BILLING_URL}" target="_blank" rel="noopener">Découvrir les offres</a>`
+      : '<span style="color:#16a34a;font-weight:bold;">Merci pour votre confiance !</span>';
+    return `
+      <p style="margin:4px 0;font-size:16px;font-weight:bold;">${statusLabel}</p>
+      <p style="margin:4px 0 8px 0;color:#475569;">${infoMessage}</p>
+      ${renderTrialProgressBar(info)}
+      <p style="margin:8px 0 0 0;font-size:12px;color:#64748b;">Expiration : ${expiration}</p>
+      <div style="margin-top:12px;">${actionButton}</div>
+    `;
+  }
+
+  async function loadTrialStatus() {
+    if (!trialStatusContent) return;
+    trialStatusContent.innerHTML = '<p>Chargement des informations d\'essai…</p>';
+    if (trialStatusSection) trialStatusSection.style.display = 'block';
+    try {
+      const res = await api('/api/demo/status');
+      if (!res || !res.ok || !res.demo) {
+        throw new Error(res && res.error ? res.error : 'Impossible de récupérer le statut de l\'essai');
+      }
+      const info = normalizeDemoStatus(res.demo);
+      if (info.hasValidSubscription) {
+        if (trialStatusSection) trialStatusSection.style.display = 'none';
+        return;
+      }
+      trialStatusContent.innerHTML = buildTrialStatusHtml(info);
+      if (trialStatusSection) trialStatusSection.style.display = 'block';
+    } catch (err) {
+      trialStatusContent.innerHTML = `<p style="color:#d32f2f;">${err.message || 'Erreur lors du chargement du statut de l\'essai.'}</p>`;
+      if (trialStatusSection) trialStatusSection.style.display = 'block';
     }
   }
 

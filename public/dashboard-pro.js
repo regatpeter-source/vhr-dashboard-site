@@ -2285,6 +2285,27 @@ async function syncRunningAppsFromServer() {
 let batteryPollInterval = null;  // Single interval reference
 const batteryBackoff = {}; // backoff per serial on repeated errors
 
+const REMOTE_AUTH_STORAGE_KEY = 'vhr_remote_token';
+
+function getRemoteAuthToken() {
+	try {
+		return localStorage.getItem(REMOTE_AUTH_STORAGE_KEY) || '';
+	} catch (e) {
+		return '';
+	}
+}
+
+function saveRemoteAuthToken(token) {
+	try {
+		if (token && token.trim()) {
+			localStorage.setItem(REMOTE_AUTH_STORAGE_KEY, token.trim());
+			return token.trim();
+		}
+		localStorage.removeItem(REMOTE_AUTH_STORAGE_KEY);
+	} catch (e) {}
+	return '';
+}
+
 // Initialize collaborative session socket handlers
 initSessionSocket();
 
@@ -2307,6 +2328,7 @@ async function api(path, opts = {}) {
 			opts.credentials = 'include';
 		}
 		const storedToken = readAuthToken();
+		const remoteToken = getRemoteAuthToken();
 		const isElectron = typeof navigator !== 'undefined' && /electron/i.test(navigator.userAgent || '');
 		const electronHeader = isElectron ? { 'x-vhr-electron': 'electron' } : {};
 		if (storedToken) {
@@ -2320,6 +2342,22 @@ async function api(path, opts = {}) {
 				...(opts.headers || {}),
 				...electronHeader
 			};
+		}
+		if (remoteToken && typeof path === 'string') {
+			const statusPaths = [
+				'/api/demo/status',
+				'/api/me',
+				'/api/subscriptions/my-subscription',
+				'/api/billing/invoices',
+				'/api/billing/subscriptions'
+			];
+			const shouldAttachRemote = statusPaths.some(p => path.startsWith(p));
+			if (shouldAttachRemote) {
+				opts.headers = {
+					...(opts.headers || {}),
+					'x-remote-auth': remoteToken
+				};
+			}
 		}
 
 		// Timeout support
@@ -4600,6 +4638,9 @@ window.loginUser = async function() {
 
 		// 3) Si prod OK, synchroniser vers backend local + cookie local
 		if (res.ok && data.ok) {
+			if (data.token) {
+				saveRemoteAuthToken(data.token);
+			}
 			const syncedUsername = data.user?.username || data.user?.name || identifier;
 			const syncedEmail = data.user?.email || identifier;
 			// Obtenir un token local pour les requêtes HTTP/localhost

@@ -3206,6 +3206,7 @@ function buildAuthCookieOptions(req, overrides = {}) {
 
 // Suivi des jeux lancés (persistance en mémoire côté serveur)
 const runningAppState = {}; // { serial: [pkg1, pkg2, ...] }
+const FORCE_REMOTE_USER_STATUS = (process.env.FORCE_REMOTE_USER_STATUS || '1') === '1';
 
 // --- Middleware de vérification du token ---
 async function authMiddleware(req, res, next) {
@@ -3342,6 +3343,46 @@ async function fetchRemoteDemoStatus(token) {
   } catch (err) {
     console.warn('[remote-demo] error fetching demo status:', err && err.message ? err.message : err);
     return null;
+  }
+}
+
+function getRemoteStatusTokenFromRequest(req) {
+  const headerToken = req.headers['x-remote-auth'] || req.headers['x-remote-token'] || '';
+  if (headerToken) return String(headerToken).trim();
+  if (req.headers && req.headers.authorization && req.headers.authorization.split(' ')[1]) {
+    return String(req.headers.authorization.split(' ')[1]).trim();
+  }
+  const queryToken = (req.query && (req.query.remote_token || req.query.remoteToken)) || null;
+  if (queryToken) return String(queryToken).trim();
+  return '';
+}
+
+async function proxyRemoteUserStatus(req, res, pathOverride) {
+  if (!AUTH_API_BASE) {
+    return res.status(503).json({ ok: false, error: 'Remote status unavailable' });
+  }
+  const token = getRemoteStatusTokenFromRequest(req);
+  if (!token) {
+    return res.status(401).json({ ok: false, error: 'Remote token missing' });
+  }
+  const path = pathOverride || req.originalUrl || '/api/me';
+  const url = new URL(path, AUTH_API_BASE).toString();
+  try {
+    const response = await promiseWithTimeout(fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    }), REMOTE_SYNC_TIMEOUT_MS);
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      return res.status(response.status).json(payload || { ok: false, error: 'Remote status error' });
+    }
+    return res.json(payload || { ok: false, error: 'Remote status empty' });
+  } catch (err) {
+    console.warn('[remote-status] proxy failed', err && err.message ? err.message : err);
+    return res.status(503).json({ ok: false, error: 'Remote status unavailable' });
   }
 }
 
@@ -4119,6 +4160,9 @@ app.get('/api/admin/diagnose', authMiddleware, async (req, res) => {
 
 // Return authenticated user info (uses auth middleware)
 app.get('/api/me', authMiddleware, async (req, res) => {
+  if (FORCE_REMOTE_USER_STATUS) {
+    return proxyRemoteUserStatus(req, res, req.originalUrl);
+  }
   const dbUser = await findUserByUsernameAsync(req.user.username);
   const normalizedUser = normalizeUserRecord(dbUser || req.user);
   const licenses = loadLicenses();
@@ -4774,6 +4818,9 @@ app.post('/api/admin/demo-end', authMiddleware, async (req, res) => {
 
 // Get demo/trial status - also check Stripe subscription status
 app.get('/api/demo/status', authMiddleware, async (req, res) => {
+  if (FORCE_REMOTE_USER_STATUS) {
+    return proxyRemoteUserStatus(req, res, '/api/demo/status');
+  }
   try {
     const user = await findUserByUsernameAsync(req.user.username);
     if (!user) {
@@ -5174,6 +5221,9 @@ app.get('/api/subscriptions/plans', (req, res) => {
 
 // Get current user's subscription status
 app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) => {
+  if (FORCE_REMOTE_USER_STATUS) {
+    return proxyRemoteUserStatus(req, res, '/api/subscriptions/my-subscription');
+  }
   try {
     let user = null;
     if (USE_POSTGRES && db) {
@@ -8840,6 +8890,9 @@ app.post('/api/billing/portal', authMiddleware, async (req, res) => {
 
 // List invoices for current authenticated user
 app.get('/api/billing/invoices', authMiddleware, async (req, res) => {
+  if (FORCE_REMOTE_USER_STATUS) {
+    return proxyRemoteUserStatus(req, res, '/api/billing/invoices');
+  }
   try {
     let user = null;
     if (USE_POSTGRES && db) {
@@ -8877,6 +8930,9 @@ app.get('/api/billing/invoices', authMiddleware, async (req, res) => {
 
 // List subscriptions for current authenticated user
 app.get('/api/billing/subscriptions', authMiddleware, async (req, res) => {
+  if (FORCE_REMOTE_USER_STATUS) {
+    return proxyRemoteUserStatus(req, res, '/api/billing/subscriptions');
+  }
   try {
     let user = null;
     if (USE_POSTGRES && db) {
@@ -9009,6 +9065,28 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
     } else if (type === 'checkout.session.completed') {
       // session completed often delivers: session.customer
       if (obj.customer) user.stripeCustomerId = obj.customer;
+
+      if (obj.metadata && obj.metadata.userEmail && !user.email) {
+        user.email = normalizeEmailValue(obj.metadata.userEmail);
+      }
+
+      if (obj.subscription) {
+        try {
+          const stripeSub = await stripe.subscriptions.retrieve(obj.subscription);
+          user.subscriptionStatus = stripeSub.status || user.subscriptionStatus || 'active';
+          user.subscriptionId = stripeSub.id;
+          ensureUserSubscription(user, {
+            stripeSubscriptionId: stripeSub.id,
+            stripePriceId: stripeSub?.items?.data?.[0]?.price?.id || null,
+            status: stripeSub.status || 'unknown',
+            planName: stripeSub?.items?.data?.[0]?.price?.nickname || stripeSub?.items?.data?.[0]?.plan?.nickname || 'Abonnement',
+            startDate: stripeSub.current_period_start ? new Date(stripeSub.current_period_start * 1000).toISOString() : undefined,
+            endDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000).toISOString() : undefined
+          });
+        } catch (subErr) {
+          console.error('[webhook] Failed to hydrate subscription from checkout:', subErr && subErr.message ? subErr.message : subErr);
+        }
+      }
 
       // Keep the Stripe customer name/email aligned with the app user (prevents cardholder name drift)
       if (obj.customer && stripe && user) {

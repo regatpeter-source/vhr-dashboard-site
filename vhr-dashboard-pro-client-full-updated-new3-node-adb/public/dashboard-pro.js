@@ -2130,6 +2130,27 @@ async function syncRunningAppsFromServer() {
 let batteryPollInterval = null;  // Single interval reference
 const batteryBackoff = {}; // backoff per serial on repeated errors
 
+const REMOTE_AUTH_STORAGE_KEY = 'vhr_remote_token';
+
+function getRemoteAuthToken() {
+	try {
+		return localStorage.getItem(REMOTE_AUTH_STORAGE_KEY) || '';
+	} catch (e) {
+		return '';
+	}
+}
+
+function saveRemoteAuthToken(token) {
+	try {
+		if (token && token.trim()) {
+			localStorage.setItem(REMOTE_AUTH_STORAGE_KEY, token.trim());
+			return token.trim();
+		}
+		localStorage.removeItem(REMOTE_AUTH_STORAGE_KEY);
+	} catch (e) {}
+	return '';
+}
+
 // Initialize collaborative session socket handlers
 initSessionSocket();
 
@@ -2152,11 +2173,28 @@ async function api(path, opts = {}) {
 			opts.credentials = 'include';
 		}
 		const storedToken = readAuthToken();
+		const remoteToken = getRemoteAuthToken();
 		if (storedToken) {
 			opts.headers = {
 				...(opts.headers || {}),
 				Authorization: 'Bearer ' + storedToken
 			};
+		}
+		if (remoteToken && typeof path === 'string') {
+			const statusPaths = [
+				'/api/demo/status',
+				'/api/me',
+				'/api/subscriptions/my-subscription',
+				'/api/billing/invoices',
+				'/api/billing/subscriptions'
+			];
+			const shouldAttachRemote = statusPaths.some(p => path.startsWith(p));
+			if (shouldAttachRemote) {
+				opts.headers = {
+					...(opts.headers || {}),
+					'x-remote-auth': remoteToken
+				};
+			}
 		}
 
 		const targetUrl = (path.startsWith('http://') || path.startsWith('https://'))
@@ -4747,6 +4785,7 @@ window.loginUser = async function() {
 		if (!(res.ok && data.ok)) {
 			showToast('❌ Identifiants incorrects (prod)', 'error');
 			saveAuthToken('');
+			saveRemoteAuthToken('');
 			localStorage.removeItem('vhr_current_user');
 			return;
 		}
@@ -4754,6 +4793,7 @@ window.loginUser = async function() {
 		if (res.ok && data.ok) {
 			if (data.token) {
 				saveAuthToken(data.token);
+				saveRemoteAuthToken(data.token);
 			}
 			showToast('✅ Connecté avec succès !', 'success');
 			currentUser = data.user?.name || data.user?.username || data.user?.email || identifier;
@@ -4774,6 +4814,7 @@ window.loginUser = async function() {
 		} else {
 			showToast('❌ ' + (data.error || 'Connexion échouée'), 'error');
 			saveAuthToken('');
+			saveRemoteAuthToken('');
 			localStorage.removeItem('vhr_current_user');
 		}
 	} catch (e) {
