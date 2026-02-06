@@ -35,6 +35,8 @@ const fetch = require('node-fetch');
 const os = require('os');
 const REMOTE_AUTH_ORIGIN = process.env.REMOTE_AUTH_ORIGIN || process.env.REMOTE_HOST || process.env.PUBLIC_API_BASE_URL || 'https://www.vhr-dashboard-site.com';
 const REMOTE_AUTH_TIMEOUT_MS = Number(process.env.REMOTE_AUTH_TIMEOUT_MS || '12000');
+const REMOTE_STATUS_LOG_COOLDOWN_MS = Math.max(1000, Number.parseInt(process.env.REMOTE_STATUS_LOG_COOLDOWN_MS || '15000', 10) || 15000);
+let lastRemoteStatusLogAt = 0;
 const REMOTE_LOGIN_PATHS = ['/api/login', '/api/auth/login'];
 const REMOTE_DEMO_STATUS_PATH = process.env.REMOTE_DEMO_STATUS_PATH || '/api/demo/status';
 const REMOTE_DEMO_CACHE_TTL_MS = Number(process.env.REMOTE_DEMO_CACHE_TTL_MS || '300000');
@@ -3141,9 +3143,16 @@ async function proxyRemoteUserStatus(req, res, pathOverride) {
   if (!REMOTE_AUTH_ORIGIN) {
     return res.status(503).json({ ok: false, error: 'Remote status unavailable' });
   }
-  const token = getRemoteStatusTokenFromRequest(req);
+  const username = req.user && req.user.username ? String(req.user.username) : '';
+  let token = getRemoteStatusTokenFromRequest(req);
+  if (!token && username) {
+    token = getCachedRemoteAuthToken(username) || getPersistedRemoteAuthToken(username) || '';
+  }
   if (!token) {
     return res.status(401).json({ ok: false, error: 'Remote token missing' });
+  }
+  if (username) {
+    cacheRemoteAuthToken(username, token);
   }
   const path = pathOverride || req.originalUrl || '/api/me';
   const url = `${REMOTE_AUTH_ORIGIN}${path}`;
@@ -3158,11 +3167,27 @@ async function proxyRemoteUserStatus(req, res, pathOverride) {
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
+      if ((response.status === 401 || response.status === 403) && username) {
+        clearRemoteAuthToken(username);
+      }
       return res.status(response.status).json(payload || { ok: false, error: 'Remote status error' });
+    }
+    if (username && path.startsWith('/api/demo/status') && payload && payload.demo) {
+      cacheRemoteDemoStatus(username, payload.demo);
     }
     return res.json(payload || { ok: false, error: 'Remote status empty' });
   } catch (err) {
-    console.warn('[remote-status] proxy failed', err && err.message ? err.message : err);
+    const now = Date.now();
+    if (now - lastRemoteStatusLogAt >= REMOTE_STATUS_LOG_COOLDOWN_MS) {
+      console.warn('[remote-status] proxy failed', err && err.message ? err.message : err);
+      lastRemoteStatusLogAt = now;
+    }
+    if (username && path.startsWith('/api/demo/status')) {
+      const cachedDemo = getCachedRemoteDemo(username);
+      if (cachedDemo) {
+        return res.json({ ok: true, demo: cachedDemo, remote: true, cached: true, error: 'remote_unavailable' });
+      }
+    }
     return res.status(503).json({ ok: false, error: 'Remote status unavailable' });
   }
 }
