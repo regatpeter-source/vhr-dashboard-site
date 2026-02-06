@@ -1025,19 +1025,27 @@ function getDemoRemainingDays(user) {
     let subscriptionStatus = normalized.subscriptionStatus || 'none';
     let stripeError = null;
 
-    // If demo is expired and no active subscription recorded, double-check Stripe
-    if (demoExpired && !hasValidSubscription && normalized.stripeCustomerId && stripe) {
+    // Double-check Stripe when local status is missing/inactive, even if demo is still active
+    if (!hasValidSubscription && stripe) {
       try {
-        const stripeSubs = await stripe.subscriptions.list({
-          customer: normalized.stripeCustomerId,
-          status: 'active',
-          limit: 1
-        });
-        if (stripeSubs.data && stripeSubs.data.length > 0) {
-          hasValidSubscription = stripeSubs.data.some(sub => sub.status === 'active');
-          subscriptionStatus = stripeSubs.data[0].status || 'active';
-        } else {
-          subscriptionStatus = 'none';
+        let customerId = normalized.stripeCustomerId || null;
+        if (!customerId) {
+          customerId = await ensureStripeCustomerForUser(normalized);
+        }
+        if (customerId) {
+          const stripeSubs = await stripe.subscriptions.list({
+            customer: customerId,
+            status: 'all',
+            limit: 5
+          });
+          const activeLikeStatuses = new Set(['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired']);
+          const stripeSub = (stripeSubs.data || []).find(sub => activeLikeStatuses.has(sub.status));
+          if (stripeSub) {
+            hasValidSubscription = true;
+            subscriptionStatus = stripeSub.status || 'active';
+          } else {
+            subscriptionStatus = subscriptionStatus || 'none';
+          }
         }
       } catch (e) {
         stripeError = e && e.message ? e.message : String(e || 'Stripe error');
@@ -1062,9 +1070,11 @@ function getDemoRemainingDays(user) {
       accessBlocked,
       message: accessBlocked
         ? '❌ Essai expiré - Abonnement ou licence requis'
-        : demoExpired
-          ? '✅ Accès accordé via abonnement actif'
-          : `✅ Essai en cours - ${remainingDays} jour(s) restant(s)`
+        : hasValidSubscription
+          ? '✅ Abonnement actif'
+          : demoExpired
+            ? '✅ Accès accordé via abonnement actif'
+            : `✅ Essai en cours - ${remainingDays} jour(s) restant(s)`
     };
   }
 

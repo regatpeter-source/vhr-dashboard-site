@@ -2451,6 +2451,30 @@ async function api(path, opts = {}) {
 	}
 }
 
+async function syncVitrineAccessStatus() {
+	try {
+		let storedToken = readAuthToken();
+		if (!storedToken) {
+			storedToken = await syncTokenFromCookie();
+		}
+		if (!storedToken) return null;
+		const demoUrl = `/api/demo/status?token=${encodeURIComponent(storedToken)}`;
+		const res = await api(demoUrl, { skipAuthHeader: true, timeout: 8000 });
+		if (res && res.ok && res.demo) {
+			applyDemoStatusSnapshot(res.demo);
+			if (!res.demo.demoExpired) {
+				showTrialBanner(res.demo.remainingDays);
+			} else if (!res.demo.accessBlocked) {
+				showTrialBanner(0);
+			}
+			return res.demo;
+		}
+	} catch (e) {
+		console.warn('[vitrine-sync] failed', e);
+	}
+	return null;
+}
+
 async function refreshDevicesList() {
 	const btn = document.getElementById('refreshBtn');
 	if (!btn) return;
@@ -2460,6 +2484,7 @@ async function refreshDevicesList() {
 	btn.style.pointerEvents = 'none';
 	const originalText = btn.innerHTML;
 	btn.innerHTML = '� Rafraîchissement...';
+	const vitrineSyncPromise = syncVitrineAccessStatus();
 	
 	try {
 		// Recharger les devices
@@ -2489,6 +2514,7 @@ async function refreshDevicesList() {
 			btn.style.pointerEvents = 'auto';
 		}, 2000);
 	}
+		await vitrineSyncPromise;
 }
 
 async function loadDevices() {
@@ -4318,12 +4344,24 @@ socket.on('stream-event', (evt) => {
 // ========== LICENSE CHECK & UNLOCK SYSTEM ========== 
 const BILLING_PAGE_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
 
+function isElectronRuntime() {
+	try {
+		return typeof navigator !== 'undefined' && /electron/i.test(navigator.userAgent || '');
+	} catch (e) {
+		return false;
+	}
+}
+
 function goToOfficialBillingPage() {
 	try {
+		if (isElectronRuntime()) {
+			window.open(BILLING_PAGE_URL, '_blank', 'noopener,noreferrer');
+			return;
+		}
 		window.location.href = BILLING_PAGE_URL;
 	} catch (e) {
 		// fallback new tab if navigation blocked
-		window.open(BILLING_PAGE_URL, '_blank');
+		window.open(BILLING_PAGE_URL, '_blank', 'noopener,noreferrer');
 	}
 }
 

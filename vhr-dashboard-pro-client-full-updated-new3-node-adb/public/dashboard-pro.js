@@ -2196,6 +2196,40 @@ async function api(path, opts = {}) {
 	}
 }
 
+async function syncVitrineAccessStatus() {
+	const token = readAuthToken();
+	const baseUrl = RESOLVED_AUTH_BASE || AUTH_API_BASE || '';
+	if (!token || !baseUrl) return null;
+	try {
+		const res = await fetch(`${baseUrl}/api/demo/status`, {
+			method: 'GET',
+			credentials: 'include',
+			headers: {
+				'Content-Type': 'application/json',
+				Authorization: 'Bearer ' + token
+			}
+		});
+		if (!res.ok) return null;
+		const data = await res.json().catch(() => null);
+		if (data && data.ok && data.demo) {
+			latestDemoStatus = data.demo;
+			licenseStatus.trial = !data.demo.demoExpired;
+			licenseStatus.expired = Boolean(data.demo.demoExpired);
+			licenseStatus.licensed = Boolean(
+				data.demo.hasValidSubscription
+				|| data.demo.hasPerpetualLicense
+				|| !data.demo.demoExpired
+				|| data.demo.subscriptionStatus === 'admin'
+			);
+			showTrialBanner(data.demo);
+			return data.demo;
+		}
+	} catch (e) {
+		console.warn('[vitrine-sync] failed', e);
+	}
+	return null;
+}
+
 async function refreshDevicesList() {
 	const btn = document.getElementById('refreshBtn');
 	if (!btn) return;
@@ -2205,6 +2239,7 @@ async function refreshDevicesList() {
 	btn.style.pointerEvents = 'none';
 	const originalText = btn.innerHTML;
 	btn.innerHTML = '⏳ Rafraîchissement...';
+	const vitrineSyncPromise = syncVitrineAccessStatus();
 	
 	try {
 		// Recharger les devices
@@ -2234,6 +2269,7 @@ async function refreshDevicesList() {
 			btn.style.pointerEvents = 'auto';
 		}, 2000);
 	}
+		await vitrineSyncPromise;
 }
 
 async function loadDevices(forceOrEvent = false) {
@@ -4054,8 +4090,8 @@ function isElectronRuntime() {
 function goToOfficialBillingPage() {
 	try {
 		if (isElectronRuntime()) {
-			const opened = window.open(BILLING_PAGE_URL, '_blank', 'noopener,noreferrer');
-			if (opened) return;
+			window.open(BILLING_PAGE_URL, '_blank', 'noopener,noreferrer');
+			return;
 		}
 		window.location.href = BILLING_PAGE_URL;
 	} catch (e) {

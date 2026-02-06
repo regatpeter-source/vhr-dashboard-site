@@ -315,32 +315,7 @@ const locateBundledAdb = () => {
 };
 
 const BUNDLED_ADB_PATH = locateBundledAdb();
-const HAS_BUNDLED_ADB = Boolean(BUNDLED_ADB_PATH);
-const ADB_BIN = HAS_BUNDLED_ADB ? BUNDLED_ADB_PATH : ADB_FILENAME;
 
-if (HAS_BUNDLED_ADB) {
-  const adbDir = path.dirname(BUNDLED_ADB_PATH);
-  const currentPath = (process.env.PATH || '').split(path.delimiter);
-  if (!currentPath.includes(adbDir)) {
-    process.env.PATH = `${adbDir}${path.delimiter}${process.env.PATH || ''}`;
-  }
-  console.log(`[ADB] Binaire embarqué détecté: ${ADB_BIN}. Ajouté en priorité au PATH.`);
-} else {
-  console.log(`[ADB] Aucun binaire ADB embarqué détecté, utilisation du ${ADB_FILENAME} présent dans le PATH système.`);
-}
-
-function isAllowedAdminUser(user) {
-  const username = (typeof user === 'string' ? user : (user && user.username) || '').toLowerCase();
-  return !!username && ADMIN_ALLOWLIST.includes(username);
-}
-
-function ensureAllowedAdmin(req, res) {
-  if (!req.user || req.user.role !== 'admin' || !isAllowedAdminUser(req.user)) {
-    if (res) res.status(403).json({ ok: false, error: 'Accès admin restreint' });
-    return false;
-  }
-  return true;
-}
 
 const LOCAL_LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 function normalizeRemoteAddress(address) {
@@ -351,12 +326,7 @@ function normalizeRemoteAddress(address) {
   return address;
 }
 
-function getRequestAddress(req) {
-  const forwardedFor = (req.headers && req.headers['x-forwarded-for']) || '';
-  const candidate = forwardedFor.split(',')[0].trim() || req.socket?.remoteAddress;
-  const normalized = normalizeRemoteAddress(candidate);
-  return normalized || 'unknown';
-}
+
 
 function isLocalRequest(req) {
   const candidate = getRequestAddress(req);

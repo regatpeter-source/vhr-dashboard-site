@@ -2350,6 +2350,32 @@ async function api(path, opts = {}) {
 	}
 }
 
+async function syncVitrineAccessStatus() {
+	try {
+		const demoInfo = await syncCentralAccessStatus();
+		if (!demoInfo) return null;
+		if (demoInfo.accessBlocked) {
+			showUnlockModal({
+				expired: true,
+				accessBlocked: true,
+				subscriptionStatus: demoInfo.subscriptionStatus,
+				hasActiveLicense: demoInfo.hasActiveLicense
+			});
+			return demoInfo;
+		}
+		const remainingDays = typeof demoInfo.remainingDays === 'number' ? demoInfo.remainingDays : 0;
+		if (!demoInfo.demoExpired) {
+			showTrialBanner(remainingDays);
+		} else {
+			showTrialBanner(0);
+		}
+		return demoInfo;
+	} catch (e) {
+		console.warn('[vitrine-sync] failed', e);
+		return null;
+	}
+}
+
 async function refreshDevicesList() {
 	const btn = document.getElementById('refreshBtn');
 	if (!btn) return;
@@ -2359,6 +2385,7 @@ async function refreshDevicesList() {
 	btn.style.pointerEvents = 'none';
 	const originalText = btn.innerHTML;
 	btn.innerHTML = '⏳ Rafraîchissement...';
+	const vitrineSyncPromise = syncVitrineAccessStatus();
 	
 	try {
 		// Recharger les devices
@@ -2388,6 +2415,7 @@ async function refreshDevicesList() {
 			btn.style.pointerEvents = 'auto';
 		}, 2000);
 	}
+		await vitrineSyncPromise;
 }
 
 async function loadDevices() {
@@ -4146,8 +4174,8 @@ function isElectronRuntime() {
 function goToOfficialBillingPage() {
 	try {
 		if (isElectronRuntime()) {
-			const opened = window.open(BILLING_PAGE_URL, '_blank', 'noopener,noreferrer');
-			if (opened) return;
+			window.open(BILLING_PAGE_URL, '_blank', 'noopener,noreferrer');
+			return;
 		}
 		window.location.href = BILLING_PAGE_URL;
 	} catch (e) {
