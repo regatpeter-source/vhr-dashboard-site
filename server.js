@@ -4145,17 +4145,22 @@ app.post('/api/admin/sync-user', async (req, res) => {
 
 // Fournit aux clients locaux le secret de synchronisation actif (pour éviter les builds figés)
 app.get('/api/admin/sync-config', (req, res) => {
-  const clientAddress = getRequestAddress(req);
-  if (!isLocalRequest(req)) {
-    console.warn(`[sync-config] blocked request from ${clientAddress}`);
-    return res.status(403).json({ ok: false, error: 'Accessible uniquement depuis localhost' });
+  try {
+    const clientAddress = getRequestAddress(req);
+    if (!isLocalRequest(req)) {
+      console.warn(`[sync-config] blocked request from ${clientAddress}`);
+      return res.json({ ok: false, error: 'Accessible uniquement depuis localhost' });
+    }
+    console.info(`[sync-config] allowed local request from ${clientAddress}`);
+    return res.json({
+      ok: true,
+      syncSecret: SYNC_USERS_SECRET || null,
+      syncUserEndpoint: SYNC_USER_ENDPOINT
+    });
+  } catch (e) {
+    console.warn('[sync-config] error:', e && e.message ? e.message : e);
+    return res.json({ ok: false, error: 'sync-config unavailable' });
   }
-  console.info(`[sync-config] allowed local request from ${clientAddress}`);
-  res.json({
-    ok: true,
-    syncSecret: SYNC_USERS_SECRET || null,
-    syncUserEndpoint: SYNC_USER_ENDPOINT
-  });
 });
 
 app.get('/.well-known/traffic-advice', (req, res) => {
