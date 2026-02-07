@@ -208,6 +208,7 @@ let licenseStatus = {
 	hasPerpetualLicense: false,
 	licenseCount: 0
 };
+const MAX_USERS_PER_ACCOUNT = 2;
 const ALLOWED_ADMIN_USER = 'peter';
 const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
 let installationOverlayElement = null;
@@ -355,6 +356,10 @@ function setUserRole(user, role) {
 	updateUserUI();
 }
 
+function getAdditionalUserCount() {
+	return userList.filter(u => u && u !== 'Invité' && u !== currentUser).length;
+}
+
 function updateUserUI() {
 	let userDiv = document.getElementById('navbarUser');
 	if (!userDiv) return;
@@ -496,6 +501,15 @@ window.createNewUser = async function() {
 	const role = document.getElementById('newUserRole').value;
 	const normalizedRole = normalizeRoleForUser(username, role);
 	
+	if (!currentUser || currentUser === 'Invité') {
+		showToast('🔒 Connectez-vous d\'abord pour créer un utilisateur', 'error');
+		return;
+	}
+	if (!isAdminAllowed(currentUser) && getAdditionalUserCount() >= MAX_USERS_PER_ACCOUNT) {
+		showToast(`❌ Limite atteinte : ${MAX_USERS_PER_ACCOUNT} utilisateur(s) par compte`, 'error');
+		return;
+	}
+	
 	if (!username) {
 		showToast('❌ Entrez un nom d\'utilisateur', 'error');
 		return;
@@ -526,6 +540,10 @@ window.createNewUser = async function() {
 			document.getElementById('addUserDialog').remove();
 			showToast(`✅ Utilisateur ${username} créé avec succès!`, 'success');
 		} else {
+			if (data && data.code === 'user_limit_reached') {
+				showToast(`❌ ${data.error || `Limite atteinte : ${MAX_USERS_PER_ACCOUNT} utilisateur(s)`}`, 'error');
+				return;
+			}
 			showToast(`❌ ${data.error || 'Erreur lors de la création'}`, 'error');
 		}
 	} catch (e) {
@@ -2472,7 +2490,16 @@ async function syncVitrineAccessStatus() {
 		const res = await api(demoUrl, { skipAuthHeader: true, timeout: 8000 });
 		if (res && res.ok && res.demo) {
 			applyDemoStatusSnapshot(res.demo);
-			if (!res.demo.demoExpired) {
+			const hasActiveSubscription = Boolean(
+				res.demo.hasValidSubscription ||
+				res.demo.hasActiveLicense ||
+				res.demo.hasPerpetualLicense ||
+				res.demo.subscriptionStatus === 'admin' ||
+				res.demo.subscriptionStatus === 'active'
+			);
+			if (hasActiveSubscription) {
+				showTrialBanner(0);
+			} else if (!res.demo.demoExpired) {
 				showTrialBanner(res.demo.remainingDays);
 			} else if (!res.demo.accessBlocked) {
 				showTrialBanner(0);
@@ -4404,7 +4431,7 @@ function applyDemoStatusSnapshot(demoStatus) {
 	licenseStatus.accessBlocked = Boolean(demoStatus.accessBlocked);
 	licenseStatus.trial = !demoStatus.demoExpired;
 	licenseStatus.expired = Boolean(demoStatus.demoExpired);
-	licenseStatus.licensed = Boolean(demoStatus.hasValidSubscription || demoStatus.hasPerpetualLicense || !demoStatus.demoExpired || demoStatus.subscriptionStatus === 'admin');
+	licenseStatus.licensed = Boolean(demoStatus.hasValidSubscription || demoStatus.hasActiveLicense || demoStatus.hasPerpetualLicense || !demoStatus.demoExpired || demoStatus.subscriptionStatus === 'admin' || demoStatus.subscriptionStatus === 'active');
 	if (typeof demoStatus.message === 'string') {
 		licenseStatus.message = demoStatus.message;
 	}
@@ -4476,7 +4503,14 @@ async function checkLicense() {
 		const demoStatus = res.demo;
 		console.log('[license] Demo status:', demoStatus);
 		applyDemoStatusSnapshot(demoStatus);
+		const hasActiveSubscription = Boolean(demoStatus.hasValidSubscription || demoStatus.hasActiveLicense || demoStatus.hasPerpetualLicense || demoStatus.subscriptionStatus === 'admin' || demoStatus.subscriptionStatus === 'active');
 		
+		// If subscription/license is active, show active banner (even if demo still running)
+		if (hasActiveSubscription) {
+			showTrialBanner(0);
+			return true; // Allow access
+		}
+
 		// Demo is still valid - show banner with remaining days
 		if (!demoStatus.demoExpired) {
 			showTrialBanner(demoStatus.remainingDays);
@@ -4484,7 +4518,7 @@ async function checkLicense() {
 		}
 		
 		// Demo is expired - check if user has valid subscription
-		if (demoStatus.accessBlocked) {
+		if (demoStatus.accessBlocked && !hasActiveSubscription) {
 			// No valid subscription after demo expiration
 			console.warn('[license] Access blocked: demo expired + no subscription');
 			showUnlockModal({

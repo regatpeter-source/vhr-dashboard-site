@@ -22,8 +22,8 @@ function buildUserModalContent(user) {
   const updatedDate = user.updatedAt ? new Date(user.updatedAt).toLocaleString('fr-FR') : 'N/A';
   const lastLogin = user.lastLogin ? new Date(user.lastLogin).toLocaleString('fr-FR') : 'N/A';
   const lastActivity = user.lastActivity ? new Date(user.lastActivity).toLocaleString('fr-FR') : 'N/A';
-  const subStatusLabel = access.subscriptionStatus || user.subscriptionStatus || 'None';
   const access = user.accessSummary || {};
+  const subStatusLabel = access.subscriptionStatus || user.subscriptionStatus || 'None';
   const demoStatusLabel = !access.hasDemo
     ? 'Non initialisé'
     : access.demoExpired
@@ -383,8 +383,8 @@ async function viewUser(username) {
       const updatedDate = user.updatedAt ? new Date(user.updatedAt).toLocaleString('fr-FR') : 'N/A';
       const lastLogin = user.lastLogin ? new Date(user.lastLogin).toLocaleString('fr-FR') : 'N/A';
       const lastActivity = user.lastActivity ? new Date(user.lastActivity).toLocaleString('fr-FR') : 'N/A';
-      const subStatusLabel = access.subscriptionStatus || user.subscriptionStatus || 'None';
       const access = user.accessSummary || {};
+      const subStatusLabel = access.subscriptionStatus || user.subscriptionStatus || 'None';
       const demoStatusLabel = !access.hasDemo
         ? 'Non initialisé'
         : access.demoExpired

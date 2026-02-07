@@ -3176,6 +3176,7 @@ function removeUserByUsername(username) {
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change_this_secret';
 const JWT_EXPIRES = '2h';
+const DASHBOARD_MAX_USERS_PER_ACCOUNT = Number.parseInt(process.env.DASHBOARD_MAX_USERS_PER_ACCOUNT || '2', 10) || 2;
 
 function isSecureRequest(req) {
   if (!req) return false;
@@ -3647,10 +3648,26 @@ app.post('/api/logout', (req, res) => {
 });
 
 // --- Route pour créer un utilisateur dashboard (simplifié, sans email) ---
-app.post('/api/dashboard/register', async (req, res) => {
+app.post('/api/dashboard/register', authMiddleware, async (req, res) => {
   console.log('[api/dashboard/register] request received');
   reloadUsers();
   const { username, password, role } = req.body;
+  const ownerUsername = req.user && req.user.username ? String(req.user.username) : '';
+  const isAdmin = req.user && req.user.role === 'admin';
+
+  if (!ownerUsername) {
+    return res.status(401).json({ ok: false, error: 'Authentification requise' });
+  }
+
+  const existingOwned = users.filter(u => (u.createdBy || u.ownerUsername) === ownerUsername);
+  if (!isAdmin && existingOwned.length >= DASHBOARD_MAX_USERS_PER_ACCOUNT) {
+    return res.status(403).json({
+      ok: false,
+      error: `Limite atteinte : ${DASHBOARD_MAX_USERS_PER_ACCOUNT} utilisateur(s) par compte`,
+      code: 'user_limit_reached',
+      limit: DASHBOARD_MAX_USERS_PER_ACCOUNT
+    });
+  }
   
   if (!username || !password) {
     return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur et mot de passe requis' });
@@ -3673,6 +3690,7 @@ app.post('/api/dashboard/register', async (req, res) => {
       email: `${username}@dashboard.local`,
       passwordHash,
       role: role || 'user',
+      createdBy: ownerUsername,
       demoStartDate: new Date().toISOString(),
       subscriptionStatus: 'dashboard',
       createdAt: new Date().toISOString()

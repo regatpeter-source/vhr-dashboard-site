@@ -2866,6 +2866,7 @@ function removeUserByUsername(username) {
 
 const JWT_SECRET = getOrCreateSecretFile('jwt-secret.txt', process.env.JWT_SECRET, 32);
 const JWT_EXPIRES = '2h';
+const DASHBOARD_MAX_USERS_PER_ACCOUNT = Number.parseInt(process.env.DASHBOARD_MAX_USERS_PER_ACCOUNT || '2', 10) || 2;
 
 function isSecureRequest(req) {
   if (!req) return false;
@@ -3462,7 +3463,7 @@ app.post('/api/logout', (req, res) => {
 });
 
 // --- Route pour créer un utilisateur dashboard (simplifié, sans email) ---
-app.post('/api/dashboard/register', async (req, res) => {
+app.post('/api/dashboard/register', authMiddleware, async (req, res) => {
   console.log('[api/dashboard/register] request received');
   // Sécurisation : on refuse la création d'utilisateurs si aucune base persistante n'est configurée
   // (ni Postgres, ni SQLite). Cela évite que l'archive client zip fonctionne en "mode démo" sans contrôle.
@@ -3473,6 +3474,22 @@ app.post('/api/dashboard/register', async (req, res) => {
 
   reloadUsers();
   const { username, password, role } = req.body;
+  const ownerUsername = req.user && req.user.username ? String(req.user.username) : '';
+  const isAdmin = req.user && req.user.role === 'admin';
+
+  if (!ownerUsername) {
+    return res.status(401).json({ ok: false, error: 'Authentification requise' });
+  }
+
+  const existingOwned = users.filter(u => (u.createdBy || u.ownerUsername) === ownerUsername);
+  if (!isAdmin && existingOwned.length >= DASHBOARD_MAX_USERS_PER_ACCOUNT) {
+    return res.status(403).json({
+      ok: false,
+      error: `Limite atteinte : ${DASHBOARD_MAX_USERS_PER_ACCOUNT} utilisateur(s) par compte`,
+      code: 'user_limit_reached',
+      limit: DASHBOARD_MAX_USERS_PER_ACCOUNT
+    });
+  }
   
   if (!username || !password) {
     return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur et mot de passe requis' });
@@ -3495,6 +3512,7 @@ app.post('/api/dashboard/register', async (req, res) => {
       email: `${username}@dashboard.local`,
       passwordHash,
       role: role || 'user',
+      createdBy: ownerUsername,
       demoStartDate: null,
       demoStartSource: 'pending',
       subscriptionStatus: 'dashboard',
@@ -9619,12 +9637,33 @@ function resolveScrcpyLauncher(scrcpyBinaryPath) {
     return { type: 'exe', path: scrcpyBinaryPath };
   }
 
-  // Plan D: launch via cmd start with hidden console
+  // In packaged apps, prefer direct exe launch to avoid VBS/PS1 policy blocks
+  // (unless an explicit cmd/ps1 override is requested)
   const forceCmd = envIsTrue('SCRCPY_FORCE_CMD');
+  const forcePs1 = envIsTrue('SCRCPY_FORCE_PS1');
+  if (isPackaged && !forceCmd && !forcePs1) {
+    return { type: 'exe', path: scrcpyBinaryPath };
+  }
+
+  // Plan D: launch via cmd start with hidden console
   if (forceCmd) {
     return { type: 'cmd', path: scrcpyBinaryPath };
   }
 
+  // Prefer PowerShell hidden launcher when explicitly enabled
+  if (forcePs1) {
+    const ps1Candidates = [
+      path.join(__dirname, 'scrcpy', 'scrcpy-hidden.ps1')
+    ];
+
+    for (const ps1Path of ps1Candidates) {
+      try {
+        if (fs.existsSync(ps1Path)) return { type: 'ps1', path: ps1Path };
+      } catch (_) {}
+    }
+  }
+
+  // Plan D: launch via cmd start with hidden console
   // Prefer VBS launcher when explicitly enabled (best for no-console)
   const allowVbs = envIsTrue('SCRCPY_FORCE_VBS')
     || (!envIsSet('SCRCPY_FORCE_VBS') && !envIsTrue('SCRCPY_FORCE_PS1') && !forceExe && !forceCmd);
@@ -9643,20 +9682,6 @@ function resolveScrcpyLauncher(scrcpyBinaryPath) {
     for (const vbsPath of vbsCandidates) {
       try {
         if (fs.existsSync(vbsPath)) return { type: 'vbs', path: vbsPath };
-      } catch (_) {}
-    }
-  }
-
-  // Prefer PowerShell hidden launcher when explicitly enabled
-  const allowPs1 = envIsTrue('SCRCPY_FORCE_PS1');
-  if (allowPs1) {
-    const ps1Candidates = [
-      path.join(__dirname, 'scrcpy', 'scrcpy-hidden.ps1')
-    ];
-
-    for (const ps1Path of ps1Candidates) {
-      try {
-        if (fs.existsSync(ps1Path)) return { type: 'ps1', path: ps1Path };
       } catch (_) {}
     }
   }

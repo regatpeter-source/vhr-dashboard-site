@@ -74,6 +74,7 @@ let licenseStatus = {
 	licenseCount: 0,
 	message: ''
 };
+const MAX_USERS_PER_ACCOUNT = 2;
 const SUBSCRIPTION_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const DEMO_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
 let latestSubscriptionDetails = null;
@@ -324,6 +325,10 @@ function setUserRole(user, role) {
 	updateUserUI();
 }
 
+function getAdditionalUserCount() {
+	return userList.filter(u => u && u !== 'Invité' && u !== currentUser).length;
+}
+
 function updateUserUI() {
 	let userDiv = document.getElementById('navbarUser');
 	if (!userDiv) return;
@@ -465,6 +470,15 @@ window.createNewUser = async function() {
 	const role = document.getElementById('newUserRole').value;
 	const normalizedRole = normalizeRoleForUser(username, role);
 	
+	if (!currentUser || currentUser === 'Invité') {
+		showToast('🔒 Connectez-vous d\'abord pour créer un utilisateur', 'error');
+		return;
+	}
+	if (!isAdminAllowed(currentUser) && getAdditionalUserCount() >= MAX_USERS_PER_ACCOUNT) {
+		showToast(`❌ Limite atteinte : ${MAX_USERS_PER_ACCOUNT} utilisateur(s) par compte`, 'error');
+		return;
+	}
+	
 	if (!username) {
 		showToast('❌ Entrez un nom d\'utilisateur', 'error');
 		return;
@@ -495,6 +509,10 @@ window.createNewUser = async function() {
 			document.getElementById('addUserDialog').remove();
 			showToast(`✅ Utilisateur ${username} créé avec succès!`, 'success');
 		} else {
+			if (data && data.code === 'user_limit_reached') {
+				showToast(`❌ ${data.error || `Limite atteinte : ${MAX_USERS_PER_ACCOUNT} utilisateur(s)`}`, 'error');
+				return;
+			}
 			showToast(`❌ ${data.error || 'Erreur lors de la création'}`, 'error');
 		}
 	} catch (e) {
@@ -2401,8 +2419,17 @@ async function syncVitrineAccessStatus() {
 			});
 			return demoInfo;
 		}
+		const hasActiveSubscription = Boolean(
+			demoInfo.hasValidSubscription ||
+			demoInfo.hasActiveLicense ||
+			demoInfo.hasPerpetualLicense ||
+			demoInfo.subscriptionStatus === 'admin' ||
+			demoInfo.subscriptionStatus === 'active'
+		);
 		const remainingDays = typeof demoInfo.remainingDays === 'number' ? demoInfo.remainingDays : 0;
-		if (!demoInfo.demoExpired) {
+		if (hasActiveSubscription) {
+			showTrialBanner(0);
+		} else if (!demoInfo.demoExpired) {
 			showTrialBanner(remainingDays);
 		} else {
 			showTrialBanner(0);
@@ -4267,8 +4294,15 @@ async function checkLicense() {
 		licenseStatus.accessBlocked = Boolean(demoStatus.accessBlocked);
 		licenseStatus.trial = !demoStatus.demoExpired;
 		licenseStatus.expired = Boolean(demoStatus.demoExpired);
-		licenseStatus.licensed = Boolean(demoStatus.hasValidSubscription || demoStatus.hasPerpetualLicense || !demoStatus.demoExpired || demoStatus.subscriptionStatus === 'admin');
+		licenseStatus.licensed = Boolean(demoStatus.hasValidSubscription || demoStatus.hasActiveLicense || demoStatus.hasPerpetualLicense || !demoStatus.demoExpired || demoStatus.subscriptionStatus === 'admin' || demoStatus.subscriptionStatus === 'active');
+		const hasActiveSubscription = Boolean(demoStatus.hasValidSubscription || demoStatus.hasActiveLicense || demoStatus.hasPerpetualLicense || demoStatus.subscriptionStatus === 'admin' || demoStatus.subscriptionStatus === 'active');
 		
+		// If subscription/license is active, show active banner (even if demo still running)
+		if (hasActiveSubscription) {
+			showTrialBanner(0);
+			return true; // Allow access
+		}
+
 		// Demo is still valid - show banner with remaining days
 		if (!demoStatus.demoExpired) {
 			showTrialBanner(demoStatus.remainingDays);
@@ -4276,7 +4310,7 @@ async function checkLicense() {
 		}
 		
 		// Demo is expired - check if user has valid subscription
-		if (demoStatus.accessBlocked) {
+		if (demoStatus.accessBlocked && !hasActiveSubscription) {
 			// No valid subscription after demo expiration
 			console.warn('[license] Access blocked: demo expired + no subscription');
 			showUnlockModal({
@@ -4583,7 +4617,7 @@ function hydrateLicenseStatusFromRemoteUser(remoteUser) {
 	licenseStatus.accessBlocked = Boolean(demoInfo.accessBlocked);
 	licenseStatus.trial = !demoInfo.demoExpired;
 	licenseStatus.expired = Boolean(demoInfo.demoExpired);
-	licenseStatus.licensed = Boolean(demoInfo.hasValidSubscription || demoInfo.hasPerpetualLicense || !demoInfo.demoExpired || licenseStatus.subscriptionStatus === 'admin');
+	licenseStatus.licensed = Boolean(demoInfo.hasValidSubscription || demoInfo.hasActiveLicense || demoInfo.hasPerpetualLicense || !demoInfo.demoExpired || licenseStatus.subscriptionStatus === 'admin' || licenseStatus.subscriptionStatus === 'active');
 	licenseStatus.message = demoInfo.message || accessSummary.message || licenseStatus.message;
 	latestDemoFetchedAt = Date.now();
 	return demoInfo;
