@@ -5374,7 +5374,12 @@ window.loginUser = async function() {
 				});
 				return;
 			}
-			showToast('❌ ' + (data?.error || 'Connexion échouée'), 'error');
+			const status = res ? res.status : 0;
+			const fallbackMsg = data?.error || 'Connexion échouée';
+			const authMsg = status === 401
+				? 'Identifiants invalides ou compte inexistant sur le site central.'
+				: fallbackMsg;
+			showToast('❌ ' + authMsg, 'error');
 		}
 	} catch (e) {
 		console.error('[auth] login error:', e);
@@ -5464,6 +5469,7 @@ async function checkJWTAuth() {
 					console.warn('[auth] logout failed for guest', e);
 				}
 				saveAuthToken('');
+				showToast('🔒 Compte invité détecté : connexion obligatoire.', 'warning');
 				const overlay = document.getElementById('authOverlay');
 				if (overlay) overlay.style.display = 'none';
 				showAuthModal('login');
