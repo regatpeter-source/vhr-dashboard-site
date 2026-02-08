@@ -195,7 +195,7 @@ function showModalInputPrompt(options = {}) {
 // ========== CONFIGURATION ========== 
 let viewMode = localStorage.getItem('vhr_view_mode') || 'table'; // 'table' ou 'cards'
 let deviceVisibilityFilter = localStorage.getItem('vhr_device_filter') || 'all';
-let currentUser = localStorage.getItem('vhr_user') || '';
+let currentUser = localStorage.getItem('vhr_user') || localStorage.getItem('vhr_current_user') || '';
 let currentUserIsPrimary = localStorage.getItem('vhr_user_is_primary') === '1';
 let userList = JSON.parse(localStorage.getItem('vhr_user_list') || '[]');
 let userRoles = JSON.parse(localStorage.getItem('vhr_user_roles') || '{}');
@@ -220,7 +220,26 @@ function isAdminAllowed(user) {
 	return typeof user === 'string' && user === ALLOWED_ADMIN_USER;
 }
 
+function canManageUsers() {
+	return isAdminAllowed(currentUser) || currentUserIsPrimary;
+}
+
+function sanitizeUserList() {
+	const cleaned = (Array.isArray(userList) ? userList : [])
+		.map(u => (typeof u === 'string' ? u.trim() : ''))
+		.filter(u => u && u.toLowerCase() !== 'null' && u.toLowerCase() !== 'undefined');
+	const unique = Array.from(new Set(cleaned));
+	const changed = unique.length !== userList.length || unique.some((u, i) => u !== userList[i]);
+	if (changed) {
+		userList = unique;
+		localStorage.setItem('vhr_user_list', JSON.stringify(userList));
+	}
+	return unique;
+}
+
 function normalizeRoleForUser(user, requestedRole) {
+	const existingRole = userRoles && user ? userRoles[user] : null;
+	if (existingRole === 'guest') return 'guest';
 	const target = (requestedRole || 'user').toLowerCase();
 	if (target === 'guest') return 'guest';
 	if (target === 'admin' && isAdminAllowed(user)) return 'admin';
@@ -228,7 +247,12 @@ function normalizeRoleForUser(user, requestedRole) {
 }
 
 function getDisplayedRole(user) {
-	return normalizeRoleForUser(user, userRoles[user]);
+	const fallbackRole = authenticatedUsers?.[user]?.role || 'user';
+	return normalizeRoleForUser(user, userRoles[user] || fallbackRole);
+}
+
+function isGuestUser(user) {
+	return getDisplayedRole(user) === 'guest';
 }
 
 function readAuthToken() {
@@ -329,6 +353,14 @@ function createNavbar() {
 	document.getElementById('noticeBtn').onclick = showSetupNotice;
 	document.getElementById('favoritesBtn').onclick = addDashboardToFavorites;
 	document.getElementById('accountBtn').onclick = showAccountPanel;
+	if (isGuestUser(currentUser)) {
+		const favBtn = document.getElementById('favoritesBtn');
+		const accountBtn = document.getElementById('accountBtn');
+		const noticeBtn = document.getElementById('noticeBtn');
+		if (favBtn) favBtn.style.display = 'none';
+		if (accountBtn) accountBtn.style.display = 'none';
+		if (noticeBtn) noticeBtn.style.display = 'none';
+	}
 	updateUserUI();
 	updateDeviceFilterUI();
 }
@@ -349,8 +381,13 @@ function saveUserList() {
 function setUser(user) {
 	currentUser = user;
 	localStorage.setItem('vhr_user', user);
+	localStorage.setItem('vhr_current_user', user);
 	if (!userList.includes(user)) {
 		userList.push(user);
+		saveUserList();
+	}
+	if (authenticatedUsers?.[user]?.role && !userRoles[user]) {
+		userRoles[user] = authenticatedUsers[user].role;
 		saveUserList();
 	}
 	updateUserUI();
@@ -365,6 +402,11 @@ function removeUser(user) {
 }
 
 function setUserRole(user, role) {
+	const existingRole = userRoles && user ? userRoles[user] : null;
+	if (existingRole === 'guest' && role !== 'guest') {
+		showToast('🔒 Le rôle invité est verrouillé', 'warning');
+		return;
+	}
 	const normalizedRole = normalizeRoleForUser(user, role);
 	userRoles[user] = normalizedRole;
 	saveUserList();
@@ -386,14 +428,38 @@ function updateUserUI() {
 	const accountTypeBadge = showAccountType
 		? `<span style="font-size:11px;background:${accountTypeColor};color:#fff;padding:3px 8px;border-radius:6px;">${accountTypeLabel}</span>`
 		: '';
+	const guest = isGuestUser(currentUser);
 	userDiv.innerHTML = `
 		<span style='font-size:18px;'>👤</span> 
 		<b style='color:#2ecc71;'>${currentUser || 'Invité'}</b> 
 		<span style="font-size:11px;background:${roleColor};color:#fff;padding:3px 8px;border-radius:6px;">${role}</span>
 		${accountTypeBadge}
-		<button id="changeUserBtn" style='margin-left:8px;'>Changer</button>
+		<button id="changeUserBtn" style="margin-left:8px;">Changer</button>
 		<button id="userMenuBtn">Menu</button>
 	`;
+	const noticeBtn = document.getElementById('noticeBtn');
+	const favBtn = document.getElementById('favoritesBtn');
+	const accountBtn = document.getElementById('accountBtn');
+	if (noticeBtn) noticeBtn.style.display = guest ? 'none' : '';
+	if (favBtn) favBtn.style.display = guest ? 'none' : '';
+	if (accountBtn) accountBtn.style.display = guest ? 'none' : '';
+	if (accountBtn) {
+		accountBtn.disabled = guest;
+		accountBtn.onclick = guest ? () => showToast('🔒 Accès au compte principal réservé', 'warning') : showAccountPanel;
+	}
+	if (favBtn) {
+		favBtn.disabled = guest;
+		favBtn.onclick = guest ? () => showToast('🔒 Fonction indisponible pour un invité', 'warning') : addDashboardToFavorites;
+	}
+	if (noticeBtn) {
+		noticeBtn.disabled = guest;
+		noticeBtn.onclick = guest ? () => showToast('🔒 Fonction indisponible pour un invité', 'warning') : showSetupNotice;
+	}
+	if (guest) {
+		document.getElementById('changeUserBtn').onclick = () => showLoginDialogForUser('');
+		document.getElementById('userMenuBtn').style.display = 'none';
+		return;
+	}
 	document.getElementById('changeUserBtn').onclick = async () => {
 		const name = await showModalInputPrompt({
 			title: 'Changer d\'utilisateur',
@@ -407,6 +473,8 @@ function updateUserUI() {
 }
 
 function showUserMenu() {
+	const guest = isGuestUser(currentUser);
+	sanitizeUserList();
 	let menu = document.getElementById('userMenu');
 	if (menu) menu.remove();
 	menu = document.createElement('div');
@@ -421,22 +489,33 @@ function showUserMenu() {
 			💡 Compte principal : vous pouvez créer 1 utilisateur secondaire (invité).
 		</div>`
 		: '';
+	const managerNotice = !canManageUsers()
+		? `<div style='background:#2c3e50;border:1px solid #f1c40f;color:#f5d76e;padding:10px 12px;border-radius:6px;margin-bottom:12px;font-size:12px;'>
+			🔒 Seul le compte principal peut créer ou gérer les invités.
+		</div>`
+		: '';
 	let html = `<b style='font-size:18px;color:#2ecc71;'>Utilisateurs</b><ul style='margin:12px 0;padding:0;list-style:none;'>`;
 	userList.forEach(u => {
 		let role = getDisplayedRole(u);
 		let roleColor = role==='admin' ? '#ff9800' : role==='guest' ? '#95a5a6' : '#2196f3';
 		const isAuthenticated = authenticatedUsers[u] ? '✅' : '🔒';
+		const canChangeRole = role !== 'guest' && canManageUsers();
 		html += `<li style='margin-bottom:8px;padding:8px;background:#23272f;border-radius:6px;'>
 			<span style='cursor:pointer;color:${u===currentUser?'#2ecc71':'#fff'};font-weight:bold;' onclick='switchToUser("${u}")'>${isAuthenticated} ${u}</span>
 			<span style='font-size:10px;background:${roleColor};color:#fff;padding:2px 6px;border-radius:4px;margin-left:6px;'>${role}</span>
-			${u!=='Invité'?`<button onclick='removeUser("${u}")' style='margin-left:8px;font-size:10px;'>🗑️</button>`:''}
-			<button onclick='setUserRolePrompt("${u}")' style='margin-left:4px;font-size:10px;'>🔧</button>
+			${u!=='Invité' && canManageUsers() ? `<button onclick='removeUser("${u}")' style='margin-left:8px;font-size:10px;'>🗑️</button>` : ''}
+			${canChangeRole ? `<button onclick='setUserRolePrompt("${u}")' style='margin-left:4px;font-size:10px;'>🔧</button>` : ''}
 		</li>`;
 	});
 	html += `</ul>`;
 	html += primaryNotice;
+	if (!guest) {
+		html += managerNotice;
+	}
 	html += `<div style='display:flex;gap:8px;flex-wrap:wrap;'>`;
-	html += `<button onclick='showAddUserDialog()' style='background:#2ecc71;color:#000;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;'>➕ Ajouter</button>`;
+	if (canManageUsers()) {
+		html += `<button onclick='showAddUserDialog()' style='background:#2ecc71;color:#000;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;'>➕ Ajouter</button>`;
+	}
 	html += `<button onclick='showLoginDialog()' style='background:#3498db;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;'>🔑 Connexion</button>`;
 	html += `<button onclick='showSessionMenu()' style='background:#9b59b6;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;'>🌐 Session</button>`;
 	html += `<button onclick='closeUserMenu()' style='background:#e74c3c;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;'>❌</button>`;
@@ -595,15 +674,19 @@ window.setUser = setUser;
 window.removeUser = removeUser;
 
 window.switchToUser = function(u) {
-	if (authenticatedUsers[u]) {
-		setUser(u);
-		showToast(`✅ Connecté en tant que ${u}`, 'success');
-	} else {
-		showLoginDialogForUser(u);
-	}
+	if (!u || u === currentUser) return;
+	showLoginDialogForUser(u);
 };
 
 window.setUserRolePrompt = async function(u) {
+	if (!canManageUsers()) {
+		showToast('🔒 Seul le compte principal peut modifier les rôles', 'warning');
+		return;
+	}
+	if (getDisplayedRole(u) === 'guest') {
+		showToast('🔒 Le rôle invité ne peut pas être modifié', 'warning');
+		return;
+	}
 	const roleOptions = [
 		{ value: 'user', label: 'Utilisateur' },
 		{ value: 'guest', label: 'Invité' }
@@ -1150,6 +1233,10 @@ window.addDashboardToFavorites = function() {
 
 // ========== MON COMPTE PANEL ========== 
 function showAccountPanel() {
+	if (isGuestUser(currentUser)) {
+		showToast('🔒 Accès au compte principal réservé', 'warning');
+		return;
+	}
 	let panel = document.getElementById('accountPanel');
 	if (panel) panel.remove();
 	
@@ -3053,6 +3140,9 @@ function applyDeviceVisibilityFilter(list) {
 function filterDevicesForCurrentUser(list) {
 	let normalized = Array.isArray(list) ? list : [];
 	normalized = applyDeviceVisibilityFilter(normalized);
+	if (isGuestUser(currentUser)) {
+		return normalized.filter(d => !isRemoteSessionDevice(d) && !isRelayDevice(d));
+	}
 	if (!isSecondaryRestricted()) return normalized;
 	return normalized.filter(d => !isRelayDevice(d));
 }
@@ -5416,20 +5506,6 @@ window.loginUser = async function() {
 		// 4) Fallback local si prod échoue
 		if (!(res.ok && data.ok)) {
 			try {
-				// Créer/synchroniser l'utilisateur en local avec le secret partagé
-				await fetch('/api/admin/sync-user', {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						'x-sync-secret': await getSyncUsersSecret()
-					},
-					body: JSON.stringify({ username: identifier, email: identifier, role: 'user', password })
-				});
-			} catch (syncErr) {
-				console.warn('[loginUser] sync-user after prod failure failed', syncErr);
-			}
-
-			try {
 				const localRes = await fetch('/api/login', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json', ...electronAuthHeader },
@@ -5471,7 +5547,9 @@ window.loginUser = async function() {
 				saveAuthToken(data.token);
 			}
 			showToast('✅ Connecté avec succès !', 'success');
-			currentUser = data.user?.name || data.user?.username || data.user?.email || identifier;
+			const resolvedUsername = data.user?.name || data.user?.username || data.user?.email || identifier;
+			const resolvedRole = normalizeRoleForUser(resolvedUsername, data.user?.role || data.role || authenticatedUsers?.[resolvedUsername]?.role);
+			currentUser = resolvedUsername;
 			localStorage.setItem('vhr_current_user', currentUser);
 			if (data.user && data.user.isPrimary !== undefined) {
 				currentUserIsPrimary = Boolean(data.user.isPrimary);
@@ -5483,6 +5561,14 @@ window.loginUser = async function() {
 			if (data.demo) {
 				applyDemoStatusSnapshot(data.demo);
 			}
+			if (!userList.includes(resolvedUsername)) {
+				userList.push(resolvedUsername);
+			}
+			userRoles[resolvedUsername] = resolvedRole;
+			authenticatedUsers[resolvedUsername] = { token: readAuthToken(), role: resolvedRole };
+			saveUserList();
+			saveAuthUsers();
+			setUser(resolvedUsername);
 			
 			const modal = document.getElementById('authModal');
 			if (modal) modal.remove();
@@ -5594,6 +5680,21 @@ async function checkJWTAuth() {
 				showAuthModal('login');
 				return false;
 			}
+			const resolvedUsername = res.user.username || res.user.name || res.user.email;
+			const resolvedRole = normalizeRoleForUser(resolvedUsername, res.user.role || authenticatedUsers?.[resolvedUsername]?.role);
+			if (resolvedRole === 'guest') {
+				console.warn('[auth] Guest session requires login');
+				try {
+					await api('/api/logout', { method: 'POST', skipAuthHeader: true });
+				} catch (e) {
+					console.warn('[auth] logout failed for guest', e);
+				}
+				saveAuthToken('');
+				const overlay = document.getElementById('authOverlay');
+				if (overlay) overlay.style.display = 'none';
+				showAuthModal('login');
+				return false;
+			}
 			if (res.token) {
 				saveAuthToken(res.token);
 			}
@@ -5601,13 +5702,22 @@ async function checkJWTAuth() {
 				await syncTokenFromCookie();
 			}
 			// User is authenticated
-			currentUser = res.user.username || res.user.name || res.user.email;
+			const resolvedRoleSafe = resolvedRole || 'user';
+			currentUser = resolvedUsername;
 			localStorage.setItem('vhr_current_user', currentUser);
 			if (res.user.isPrimary !== undefined) {
 				currentUserIsPrimary = Boolean(res.user.isPrimary);
 				localStorage.setItem('vhr_user_is_primary', currentUserIsPrimary ? '1' : '0');
 			}
 			console.log('[auth] ✓ JWT valid for user:', currentUser);
+			if (!userList.includes(resolvedUsername)) {
+				userList.push(resolvedUsername);
+			}
+			userRoles[resolvedUsername] = resolvedRoleSafe;
+			authenticatedUsers[resolvedUsername] = { token: readAuthToken(), role: resolvedRoleSafe };
+			saveUserList();
+			saveAuthUsers();
+			setUser(resolvedUsername);
 			return true;
 		} else {
 			console.log('[auth] � No valid JWT - authenticated =', res?.authenticated);
@@ -5664,8 +5774,18 @@ async function activateGuestDemo() {
 			if (res.token) {
 				saveAuthToken(res.token);
 			}
-			currentUser = res.user.username || res.user.name || res.user.email;
+			const resolvedUsername = res.user.username || res.user.name || res.user.email;
+			const resolvedRole = normalizeRoleForUser(resolvedUsername, res.user.role || authenticatedUsers?.[resolvedUsername]?.role || 'guest');
+			currentUser = resolvedUsername;
 			localStorage.setItem('vhr_current_user', currentUser);
+			if (!userList.includes(resolvedUsername)) {
+				userList.push(resolvedUsername);
+			}
+			userRoles[resolvedUsername] = resolvedRole;
+			authenticatedUsers[resolvedUsername] = { token: readAuthToken(), role: resolvedRole };
+			saveUserList();
+			saveAuthUsers();
+			setUser(resolvedUsername);
 			showToast('✅ Essai invité activé pour 7 jours', 'success');
 			return true;
 		}
