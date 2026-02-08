@@ -782,6 +782,27 @@ window.createNewUser = async function() {
 			saveUserList();
 			saveAuthUsers();
 			setUser(username);
+			const shouldSyncCentral = AUTH_API_BASE && AUTH_API_BASE !== window.location.origin;
+			if (shouldSyncCentral) {
+				try {
+					const syncRes = await fetch(`${AUTH_API_BASE}/api/dashboard/register`, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json', ...(isElectronUserAgent ? { 'x-vhr-electron': 'electron' } : {}) },
+						credentials: 'include',
+						body: JSON.stringify({ username, password, role: normalizedRole })
+					});
+					const syncData = await syncRes.json().catch(() => null);
+					if (!syncRes.ok || !syncData?.ok) {
+						const syncError = syncData?.error || 'Synchronisation centrale impossible';
+						if (!/existe déjà/i.test(syncError)) {
+							showToast(`⚠️ Sync central: ${syncError}`, 'warning');
+						}
+					}
+				} catch (syncErr) {
+					console.warn('[createNewUser] central sync failed', syncErr);
+					showToast('⚠️ Sync central: serveur indisponible', 'warning');
+				}
+			}
 			document.getElementById('addUserDialog').remove();
 			showToast(`✅ Utilisateur ${username} créé avec succès!`, 'success');
 		} else {
@@ -3001,6 +3022,47 @@ async function syncVitrineAccessStatus() {
 	}
 	return null;
 }
+
+const DEMO_STATUS_POLL_INTERVAL_MS = 30000;
+const DEMO_STATUS_MIN_INTERVAL_MS = 8000;
+let demoStatusPoller = null;
+let lastDemoStatusSync = 0;
+
+async function refreshDemoStatus(reason = 'poll', force = false) {
+	const now = Date.now();
+	if (!force && now - lastDemoStatusSync < DEMO_STATUS_MIN_INTERVAL_MS) return;
+	lastDemoStatusSync = now;
+	let storedToken = readAuthToken();
+	if (!storedToken) {
+		storedToken = await syncTokenFromCookie();
+	}
+	if (!storedToken) return;
+	await syncVitrineAccessStatus();
+}
+
+function startDemoStatusPolling() {
+	if (demoStatusPoller) return;
+	demoStatusPoller = setInterval(() => {
+		refreshDemoStatus('poll').catch(() => {});
+	}, DEMO_STATUS_POLL_INTERVAL_MS);
+}
+
+function stopDemoStatusPolling() {
+	if (demoStatusPoller) {
+		clearInterval(demoStatusPoller);
+		demoStatusPoller = null;
+	}
+}
+
+document.addEventListener('visibilitychange', () => {
+	if (!document.hidden) {
+		refreshDemoStatus('visibility', true).catch(() => {});
+	}
+});
+
+window.addEventListener('focus', () => {
+	refreshDemoStatus('focus', true).catch(() => {});
+});
 
 async function refreshDevicesList() {
 	const btn = document.getElementById('refreshBtn');
@@ -5570,6 +5632,8 @@ window.loginUser = async function() {
 				createNavbar();
 				const authOk = await checkJWTAuth();
 				if (!authOk) return;
+				startDemoStatusPolling();
+				refreshDemoStatus('login', true).catch(() => {});
 				checkLicense().then(hasAccess => {
 					if (hasAccess) {
 						loadGamesCatalog().finally(() => loadDevices());
@@ -5836,6 +5900,8 @@ async function initDashboardPro() {
 	if (isAuth) {
 		showDashboardContent();
 		createNavbar();
+		startDemoStatusPolling();
+		refreshDemoStatus('init', true).catch(() => {});
 		checkLicense().then(hasAccess => {
 			if (hasAccess) {
 				loadGamesCatalog().finally(() => loadDevices());
@@ -5843,6 +5909,7 @@ async function initDashboardPro() {
 		});
 	} else {
 		hideDashboardContent();
+		stopDemoStatusPolling();
 	}
 }
 

@@ -6347,7 +6347,8 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
         const referenceStart = targetUser.demoStartDate ? new Date(targetUser.demoStartDate) : now;
         const fallbackExpiration = new Date(referenceStart.getTime() + demoConfig.DEMO_DURATION_MS);
         const baseExpiration = getDemoExpirationDate(targetUser) || fallbackExpiration;
-        const newExpiration = new Date(baseExpiration.getTime() + addedMs);
+        const baseTime = Math.max(baseExpiration.getTime(), now.getTime());
+        const newExpiration = new Date(baseTime + addedMs);
         if (!targetUser.demoStartDate) {
           targetUser.demoStartDate = toIso(now);
         }
