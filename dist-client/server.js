@@ -4707,6 +4707,9 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
     return proxyRemoteUserStatus(req, res, '/api/demo/status');
   }
   try {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     const demoUserAgent = String(req.headers['user-agent'] || '').toLowerCase();
     const demoIsElectron = demoUserAgent.includes('electron') || String(req.headers['x-vhr-electron'] || '').toLowerCase() === 'electron';
     const bypassRemoteReturn = FORCE_REMOTE_DEMO ? false : demoIsElectron;
@@ -6192,6 +6195,9 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
       ...u,
       accessSummary: buildUserAccessSummary(u, { licenses })
     }));
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.json({ ok: true, users: enrichedUsers });
   } catch (e) {
     console.error('[api] admin/users:', e);

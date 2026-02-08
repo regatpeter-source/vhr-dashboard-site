@@ -5058,6 +5058,9 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
     }
 
     const demo = await buildDemoStatusForUser(user);
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     return res.json({ ok: true, demo });
   } catch (e) {
     console.error('[demo] status error:', e);
@@ -6156,6 +6159,9 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
       : list;
 
     // Return all users (including test accounts) so admin can audit every entry
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.json({ ok: true, users: normalized });
   } catch (e) {
     console.error('[api] admin/users:', e);

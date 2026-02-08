@@ -13,6 +13,7 @@ async function authFetch(url, options = {}) {
   return fetch(url, {
     ...options,
     credentials: 'include',  // Important: send cookies with each request
+    cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
       ...options.headers
