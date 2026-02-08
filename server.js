@@ -8658,11 +8658,14 @@ io.on('connection', socket => {
   // Create a new collaborative session
   socket.on('create-session', (data) => {
     const username = data && data.username ? String(data.username) : 'Utilisateur';
+    const rawHostLanUrl = data && typeof data.hostLanUrl === 'string' ? data.hostLanUrl.trim() : '';
+    const hostLanUrl = rawHostLanUrl && /^https?:\/\//i.test(rawHostLanUrl) ? rawHostLanUrl : null;
     const sessionCode = generateSessionCode();
     
     collaborativeSessions.set(sessionCode, {
       host: username,
       hostSocketId: socket.id,
+      hostLanUrl,
       users: [{ username, socketId: socket.id, role: 'host', joinedAt: new Date() }],
       createdAt: new Date(),
       lastActivity: new Date()
@@ -8673,7 +8676,7 @@ io.on('connection', socket => {
     socket.sessionUsername = username;
     
     console.log(`[Session] ✅ Created session ${sessionCode} by ${username}`);
-    socket.emit('session-created', { sessionCode, users: collaborativeSessions.get(sessionCode).users });
+    socket.emit('session-created', { sessionCode, users: collaborativeSessions.get(sessionCode).users, hostLanUrl });
   });
   
   // Join an existing session
@@ -8713,10 +8716,29 @@ io.on('connection', socket => {
     io.to(`session-${sessionCode}`).emit('session-updated', { 
       sessionCode, 
       users: session.users,
+      hostLanUrl: session.hostLanUrl || null,
       message: `${username} a rejoint la session`
     });
     
-    socket.emit('session-joined', { sessionCode, users: session.users, host: session.host });
+    socket.emit('session-joined', { sessionCode, users: session.users, host: session.host, hostLanUrl: session.hostLanUrl || null });
+  });
+
+  // Host can update LAN URL for auto-redirects (kept private in UI)
+  socket.on('session-host-info', (data) => {
+    if (!socket.sessionCode) return;
+    const session = collaborativeSessions.get(socket.sessionCode);
+    if (!session) return;
+    if (session.hostSocketId !== socket.id) return;
+    const rawHostLanUrl = data && typeof data.hostLanUrl === 'string' ? data.hostLanUrl.trim() : '';
+    const hostLanUrl = rawHostLanUrl && /^https?:\/\//i.test(rawHostLanUrl) ? rawHostLanUrl : null;
+    session.hostLanUrl = hostLanUrl;
+    session.lastActivity = new Date();
+    io.to(`session-${socket.sessionCode}`).emit('session-updated', {
+      sessionCode: socket.sessionCode,
+      users: session.users,
+      hostLanUrl: session.hostLanUrl || null,
+      message: `${session.host} a mis à jour l'adresse de connexion`
+    });
   });
   
   // Leave session
@@ -8743,9 +8765,11 @@ io.on('connection', socket => {
             session.host = session.users[0].username;
             session.hostSocketId = session.users[0].socketId;
             session.users[0].role = 'host';
+            session.hostLanUrl = null;
             io.to(`session-${socket.sessionCode}`).emit('session-updated', {
               sessionCode: socket.sessionCode,
               users: session.users,
+              hostLanUrl: session.hostLanUrl,
               message: `${session.host} est maintenant l'hôte`
             });
           }
@@ -8816,6 +8840,7 @@ io.on('connection', socket => {
             session.host = session.users[0].username;
             session.hostSocketId = session.users[0].socketId;
             session.users[0].role = 'host';
+            session.hostLanUrl = null;
           }
         }
       }
