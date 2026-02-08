@@ -490,9 +490,10 @@ function refreshMergedDevices() {
 }
 
 function publishSessionDevices() {
-	if (!isSessionActive() || !window.vhrSocket) return;
+	const activeSocket = getSessionSocket();
+	if (!isSessionActive() || !activeSocket) return;
 	const safeDevices = Array.isArray(localDevices) ? localDevices : [];
-	window.vhrSocket.emit('session-action', {
+	activeSocket.emit('session-action', {
 		action: 'session-devices',
 		payload: { devices: safeDevices, runningApps: runningApps || {} }
 	});
@@ -527,6 +528,63 @@ function isRemoteSessionDevice(device) {
 function getSessionDeviceIcon(device) {
 	if (!isRemoteSessionDevice(device)) return '';
 	return `<span style='display:inline-flex;align-items:center;justify-content:center;margin-right:6px;color:#9b59b6;font-size:14px;' title='Casque distant'>🛰️</span>`;
+}
+
+function isCurrentUserSessionHost(users = []) {
+	return Array.isArray(users) && users.some(u => u && u.username === currentUser && u.role === 'host');
+}
+
+function normalizeSessionHostUrl(url) {
+	if (!url || typeof url !== 'string') return '';
+	const trimmed = url.trim();
+	if (!trimmed) return '';
+	try {
+		const parsed = new URL(trimmed);
+		return parsed.href;
+	} catch (e) {
+		return '';
+	}
+}
+
+function shouldRedirectToHost(hostLanUrl) {
+	const normalized = normalizeSessionHostUrl(hostLanUrl);
+	if (!normalized) return false;
+	let origin = '';
+	try {
+		origin = new URL(normalized).origin;
+	} catch (e) {
+		origin = '';
+	}
+	if (!origin || origin === window.location.origin) return false;
+	const sessionCode = currentSession && currentSession.code ? currentSession.code : 'unknown';
+	const key = `vhr_session_redirect_${sessionCode}`;
+	if (sessionStorage.getItem(key) === '1') return false;
+	sessionStorage.setItem(key, '1');
+	return true;
+}
+
+async function pushSessionHostInfo() {
+	if (!isSessionActive() || !window.vhrSocket) return;
+	if (SESSION_USE_CENTRAL) return;
+	try {
+		const { url } = await buildLanDashboardUrl();
+		const hostLanUrl = normalizeSessionHostUrl(url);
+		if (!hostLanUrl) return;
+		window.vhrSocket.emit('session-host-info', { hostLanUrl });
+	} catch (e) {
+		console.warn('[session] push host info failed', e);
+	}
+}
+
+function maybeAutoRedirectToHost(data) {
+	if (SESSION_USE_CENTRAL) return;
+	if (!data || isCurrentUserSessionHost(data.users)) return;
+	const hostLanUrl = data.hostLanUrl;
+	if (!shouldRedirectToHost(hostLanUrl)) return;
+	showToast('🔗 Connexion au serveur de l’hôte…', 'info', 2500);
+	setTimeout(() => {
+		window.location.href = hostLanUrl;
+	}, 400);
 }
 
 function saveAuthUsers() {
@@ -816,31 +874,44 @@ function updateSessionUsersList() {
 	}
 }
 
-// Socket.IO session handlers
-function initSessionSocket() {
-	if (typeof io === 'undefined') return;
-	
-	const socket = window.vhrSocket || io();
-	window.vhrSocket = socket;
-	
-	socket.on('session-created', (data) => {
+let sessionSocket = null;
+let sessionHandlersBound = false;
+
+function getSessionSocket() {
+	return window.vhrSessionSocket || sessionSocket || null;
+}
+
+function bindSessionSocketHandlers(activeSocket) {
+	if (!activeSocket || sessionHandlersBound) return;
+	sessionHandlersBound = true;
+	activeSocket.on('session-created', (data) => {
 		currentSession = { code: data.sessionCode, users: data.users, host: currentUser };
 		showToast(`🎯 Session créée! Code: ${data.sessionCode}`, 'success', 5000);
 		// Show the code prominently
 		showSessionCodePopup(data.sessionCode);
 		publishSessionDevices();
 		refreshMergedDevices();
+		if (!SESSION_USE_CENTRAL) {
+			pushSessionHostInfo();
+		}
 	});
 	
-	socket.on('session-joined', (data) => {
+	activeSocket.on('session-joined', (data) => {
 		currentSession = { code: data.sessionCode, users: data.users, host: data.host };
 		showToast(`✅ Connecté à la session ${data.sessionCode}`, 'success');
 		document.getElementById('sessionMenu')?.remove();
 		publishSessionDevices();
 		refreshMergedDevices();
+		if (!SESSION_USE_CENTRAL) {
+			if (isCurrentUserSessionHost(data.users)) {
+				pushSessionHostInfo();
+			} else {
+				maybeAutoRedirectToHost(data);
+			}
+		}
 	});
 	
-	socket.on('session-updated', (data) => {
+	activeSocket.on('session-updated', (data) => {
 		if (currentSession) {
 			currentSession.users = data.users;
 			if (data.message) {
@@ -856,18 +927,55 @@ function initSessionSocket() {
 			updateSessionUsersList();
 			updateSessionIndicator();
 			refreshMergedDevices();
+			if (!SESSION_USE_CENTRAL) {
+				if (isCurrentUserSessionHost(data.users)) {
+					pushSessionHostInfo();
+				} else {
+					maybeAutoRedirectToHost(data);
+				}
+			}
 		}
 	});
 	
-	socket.on('session-error', (data) => {
+	activeSocket.on('session-error', (data) => {
 		showToast(`❌ ${data.error}`, 'error');
 	});
 	
-	socket.on('session-action', (data) => {
+	activeSocket.on('session-action', (data) => {
 		// Handle synchronized actions from other users
 		console.log('[Session] Action received:', data);
 		handleSessionAction(data);
 	});
+}
+
+function ensureSessionSocket() {
+	if (sessionSocket) return sessionSocket;
+	const activeSocket = SESSION_USE_CENTRAL
+		? io(SESSION_HUB_URL, { path: '/socket.io', transports: ['websocket', 'polling'] })
+		: (window.vhrSocket || io());
+	sessionSocket = activeSocket;
+	window.vhrSessionSocket = activeSocket;
+	if (SESSION_USE_CENTRAL) {
+		activeSocket.on('connect_error', (err) => {
+			console.warn('[session] hub connection error:', err && err.message ? err.message : err);
+		});
+		activeSocket.on('disconnect', (reason) => {
+			console.warn('[session] hub disconnected:', reason);
+		});
+	}
+	bindSessionSocketHandlers(activeSocket);
+	return activeSocket;
+}
+
+// Socket.IO session handlers
+function initSessionSocket() {
+	if (typeof io === 'undefined') return;
+	if (!SESSION_USE_CENTRAL) {
+		const activeSocket = window.vhrSocket || io();
+		sessionSocket = activeSocket;
+		window.vhrSessionSocket = activeSocket;
+		bindSessionSocketHandlers(activeSocket);
+	}
 }
 
 function handleSessionAction(data) {
@@ -903,15 +1011,25 @@ function handleSessionAction(data) {
 	}
 }
 
-window.createSession = function() {
+window.createSession = async function() {
 	if (!currentUser || currentUser === 'Invité') {
 		showToast('🔒 Connectez-vous d\'abord pour créer une session', 'error');
 		return;
 	}
 		sessionRunningAppsByUser = {};
 	
-	if (window.vhrSocket) {
-		window.vhrSocket.emit('create-session', { username: currentUser });
+	const activeSocket = SESSION_USE_CENTRAL ? ensureSessionSocket() : (getSessionSocket() || window.vhrSocket);
+	if (activeSocket) {
+		let hostLanUrl = '';
+		if (!SESSION_USE_CENTRAL) {
+			try {
+				const result = await buildLanDashboardUrl();
+				hostLanUrl = normalizeSessionHostUrl(result && result.url);
+			} catch (e) {
+				console.warn('[session] Unable to resolve LAN url', e);
+			}
+		}
+		activeSocket.emit('create-session', { username: currentUser, hostLanUrl });
 		refreshMergedDevices();
 	} else {
 		showToast('⚠️ Connexion socket non disponible', 'error');
@@ -930,18 +1048,26 @@ window.joinSession = function() {
 		return;
 	}
 	
-	if (window.vhrSocket) {
-		window.vhrSocket.emit('join-session', { sessionCode: code, username: currentUser });
+	const activeSocket = SESSION_USE_CENTRAL ? ensureSessionSocket() : (getSessionSocket() || window.vhrSocket);
+	if (activeSocket) {
+		activeSocket.emit('join-session', { sessionCode: code, username: currentUser });
 	}
 };
 
 window.leaveSession = function() {
-	if (window.vhrSocket && currentSession) {
-		window.vhrSocket.emit('leave-session');
+	const activeSocket = getSessionSocket();
+	if (activeSocket && currentSession) {
+		activeSocket.emit('leave-session');
 		currentSession = null;
 		showToast('👋 Session quittée', 'info');
 		document.getElementById('sessionMenu')?.remove();
 		updateSessionIndicator();
+		if (SESSION_USE_CENTRAL) {
+			try { activeSocket.close(); } catch (e) {}
+			sessionSocket = null;
+			window.vhrSessionSocket = null;
+			sessionHandlersBound = false;
+		}
 	}
 };
 
@@ -993,8 +1119,9 @@ function updateSessionIndicator() {
 
 // Broadcast action to session
 function broadcastSessionAction(action, payload) {
-	if (currentSession && window.vhrSocket) {
-		window.vhrSocket.emit('session-action', { action, payload });
+	const activeSocket = getSessionSocket();
+	if (currentSession && activeSocket) {
+		activeSocket.emit('session-action', { action, payload });
 	}
 }
 
@@ -2228,6 +2355,8 @@ const AUTH_API_BASE = (() => {
 })();
 const DEFAULT_SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
 const API_BASE = '/api';
+const SESSION_HUB_URL = (localStorage.getItem('vhr_session_hub') || '').trim() || 'https://www.vhr-dashboard-site.com';
+const SESSION_USE_CENTRAL = SESSION_HUB_URL && SESSION_HUB_URL !== window.location.origin;
 const ENABLE_GUEST_DEMO = false;
 let cachedSyncUsersSecret = DEFAULT_SYNC_USERS_SECRET;
 let syncSecretPromise = null;
@@ -2380,7 +2509,7 @@ socket.on('connect', () => {
 	}
 });
 
-window.vhrSocket = socket; // Make socket available globally for sessions
+window.vhrSocket = socket; // default; overridden if central session hub is enabled
 let devices = [];
 let games = [];
 let favorites = [];
@@ -2603,7 +2732,8 @@ function handleSessionApiResponse(payload) {
 }
 
 async function executeSessionApiRequest(payload) {
-	if (!payload || !window.vhrSocket) return;
+	const socket = getSessionSocket();
+	if (!payload || !socket) return;
 	const { requestId, path, options, targetUser } = payload;
 	if (targetUser !== currentUser) return;
 	let response;
@@ -2612,7 +2742,7 @@ async function executeSessionApiRequest(payload) {
 	} catch (err) {
 		response = { ok: false, error: err && err.message ? err.message : 'Erreur session' };
 	}
-	window.vhrSocket.emit('session-action', {
+	socket.emit('session-action', {
 		action: 'session-api-response',
 		payload: { requestId, response },
 		from: currentUser
@@ -2620,7 +2750,8 @@ async function executeSessionApiRequest(payload) {
 }
 
 function sendSessionApiRequest({ targetUser, path, opts }) {
-	if (!isSessionActive() || !window.vhrSocket) {
+	const socket = getSessionSocket();
+	if (!isSessionActive() || !socket) {
 		return Promise.resolve({ ok: false, error: 'Session inactive' });
 	}
 	const requestId = `sess_${Date.now()}_${sessionRequestCounter++}`;
@@ -2631,7 +2762,7 @@ function sendSessionApiRequest({ targetUser, path, opts }) {
 			resolve({ ok: false, error: 'timeout', timeout: true });
 		}, SESSION_API_TIMEOUT_MS);
 		pendingSessionRequests.set(requestId, { resolve, timeoutId });
-		window.vhrSocket.emit('session-action', {
+		socket.emit('session-action', {
 			action: 'session-api-request',
 			payload: { requestId, targetUser, path, options },
 			from: currentUser
