@@ -1317,6 +1317,80 @@ function getOrCreateSecretFile(filename, envValue, bytes = 32) {
   }
 }
 
+// ========== GUEST ACCESS RESTRICTIONS ==========
+let cachedGuestJwtSecret = null;
+const GUEST_VITRINE_PATHS = new Set([
+  '/index.html',
+  '/pricing.html',
+  '/features.html',
+  '/contact.html',
+  '/account.html',
+  '/START-HERE.html',
+  '/developer-setup.html',
+  '/mentions.html',
+  '/launch-dashboard.html'
+]);
+
+function getGuestJwtSecret() {
+  if (!cachedGuestJwtSecret) {
+    cachedGuestJwtSecret = getOrCreateSecretFile('jwt-secret.txt', process.env.JWT_SECRET, 32);
+  }
+  return cachedGuestJwtSecret;
+}
+
+function getGuestTokenFromRequest(req) {
+  const queryToken = (req.query && (req.query.token || req.query.vhr_token)) || null;
+  if (queryToken) return String(queryToken).trim();
+  const header = req.headers && req.headers.authorization;
+  if (header && header.split(' ')[1]) return String(header.split(' ')[1]).trim();
+  if (req.cookies && req.cookies.vhr_token) return String(req.cookies.vhr_token).trim();
+  return '';
+}
+
+function decodeGuestToken(req) {
+  const token = getGuestTokenFromRequest(req);
+  if (!token) return null;
+  try {
+    return jwt.verify(token, getGuestJwtSecret());
+  } catch (e) {
+    return null;
+  }
+}
+
+function isGuestUser(decoded) {
+  return decoded && String(decoded.role || '').toLowerCase() === 'guest';
+}
+
+function isElectronLikeRequest(req) {
+  const userAgent = String(req.headers['user-agent'] || '').toLowerCase();
+  const electronHeader = String(req.headers['x-vhr-electron'] || '').toLowerCase();
+  return userAgent.includes('electron') || electronHeader === 'electron';
+}
+
+function isVitrineRequestPath(pathname) {
+  if (!pathname) return false;
+  if (pathname === '/') return true;
+  if (pathname.startsWith('/site-vitrine')) return true;
+  return GUEST_VITRINE_PATHS.has(pathname);
+}
+
+function isDashboardHtmlPath(pathname) {
+  return pathname === '/vhr-dashboard-pro.html' || pathname === '/dashboard-pro.html' || pathname === '/dashboard-pro';
+}
+
+app.use((req, res, next) => {
+  const decoded = decodeGuestToken(req);
+  if (!isGuestUser(decoded)) return next();
+  const pathname = req.path || '';
+  if (isVitrineRequestPath(pathname)) {
+    return res.status(403).send('Accès réservé');
+  }
+  if (isDashboardHtmlPath(pathname) && !isElectronLikeRequest(req)) {
+    return res.status(403).send('Accès réservé à l’app Electron');
+  }
+  return next();
+});
+
 // ========== LICENSE SYSTEM ==========
 const LICENSE_SECRET = getOrCreateSecretFile('license-secret.txt', process.env.LICENSE_SECRET, 32);
 
