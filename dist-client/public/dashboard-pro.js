@@ -195,6 +195,7 @@ function showModalInputPrompt(options = {}) {
 // ========== CONFIGURATION ========== 
 let viewMode = localStorage.getItem('vhr_view_mode') || 'table'; // 'table' ou 'cards'
 let currentUser = localStorage.getItem('vhr_user') || '';
+let currentUserIsPrimary = localStorage.getItem('vhr_user_is_primary') === '1';
 let userList = JSON.parse(localStorage.getItem('vhr_user_list') || '[]');
 let userRoles = JSON.parse(localStorage.getItem('vhr_user_roles') || '{}');
 let licenseKey = localStorage.getItem('vhr_license_key') || '';
@@ -208,7 +209,7 @@ let licenseStatus = {
 	hasPerpetualLicense: false,
 	licenseCount: 0
 };
-const MAX_USERS_PER_ACCOUNT = 2;
+const MAX_USERS_PER_ACCOUNT = 1;
 const ALLOWED_ADMIN_USER = 'peter';
 const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
 let installationOverlayElement = null;
@@ -365,10 +366,17 @@ function updateUserUI() {
 	if (!userDiv) return;
 	let role = getDisplayedRole(currentUser);
 	let roleColor = role==='admin' ? '#ff9800' : role==='guest' ? '#95a5a6' : '#2196f3';
+	const showAccountType = currentUser && currentUser !== 'Invité';
+	const accountTypeLabel = showAccountType ? (currentUserIsPrimary ? 'Principal' : 'Secondaire') : '';
+	const accountTypeColor = currentUserIsPrimary ? '#16a085' : '#7f8c8d';
+	const accountTypeBadge = showAccountType
+		? `<span style="font-size:11px;background:${accountTypeColor};color:#fff;padding:3px 8px;border-radius:6px;">${accountTypeLabel}</span>`
+		: '';
 	userDiv.innerHTML = `
 		<span style='font-size:18px;'>👤</span> 
 		<b style='color:#2ecc71;'>${currentUser || 'Invité'}</b> 
 		<span style="font-size:11px;background:${roleColor};color:#fff;padding:3px 8px;border-radius:6px;">${role}</span>
+		${accountTypeBadge}
 		<button id="changeUserBtn" style='margin-left:8px;'>Changer</button>
 		<button id="userMenuBtn">Menu</button>
 	`;
@@ -390,6 +398,15 @@ function showUserMenu() {
 	menu = document.createElement('div');
 	menu.id = 'userMenu';
 	menu.style = 'position:fixed;top:54px;right:16px;background:#1a1d24;color:#fff;padding:18px;z-index:1200;border-radius:8px;box-shadow:0 4px 20px #000;border:2px solid #2ecc71;min-width:280px;';
+	const isElectronRuntime = (() => {
+		try { return typeof navigator !== 'undefined' && /electron/i.test(navigator.userAgent || ''); } catch (e) { return false; }
+	})();
+	const showPrimaryNotice = isElectronRuntime && currentUserIsPrimary && currentUser && currentUser !== 'Invité';
+	const primaryNotice = showPrimaryNotice
+		? `<div style='background:#23272f;border:1px solid #3498db;color:#b8d9ff;padding:10px 12px;border-radius:6px;margin-bottom:12px;font-size:12px;'>
+			💡 Compte principal : vous pouvez créer 1 utilisateur secondaire (invité).
+		</div>`
+		: '';
 	let html = `<b style='font-size:18px;color:#2ecc71;'>Utilisateurs</b><ul style='margin:12px 0;padding:0;list-style:none;'>`;
 	userList.forEach(u => {
 		let role = getDisplayedRole(u);
@@ -403,6 +420,7 @@ function showUserMenu() {
 		</li>`;
 	});
 	html += `</ul>`;
+	html += primaryNotice;
 	html += `<div style='display:flex;gap:8px;flex-wrap:wrap;'>`;
 	html += `<button onclick='showAddUserDialog()' style='background:#2ecc71;color:#000;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;'>➕ Ajouter</button>`;
 	html += `<button onclick='showLoginDialog()' style='background:#3498db;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;'>🔑 Connexion</button>`;
@@ -503,6 +521,10 @@ window.createNewUser = async function() {
 	
 	if (!currentUser || currentUser === 'Invité') {
 		showToast('🔒 Connectez-vous d\'abord pour créer un utilisateur', 'error');
+		return;
+	}
+	if (!isAdminAllowed(currentUser) && !currentUserIsPrimary) {
+		showToast('❌ Abonnement requis pour créer des utilisateurs.', 'error');
 		return;
 	}
 	if (!isAdminAllowed(currentUser) && getAdditionalUserCount() >= MAX_USERS_PER_ACCOUNT) {
@@ -889,6 +911,10 @@ function showAccountPanel() {
 	const role = getDisplayedRole(currentUser);
 	const roleColor = role==='admin' ? '#ff9800' : role==='user' ? '#2196f3' : '#95a5a6';
 	const roleIcon = role==='admin' ? '👑' : role==='user' ? '👤' : '👥';
+	const showAccountType = currentUser && currentUser !== 'Invité';
+	const accountTypeLabel = showAccountType ? (currentUserIsPrimary ? 'Principal' : 'Secondaire') : '';
+	const accountTypeColor = currentUserIsPrimary ? '#16a085' : '#7f8c8d';
+	const settingsLocked = !currentUserIsPrimary && !isAdminAllowed(currentUser);
 	
 	panel = document.createElement('div');
 	panel.id = 'accountPanel';
@@ -908,6 +934,7 @@ function showAccountPanel() {
 						<h2 style='margin:0;font-size:28px;color:#fff;'>${currentUser || 'Invité'}</h2>
 						<div style='margin-top:6px;display:flex;gap:8px;align-items:center;'>
 							<span style='background:${roleColor};color:#fff;padding:4px 12px;border-radius:6px;font-size:12px;font-weight:bold;text-transform:uppercase;'>${role}</span>
+							${showAccountType ? `<span style='background:${accountTypeColor};color:#fff;padding:4px 12px;border-radius:6px;font-size:12px;font-weight:bold;'>${accountTypeLabel}</span>` : ''}
 							<span style='background:rgba(255,255,255,0.2);color:#fff;padding:4px 12px;border-radius:6px;font-size:12px;'>Membre depuis ${userStats.memberSince}</span>
 						</div>
 					</div>
@@ -922,8 +949,8 @@ function showAccountPanel() {
 				<button id='tabStats' class='account-tab' onclick='switchAccountTab("stats")' style='flex:1;padding:16px;background:transparent;border:none;color:#95a5a6;cursor:pointer;font-weight:bold;border-bottom:3px solid transparent;transition:all 0.3s;'>
 					📊 Statistiques
 				</button>
-				<button id='tabSettings' class='account-tab' onclick='switchAccountTab("settings")' style='flex:1;padding:16px;background:transparent;border:none;color:#95a5a6;cursor:pointer;font-weight:bold;border-bottom:3px solid transparent;transition:all 0.3s;'>
-					⚙️ Paramètres
+				<button id='tabSettings' class='account-tab' onclick='switchAccountTab("settings")' style='flex:1;padding:16px;background:transparent;border:none;color:#95a5a6;cursor:pointer;font-weight:bold;border-bottom:3px solid transparent;transition:all 0.3s;${settingsLocked ? 'opacity:0.65;' : ''}' title='${settingsLocked ? 'Réservé au compte principal' : ''}'>
+					⚙️ Paramètres${settingsLocked ? ' 🔒' : ''}
 				</button>
 			</div>
 			
@@ -1152,9 +1179,19 @@ function getSettingsContent() {
 		: '—';
 	const licenseLabel = detail.hasActiveLicense ? '✅ Oui' : '❌ Non';
 	const planMessage = detail.message || 'Les détails de facturation sont synchronisés avec notre portail sécurisé.';
+	const settingsLocked = !currentUserIsPrimary && !isAdminAllowed(currentUser);
+	const settingsReadOnlyStyle = settingsLocked ? 'opacity:0.65;pointer-events:none;' : '';
+	const saveButtonLabel = settingsLocked ? '🔒 Paramètres réservés au compte principal' : '💾 Sauvegarder les paramètres';
+	const lockedNotice = settingsLocked
+		? `<div style='background:#2c3e50;border:1px solid #e67e22;color:#f5c26b;padding:12px 14px;border-radius:8px;margin-bottom:18px;font-size:13px;'>
+			🔒 Les paramètres de l'application sont réservés au compte principal.
+		</div>`
+		: '';
 	
 	return `
 		<div style='max-width:700px;margin:0 auto;'>
+			${lockedNotice}
+			<div style='${settingsReadOnlyStyle}'>
 			<h3 style='color:#2ecc71;margin-bottom:16px;font-size:20px;'>💳 Abonnement & Facturation</h3>
 			<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;border-left:4px solid #3498db;'>
 				<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px;'>
@@ -1197,25 +1234,25 @@ function getSettingsContent() {
 			<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;'>
 				<div style='margin-bottom:16px;'>
 					<label style='color:#fff;font-size:15px;display:flex;align-items:center;cursor:pointer;'>
-						<input type='checkbox' id='prefAutoRefresh' ${prefs.autoRefresh !== false ? 'checked' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
+						<input type='checkbox' id='prefAutoRefresh' ${prefs.autoRefresh !== false ? 'checked' : ''} ${settingsLocked ? 'disabled' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
 						<span>🔄 Rafraîchissement automatique des casques</span>
 					</label>
 				</div>
 				<div style='margin-bottom:16px;'>
 					<label style='color:#fff;font-size:15px;display:flex;align-items:center;cursor:pointer;'>
-						<input type='checkbox' id='prefNotifications' ${prefs.notifications !== false ? 'checked' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
+						<input type='checkbox' id='prefNotifications' ${prefs.notifications !== false ? 'checked' : ''} ${settingsLocked ? 'disabled' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
 						<span>🔔 Notifications toast activées</span>
 					</label>
 				</div>
 				<div style='margin-bottom:16px;'>
 					<label style='color:#fff;font-size:15px;display:flex;align-items:center;cursor:pointer;'>
-						<input type='checkbox' id='prefSounds' ${prefs.sounds === true ? 'checked' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
+						<input type='checkbox' id='prefSounds' ${prefs.sounds === true ? 'checked' : ''} ${settingsLocked ? 'disabled' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
 						<span>🔊 Sons d'actions activés</span>
 					</label>
 				</div>
 				<div>
 					<label style='color:#95a5a6;font-size:13px;display:block;margin-bottom:8px;'>Vue par défaut</label>
-					<select id='prefDefaultView' style='width:100%;background:#1a1d24;color:#fff;border:2px solid #34495e;padding:10px;border-radius:6px;font-size:14px;cursor:pointer;'>
+					<select id='prefDefaultView' ${settingsLocked ? 'disabled' : ''} style='width:100%;background:#1a1d24;color:#fff;border:2px solid #34495e;padding:10px;border-radius:6px;font-size:14px;cursor:pointer;'>
 						<option value='table' ${viewMode === 'table' ? 'selected' : ''}>📊 Tableau</option>
 						<option value='cards' ${viewMode === 'cards' ? 'selected' : ''}>🎴 Cartes</option>
 					</select>
@@ -1226,7 +1263,7 @@ function getSettingsContent() {
 			<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;'>
 				<div style='margin-bottom:16px;'>
 					<label style='color:#95a5a6;font-size:13px;display:block;margin-bottom:8px;'>Profil streaming par défaut</label>
-					<select id='prefDefaultProfile' style='width:100%;background:#1a1d24;color:#fff;border:2px solid #34495e;padding:10px;border-radius:6px;font-size:14px;cursor:pointer;'>
+					<select id='prefDefaultProfile' ${settingsLocked ? 'disabled' : ''} style='width:100%;background:#1a1d24;color:#fff;border:2px solid #34495e;padding:10px;border-radius:6px;font-size:14px;cursor:pointer;'>
 						<option value='ultra-low'>Ultra Low (320p)</option>
 						<option value='low'>Low (480p)</option>
 						<option value='wifi'>WiFi (640p)</option>
@@ -1237,7 +1274,7 @@ function getSettingsContent() {
 				</div>
 				<div>
 					<label style='color:#95a5a6;font-size:13px;display:block;margin-bottom:8px;'>Intervalle de rafraîchissement (secondes)</label>
-					<input type='number' id='prefRefreshInterval' value='${prefs.refreshInterval || 5}' min='1' max='60' style='width:100%;background:#1a1d24;color:#fff;border:2px solid #34495e;padding:10px;border-radius:6px;font-size:14px;' />
+					<input type='number' id='prefRefreshInterval' value='${prefs.refreshInterval || 5}' min='1' max='60' ${settingsLocked ? 'disabled' : ''} style='width:100%;background:#1a1d24;color:#fff;border:2px solid #34495e;padding:10px;border-radius:6px;font-size:14px;' />
 				</div>
 			</div>
 			
@@ -1245,13 +1282,13 @@ function getSettingsContent() {
 			<div style='background:#23272f;padding:20px;border-radius:12px;margin-bottom:24px;'>
 				<div style='margin-bottom:16px;'>
 					<label style='color:#fff;font-size:15px;display:flex;align-items:center;cursor:pointer;'>
-						<input type='checkbox' id='prefDebugMode' ${prefs.debugMode === true ? 'checked' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
+						<input type='checkbox' id='prefDebugMode' ${prefs.debugMode === true ? 'checked' : ''} ${settingsLocked ? 'disabled' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
 						<span>🐛 Mode debug (logs console)</span>
 					</label>
 				</div>
 				<div>
 					<label style='color:#fff;font-size:15px;display:flex;align-items:center;cursor:pointer;'>
-						<input type='checkbox' id='prefAutoWifi' ${prefs.autoWifi === true ? 'checked' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
+						<input type='checkbox' id='prefAutoWifi' ${prefs.autoWifi === true ? 'checked' : ''} ${settingsLocked ? 'disabled' : ''} style='margin-right:10px;width:20px;height:20px;cursor:pointer;' />
 						<span>📶 WiFi auto au démarrage</span>
 					</label>
 				</div>
@@ -1265,9 +1302,10 @@ function getSettingsContent() {
 				</button>
 			</div>
 			
-			<button onclick='saveSettings()' style='width:100%;background:#2ecc71;color:#000;border:none;padding:16px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>
-				💾 Sauvegarder les paramètres
+			<button onclick='saveSettings()' style='width:100%;background:#2ecc71;color:#000;border:none;padding:16px;border-radius:8px;cursor:${settingsLocked ? 'not-allowed' : 'pointer'};font-weight:bold;font-size:16px;${settingsLocked ? 'opacity:0.6;' : ''}'>
+				${saveButtonLabel}
 			</button>
+			</div>
 		</div>
 	`;
 }
@@ -1765,6 +1803,10 @@ window.saveProfileChanges = function() {
 };
 
 window.saveSettings = function() {
+	if (!currentUserIsPrimary && !isAdminAllowed(currentUser)) {
+		showToast('🔒 Paramètres réservés au compte principal', 'warning');
+		return;
+	}
 	const prefs = {
 		autoRefresh: document.getElementById('prefAutoRefresh').checked,
 		notifications: document.getElementById('prefNotifications').checked,
@@ -2527,7 +2569,7 @@ async function refreshDevicesList() {
 		// Recharger les devices
 		const data = await api('/api/devices');
 		if (data.ok && Array.isArray(data.devices)) {
-			devices = data.devices;
+			devices = filterDevicesForCurrentUser(data.devices);
 			renderDevices();
 			
 			// Feedback visuel de succès
@@ -2568,7 +2610,7 @@ async function loadDevices() {
 	try {
 		const data = await api('/api/devices');
 		if (data.ok && Array.isArray(data.devices)) {
-			devices = data.devices;
+			devices = filterDevicesForCurrentUser(data.devices);
 			lastDevicesLoadTs = Date.now();
 			// Récupérer l'état des jeux en cours depuis le serveur avant de rendre
 			await syncRunningAppsFromServer();
@@ -2603,6 +2645,16 @@ window.loadDevices = loadDevices;
 
 function isRelayDevice(dev) {
 	return !!dev && (dev.origin === 'relay' || dev.status === 'relay');
+}
+
+function isSecondaryRestricted() {
+	return !currentUserIsPrimary && !isAdminAllowed(currentUser);
+}
+
+function filterDevicesForCurrentUser(list) {
+	const normalized = Array.isArray(list) ? list : [];
+	if (!isSecondaryRestricted()) return normalized;
+	return normalized.filter(d => !isRelayDevice(d));
 }
 
 // ========== RENDER: TABLE VIEW ========== 
@@ -4352,7 +4404,7 @@ function showSetupNotice() {
 socket.on('devices-update', (data) => {
 	console.log('[socket] devices-update received:', data);
 	if (Array.isArray(data)) {
-		devices = data;
+		devices = filterDevicesForCurrentUser(data);
 		renderDevices();
 	} else {
 		console.warn('[socket] Invalid devices data received:', data);
@@ -4955,6 +5007,13 @@ window.loginUser = async function() {
 			showToast('✅ Connecté avec succès !', 'success');
 			currentUser = data.user?.name || data.user?.username || data.user?.email || identifier;
 			localStorage.setItem('vhr_current_user', currentUser);
+			if (data.user && data.user.isPrimary !== undefined) {
+				currentUserIsPrimary = Boolean(data.user.isPrimary);
+				localStorage.setItem('vhr_user_is_primary', currentUserIsPrimary ? '1' : '0');
+			} else if (data.isPrimary !== undefined) {
+				currentUserIsPrimary = Boolean(data.isPrimary);
+				localStorage.setItem('vhr_user_is_primary', currentUserIsPrimary ? '1' : '0');
+			}
 			if (data.demo) {
 				applyDemoStatusSnapshot(data.demo);
 			}
@@ -5078,6 +5137,10 @@ async function checkJWTAuth() {
 			// User is authenticated
 			currentUser = res.user.username || res.user.name || res.user.email;
 			localStorage.setItem('vhr_current_user', currentUser);
+			if (res.user.isPrimary !== undefined) {
+				currentUserIsPrimary = Boolean(res.user.isPrimary);
+				localStorage.setItem('vhr_user_is_primary', currentUserIsPrimary ? '1' : '0');
+			}
 			console.log('[auth] ✓ JWT valid for user:', currentUser);
 			return true;
 		} else {

@@ -302,6 +302,8 @@
       } else { 
         if (res && res.code === 'email_not_verified') {
           renderVerificationPrompt(res.email);
+        } else if (res && res.code === 'secondary_electron_only') {
+          loginMessage.textContent = 'Compte secondaire non autorisé sur le site vitrine.';
         } else {
           const errorMsg = res && res.error ? res.error : 'Erreur inconnue';
           console.error('[LOGIN] Error:', errorMsg);

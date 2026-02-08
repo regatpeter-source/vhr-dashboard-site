@@ -2866,7 +2866,19 @@ function removeUserByUsername(username) {
 
 const JWT_SECRET = getOrCreateSecretFile('jwt-secret.txt', process.env.JWT_SECRET, 32);
 const JWT_EXPIRES = '2h';
-const DASHBOARD_MAX_USERS_PER_ACCOUNT = Number.parseInt(process.env.DASHBOARD_MAX_USERS_PER_ACCOUNT || '2', 10) || 2;
+const DASHBOARD_MAX_USERS_PER_ACCOUNT = Number.parseInt(process.env.DASHBOARD_MAX_USERS_PER_ACCOUNT || '1', 10) || 1;
+
+function isPrimaryAccount(user) {
+  if (!user) return false;
+  if (typeof user.isPrimary === 'boolean') return user.isPrimary;
+  if (typeof user.isPrimary === 'string') {
+    const normalized = user.isPrimary.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+    if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+  }
+  if (user.createdBy || user.ownerUsername) return false;
+  return true;
+}
 
 function isSecureRequest(req) {
   if (!req) return false;
@@ -3282,6 +3294,9 @@ async function ensureLocalUserFromRemote(remotePayload, identifier, password) {
   const remoteDemoReason = remoteUser.demoStartReason || null;
   const remoteDemoAt = remoteUser.demoStartAt || remoteUser.demoStartDate || null;
   const remoteDemoExtensionDays = remoteUser.demoExtensionDays ?? remoteUser.demoextensiondays ?? null;
+  const resolvedPrimary = remoteUser.isPrimary !== undefined
+    ? Boolean(remoteUser.isPrimary)
+    : (existing && existing.isPrimary !== undefined ? Boolean(existing.isPrimary) : true);
 
   const userToPersist = existing
     ? {
@@ -3289,6 +3304,7 @@ async function ensureLocalUserFromRemote(remotePayload, identifier, password) {
       passwordHash: hashedPassword,
       email: emailCandidate || existing.email,
       role,
+      isPrimary: resolvedPrimary,
       stripeCustomerId: remoteUser.stripeCustomerId || existing.stripeCustomerId,
       subscriptionStatus: remoteUser.subscriptionStatus || existing.subscriptionStatus,
       demoStartDate: existing.demoStartDate || remoteDemoStart || null,
@@ -3304,6 +3320,7 @@ async function ensureLocalUserFromRemote(remotePayload, identifier, password) {
       passwordHash: hashedPassword,
       email: emailCandidate || null,
       role,
+      isPrimary: resolvedPrimary,
       stripeCustomerId: remoteUser.stripeCustomerId || null,
       subscriptionStatus: remoteUser.subscriptionStatus || null,
       demoStartDate: remoteDemoStart || null,
@@ -3321,6 +3338,12 @@ async function ensureLocalUserFromRemote(remotePayload, identifier, password) {
     return null;
   }
   return getUserByUsername(username);
+}
+
+function isElectronRequest(req) {
+  const userAgent = String(req.headers['user-agent'] || '').toLowerCase();
+  const electronHeader = String(req.headers['x-vhr-electron'] || '').toLowerCase();
+  return userAgent.includes('electron') || electronHeader === 'electron';
 }
 
 // --- Route de login ---
@@ -3370,6 +3393,14 @@ async function handleApiLogin(req, res) {
     }
   }
 
+  if (!isPrimaryAccount(user) && !isElectronRequest(req)) {
+    return res.status(403).json({
+      ok: false,
+      error: 'Compte secondaire: connexion autorisée uniquement via l\'app Electron',
+      code: 'secondary_electron_only'
+    });
+  }
+
   const valid = await bcrypt.compare(password, user.passwordHash || user.passwordhash);
   if (!valid) {
     console.log('[api/login] password mismatch');
@@ -3398,7 +3429,15 @@ async function handleApiLogin(req, res) {
   const cookieOptions = buildAuthCookieOptions(req);
   res.cookie('vhr_token', token, cookieOptions);
   console.log('[api/login] cookie set with secure=' + cookieOptions.secure + ', sameSite=' + cookieOptions.sameSite + ', maxAge=' + cookieOptions.maxAge);
-  res.json({ ok: true, token, userId: elevatedUser.id, username: elevatedUser.username, role: elevatedUser.role, email: elevatedUser.email || null });
+  res.json({
+    ok: true,
+    token,
+    userId: elevatedUser.id,
+    username: elevatedUser.username,
+    role: elevatedUser.role,
+    email: elevatedUser.email || null,
+    isPrimary: isPrimaryAccount(elevatedUser)
+  });
 }
 
 app.post('/api/login', handleApiLogin);
@@ -3481,6 +3520,14 @@ app.post('/api/dashboard/register', authMiddleware, async (req, res) => {
     return res.status(401).json({ ok: false, error: 'Authentification requise' });
   }
 
+  if (!isAdmin && !isPrimaryAccount(req.user)) {
+    return res.status(403).json({
+      ok: false,
+      error: 'Abonnement requis pour créer des utilisateurs.',
+      code: 'primary_required'
+    });
+  }
+
   const existingOwned = users.filter(u => (u.createdBy || u.ownerUsername) === ownerUsername);
   if (!isAdmin && existingOwned.length >= DASHBOARD_MAX_USERS_PER_ACCOUNT) {
     return res.status(403).json({
@@ -3512,6 +3559,7 @@ app.post('/api/dashboard/register', authMiddleware, async (req, res) => {
       email: `${username}@dashboard.local`,
       passwordHash,
       role: role || 'user',
+      isPrimary: false,
       createdBy: ownerUsername,
       demoStartDate: null,
       demoStartSource: 'pending',
@@ -4051,7 +4099,7 @@ app.get('/api/me', authMiddleware, (req, res) => {
   if (FORCE_REMOTE_USER_STATUS) {
     return proxyRemoteUserStatus(req, res, req.originalUrl);
   }
-  const user = { username: req.user.username, role: req.user.role };
+  const user = { username: req.user.username, role: req.user.role, isPrimary: isPrimaryAccount(req.user) };
   res.json({ ok: true, user });
 });
 
@@ -4072,12 +4120,21 @@ app.get('/api/check-auth', (req, res) => {
   
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+    let isPrimary = undefined;
+    try {
+      const storedUser = getUserByUsername(decoded.username);
+      if (storedUser) {
+        isPrimary = isPrimaryAccount(storedUser);
+      }
+    } catch (e) {
+      isPrimary = undefined;
+    }
     // Token is valid
     const includeToken = req.query && String(req.query.includeToken || req.query.include_token || '0') === '1';
     res.json({ 
       ok: true, 
       authenticated: true, 
-      user: { username: decoded.username, role: decoded.role },
+      user: { username: decoded.username, role: decoded.role, isPrimary },
       token: includeToken ? token : undefined
     });
   } catch (e) {
@@ -4256,6 +4313,14 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
     }
   }
+
+  if (!isPrimaryAccount(user) && !isElectronRequest(req)) {
+    return res.status(403).json({
+      ok: false,
+      error: 'Compte secondaire: connexion autorisée uniquement via l\'app Electron',
+      code: 'secondary_electron_only'
+    });
+  }
   
   const valid = await bcrypt.compare(password, user.passwordhash || user.passwordHash);
   if (!valid) {
@@ -4294,7 +4359,8 @@ app.post('/api/auth/login', async (req, res) => {
     user: {
       name: user.username,
       email: user.email,
-      role: user.role
+      role: user.role,
+      isPrimary: isPrimaryAccount(user)
     }
   });
 });
