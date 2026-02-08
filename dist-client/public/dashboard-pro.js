@@ -649,10 +649,7 @@ window.showAddUserDialog = function() {
 			</div>
 			<div style='margin-bottom:20px;'>
 				<label style='display:block;margin-bottom:5px;color:#95a5a6;'>Rôle</label>
-				<select id='newUserRole' style='width:100%;padding:12px;border:2px solid #34495e;border-radius:8px;background:#23272f;color:#fff;font-size:16px;'>
-					<option value='user'>👤 Utilisateur</option>
-					<option value='guest'>👥 Invité</option>
-				</select>
+				<div style='width:100%;padding:12px;border:2px solid #34495e;border-radius:8px;background:#23272f;color:#fff;font-size:16px;'>👥 Invité (1 max)</div>
 			</div>
 			<div style='display:flex;gap:10px;'>
 				<button onclick='createNewUser()' style='flex:1;background:#2ecc71;color:#000;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;'>✅ Créer</button>
@@ -668,8 +665,7 @@ window.showAddUserDialog = function() {
 window.createNewUser = async function() {
 	const username = document.getElementById('newUserName').value.trim();
 	const password = document.getElementById('newUserPass').value;
-	const role = document.getElementById('newUserRole').value;
-	const normalizedRole = normalizeRoleForUser(username, role);
+	const normalizedRole = 'guest';
 	
 	if (!currentUser || currentUser === 'Invité') {
 		showToast('🔒 Connectez-vous d\'abord pour créer un utilisateur', 'error');
@@ -680,7 +676,7 @@ window.createNewUser = async function() {
 		return;
 	}
 	if (!isAdminAllowed(currentUser) && getAdditionalUserCount() >= MAX_USERS_PER_ACCOUNT) {
-		showToast(`❌ Limite atteinte : ${MAX_USERS_PER_ACCOUNT} utilisateur(s) par compte`, 'error');
+		showToast('❌ Limite atteinte : 1 invité par compte', 'error');
 		return;
 	}
 	

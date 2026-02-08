@@ -2201,6 +2201,18 @@ function ensureDataDir() {
   try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { }
 }
 
+function canPersistJsonStore() {
+  try {
+    ensureDataDir();
+    const probe = path.join(DATA_DIR, '.persist_test');
+    fs.writeFileSync(probe, 'ok', 'utf8');
+    fs.unlinkSync(probe);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 function saveUsers() {
   try {
     ensureDataDir();
@@ -3506,7 +3518,7 @@ app.post('/api/dashboard/register', authMiddleware, async (req, res) => {
   console.log('[api/dashboard/register] request received');
   // Sécurisation : on refuse la création d'utilisateurs si aucune base persistante n'est configurée
   // (ni Postgres, ni SQLite). Cela évite que l'archive client zip fonctionne en "mode démo" sans contrôle.
-  const hasPersistentStore = USE_POSTGRES || dbEnabled;
+  const hasPersistentStore = USE_POSTGRES || dbEnabled || canPersistJsonStore();
   if (!hasPersistentStore) {
     return res.status(403).json({ ok: false, error: 'Création désactivée : aucune base persistante configurée' });
   }
@@ -3515,6 +3527,7 @@ app.post('/api/dashboard/register', authMiddleware, async (req, res) => {
   const { username, password, role } = req.body;
   const ownerUsername = req.user && req.user.username ? String(req.user.username) : '';
   const isAdmin = req.user && req.user.role === 'admin';
+  const forcedRole = 'guest';
 
   if (!ownerUsername) {
     return res.status(401).json({ ok: false, error: 'Authentification requise' });
@@ -3532,7 +3545,7 @@ app.post('/api/dashboard/register', authMiddleware, async (req, res) => {
   if (!isAdmin && existingOwned.length >= DASHBOARD_MAX_USERS_PER_ACCOUNT) {
     return res.status(403).json({
       ok: false,
-      error: `Limite atteinte : ${DASHBOARD_MAX_USERS_PER_ACCOUNT} utilisateur(s) par compte`,
+      error: 'Limite atteinte : 1 invité par compte',
       code: 'user_limit_reached',
       limit: DASHBOARD_MAX_USERS_PER_ACCOUNT
     });
@@ -3558,7 +3571,7 @@ app.post('/api/dashboard/register', authMiddleware, async (req, res) => {
       username,
       email: `${username}@dashboard.local`,
       passwordHash,
-      role: role || 'user',
+      role: forcedRole,
       isPrimary: false,
       createdBy: ownerUsername,
       demoStartDate: null,
