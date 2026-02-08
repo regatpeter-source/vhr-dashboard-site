@@ -194,6 +194,7 @@ function showModalInputPrompt(options = {}) {
 
 // ========== CONFIGURATION ========== 
 let viewMode = localStorage.getItem('vhr_view_mode') || 'table'; // 'table' ou 'cards'
+let deviceVisibilityFilter = localStorage.getItem('vhr_device_filter') || 'all';
 let currentUser = localStorage.getItem('vhr_user') || '';
 let currentUserIsPrimary = localStorage.getItem('vhr_user_is_primary') === '1';
 let userList = JSON.parse(localStorage.getItem('vhr_user_list') || '[]');
@@ -293,6 +294,14 @@ function createNavbar() {
 			<span style='color:#2ecc71;font-size:20px;'>VHR DASHBOARD PRO</span>
 		</div>
 		<div style='flex:1'></div>
+		<div id="deviceFilterWrapper" style="margin-right:15px;display:flex;align-items:center;gap:8px;">
+			<span style="font-size:12px;color:#95a5a6;">Filtre:</span>
+			<select id="deviceFilterSelect" style="background:#23272f;color:#fff;border:1px solid #2ecc71;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12px;">
+				<option value="all">Tous</option>
+				<option value="local">Local</option>
+				<option value="remote">Distant</option>
+			</select>
+		</div>
 		<button id="toggleViewBtn" style="margin-right:15px;background:#2ecc71;color:#000;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;">
 			📊 Vue: Tableau
 		</button>
@@ -311,12 +320,17 @@ function createNavbar() {
 		<div id='navbarUser' style='margin-right:24px;display:flex;gap:12px;align-items:center;'></div>
 	`;
 	
+	const filterSelect = document.getElementById('deviceFilterSelect');
+	if (filterSelect) {
+		filterSelect.onchange = (event) => setDeviceVisibilityFilter(event.target.value);
+	}
 	document.getElementById('toggleViewBtn').onclick = toggleView;
 	document.getElementById('refreshBtn').onclick = refreshDevicesList;
 	document.getElementById('noticeBtn').onclick = showSetupNotice;
 	document.getElementById('favoritesBtn').onclick = addDashboardToFavorites;
 	document.getElementById('accountBtn').onclick = showAccountPanel;
 	updateUserUI();
+	updateDeviceFilterUI();
 }
 
 function toggleView() {
@@ -434,6 +448,86 @@ function showUserMenu() {
 // ========== AUTHENTICATION SYSTEM ==========
 let authenticatedUsers = JSON.parse(localStorage.getItem('vhr_auth_users') || '{}');
 let currentSession = null;
+let localDevices = [];
+let sessionDevicesByUser = {};
+let sessionRunningAppsByUser = {};
+let sessionRequestCounter = 0;
+const pendingSessionRequests = new Map();
+const SESSION_API_TIMEOUT_MS = 20000;
+
+function isSessionActive() {
+	return !!(currentSession && currentSession.code);
+}
+
+function attachSessionMetaToDevice(device, owner, isRemote) {
+	if (!device) return device;
+	return {
+		...device,
+		sessionOwner: owner || currentUser || null,
+		sessionRemote: Boolean(isRemote)
+	};
+}
+
+function normalizeSessionDevices(list, owner) {
+	const safeList = Array.isArray(list) ? list : [];
+	return safeList.map(d => attachSessionMetaToDevice(d, owner, true));
+}
+
+function buildMergedSessionDevices() {
+	const localList = Array.isArray(localDevices) ? localDevices : [];
+	const normalizedLocal = localList.map(d => attachSessionMetaToDevice(d, currentUser, false));
+	const remoteLists = Object.entries(sessionDevicesByUser || {}).flatMap(([owner, list]) => {
+		if (!owner || owner === currentUser) return [];
+		return normalizeSessionDevices(list, owner);
+	});
+	return [...normalizedLocal, ...remoteLists];
+}
+
+function refreshMergedDevices() {
+	const merged = buildMergedSessionDevices();
+	devices = filterDevicesForCurrentUser(merged);
+	renderDevices();
+}
+
+function publishSessionDevices() {
+	if (!isSessionActive() || !window.vhrSocket) return;
+	const safeDevices = Array.isArray(localDevices) ? localDevices : [];
+	window.vhrSocket.emit('session-action', {
+		action: 'session-devices',
+		payload: { devices: safeDevices, runningApps: runningApps || {} }
+	});
+}
+
+function getSessionDeviceOwner(serial) {
+	if (!serial) return '';
+	const entries = Object.entries(sessionDevicesByUser || {});
+	for (const [owner, list] of entries) {
+		if (!owner || owner === currentUser) continue;
+		if ((list || []).some(d => d && d.serial === serial)) return owner;
+	}
+	return '';
+}
+
+function isRemoteSessionSerial(serial) {
+	const owner = getSessionDeviceOwner(serial);
+	return !!owner && owner !== currentUser;
+}
+
+function getSessionDeviceBadge(device) {
+	if (!device || !device.sessionOwner || device.sessionOwner === currentUser) return '';
+	return `<span style='margin-left:6px;font-size:10px;background:#9b59b6;color:#fff;padding:2px 6px;border-radius:6px;'>🌐 ${device.sessionOwner}</span>`;
+}
+
+function isRemoteSessionDevice(device) {
+	if (!device) return false;
+	if (typeof device.sessionRemote === 'boolean') return device.sessionRemote;
+	return !!(device.sessionOwner && device.sessionOwner !== currentUser);
+}
+
+function getSessionDeviceIcon(device) {
+	if (!isRemoteSessionDevice(device)) return '';
+	return `<span style='display:inline-flex;align-items:center;justify-content:center;margin-right:6px;color:#9b59b6;font-size:14px;' title='Casque distant'>🛰️</span>`;
+}
 
 function saveAuthUsers() {
 	localStorage.setItem('vhr_auth_users', JSON.stringify(authenticatedUsers));
@@ -734,12 +828,16 @@ function initSessionSocket() {
 		showToast(`🎯 Session créée! Code: ${data.sessionCode}`, 'success', 5000);
 		// Show the code prominently
 		showSessionCodePopup(data.sessionCode);
+		publishSessionDevices();
+		refreshMergedDevices();
 	});
 	
 	socket.on('session-joined', (data) => {
 		currentSession = { code: data.sessionCode, users: data.users, host: data.host };
 		showToast(`✅ Connecté à la session ${data.sessionCode}`, 'success');
 		document.getElementById('sessionMenu')?.remove();
+		publishSessionDevices();
+		refreshMergedDevices();
 	});
 	
 	socket.on('session-updated', (data) => {
@@ -748,8 +846,16 @@ function initSessionSocket() {
 			if (data.message) {
 				showToast(`ℹ️ ${data.message}`, 'info');
 			}
+			const activeUsers = (data.users || []).map(u => u.username).filter(Boolean);
+			Object.keys(sessionDevicesByUser || {}).forEach(user => {
+				if (!activeUsers.includes(user)) {
+					delete sessionDevicesByUser[user];
+					delete sessionRunningAppsByUser[user];
+				}
+			});
 			updateSessionUsersList();
 			updateSessionIndicator();
+			refreshMergedDevices();
 		}
 	});
 	
@@ -777,6 +883,23 @@ function handleSessionAction(data) {
 		case 'settings-changed':
 			showToast(`⚙️ ${from} a modifié les paramètres`, 'info');
 			break;
+		case 'session-devices': {
+			if (!from || from === currentUser) return;
+			const remoteDevices = Array.isArray(payload?.devices) ? payload.devices : [];
+			sessionDevicesByUser[from] = remoteDevices;
+			sessionRunningAppsByUser[from] = payload?.runningApps || {};
+			refreshMergedDevices();
+			break;
+		}
+		case 'session-api-request': {
+			if (!payload || payload.targetUser !== currentUser) return;
+			executeSessionApiRequest(payload);
+			break;
+		}
+		case 'session-api-response': {
+			handleSessionApiResponse(payload);
+			break;
+		}
 	}
 }
 
@@ -785,9 +908,11 @@ window.createSession = function() {
 		showToast('🔒 Connectez-vous d\'abord pour créer une session', 'error');
 		return;
 	}
+		sessionRunningAppsByUser = {};
 	
 	if (window.vhrSocket) {
 		window.vhrSocket.emit('create-session', { username: currentUser });
+		refreshMergedDevices();
 	} else {
 		showToast('⚠️ Connexion socket non disponible', 'error');
 	}
@@ -2222,6 +2347,11 @@ socket.on('disconnect', (reason) => {
 	socketConnected = false;
 	addOfflineReason('socket');
 	startPollingFallback();
+	sessionDevicesByUser = {};
+	sessionRunningAppsByUser = {};
+	if (isSessionActive()) {
+		refreshMergedDevices();
+	}
 	// Clean up audio on disconnect to prevent orphaned sessions
 	if (activeAudioStream) {
 		console.log('[socket] Cleaning up audio stream due to disconnect');
@@ -2245,6 +2375,9 @@ socket.on('connect', () => {
 	removeOfflineReason('socket');
 	stopPollingFallback();
 	offlineToastShown = false;
+	if (isSessionActive()) {
+		publishSessionDevices();
+	}
 });
 
 window.vhrSocket = socket; // Make socket available globally for sessions
@@ -2280,6 +2413,15 @@ function getGameMeta(pkg) {
 		name: meta.name || pkg,
 		icon: normalizeGameIcon(meta.icon)
 	};
+}
+
+function getRunningAppsForDevice(device) {
+	if (!device) return [];
+	if (device.sessionOwner && device.sessionOwner !== currentUser) {
+		const remoteRunning = sessionRunningAppsByUser[device.sessionOwner] || {};
+		return remoteRunning[device.serial] || [];
+	}
+	return runningApps[device.serial] || [];
 }
 
 async function loadGamesCatalog() {
@@ -2439,6 +2581,64 @@ const batteryBackoff = {}; // backoff per serial on repeated errors
 // Initialize collaborative session socket handlers
 initSessionSocket();
 
+function buildSessionApiRequestOptions(opts = {}) {
+	const method = (opts.method || 'GET').toUpperCase();
+	const headers = { ...(opts.headers || {}) };
+	delete headers.Authorization;
+	delete headers.authorization;
+	return {
+		method,
+		headers,
+		body: opts.body
+	};
+}
+
+function handleSessionApiResponse(payload) {
+	if (!payload || !payload.requestId) return;
+	const pending = pendingSessionRequests.get(payload.requestId);
+	if (!pending) return;
+	clearTimeout(pending.timeoutId);
+	pendingSessionRequests.delete(payload.requestId);
+	pending.resolve(payload.response || { ok: false, error: 'Aucune réponse reçue' });
+}
+
+async function executeSessionApiRequest(payload) {
+	if (!payload || !window.vhrSocket) return;
+	const { requestId, path, options, targetUser } = payload;
+	if (targetUser !== currentUser) return;
+	let response;
+	try {
+		response = await api(path, { ...(options || {}), _skipSessionProxy: true });
+	} catch (err) {
+		response = { ok: false, error: err && err.message ? err.message : 'Erreur session' };
+	}
+	window.vhrSocket.emit('session-action', {
+		action: 'session-api-response',
+		payload: { requestId, response },
+		from: currentUser
+	});
+}
+
+function sendSessionApiRequest({ targetUser, path, opts }) {
+	if (!isSessionActive() || !window.vhrSocket) {
+		return Promise.resolve({ ok: false, error: 'Session inactive' });
+	}
+	const requestId = `sess_${Date.now()}_${sessionRequestCounter++}`;
+	const options = buildSessionApiRequestOptions(opts || {});
+	return new Promise((resolve) => {
+		const timeoutId = setTimeout(() => {
+			pendingSessionRequests.delete(requestId);
+			resolve({ ok: false, error: 'timeout', timeout: true });
+		}, SESSION_API_TIMEOUT_MS);
+		pendingSessionRequests.set(requestId, { resolve, timeoutId });
+		window.vhrSocket.emit('session-action', {
+			action: 'session-api-request',
+			payload: { requestId, targetUser, path, options },
+			from: currentUser
+		});
+	});
+}
+
 function startBatteryPolling() {
 	if (batteryPollInterval) return;
 	const poll = async () => {
@@ -2451,8 +2651,49 @@ function startBatteryPolling() {
 	batteryPollInterval = setInterval(poll, 30000); // 30s cadence
 }
 
+function extractSerialFromBody(opts = {}) {
+	if (!opts || !opts.body) return '';
+	if (typeof FormData !== 'undefined' && opts.body instanceof FormData) {
+		try { return opts.body.get('serial') || ''; } catch (e) { return ''; }
+	}
+	if (typeof opts.body === 'string') {
+		try {
+			const parsed = JSON.parse(opts.body);
+			return parsed?.serial || parsed?.device || parsed?.targetSerial || '';
+		} catch (e) {
+			return '';
+		}
+	}
+	if (typeof opts.body === 'object') {
+		return opts.body.serial || opts.body.device || opts.body.targetSerial || '';
+	}
+	return '';
+}
+
+function extractSerialFromApiRequest(path, opts = {}) {
+	if (!path || typeof path !== 'string') return '';
+	const batteryMatch = path.match(/^\/api\/battery\/([^/?#]+)/);
+	if (batteryMatch) return decodeURIComponent(batteryMatch[1]);
+	const appsMatch = path.match(/^\/api\/apps\/([^/?#]+)/);
+	if (appsMatch) return decodeURIComponent(appsMatch[1]);
+	const streamMatch = path.match(/^\/api\/stream\/(start|stop)/);
+	if (streamMatch) return extractSerialFromBody(opts);
+	if (path.startsWith('/api/device/') || path.startsWith('/api/adb/') || path.startsWith('/api/scrcpy-gui') || path.startsWith('/api/devices/rename') || path.startsWith('/api/apps/running/mark') || path.startsWith('/api/stream/audio-output') || path.startsWith('/api/install-dev-game')) {
+		return extractSerialFromBody(opts);
+	}
+	if (opts.serial) return opts.serial;
+	return '';
+}
+
 async function api(path, opts = {}) {
 	try {
+		if (!opts._skipSessionProxy) {
+			const targetSerial = extractSerialFromApiRequest(path, opts);
+			if (targetSerial && isRemoteSessionSerial(targetSerial)) {
+				const targetUser = getSessionDeviceOwner(targetSerial);
+				return await sendSessionApiRequest({ targetUser, path, opts });
+			}
+		}
 		// Include cookies in request (for httpOnly vhr_token cookie)
 		if (!opts.credentials) {
 			opts.credentials = 'include';
@@ -2496,7 +2737,8 @@ async function api(path, opts = {}) {
 		// Timeout support
 		const controller = new AbortController();
 		const t = setTimeout(() => controller.abort(), opts.timeout || API_TIMEOUT_MS);
-		const res = await fetch(path, { ...opts, signal: controller.signal }).finally(() => clearTimeout(t));
+		const { _skipSessionProxy, serial, ...fetchOpts } = opts;
+		const res = await fetch(path, { ...fetchOpts, signal: controller.signal }).finally(() => clearTimeout(t));
 		
 		// Check if response is JSON
 		const contentType = res.headers.get('content-type');
@@ -2569,8 +2811,9 @@ async function refreshDevicesList() {
 		// Recharger les devices
 		const data = await api('/api/devices');
 		if (data.ok && Array.isArray(data.devices)) {
-			devices = filterDevicesForCurrentUser(data.devices);
-			renderDevices();
+			localDevices = data.devices;
+			refreshMergedDevices();
+			publishSessionDevices();
 			
 			// Feedback visuel de succès
 			btn.innerHTML = '✓ Rafraîchi!';
@@ -2610,7 +2853,9 @@ async function loadDevices() {
 	try {
 		const data = await api('/api/devices');
 		if (data.ok && Array.isArray(data.devices)) {
-			devices = filterDevicesForCurrentUser(data.devices);
+			localDevices = data.devices;
+			refreshMergedDevices();
+			publishSessionDevices();
 			lastDevicesLoadTs = Date.now();
 			// Récupérer l'état des jeux en cours depuis le serveur avant de rendre
 			await syncRunningAppsFromServer();
@@ -2627,7 +2872,6 @@ async function loadDevices() {
 				}
 			}
 			
-			renderDevices();
 			startBatteryPolling();
 			if (!initialDevicesLoadComplete) {
 				initialDevicesLoadComplete = true;
@@ -2651,8 +2895,37 @@ function isSecondaryRestricted() {
 	return !currentUserIsPrimary && !isAdminAllowed(currentUser);
 }
 
-function filterDevicesForCurrentUser(list) {
+function normalizeDeviceVisibilityFilter(value) {
+	const normalized = String(value || '').toLowerCase();
+	if (['all', 'local', 'remote'].includes(normalized)) return normalized;
+	return 'all';
+}
+
+function setDeviceVisibilityFilter(value) {
+	deviceVisibilityFilter = normalizeDeviceVisibilityFilter(value);
+	localStorage.setItem('vhr_device_filter', deviceVisibilityFilter);
+	updateDeviceFilterUI();
+	refreshMergedDevices();
+}
+
+function updateDeviceFilterUI() {
+	const filterSelect = document.getElementById('deviceFilterSelect');
+	if (filterSelect) {
+		filterSelect.value = normalizeDeviceVisibilityFilter(deviceVisibilityFilter);
+	}
+}
+
+function applyDeviceVisibilityFilter(list) {
 	const normalized = Array.isArray(list) ? list : [];
+	const mode = normalizeDeviceVisibilityFilter(deviceVisibilityFilter);
+	if (mode === 'local') return normalized.filter(d => !isRemoteSessionDevice(d));
+	if (mode === 'remote') return normalized.filter(d => isRemoteSessionDevice(d));
+	return normalized;
+}
+
+function filterDevicesForCurrentUser(list) {
+	let normalized = Array.isArray(list) ? list : [];
+	normalized = applyDeviceVisibilityFilter(normalized);
 	if (!isSecondaryRestricted()) return normalized;
 	return normalized.filter(d => !isRelayDevice(d));
 }
@@ -2696,7 +2969,7 @@ function renderDevicesTable() {
 		const statusColor = relay ? '#9b59b6' : d.status === 'device' ? '#2ecc71' : d.status === 'streaming' ? '#3498db' : '#e74c3c';
 		const statusIcon = relay ? '📡' : d.status === 'device' ? '✅' : d.status === 'streaming' ? '🟢' : '�';
 		const statusLabel = relay ? 'relay (cloud)' : d.status;
-		const runningGamesList = runningApps[d.serial] || [];
+		const runningGamesList = getRunningAppsForDevice(d);
 		const serialJson = JSON.stringify(d.serial);
 		const runningGameDisplay = runningGamesList.length > 0 ? runningGamesList.map(pkg => {
 			const meta = getGameMeta(pkg);
@@ -2766,12 +3039,12 @@ function renderDevicesTable() {
 			? `<div style='color:#bdc3c7;font-size:12px;'>Actions ADB désactivées (relais cloud)</div>`
 			: `
 			<button onclick='renameDevice({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>✏️</button>
-			<button onclick='showStorageDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>💾</button>
+			<button onclick='showStorageDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')},sessionOwner:${JSON.stringify(d.sessionOwner || '')}})' style='background:#34495e;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin:2px;'>💾</button>
 		`;
 
 		table += `<tr style='background:${bgColor};border-bottom:1px solid #34495e;'>
 			<td style='padding:12px;'>
-				<div style='font-weight:bold;font-size:16px;color:#2ecc71;'>${d.name}</div>
+				<div style='font-weight:bold;font-size:16px;color:#2ecc71;'>${getSessionDeviceIcon(d)}${d.name || 'Casque'} ${getSessionDeviceBadge(d)}</div>
 				<div style='font-size:11px;color:#95a5a6;margin-top:2px;'>${d.serial}</div>
 			</td>
 			<td style='padding:12px;text-align:center;'>
@@ -2834,7 +3107,7 @@ function renderDevicesCards() {
 		
 		const relay = isRelayDevice(d);
 		const statusColor = relay ? '#9b59b6' : d.status === 'device' ? '#2ecc71' : d.status === 'streaming' ? '#3498db' : '#e74c3c';
-		const runningGamesList = runningApps[d.serial] || [];
+		const runningGamesList = getRunningAppsForDevice(d);
 		const serialJson = JSON.stringify(d.serial);
 		const runningGameDisplay = runningGamesList.length > 0 ? runningGamesList.map(pkg => {
 			const meta = getGameMeta(pkg);
@@ -2904,12 +3177,12 @@ function renderDevicesCards() {
 			? `<div style='color:#bdc3c7;font-size:12px;'>Actions ADB désactivées (relais cloud)</div>`
 			: `<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;'>
 				<button onclick='renameDevice({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>✏️ Renommer</button>
-				<button onclick='showStorageDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')}})' style='background:#34495e;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>💾 Stockage</button>
+				<button onclick='showStorageDialog({serial:${JSON.stringify(d.serial)},name:${JSON.stringify(d.name || '')},sessionOwner:${JSON.stringify(d.sessionOwner || '')}})' style='background:#34495e;color:#fff;border:none;padding:8px;border-radius:6px;cursor:pointer;font-size:12px;'>💾 Stockage</button>
 			</div>`;
 
 		card.innerHTML = `
 			<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'>
-				<div style='font-weight:bold;font-size:18px;color:#2ecc71;'>${d.name}</div>
+				<div style='font-weight:bold;font-size:18px;color:#2ecc71;'>${getSessionDeviceIcon(d)}${d.name || 'Casque'} ${getSessionDeviceBadge(d)}</div>
 				${batteryBlock}
 			</div>
 			<div style='font-size:11px;color:#95a5a6;margin-bottom:12px;'>${d.serial}</div>
@@ -3774,6 +4047,7 @@ window.launchAppMulti = async function(serials, pkg, refreshSerial) {
 
 	for (const serial of uniqueSerials) {
 		try {
+			const isRemote = isRemoteSessionSerial(serial);
 			let isInstalled = null;
 			try {
 				const listRes = await api(`/api/apps/${serial}`, { timeout: 12000 });
@@ -3794,15 +4068,17 @@ window.launchAppMulti = async function(serials, pkg, refreshSerial) {
 			});
 			if (res && res.ok) {
 				success += 1;
-				if (!runningApps[serial]) runningApps[serial] = [];
-				if (!runningApps[serial].includes(pkg)) {
-					runningApps[serial].push(pkg);
+				if (!isRemote) {
+					if (!runningApps[serial]) runningApps[serial] = [];
+					if (!runningApps[serial].includes(pkg)) {
+						runningApps[serial].push(pkg);
+					}
+					api('/api/apps/running/mark', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ serial, package: pkg, action: 'add' })
+					}).catch(() => {});
 				}
-				api('/api/apps/running/mark', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ serial, package: pkg, action: 'add' })
-				}).catch(() => {});
 			} else {
 				failed += 1;
 				if (isInstalled === null) checkFailed.push(serial);
@@ -3831,6 +4107,9 @@ window.launchAppMulti = async function(serials, pkg, refreshSerial) {
 	}
 
 	renderDevices();
+	if (isSessionActive()) {
+		publishSessionDevices();
+	}
 	const device = { serial: refreshSerial || uniqueSerials[0], name: 'Device' };
 	showAppsDialog(device);
 };
@@ -3856,7 +4135,7 @@ window.showAppsDialog = async function(device) {
 	}
 	await syncFavorites();
 	const apps = res.apps || [];
-	const running = runningApps[device.serial] || [];
+	const running = getRunningAppsForDevice(device);
 	const rawDevices = Array.isArray(devices) ? devices : [];
 	const selectableDevices = rawDevices
 		.filter(d => d && d.serial && (typeof isRelayDevice !== 'function' || !isRelayDevice(d)));
@@ -3927,18 +4206,23 @@ window.launchApp = async function(serial, pkg) {
 		showToast('✅ App lancée !', 'success');
 		incrementStat('appsLaunched');
 		// Add to running apps
-		if (!runningApps[serial]) runningApps[serial] = [];
-		if (!runningApps[serial].includes(pkg)) {
-			runningApps[serial].push(pkg);
+		if (!isRemoteSessionSerial(serial)) {
+			if (!runningApps[serial]) runningApps[serial] = [];
+			if (!runningApps[serial].includes(pkg)) {
+				runningApps[serial].push(pkg);
+			}
+			// Notifier le serveur pour persister l'état
+			api('/api/apps/running/mark', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ serial, package: pkg, action: 'add' })
+			}).catch(() => {});
 		}
-		// Notifier le serveur pour persister l'état
-		api('/api/apps/running/mark', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ serial, package: pkg, action: 'add' })
-		}).catch(() => {});
 		// Rafraîchir immédiatement la vue tableau/cartes
 		renderDevices();
+		if (isSessionActive()) {
+			publishSessionDevices();
+		}
 		// Refresh the apps dialog
 		const device = { serial, name: 'Device' };
 		showAppsDialog(device);
@@ -3951,9 +4235,10 @@ window.stopGame = async function(serial, pkg) {
 	try {
 		showToast('⏹️ Arrêt du jeu...', 'info');
 		const previouslyRunning = Array.isArray(runningApps[serial]) && runningApps[serial].includes(pkg);
+		const isRemote = isRemoteSessionSerial(serial);
 
 		// 🔄 Optimistic UI update for immediate feedback
-		if (runningApps[serial]) {
+		if (!isRemote && runningApps[serial]) {
 			runningApps[serial] = runningApps[serial].filter(p => p !== pkg);
 			if (runningApps[serial].length === 0) {
 				delete runningApps[serial];
@@ -3974,14 +4259,19 @@ window.stopGame = async function(serial, pkg) {
 			
 			if (stopRes && stopRes.ok) {
 				showToast('✅ Jeu arrêté!', 'success');
-				// Aligner l'état serveur
-				api('/api/apps/running/mark', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ serial, package: pkg, action: 'remove' })
-				}).catch(() => {});
+				if (!isRemote) {
+					// Aligner l'état serveur
+					api('/api/apps/running/mark', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ serial, package: pkg, action: 'remove' })
+					}).catch(() => {});
+				}
 				// Rafraîchir les listes
 				renderDevices();
+				if (isSessionActive()) {
+					publishSessionDevices();
+				}
 				// Refresh the apps dialog
 				const device = { serial, name: 'Device' };
 				showAppsDialog(device);
@@ -4006,14 +4296,19 @@ window.stopGame = async function(serial, pkg) {
 		
 		if (fallbackRes && fallbackRes.ok) {
 			showToast('✅ Jeu arrêté!', 'success');
-			// Notifier le serveur pour aligner l'état si le fallback a été utilisé
-			api('/api/apps/running/mark', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ serial, package: pkg, action: 'remove' })
-			}).catch(() => {});
+			if (!isRemote) {
+				// Notifier le serveur pour aligner l'état si le fallback a été utilisé
+				api('/api/apps/running/mark', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ serial, package: pkg, action: 'remove' })
+				}).catch(() => {});
+			}
 			// Rafraîchir les listes
 			renderDevices();
+			if (isSessionActive()) {
+				publishSessionDevices();
+			}
 			// Refresh the apps dialog
 			const device = { serial, name: 'Device' };
 			showAppsDialog(device);
@@ -4093,7 +4388,12 @@ window.toggleFavorite = async function(serial, pkg) {
 };
 
 window.showFavoritesDialog = async function(device) {
-	const res = await api('/api/favorites');
+	const targetUser = device?.sessionOwner && device.sessionOwner !== currentUser
+		? device.sessionOwner
+		: '';
+	const res = targetUser
+		? await sendSessionApiRequest({ targetUser, path: '/api/favorites', opts: { method: 'GET' } })
+		: await api('/api/favorites');
 	if (!res.ok) return showToast('❌ Erreur chargement favoris', 'error');
 	const favs = res.favorites || [];
 	const rawDevices = Array.isArray(devices) ? devices : [];
@@ -4154,6 +4454,15 @@ window.showFavoritesDialog = async function(device) {
 
 window.showStorageDialog = function(device) {
 	try {
+		const resolvedOwner = device?.sessionOwner || getSessionDeviceOwner(device?.serial) || '';
+		const isRemoteDevice = resolvedOwner && resolvedOwner !== currentUser;
+		const uploadDisabled = isRemoteDevice ? 'disabled' : '';
+		const uploadStyle = isRemoteDevice
+			? 'background:#6c5ce7;color:#fff;border:none;padding:12px;border-radius:6px;cursor:not-allowed;font-weight:bold;font-size:13px;opacity:0.55;'
+			: 'background:#9b59b6;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;transition:all 0.2s;';
+		const uploadNotice = isRemoteDevice
+			? `<div style='font-size:11px;color:#f1c40f;margin-top:6px;'>⚠️ Upload APK désactivé pour un casque distant.</div>`
+			: '';
 		// Afficher le dialog de stockage avec les options d'installation
 		// Données de placeholder pour demo (en prod, ces infos viendront du backend)
 		const storageHTML = `
@@ -4190,13 +4499,14 @@ window.showStorageDialog = function(device) {
 					<h4 style='margin-top:0;margin-bottom:12px;color:#fff;'>📦 Installer des jeux développeur</h4>
 					<p style='margin:0 0 12px 0;font-size:12px;color:#ecf0f1;'>Téléchargez et installez des APK directement sur votre casque Meta Quest depuis votre PC.</p>
 					<div style='display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;'>
-						<button onclick='uploadDevGameToHeadset("${device.serial}", "${device.name}")' style='background:#9b59b6;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;transition:all 0.2s;'>
+						<button onclick='uploadDevGameToHeadset("${device.serial}", "${device.name}")' ${uploadDisabled} style='${uploadStyle}'>
 							📤 Uploader APK
 						</button>
 						<button onclick='installDevGameOnHeadset("${device.serial}", "${device.name}")' style='background:#3498db;color:#fff;border:none;padding:12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;transition:all 0.2s;'>
 							⚙️ Installer APK
 						</button>
 					</div>
+					${uploadNotice}
 					<div style='font-size:12px;color:#ecf0f1;background:#1a1d24;padding:12px;border-radius:6px;'>
 						<strong>📋 Étapes:</strong>
 						<ol style='margin:8px 0;padding-left:20px;'>
@@ -4220,6 +4530,10 @@ window.showStorageDialog = function(device) {
 };
 
 window.uploadDevGameToHeadset = async function(serial, deviceName) {
+	if (isRemoteSessionSerial(serial)) {
+		showToast('❌ Upload APK non disponible pour un casque distant', 'error');
+		return;
+	}
 	// Créer un input file
 	const input = document.createElement('input');
 	input.type = 'file';
@@ -4311,7 +4625,19 @@ window.installDevGameOnHeadsets = async function(serials) {
 
 		for (const serial of uploaded) {
 			try {
-				const res = await api('/api/install-dev-game', { serial });
+				const isRemote = isRemoteSessionSerial(serial);
+				const targetUser = isRemote ? getSessionDeviceOwner(serial) : '';
+				const res = isRemote
+					? await sendSessionApiRequest({
+						targetUser,
+						path: '/api/install-dev-game',
+						opts: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serial }) }
+					})
+					: await api('/api/install-dev-game', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ serial })
+					});
 				if (res && res.ok) {
 					installed += 1;
 				} else {
@@ -4335,7 +4661,19 @@ window.installDevGameOnHeadsets = async function(serials) {
 window.installDevGameOnHeadset = async function(serial, deviceName) {
 	try {
 		showToast('⚙️ Installation en cours...', 'info');
-		const res = await api('/api/install-dev-game', { serial });
+		const isRemote = isRemoteSessionSerial(serial);
+		const targetUser = isRemote ? getSessionDeviceOwner(serial) : '';
+		const res = isRemote
+			? await sendSessionApiRequest({
+				targetUser,
+				path: '/api/install-dev-game',
+				opts: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serial }) }
+			})
+			: await api('/api/install-dev-game', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ serial })
+			});
 		
 		if (!res || !res.ok) {
 			showToast(`❌ ${res?.error || 'Erreur lors de l\'installation'}`, 'error');
@@ -4404,8 +4742,9 @@ function showSetupNotice() {
 socket.on('devices-update', (data) => {
 	console.log('[socket] devices-update received:', data);
 	if (Array.isArray(data)) {
-		devices = filterDevicesForCurrentUser(data);
-		renderDevices();
+		localDevices = data;
+		refreshMergedDevices();
+		publishSessionDevices();
 	} else {
 		console.warn('[socket] Invalid devices data received:', data);
 	}
