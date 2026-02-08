@@ -96,6 +96,37 @@ function refreshUserModalIfNeeded(username) {
   renderUserModal(cached);
 }
 
+function updateCachedUserAccessFromResponse(username, payload) {
+  if (!username || !payload) return;
+  const cached = getCachedUserByUsername(username);
+  if (!cached) return;
+  const updatedUser = payload.user || {};
+  const demoStartDate = updatedUser.demoStartDate || cached.demoStartDate || cached.demostartdate || null;
+  const demoEndDate = updatedUser.demoEndDate || cached.demoEndDate || cached.demoenddate || null;
+  cached.demoStartDate = demoStartDate || cached.demoStartDate || null;
+  cached.demoEndDate = demoEndDate || cached.demoEndDate || null;
+  if (updatedUser.subscriptionStatus) {
+    cached.subscriptionStatus = updatedUser.subscriptionStatus;
+  }
+  cached.updatedAt = updatedUser.updatedAt || cached.updatedAt || new Date().toISOString();
+
+  const endMs = demoEndDate ? new Date(demoEndDate).getTime() : null;
+  const remainingDays = endMs && Number.isFinite(endMs)
+    ? Math.max(0, Math.ceil((endMs - Date.now()) / (24 * 60 * 60 * 1000)))
+    : null;
+  const demoExpired = Number.isFinite(remainingDays) ? remainingDays <= 0 : false;
+  cached.accessSummary = {
+    ...(cached.accessSummary || {}),
+    hasDemo: true,
+    demoExpired,
+    demoRemainingDays: Number.isFinite(remainingDays) ? remainingDays : (cached.accessSummary?.demoRemainingDays ?? 0),
+    demoMessage: cached.accessSummary?.demoMessage || null,
+    subscriptionStatus: updatedUser.subscriptionStatus || cached.accessSummary?.subscriptionStatus || cached.subscriptionStatus || 'none'
+  };
+
+  refreshUserModalIfNeeded(username);
+}
+
 // Initialize Android Installer when tab is clicked
 function initializeAndroidInstaller() {
   if (window.androidInstaller) return; // Already initialized
@@ -498,6 +529,7 @@ async function manageSubscription(username, action, days) {
     }
 
     alert('✅ Action effectuée');
+    updateCachedUserAccessFromResponse(normalized, data);
     await loadUsers();
     await loadStats();
     refreshUserModalIfNeeded(normalized);

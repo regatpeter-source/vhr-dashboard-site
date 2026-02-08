@@ -219,6 +219,23 @@ function getDisplayedRole(user) {
 	return normalizeRoleForUser(user, userRoles[user]);
 }
 
+function isKnownGuestIdentifier(identifier) {
+	const normalized = String(identifier || '').trim();
+	if (!normalized) return false;
+	const normalizedLower = normalized.toLowerCase();
+	const roleFromList = userRoles && (userRoles[normalized] || userRoles[normalizedLower]);
+	const roleFromAuth = authenticatedUsers && (authenticatedUsers[normalized]?.role || authenticatedUsers[normalizedLower]?.role);
+	const role = String(roleFromAuth || roleFromList || '').toLowerCase();
+	if (role !== 'guest') return false;
+	const list = Array.isArray(userList) ? userList : [];
+	const inList = list.some(u => String(u || '').toLowerCase() === normalizedLower);
+	const inAuth = Boolean(authenticatedUsers && (authenticatedUsers[normalized] || authenticatedUsers[normalizedLower]));
+	if (!inList && !inAuth) return false;
+	if (typeof isAdminAllowed === 'function' && isAdminAllowed(normalized)) return false;
+	if (normalizedLower === 'vhr') return false;
+	return true;
+}
+
 function readAuthToken() {
 	return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
 }
@@ -4620,28 +4637,59 @@ window.loginUser = async function() {
 	
 	try {
 		let res, data;
-		// 1) Auth prod par username
-		res = await fetch(`${AUTH_API_BASE}/api/login`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			credentials: 'include',
-			body: JSON.stringify({ username: identifier, password })
-		});
-		data = await res.json();
-
-		// 2) Fallback prod par email
-		if (!(res.ok && data.ok)) {
-			res = await fetch(`${AUTH_API_BASE}/api/auth/login`, {
+		let authSource = 'unknown';
+		const tryLocalAuth = async () => {
+			let localRes = await fetch('/api/login', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				credentials: 'include',
-				body: JSON.stringify({ email: identifier, password })
+				body: JSON.stringify({ username: identifier, password })
 			});
-			data = await res.json();
+			let localData = await localRes.json();
+			if (!(localRes.ok && localData.ok)) {
+				localRes = await fetch('/api/auth/login', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					credentials: 'include',
+					body: JSON.stringify({ email: identifier, password })
+				});
+				localData = await localRes.json();
+			}
+			return { res: localRes, data: localData, source: 'local' };
+		};
+		const tryRemoteAuth = async () => {
+			let remoteRes = await fetch(`${AUTH_API_BASE}/api/login`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'include',
+				body: JSON.stringify({ username: identifier, password })
+			});
+			let remoteData = await remoteRes.json();
+			if (!(remoteRes.ok && remoteData.ok)) {
+				remoteRes = await fetch(`${AUTH_API_BASE}/api/auth/login`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					credentials: 'include',
+					body: JSON.stringify({ email: identifier, password })
+				});
+				remoteData = await remoteRes.json();
+			}
+			return { res: remoteRes, data: remoteData, source: 'remote' };
+		};
+
+		const blockRemoteForGuest = isKnownGuestIdentifier(identifier);
+		// 1) En contexte local/Electron: tenter le login local d'abord
+		if (isLocalAuthContext) {
+			({ res, data, source: authSource } = await tryLocalAuth());
 		}
 
-		// 3) Si prod OK, synchroniser vers backend local + cookie local
-		if (res.ok && data.ok) {
+		// 2) Si échec local et pas d'override local forcé, tenter le site central
+		if (!(res && res.ok && data && data.ok) && !FORCE_LOCAL_AUTH && !blockRemoteForGuest) {
+			({ res, data, source: authSource } = await tryRemoteAuth());
+		}
+
+		// 3) Si remote OK, synchroniser vers backend local + cookie local
+		if (res && res.ok && data && data.ok && authSource === 'remote') {
 			const syncedUsername = data.user?.username || data.user?.name || identifier;
 			const syncedEmail = data.user?.email || identifier;
 			try {
@@ -4696,40 +4744,8 @@ window.loginUser = async function() {
 			}
 		}
 
-		// 4) Fallback local si prod échoue
-		if (!(res.ok && data.ok)) {
-			try {
-				// Créer/synchroniser l'utilisateur en local avec le secret partagé
-				await fetch('/api/admin/sync-user', {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						'x-sync-secret': await getSyncUsersSecret()
-					},
-					body: JSON.stringify({ username: identifier, email: identifier, role: 'user', password })
-				});
-			} catch (syncErr) {
-				console.warn('[loginUser] sync-user after prod failure failed', syncErr);
-			}
-
-			try {
-				const localRes = await fetch('/api/login', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					credentials: 'include',
-					body: JSON.stringify({ username: identifier, password })
-				});
-				const localData = await localRes.json();
-				if (localRes.ok && localData.ok) {
-					res = localRes;
-					data = localData;
-				}
-			} catch (localErr) {
-				console.warn('[loginUser] local login fallback failed', localErr);
-			}
-		}
-		// 4b) Fallback distant via le serveur local si tout échoue
-		if (!(res.ok && data.ok)) {
+		// 4) Fallback distant via le serveur local si tout échoue
+		if (!(res && res.ok && data && data.ok) && !FORCE_LOCAL_AUTH && !blockRemoteForGuest) {
 			try {
 				const remoteRes = await fetch('/api/remote-login', {
 					method: 'POST',

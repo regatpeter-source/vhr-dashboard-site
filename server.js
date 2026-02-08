@@ -3623,6 +3623,36 @@ function isElectronRequest(req) {
   return userAgent.includes('electron') || electronHeader === 'electron';
 }
 
+function isGuestAccount(user) {
+  if (!user) return false;
+  const role = String(user.role || '').toLowerCase();
+  if (role === 'guest') return true;
+  if (user.createdBy || user.ownerUsername) return true;
+  const email = String(user.email || '').toLowerCase();
+  if (email.endsWith('@dashboard.local')) return true;
+  return false;
+}
+
+function findLocalGuestUser(identifier) {
+  const normalized = String(identifier || '').trim().toLowerCase();
+  if (!normalized) return null;
+  let localUsers = [];
+  try {
+    localUsers = loadUsers();
+  } catch (e) {
+    return null;
+  }
+  if (!Array.isArray(localUsers) || localUsers.length === 0) return null;
+  const match = localUsers.find(u => {
+    const uname = String(u.username || '').toLowerCase();
+    const email = String(u.email || '').toLowerCase();
+    return uname === normalized || email === normalized;
+  });
+  if (!match) return null;
+  const normalizedUser = normalizeUserRecord(match);
+  return isGuestAccount(normalizedUser) ? normalizedUser : null;
+}
+
 // --- Route de login ---
 app.post('/api/login', async (req, res) => {
   console.log('[api/login] request received:', req.body);
@@ -3634,7 +3664,14 @@ app.post('/api/login', async (req, res) => {
     reloadUsers();
   }
   
-  let user = await findUserByUsernameAsync(loginIdentifier);
+  let user = null;
+  const earlyLocalGuest = isElectronRequest(req) ? findLocalGuestUser(loginIdentifier) : null;
+  if (earlyLocalGuest) {
+    user = earlyLocalGuest;
+    console.log('[api/login] local guest found in local store, skipping postgres lookup');
+  } else {
+    user = await findUserByUsernameAsync(loginIdentifier);
+  }
   if (!user && USE_POSTGRES) {
     console.log('[api/login] user from PostgreSQL: not found');
   } else {
@@ -3693,13 +3730,22 @@ app.post('/api/login', async (req, res) => {
       email: user.email || null
     });
   }
-  const valid = await bcrypt.compare(password, user.passwordhash || user.passwordHash);
+  const storedHash = user.passwordhash || user.passwordHash;
+  if (!storedHash) {
+    console.warn('[api/login] missing password hash for', user.username);
+    return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
+  }
+  const valid = await bcrypt.compare(password, storedHash);
   if (!valid) {
     console.log('[api/login] password mismatch');
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
   }
 
-  user = await syncLocalUserWithRemoteAccess(user, loginIdentifier, password) || user;
+  if (!isGuestAccount(user)) {
+    user = await syncLocalUserWithRemoteAccess(user, loginIdentifier, password) || user;
+  } else {
+    console.log('[api/login] local guest login: skipping remote sync');
+  }
 
   if (demoConfig.MODE === 'database' && !user.demoStartDate) {
     const nowIso = new Date().toISOString();
@@ -4558,9 +4604,16 @@ app.post('/api/auth/login', async (req, res) => {
   console.log('[api/auth/login] attempting login for identifier:', loginIdentifier);
   
   // Trouver l'utilisateur par email, sinon par username (le champ UI accepte les deux)
-  let user = await findUserByEmailAsync(loginIdentifier);
-  if (!user) {
-    user = await findUserByUsernameAsync(loginIdentifier);
+  let user = null;
+  const earlyLocalGuest = isElectronRequest(req) ? findLocalGuestUser(loginIdentifier) : null;
+  if (earlyLocalGuest) {
+    user = earlyLocalGuest;
+    console.log('[api/auth/login] local guest found in local store, skipping postgres lookup');
+  } else {
+    user = await findUserByEmailAsync(loginIdentifier);
+    if (!user) {
+      user = await findUserByUsernameAsync(loginIdentifier);
+    }
   }
 
   if (!user) {
@@ -4591,7 +4644,12 @@ app.post('/api/auth/login', async (req, res) => {
     });
   }
   
-  const valid = await bcrypt.compare(password, user.passwordhash || user.passwordHash);
+  const storedHash = user.passwordhash || user.passwordHash;
+  if (!storedHash) {
+    console.warn('[api/auth/login] missing password hash for', user.username);
+    return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
+  }
+  const valid = await bcrypt.compare(password, storedHash);
   if (!valid) {
     console.log('[api/auth/login] password mismatch for:', user.username);
     return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });

@@ -3432,6 +3432,34 @@ function isElectronRequest(req) {
   return userAgent.includes('electron') || electronHeader === 'electron';
 }
 
+function isGuestAccount(user) {
+  if (!user) return false;
+  const role = String(user.role || '').toLowerCase();
+  if (role === 'guest') return true;
+  if (user.createdBy || user.ownerUsername) return true;
+  const email = String(user.email || '').toLowerCase();
+  if (email.endsWith('@dashboard.local')) return true;
+  return false;
+}
+
+function findLocalGuestUser(identifier) {
+  const normalized = String(identifier || '').trim().toLowerCase();
+  if (!normalized) return null;
+  let localUsers = [];
+  try {
+    localUsers = loadUsers();
+  } catch (e) {
+    return null;
+  }
+  if (!Array.isArray(localUsers) || localUsers.length === 0) return null;
+  const match = localUsers.find(u => {
+    const uname = String(u.username || '').toLowerCase();
+    const email = String(u.email || '').toLowerCase();
+    return uname === normalized || email === normalized;
+  });
+  return isGuestAccount(match) ? match : null;
+}
+
 // --- Route de login ---
 async function handleApiLogin(req, res) {
   console.log('[api/login] request received:', req.body);
@@ -3446,36 +3474,49 @@ async function handleApiLogin(req, res) {
     reloadUsers();
   }
 
-  let user = getUserByUsername(identifier);
-  if (!user) {
-    user = getUserByEmail(identifier);
-    if (user) {
-      console.log('[api/login] user found by email instead of username');
+  let user = null;
+  const earlyLocalGuest = isElectronRequest(req) ? findLocalGuestUser(identifier) : null;
+  if (earlyLocalGuest) {
+    user = earlyLocalGuest;
+    console.log('[api/login] local guest found in local store, skipping remote auth');
+  } else {
+    user = getUserByUsername(identifier);
+    if (!user) {
+      user = getUserByEmail(identifier);
+      if (user) {
+        console.log('[api/login] user found by email instead of username');
+      }
     }
   }
 
   if (!user) {
-    console.log('[api/login] user not found locally, attempting remote auth');
-    try {
-      const remoteAuth = await attemptRemoteAuthentication(identifier, password);
-      if (!remoteAuth || !remoteAuth.remoteToken) {
+    const localGuest = isElectronRequest(req) ? findLocalGuestUser(identifier) : null;
+    if (localGuest) {
+      user = localGuest;
+      console.log('[api/login] local guest found, skipping remote auth');
+    } else {
+      console.log('[api/login] user not found locally, attempting remote auth');
+      try {
+        const remoteAuth = await attemptRemoteAuthentication(identifier, password);
+        if (!remoteAuth || !remoteAuth.remoteToken) {
+          return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
+        }
+
+        const localUser = await ensureLocalUserFromRemote(remoteAuth.payload, identifier, password);
+        if (!localUser) {
+          return res.status(500).json({ ok: false, error: 'Impossible de synchroniser le compte local' });
+        }
+
+        user = localUser;
+        cacheRemoteAuthToken(user.username, remoteAuth.remoteToken);
+        const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, user.username);
+        if (remoteDemo) {
+          applyRemoteDemoToUser(user, remoteDemo, { reason: 'login-remote-autoprovision' });
+        }
+      } catch (err) {
+        console.warn('[remote-sync] login autoprovision failed:', err && err.message ? err.message : err);
         return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
       }
-
-      const localUser = await ensureLocalUserFromRemote(remoteAuth.payload, identifier, password);
-      if (!localUser) {
-        return res.status(500).json({ ok: false, error: 'Impossible de synchroniser le compte local' });
-      }
-
-      user = localUser;
-      cacheRemoteAuthToken(user.username, remoteAuth.remoteToken);
-      const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, user.username);
-      if (remoteDemo) {
-        applyRemoteDemoToUser(user, remoteDemo, { reason: 'login-remote-autoprovision' });
-      }
-    } catch (err) {
-      console.warn('[remote-sync] login autoprovision failed:', err && err.message ? err.message : err);
-      return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
     }
   }
 
@@ -3487,25 +3528,34 @@ async function handleApiLogin(req, res) {
     });
   }
 
-  const valid = await bcrypt.compare(password, user.passwordHash || user.passwordhash);
+  const storedHash = user.passwordHash || user.passwordhash;
+  if (!storedHash) {
+    console.warn('[api/login] missing password hash for', user.username);
+    return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
+  }
+  const valid = await bcrypt.compare(password, storedHash);
   if (!valid) {
     console.log('[api/login] password mismatch');
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
   }
 
   console.log('[api/login] login successful for:', user.username);
-  // Best-effort remote sync to keep demo/subscription aligned with site vitrine
-  try {
-    const remoteAuth = await attemptRemoteAuthentication(identifier, password);
-    if (remoteAuth && remoteAuth.remoteToken) {
-      cacheRemoteAuthToken(user.username, remoteAuth.remoteToken);
-      const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, user.username);
-      if (remoteDemo) {
-        applyRemoteDemoToUser(user, remoteDemo, { reason: 'login-remote-sync' });
+  if (!isGuestAccount(user)) {
+    // Best-effort remote sync to keep demo/subscription aligned with site vitrine
+    try {
+      const remoteAuth = await attemptRemoteAuthentication(identifier, password);
+      if (remoteAuth && remoteAuth.remoteToken) {
+        cacheRemoteAuthToken(user.username, remoteAuth.remoteToken);
+        const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, user.username);
+        if (remoteDemo) {
+          applyRemoteDemoToUser(user, remoteDemo, { reason: 'login-remote-sync' });
+        }
       }
+    } catch (e) {
+      console.warn('[remote-sync] login sync failed:', e && e.message ? e.message : e);
     }
-  } catch (e) {
-    console.warn('[remote-sync] login sync failed:', e && e.message ? e.message : e);
+  } else {
+    console.log('[api/login] local guest login: skipping remote sync');
   }
   if (!FORCE_REMOTE_DEMO) {
     ensureElectronTrialStarted(user, { reason: 'login' });
@@ -4361,16 +4411,22 @@ app.post('/api/auth/login', async (req, res) => {
   
   // Find user by email
   let user = null;
-  if (USE_POSTGRES && db) {
-    try {
-      const resUser = await db.pool.query('SELECT * FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [email]);
-      if (resUser.rows && resUser.rows[0]) user = resUser.rows[0];
-    } catch (e) {
-      console.error('[api/auth/login] Postgres email lookup failed:', e && e.message);
+  const earlyLocalGuest = isElectronRequest(req) ? findLocalGuestUser(email) : null;
+  if (earlyLocalGuest) {
+    user = earlyLocalGuest;
+    console.log('[api/auth/login] local guest found in local store, skipping postgres lookup');
+  } else {
+    if (USE_POSTGRES && db) {
+      try {
+        const resUser = await db.pool.query('SELECT * FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [email]);
+        if (resUser.rows && resUser.rows[0]) user = resUser.rows[0];
+      } catch (e) {
+        console.error('[api/auth/login] Postgres email lookup failed:', e && e.message);
+      }
     }
-  }
-  if (!user) {
-    user = getUserByEmail(email);
+    if (!user) {
+      user = getUserByEmail(email);
+    }
   }
 
   if (!user) {
@@ -4409,28 +4465,37 @@ app.post('/api/auth/login', async (req, res) => {
     });
   }
   
-  const valid = await bcrypt.compare(password, user.passwordhash || user.passwordHash);
+  const storedHash = user.passwordhash || user.passwordHash;
+  if (!storedHash) {
+    console.warn('[api/auth/login] missing password hash for', user.username);
+    return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
+  }
+  const valid = await bcrypt.compare(password, storedHash);
   if (!valid) {
     console.log('[api/auth/login] password mismatch for:', user.username);
     return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
   }
   
   console.log('[api/auth/login] login successful for:', user.username);
-  // Best-effort remote sync to keep demo/subscription aligned with site vitrine
-  try {
-    let remoteAuth = await attemptRemoteAuthentication(email, password);
-    if (!remoteAuth && user && user.username) {
-      remoteAuth = await attemptRemoteAuthentication(user.username, password);
-    }
-    if (remoteAuth && remoteAuth.remoteToken) {
-      cacheRemoteAuthToken(user.username, remoteAuth.remoteToken);
-      const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, user.username);
-      if (remoteDemo) {
-        applyRemoteDemoToUser(user, remoteDemo, { reason: 'auth-login-remote-sync' });
+  if (!isGuestAccount(user)) {
+    // Best-effort remote sync to keep demo/subscription aligned with site vitrine
+    try {
+      let remoteAuth = await attemptRemoteAuthentication(email, password);
+      if (!remoteAuth && user && user.username) {
+        remoteAuth = await attemptRemoteAuthentication(user.username, password);
       }
+      if (remoteAuth && remoteAuth.remoteToken) {
+        cacheRemoteAuthToken(user.username, remoteAuth.remoteToken);
+        const remoteDemo = await fetchRemoteDemoStatus(remoteAuth.remoteToken, user.username);
+        if (remoteDemo) {
+          applyRemoteDemoToUser(user, remoteDemo, { reason: 'auth-login-remote-sync' });
+        }
+      }
+    } catch (e) {
+      console.warn('[remote-sync] auth login sync failed:', e && e.message ? e.message : e);
     }
-  } catch (e) {
-    console.warn('[remote-sync] auth login sync failed:', e && e.message ? e.message : e);
+  } else {
+    console.log('[api/auth/login] local guest login: skipping remote sync');
   }
   if (!FORCE_REMOTE_DEMO) {
     ensureElectronTrialStarted(user, { reason: 'auth-login' });
