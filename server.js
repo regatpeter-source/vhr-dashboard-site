@@ -1999,6 +1999,7 @@ if (!stripeKey) {
   throw new Error('Stripe secret key required: STRIPE_SECRET_KEY must be an sk_ key.');
 }
 const stripe = require('stripe')(stripeKey);
+const WebSocket = require('ws');
 
 // Verify the Stripe secret key early at startup (fail fast on invalid / publishable key)
 async function verifyStripeKeyAtStartup() {
@@ -3327,6 +3328,8 @@ const JWT_SECRET = process.env.JWT_SECRET || 'change_this_secret';
 const JWT_EXPIRES = '2h';
 const DASHBOARD_MAX_USERS_PER_ACCOUNT = Number.parseInt(process.env.DASHBOARD_MAX_USERS_PER_ACCOUNT || '1', 10) || 1;
 const DASHBOARD_MULTI_USERS_ENABLED = (process.env.DASHBOARD_MULTI_USERS_ENABLED || '0') === '1';
+const RELAY_STREAM_ENABLED = (process.env.RELAY_STREAM_ENABLED || '1') !== '0';
+const RELAY_STREAM_SECRET = process.env.RELAY_STREAM_SECRET || SYNC_USERS_SECRET || '';
 
 function isSecureRequest(req) {
   if (!req) return false;
@@ -8886,6 +8889,63 @@ app.post('/api/stream/audio-output', async (req, res) => {
 // ---------- Collaborative Sessions Storage ----------
 const collaborativeSessions = new Map(); // sessionCode -> { host, hostSocket, users: [{username, socketId}], createdAt }
 
+// ---------- Central Relay (video/audio) ----------
+const relayVideoSessions = new Map(); // key -> { sender, viewers: Set }
+const relayAudioSessions = new Map(); // key -> { sender, viewers: Set }
+const wssRelayVideo = new WebSocket.Server({ noServer: true });
+const wssRelayAudio = new WebSocket.Server({ noServer: true });
+
+function buildRelayKey(sessionCode, serial) {
+  return `${String(sessionCode || '').trim().toUpperCase()}::${String(serial || '').trim()}`;
+}
+
+function handleRelaySocket(kind, ws, req) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const sessionCode = url.searchParams.get('session') || '';
+  const serial = url.searchParams.get('serial') || '';
+  const role = (url.searchParams.get('role') || 'viewer').toLowerCase();
+  const secret = url.searchParams.get('secret') || '';
+
+  if (!sessionCode || !serial) {
+    ws.close();
+    return;
+  }
+
+  if (role === 'sender' && RELAY_STREAM_SECRET && secret !== RELAY_STREAM_SECRET) {
+    ws.close();
+    return;
+  }
+
+  const key = buildRelayKey(sessionCode, serial);
+  const map = kind === 'audio' ? relayAudioSessions : relayVideoSessions;
+  const entry = map.get(key) || { sender: null, viewers: new Set() };
+  map.set(key, entry);
+
+  if (role === 'sender') {
+    if (entry.sender && entry.sender.readyState === WebSocket.OPEN) {
+      try { entry.sender.close(); } catch (e) {}
+    }
+    entry.sender = ws;
+    ws.on('message', (data) => {
+      for (const viewer of entry.viewers) {
+        if (viewer.readyState === WebSocket.OPEN) {
+          try { viewer.send(data); } catch (e) {}
+        }
+      }
+    });
+  } else {
+    entry.viewers.add(ws);
+  }
+
+  ws.on('close', () => {
+    if (entry.sender === ws) entry.sender = null;
+    entry.viewers.delete(ws);
+    if (!entry.sender && entry.viewers.size === 0) {
+      map.delete(key);
+    }
+  });
+}
+
 function normalizeSessionCode(rawCode) {
   if (!rawCode) return '';
   return String(rawCode)
@@ -9189,6 +9249,24 @@ function startPrimaryServer(initializationFailed = false) {
     logServerBanner(initializationFailed);
   });
   serverStarted = true;
+}
+
+if (listenerServer && typeof listenerServer.on === 'function') {
+  listenerServer.on('upgrade', (req, socket, head) => {
+    if (!RELAY_STREAM_ENABLED) return;
+    if (req.url.startsWith('/api/relay/stream')) {
+      wssRelayVideo.handleUpgrade(req, socket, head, (ws) => {
+        handleRelaySocket('video', ws, req);
+      });
+      return;
+    }
+    if (req.url.startsWith('/api/relay/audio')) {
+      wssRelayAudio.handleUpgrade(req, socket, head, (ws) => {
+        handleRelaySocket('audio', ws, req);
+      });
+      return;
+    }
+  });
 }
 
 // Start server after initializing app

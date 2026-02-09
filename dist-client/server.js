@@ -2561,6 +2561,51 @@ let subscriptions = [];
 let messageIdCounter = 1;
 let subscriptionIdCounter = 1;
 
+const relayVideoSenders = new Map(); // serial -> ws
+const relayAudioSenders = new Map(); // serial -> ws
+const relayAudioSessions = new Map(); // serial -> sessionCode
+
+function buildRelayWsUrl(kind, serial, sessionCode, role, extra = {}) {
+  if (!RELAY_STREAM_BASE_URL) return '';
+  const base = new URL(RELAY_STREAM_BASE_URL);
+  const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
+  const path = kind === 'audio' ? '/api/relay/audio' : '/api/relay/stream';
+  const params = new URLSearchParams({
+    session: sessionCode,
+    serial,
+    role
+  });
+  if (role === 'sender' && RELAY_STREAM_SECRET) params.set('secret', RELAY_STREAM_SECRET);
+  Object.entries(extra || {}).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== '') params.set(k, String(v));
+  });
+  return `${protocol}//${base.host}${path}?${params.toString()}`;
+}
+
+function ensureRelayVideoSender(serial, sessionCode) {
+  if (!RELAY_STREAM_ENABLED || !sessionCode || !serial) return null;
+  if (relayVideoSenders.has(serial)) return relayVideoSenders.get(serial);
+  const wsUrl = buildRelayWsUrl('video', serial, sessionCode, 'sender');
+  if (!wsUrl) return null;
+  const ws = new WebSocket(wsUrl);
+  relayVideoSenders.set(serial, ws);
+  ws.on('close', () => relayVideoSenders.delete(serial));
+  ws.on('error', () => relayVideoSenders.delete(serial));
+  return ws;
+}
+
+function ensureRelayAudioSender(serial, sessionCode) {
+  if (!RELAY_STREAM_ENABLED || !sessionCode || !serial) return null;
+  if (relayAudioSenders.has(serial)) return relayAudioSenders.get(serial);
+  const wsUrl = buildRelayWsUrl('audio', serial, sessionCode, 'sender');
+  if (!wsUrl) return null;
+  const ws = new WebSocket(wsUrl);
+  relayAudioSenders.set(serial, ws);
+  ws.on('close', () => relayAudioSenders.delete(serial));
+  ws.on('error', () => relayAudioSenders.delete(serial));
+  return ws;
+}
+
 // --- Auto-confirm Stripe subscriptions (avoid missing emails or statuses) ---
 const SUBSCRIPTION_RECONCILE_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 let subscriptionReconcileTimer = null;
@@ -3029,6 +3074,9 @@ const JWT_SECRET = getOrCreateSecretFile('jwt-secret.txt', process.env.JWT_SECRE
 const JWT_EXPIRES = '2h';
 const DASHBOARD_MAX_USERS_PER_ACCOUNT = Number.parseInt(process.env.DASHBOARD_MAX_USERS_PER_ACCOUNT || '1', 10) || 1;
 const DASHBOARD_MULTI_USERS_ENABLED = (process.env.DASHBOARD_MULTI_USERS_ENABLED || '0') === '1';
+const RELAY_STREAM_ENABLED = (process.env.RELAY_STREAM_ENABLED || '1') !== '0';
+const RELAY_STREAM_BASE_URL = (process.env.RELAY_STREAM_BASE_URL || process.env.RELAY_BASE_URL || 'https://www.vhr-dashboard-site.com').replace(/\/+$/, '');
+const RELAY_STREAM_SECRET = process.env.RELAY_STREAM_SECRET || SYNC_USERS_SECRET || '';
 
 function isPrimaryAccount(user) {
   if (!user) return false;
@@ -7248,6 +7296,10 @@ async function startStream(serial, opts = {}) {
   entry.adbProc = adbProc;
   entry.shouldRun = true;
   entry.autoReconnect = Boolean(opts.autoReconnect);
+  entry.relaySessionCode = opts.sessionCode || entry.relaySessionCode || null;
+  if (entry.relaySessionCode) {
+    entry.relayWs = ensureRelayVideoSender(serial, entry.relaySessionCode);
+  }
   
   // ---------- Video Stabilization Buffer ----------
   // Prevent flickering by buffering and smoothly distributing frames
@@ -7286,6 +7338,10 @@ async function startStream(serial, opts = {}) {
             if (ws.readyState === 1) {
               try { ws.send(chunk) } catch {}
             }
+          }
+
+          if (entry.relayWs && entry.relayWs.readyState === WebSocket.OPEN) {
+            try { entry.relayWs.send(chunk); } catch (e) {}
           }
           
           entry.lastSendTime = Date.now();
@@ -7352,6 +7408,11 @@ function stopStream(serial) {
     }
   } catch {}
 
+    if (entry.relayWs) {
+      try { entry.relayWs.close(); } catch (e) {}
+      relayVideoSenders.delete(serial);
+    }
+
   for (const ws of entry.clients) {
     try { ws.close(); } catch {}
   }
@@ -7395,6 +7456,10 @@ function handleAudioWebSocket(serial, ws, req) {
     // PC sending audio
     audioEntry.sender = ws;
     audioEntry.format = format;
+    const relaySession = relayAudioSessions.get(serial);
+    if (relaySession) {
+      audioEntry.relayWs = ensureRelayAudioSender(serial, relaySession);
+    }
     // Reset buffer + header when a new sender arrives to avoid stale audio
     audioEntry.buffer = [];
     audioEntry.headerChunk = null;
@@ -7425,6 +7490,9 @@ function handleAudioWebSocket(serial, ws, req) {
           }
         }
       }
+      if (audioEntry.relayWs && audioEntry.relayWs.readyState === WebSocket.OPEN) {
+        try { audioEntry.relayWs.send(data); } catch (e) {}
+      }
       if (sentCount === 0) {
         console.warn('[Audio] No receivers got the chunk');
       }
@@ -7433,6 +7501,11 @@ function handleAudioWebSocket(serial, ws, req) {
     ws.on('close', () => {
       console.log(`[Audio] Sender disconnected: ${serial}`);
       audioEntry.sender = null;
+      if (audioEntry.relayWs) {
+        try { audioEntry.relayWs.close(); } catch (e) {}
+        relayAudioSenders.delete(serial);
+        audioEntry.relayWs = null;
+      }
       // Notify all receivers that sender disconnected
       for (const receiverWs of audioEntry.receivers) {
         if (receiverWs.readyState === WebSocket.OPEN) {
@@ -7624,8 +7697,25 @@ app.get('/_status', async (req, res) => {
   }
 });
 
+app.post('/api/relay/audio/register', authMiddleware, (req, res) => {
+  const { serial, sessionCode } = req.body || {};
+  if (!serial || !sessionCode) {
+    return res.status(400).json({ ok: false, error: 'serial and sessionCode required' });
+  }
+  if (!RELAY_STREAM_ENABLED) {
+    return res.status(403).json({ ok: false, error: 'relay disabled' });
+  }
+  relayAudioSessions.set(serial, String(sessionCode).trim().toUpperCase());
+  // If a sender already exists, connect relay immediately
+  const audioEntry = audioStreams.get(serial);
+  if (audioEntry && !audioEntry.relayWs) {
+    audioEntry.relayWs = ensureRelayAudioSender(serial, relayAudioSessions.get(serial));
+  }
+  return res.json({ ok: true });
+});
+
 app.post('/api/stream/start', async (req, res) => {
-  const { serial, profile, cropLeftEye } = req.body || {};
+  const { serial, profile, cropLeftEye, sessionCode } = req.body || {};
   if (!serial) return res.status(400).json({ ok: false, error: 'serial required' });
 
   let finalProfile = profile;
@@ -7639,7 +7729,8 @@ app.post('/api/stream/start', async (req, res) => {
     await startStream(serial, { 
       profile: finalProfile, 
       autoReconnect: true,
-      cropLeftEye: false  // Désactiver le crop par défaut
+      cropLeftEye: false,  // Désactiver le crop par défaut
+      sessionCode: sessionCode ? String(sessionCode).trim().toUpperCase() : null
     });
     res.json({ ok: true });
   } catch (e) {

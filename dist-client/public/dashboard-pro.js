@@ -532,6 +532,85 @@ function isSessionActive() {
 	return !!(currentSession && currentSession.code);
 }
 
+function getActiveSessionCode() {
+	if (!currentSession || !currentSession.code) return '';
+	return String(currentSession.code).trim().toUpperCase();
+}
+
+function getSessionHostLanUrl() {
+	const raw = currentSession && currentSession.hostLanUrl ? String(currentSession.hostLanUrl) : '';
+	return normalizeSessionHostUrl(raw);
+}
+
+function getRelayBaseUrl() {
+	const raw = (localStorage.getItem('vhr_relay_base') || '').trim();
+	return raw || SESSION_HUB_URL || window.location.origin;
+}
+
+function buildRelayWsUrl(kind, serial, sessionCode, role = 'viewer') {
+	if (!serial || !sessionCode) return '';
+	const base = getRelayBaseUrl();
+	let baseUrl;
+	try {
+		baseUrl = new URL(base);
+	} catch (e) {
+		return '';
+	}
+	const protocol = baseUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+	const path = kind === 'audio' ? '/api/relay/audio' : '/api/relay/stream';
+	const params = new URLSearchParams({
+		session: sessionCode,
+		serial: serial,
+		role
+	});
+	return `${protocol}//${baseUrl.host}${path}?${params.toString()}`;
+}
+
+function shouldUseRelayForSession(serial) {
+	if (!SESSION_USE_CENTRAL) return false;
+	if (!isSessionActive()) return false;
+	if (!serial) return false;
+	return true;
+}
+
+function openRelayAudioReceiver(serial, sessionCode) {
+	if (!serial || !sessionCode) return '';
+	const device = devices.find(d => d.serial === serial);
+	const deviceName = device ? device.name : serial;
+	const relayBase = getRelayBaseUrl();
+	const params = new URLSearchParams({
+		serial: serial,
+		name: deviceName,
+		autoconnect: 'true',
+		relay: '1',
+		session: sessionCode,
+		relayBase: relayBase
+	});
+	const targetUrl = `/audio-receiver.html?${params.toString()}`;
+	try {
+		const opened = window.open(targetUrl, '_blank', 'noopener,noreferrer');
+		if (!opened) {
+			showToast('🔗 Ouvrez le récepteur audio (onglet bloqué)', 'warning');
+		}
+	} catch (e) {
+		console.warn('[relay audio] open failed', e);
+	}
+	return targetUrl;
+}
+
+function openSessionHostViewer({ mode, serial }) {
+	const hostUrl = getSessionHostLanUrl();
+	if (!hostUrl) {
+		showToast('⚠️ URL hôte introuvable. Demandez à l’hôte de relancer la session.', 'warning');
+		return false;
+	}
+	const cleanHost = hostUrl.replace(/\/+$/, '');
+	const param = mode === 'voice' ? 'autoVoice' : 'autoStream';
+	const targetUrl = `${cleanHost}/vhr-dashboard-pro.html?${param}=${encodeURIComponent(serial)}`;
+	window.open(targetUrl, '_blank');
+	return true;
+}
+
 function attachSessionMetaToDevice(device, owner, isRemote) {
 	if (!device) return device;
 	return {
@@ -1000,7 +1079,7 @@ function bindSessionSocketHandlers(activeSocket) {
 	if (!activeSocket || sessionHandlersBound) return;
 	sessionHandlersBound = true;
 	activeSocket.on('session-created', (data) => {
-		currentSession = { code: data.sessionCode, users: data.users, host: currentUser };
+		currentSession = { code: data.sessionCode, users: data.users, host: currentUser, hostLanUrl: data.hostLanUrl || '' };
 		showToast(`🎯 Session créée! Code: ${data.sessionCode}`, 'success', 5000);
 		// Show the code prominently
 		showSessionCodePopup(data.sessionCode);
@@ -1013,7 +1092,7 @@ function bindSessionSocketHandlers(activeSocket) {
 	});
 	
 	activeSocket.on('session-joined', (data) => {
-		currentSession = { code: data.sessionCode, users: data.users, host: data.host };
+		currentSession = { code: data.sessionCode, users: data.users, host: data.host, hostLanUrl: data.hostLanUrl || '' };
 		showToast(`✅ Connecté à la session ${data.sessionCode}`, 'success');
 		document.getElementById('sessionMenu')?.remove();
 		publishSessionDevices();
@@ -1031,6 +1110,9 @@ function bindSessionSocketHandlers(activeSocket) {
 	activeSocket.on('session-updated', (data) => {
 		if (currentSession) {
 			currentSession.users = data.users;
+			if (data.hostLanUrl) {
+				currentSession.hostLanUrl = data.hostLanUrl;
+			}
 			if (data.message) {
 				showToast(`ℹ️ ${data.message}`, 'info');
 			}
@@ -1095,6 +1177,10 @@ function initSessionSocket() {
 	}
 }
 
+window.addEventListener('load', () => {
+	maybeAutoLaunchFromQuery();
+});
+
 function handleSessionAction(data) {
 	const { action, payload, from } = data;
 	
@@ -1124,6 +1210,12 @@ function handleSessionAction(data) {
 		}
 		case 'session-api-response': {
 			handleSessionApiResponse(payload);
+			break;
+		}
+		case 'session-voice-start': {
+			if (!payload || !payload.serial) return;
+			const sessionCode = payload.sessionCode || getActiveSessionCode();
+			window.sendVoiceToHeadset(payload.serial, { viaSession: true, sessionCode });
 			break;
 		}
 	}
@@ -1736,8 +1828,27 @@ window.toggleAudioPanelSize = function() {
 	return false; // always compact
 };
 
-window.sendVoiceToHeadset = async function(serial) {
+window.sendVoiceToHeadset = async function(serial, options = {}) {
 	console.log('[voice] sendVoiceToHeadset invoked for serial:', serial);
+	const isRemoteDevice = isRemoteSessionSerial(serial);
+	const sessionCode = options.sessionCode || getActiveSessionCode();
+	const useRelayForRemote = isRemoteDevice && shouldUseRelayForSession(serial) && sessionCode && !options.viaSession;
+
+	if (useRelayForRemote) {
+		showToast('🛰️ Voix distante via relais…', 'info');
+		try {
+			await api('/api/relay/audio/register', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ serial, sessionCode })
+			});
+		} catch (e) {
+			console.warn('[relay audio] register failed', e);
+		}
+		broadcastSessionAction('session-voice-start', { serial, sessionCode, requester: currentUser || '' });
+		openRelayAudioReceiver(serial, sessionCode);
+		return;
+	}
 	// Close any existing stream first (same or different device)
 	if (activeAudioStream) {
 		console.log('[sendVoiceToHeadset] Closing existing stream before starting new one');
@@ -1837,7 +1948,17 @@ window.sendVoiceToHeadset = async function(serial) {
 	// Start audio streaming
 	try {
 		// Build headset-accessible server URL (avoid localhost inside headset)
-		const resolvedServerUrl = await resolveAudioServerUrl();
+		let resolvedServerUrl = await resolveAudioServerUrl();
+		if (isRemoteDevice) {
+			const hostUrl = getSessionHostLanUrl();
+			if (!hostUrl) {
+				showToast('⚠️ URL hôte introuvable. Demandez à l’hôte de relancer la session.', 'warning');
+				return;
+			}
+			resolvedServerUrl = hostUrl.replace(/\/+$/, '');
+			showToast('🔗 Connexion audio via le serveur de l’hôte…', 'info');
+			openSessionHostViewer({ mode: 'voice', serial });
+		}
 		const useBackgroundApp = true; // casque app prioritaire
 		// Ensure we have a token for signaling (LAN origin may not share localStorage)
 		let signalingToken = readAuthToken();
@@ -3659,6 +3780,17 @@ window.scrcpyLastLaunch = window.scrcpyLastLaunch || new Map();
 const SCRCPY_LAUNCH_DEBOUNCE_MS = 2000;
 
 window.launchStreamWithAudio = async function(serial, audioOutput) {
+	if (isRemoteSessionSerial(serial)) {
+		if (shouldUseRelayForSession(serial)) {
+			showToast('🛰️ Casque distant: ouverture du viewer relais…', 'info');
+			await window.startStreamJSMpeg(serial);
+			return;
+		}
+		showToast('🛰️ Casque distant: ouverture du viewer sur l’hôte…', 'info');
+		await window.startStreamJSMpeg(serial);
+		openSessionHostViewer({ mode: 'stream', serial });
+		return;
+	}
 	const serialKey = String(serial || '');
 	const now = Date.now();
 	const last = window.scrcpyLastLaunch.get(serialKey) || 0;
@@ -3707,10 +3839,11 @@ window.startStreamFromCard = async function(serial) {
 };
 
 window.startStreamJSMpeg = async function(serial) {
+	const sessionCode = getActiveSessionCode();
 	const res = await api('/api/stream/start', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ serial, profile: 'default' })
+		body: JSON.stringify({ serial, profile: 'default', sessionCode: sessionCode || undefined })
 	});
 	if (res.ok) {
 		showToast('✅ Stream JSMpeg démarré !', 'success');
@@ -3718,6 +3851,38 @@ window.startStreamJSMpeg = async function(serial) {
 	}
 	else showToast('� Erreur: ' + (res.error || 'inconnue'), 'error');
 };
+
+function waitForAuthReady(callback, label) {
+	let attempts = 0;
+	const timer = setInterval(() => {
+		attempts += 1;
+		if (currentUser && readAuthToken()) {
+			clearInterval(timer);
+			callback();
+			return;
+		}
+		if (attempts >= 20) {
+			clearInterval(timer);
+			showToast(`🔐 Connectez-vous pour lancer ${label}`, 'warning');
+		}
+	}, 1000);
+}
+
+function maybeAutoLaunchFromQuery() {
+	try {
+		const params = new URLSearchParams(window.location.search || '');
+		const autoStream = params.get('autoStream');
+		const autoVoice = params.get('autoVoice');
+		if (autoStream) {
+			waitForAuthReady(() => window.startStreamJSMpeg(autoStream), 'le stream');
+		}
+		if (autoVoice) {
+			waitForAuthReady(() => window.sendVoiceToHeadset(autoVoice), 'la voix');
+		}
+	} catch (e) {
+		console.warn('[session] auto launch query failed', e);
+	}
+}
 
 window.showStreamViewer = function(serial) {
 	// Récupérer le nom du casque
@@ -3886,8 +4051,16 @@ window.initStreamPlayer = function(serial) {
 
 
 window.connectStreamSocket = function(serial) {
+	const sessionCode = getActiveSessionCode();
+	const useRelay = isRemoteSessionSerial(serial) && shouldUseRelayForSession(serial) && sessionCode;
 	const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-	const wsUrl = wsProtocol + window.location.host + '/api/stream/ws?serial=' + encodeURIComponent(serial);
+	let wsUrl = useRelay
+		? buildRelayWsUrl('video', serial, sessionCode, 'viewer')
+		: wsProtocol + window.location.host + '/api/stream/ws?serial=' + encodeURIComponent(serial);
+	if (useRelay && !wsUrl) {
+		showToast('⚠️ Relais indisponible, fallback local', 'warning');
+		wsUrl = wsProtocol + window.location.host + '/api/stream/ws?serial=' + encodeURIComponent(serial);
+	}
 	const canvas = document.getElementById('streamCanvas');
 	
 	if (!canvas) {

@@ -34,6 +34,10 @@
   let hasUserGesture = false;
   let pendingAutoConnect = false;
   let isConnecting = false;
+  const urlParams = new URLSearchParams(window.location.search);
+  const relaySession = urlParams.get('session') || '';
+  const relayBaseParam = urlParams.get('relayBase') || '';
+  const relayEnabled = urlParams.get('relay') === '1' || !!relaySession;
 
   function log(msg) {
     console.log('[Audio Receiver]', msg);
@@ -257,6 +261,16 @@
   }
 
   async function resolveWsUrl(serial) {
+    if (relayEnabled && relaySession) {
+      let baseUrl;
+      try {
+        baseUrl = new URL(relayBaseParam || window.location.origin);
+      } catch (e) {
+        baseUrl = new URL(window.location.origin);
+      }
+      const protocol = baseUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${protocol}//${baseUrl.host}/api/relay/audio?session=${encodeURIComponent(relaySession)}&serial=${encodeURIComponent(serial)}&role=viewer`;
+    }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     let host = window.location.host;
     // Si la page est en localhost, essayer de récupérer l'IP LAN du serveur pour que le casque puisse joindre le WebSocket
@@ -444,7 +458,6 @@
   connectBtn.addEventListener('click', connect);
   disconnectBtn.addEventListener('click', disconnect);
 
-  const urlParams = new URLSearchParams(window.location.search);
   const autoSerial = urlParams.get('serial');
   const autoName = urlParams.get('name');
   const autoConnect = urlParams.get('autoconnect');
