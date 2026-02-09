@@ -406,19 +406,13 @@ function updateUserUI() {
 	if (!userDiv) return;
 	let role = getDisplayedRole(currentUser);
 	let roleColor = role==='admin' ? '#ff9800' : role==='guest' ? '#95a5a6' : '#2196f3';
-	const showAccountType = currentUser && currentUser !== 'Invité';
-	const accountTypeLabel = showAccountType ? (currentUserIsPrimary ? 'Principal' : 'Secondaire') : '';
-	const accountTypeColor = currentUserIsPrimary ? '#16a085' : '#7f8c8d';
-	const accountTypeBadge = showAccountType
-		? `<span style="font-size:11px;background:${accountTypeColor};color:#fff;padding:3px 8px;border-radius:6px;">${accountTypeLabel}</span>`
-		: '';
+	const accountTypeBadge = '';
 	const guest = isGuestUser(currentUser);
 	userDiv.innerHTML = `
 		<span style='font-size:18px;'>👤</span> 
 		<b style='color:#2ecc71;'>${currentUser || 'Invité'}</b> 
 		<span style="font-size:11px;background:${roleColor};color:#fff;padding:3px 8px;border-radius:6px;">${role}</span>
 		${accountTypeBadge}
-		<button id="changeUserBtn" style="margin-left:8px;">Changer</button>
 		<button id="userMenuBtn">Menu</button>
 	`;
 	const favBtn = document.getElementById('favoritesBtn');
@@ -434,20 +428,12 @@ function updateUserUI() {
 		favBtn.onclick = guest ? () => showToast('🔒 Fonction indisponible pour un invité', 'warning') : addDashboardToFavorites;
 	}
 	if (guest) {
-		document.getElementById('changeUserBtn').onclick = () => showLoginDialogForUser('');
-		document.getElementById('userMenuBtn').style.display = 'none';
+		const userMenuBtn = document.getElementById('userMenuBtn');
+		if (userMenuBtn) userMenuBtn.style.display = 'none';
 		return;
 	}
-	document.getElementById('changeUserBtn').onclick = async () => {
-		const name = await showModalInputPrompt({
-			title: 'Changer d\'utilisateur',
-			message: 'Nom d\'utilisateur',
-			defaultValue: currentUser || '',
-			placeholder: 'Nom d\'utilisateur'
-		});
-		if (name && name.trim()) setUser(name.trim());
-	};
-	document.getElementById('userMenuBtn').onclick = showUserMenu;
+	const userMenuBtn = document.getElementById('userMenuBtn');
+	if (userMenuBtn) userMenuBtn.onclick = showUserMenu;
 }
 
 function showUserMenu() {
@@ -472,28 +458,23 @@ function showUserMenu() {
 			🔒 Seul le compte principal peut créer ou gérer les invités.
 		</div>`
 		: '';
-	let html = `<b style='font-size:18px;color:#2ecc71;'>Utilisateurs</b><ul style='margin:12px 0;padding:0;list-style:none;'>`;
-	userList.forEach(u => {
-		let role = getDisplayedRole(u);
-		let roleColor = role==='admin' ? '#ff9800' : role==='guest' ? '#95a5a6' : '#2196f3';
-		const isAuthenticated = authenticatedUsers[u] ? '✅' : '🔒';
-		const canChangeRole = role !== 'guest' && canManageUsers();
-		html += `<li style='margin-bottom:8px;padding:8px;background:#23272f;border-radius:6px;'>
-			<span style='cursor:pointer;color:${u===currentUser?'#2ecc71':'#fff'};font-weight:bold;' onclick='switchToUser("${u}")'>${isAuthenticated} ${u}</span>
-			<span style='font-size:10px;background:${roleColor};color:#fff;padding:2px 6px;border-radius:4px;margin-left:6px;'>${role}</span>
-			${u!=='Invité' && canManageUsers() ? `<button onclick='removeUser("${u}")' style='margin-left:8px;font-size:10px;'>❌</button>` : ''}
-			${canChangeRole ? `<button onclick='setUserRolePrompt("${u}")' style='margin-left:4px;font-size:10px;'>🔧</button>` : ''}
-		</li>`;
-	});
-	html += `</ul>`;
+	let html = `<b style='font-size:18px;color:#2ecc71;'>Compte</b>`;
+	const currentRole = getDisplayedRole(currentUser);
+	const currentRoleColor = currentRole==='admin' ? '#ff9800' : currentRole==='guest' ? '#95a5a6' : '#2196f3';
+	html += `
+		<div style='margin:12px 0;padding:10px;background:#23272f;border-radius:6px;'>
+			<div style='font-weight:bold;color:#2ecc71;'>${currentUser || 'Invité'}</div>
+			<div style='margin-top:6px;display:inline-flex;align-items:center;gap:6px;'>
+				<span style='font-size:10px;background:${currentRoleColor};color:#fff;padding:2px 6px;border-radius:4px;'>${currentRole}</span>
+				<span style='font-size:10px;color:#95a5a6;'>Multi-utilisateurs désactivé</span>
+			</div>
+		</div>
+	`;
 	html += primaryNotice;
 	if (!guest) {
 		html += managerNotice;
 	}
 	html += `<div style='display:flex;gap:8px;flex-wrap:wrap;'>`;
-	if (canManageUsers()) {
-		html += `<button onclick='showAddUserDialog()' style='background:#2ecc71;color:#000;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;'>➕ Ajouter</button>`;
-	}
 	html += `<button onclick='showLoginDialog()' style='background:#3498db;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;'>🔑 Connexion</button>`;
 	html += `<button onclick='showSessionMenu()' style='background:#9b59b6;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;'>🌐 Session</button>`;
 	html += `<button onclick='closeUserMenu()' style='background:#e74c3c;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;'>❌</button>`;
@@ -4846,6 +4827,25 @@ socket.on('favorites-update', (data) => {
 socket.on('stream-event', (evt) => {
 	if (evt.type === 'start') showToast('🟢 Stream démarré', 'success');
 	if (evt.type === 'stop') showToast('⏹️ Stream arrêté', 'info');
+});
+
+socket.on('access-update', async (payload) => {
+	try {
+		const target = payload && payload.username ? String(payload.username) : '';
+		if (!target || !currentUser || target.toLowerCase() !== String(currentUser).toLowerCase()) return;
+		await refreshAccountBillingDetails({ forceSubscription: true, forceDemo: true });
+		const panel = document.getElementById('accountPanel');
+		if (panel) {
+			const content = document.getElementById('accountContent');
+			if (content) {
+				const stats = getUserStats();
+				content.innerHTML = getProfileContent(stats, getDisplayedRole(currentUser));
+			}
+		}
+		showToast('✅ Essai mis à jour', 'success');
+	} catch (e) {
+		console.warn('[access-update] refresh failed', e && e.message ? e.message : e);
+	}
 });
 
 // ========== LICENSE CHECK & UNLOCK SYSTEM ========== 

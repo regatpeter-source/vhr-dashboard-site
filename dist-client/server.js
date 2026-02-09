@@ -2964,6 +2964,7 @@ function removeUserByUsername(username) {
 const JWT_SECRET = getOrCreateSecretFile('jwt-secret.txt', process.env.JWT_SECRET, 32);
 const JWT_EXPIRES = '2h';
 const DASHBOARD_MAX_USERS_PER_ACCOUNT = Number.parseInt(process.env.DASHBOARD_MAX_USERS_PER_ACCOUNT || '1', 10) || 1;
+const DASHBOARD_MULTI_USERS_ENABLED = (process.env.DASHBOARD_MULTI_USERS_ENABLED || '0') === '1';
 
 function isPrimaryAccount(user) {
   if (!user) return false;
@@ -3677,6 +3678,13 @@ app.post('/api/logout', (req, res) => {
 // --- Route pour créer un utilisateur dashboard (simplifié, sans email) ---
 app.post('/api/dashboard/register', authMiddleware, async (req, res) => {
   console.log('[api/dashboard/register] request received');
+  if (!DASHBOARD_MULTI_USERS_ENABLED) {
+    return res.status(403).json({
+      ok: false,
+      error: 'Multi-utilisateurs désactivé',
+      code: 'multi_users_disabled'
+    });
+  }
   // Sécurisation : on refuse la création d'utilisateurs si aucune base persistante n'est configurée
   // (ni Postgres, ni SQLite). Cela évite que l'archive client zip fonctionne en "mode démo" sans contrôle.
   const hasPersistentStore = USE_POSTGRES || dbEnabled || canPersistJsonStore();
@@ -4768,6 +4776,20 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
       const appliedDays = addTrialDays(days);
       const accessSummary = buildUserAccessSummary(user, { licenses: loadLicenses() });
       syncUserToTargets(user, { reason: 'admin-extend-trial' });
+      try {
+        if (typeof io !== 'undefined' && io && typeof io.emit === 'function') {
+          io.emit('access-update', {
+            username: user.username,
+            subscriptionStatus: user.subscriptionStatus || null,
+            subscriptionId: user.subscriptionId || null,
+            demoStartDate: user.demoStartDate || null,
+            demoEndDate: user.demoEndDate || null,
+            accessSummary
+          });
+        }
+      } catch (e) {
+        console.warn('[admin] access-update emit failed:', e && e.message ? e.message : e);
+      }
       return res.json({ ok: true, message: `✅ ${appliedDays} jour(s) d'essai ajoutés`, accessSummary });
     }
 
@@ -4775,6 +4797,20 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
       const appliedDays = addTrialDays(30);
       const accessSummary = buildUserAccessSummary(user, { licenses: loadLicenses() });
       syncUserToTargets(user, { reason: 'admin-free-month' });
+      try {
+        if (typeof io !== 'undefined' && io && typeof io.emit === 'function') {
+          io.emit('access-update', {
+            username: user.username,
+            subscriptionStatus: user.subscriptionStatus || null,
+            subscriptionId: user.subscriptionId || null,
+            demoStartDate: user.demoStartDate || null,
+            demoEndDate: user.demoEndDate || null,
+            accessSummary
+          });
+        }
+      } catch (e) {
+        console.warn('[admin] access-update emit failed:', e && e.message ? e.message : e);
+      }
       return res.json({ ok: true, message: `✅ Mois gratuit offert (${appliedDays} jours)`, accessSummary });
     }
 
@@ -4784,6 +4820,20 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
       persistUser(user);
       updateLocalSubscription({ status: 'cancelled', cancelledAt: now.toISOString() });
       syncUserToTargets(user, { reason: 'admin-cancel-subscription' });
+      try {
+        if (typeof io !== 'undefined' && io && typeof io.emit === 'function') {
+          io.emit('access-update', {
+            username: user.username,
+            subscriptionStatus: user.subscriptionStatus || null,
+            subscriptionId: user.subscriptionId || null,
+            demoStartDate: user.demoStartDate || null,
+            demoEndDate: user.demoEndDate || null,
+            accessSummary: buildUserAccessSummary(user, { licenses: loadLicenses() })
+          });
+        }
+      } catch (e) {
+        console.warn('[admin] access-update emit failed:', e && e.message ? e.message : e);
+      }
       return res.json({ ok: true, message: `✅ Abonnement annulé pour ${normalized}` });
     }
 
@@ -4793,6 +4843,20 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
       persistUser(user);
       updateLocalSubscription({ status: 'refunded', cancelledAt: now.toISOString() });
       syncUserToTargets(user, { reason: 'admin-refund-subscription' });
+      try {
+        if (typeof io !== 'undefined' && io && typeof io.emit === 'function') {
+          io.emit('access-update', {
+            username: user.username,
+            subscriptionStatus: user.subscriptionStatus || null,
+            subscriptionId: user.subscriptionId || null,
+            demoStartDate: user.demoStartDate || null,
+            demoEndDate: user.demoEndDate || null,
+            accessSummary: buildUserAccessSummary(user, { licenses: loadLicenses() })
+          });
+        }
+      } catch (e) {
+        console.warn('[admin] access-update emit failed:', e && e.message ? e.message : e);
+      }
       return res.json({ ok: true, message: `✅ Abonnement remboursé pour ${normalized}` });
     }
 

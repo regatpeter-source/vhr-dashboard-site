@@ -3264,6 +3264,7 @@ function removeUserByUsername(username) {
 const JWT_SECRET = process.env.JWT_SECRET || 'change_this_secret';
 const JWT_EXPIRES = '2h';
 const DASHBOARD_MAX_USERS_PER_ACCOUNT = Number.parseInt(process.env.DASHBOARD_MAX_USERS_PER_ACCOUNT || '1', 10) || 1;
+const DASHBOARD_MULTI_USERS_ENABLED = (process.env.DASHBOARD_MULTI_USERS_ENABLED || '0') === '1';
 
 function isSecureRequest(req) {
   if (!req) return false;
@@ -3802,6 +3803,13 @@ app.post('/api/logout', (req, res) => {
 // --- Route pour créer un utilisateur dashboard (simplifié, sans email) ---
 app.post('/api/dashboard/register', authMiddleware, async (req, res) => {
   console.log('[api/dashboard/register] request received');
+  if (!DASHBOARD_MULTI_USERS_ENABLED) {
+    return res.status(403).json({
+      ok: false,
+      error: 'Multi-utilisateurs désactivé',
+      code: 'multi_users_disabled'
+    });
+  }
   reloadUsers();
   const { username, password, role } = req.body;
   const ownerUsername = req.user && req.user.username ? String(req.user.username) : '';
@@ -6452,6 +6460,48 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
 
     await persistUserChanges();
 
+    let accessSummary = null;
+    try {
+      const demoStatus = await buildDemoStatusForUser(targetUser);
+      const demoRemainingDays = Number.isFinite(demoStatus.remainingDays)
+        ? Math.max(0, demoStatus.remainingDays)
+        : 0;
+      accessSummary = {
+        hasDemo: true,
+        demoExpired: !!demoStatus.demoExpired,
+        demoRemainingDays,
+        demoMessage: demoStatus.message || null,
+        subscriptionStatus: demoStatus.subscriptionStatus || (targetUser.subscriptionStatus || 'none'),
+        hasPerpetualLicense: !!demoStatus.hasActiveLicense,
+        licenseCount: typeof demoStatus.licenseCount === 'number'
+          ? demoStatus.licenseCount
+          : (targetUser.licenseCount || 0)
+      };
+    } catch (e) {
+      console.warn('[admin] buildDemoStatusForUser failed:', e && e.message ? e.message : e);
+    }
+
+    try {
+      await triggerUserSync(targetUser);
+    } catch (e) {
+      console.warn('[admin] triggerUserSync failed:', e && e.message ? e.message : e);
+    }
+
+    try {
+      if (typeof io !== 'undefined' && io && typeof io.emit === 'function') {
+        io.emit('access-update', {
+          username: targetUser.username,
+          subscriptionStatus: targetUser.subscriptionStatus || null,
+          subscriptionId: targetUser.subscriptionId || null,
+          demoStartDate: targetUser.demoStartDate || null,
+          demoEndDate: targetUser.demoEndDate || null,
+          accessSummary
+        });
+      }
+    } catch (e) {
+      console.warn('[admin] access-update emit failed:', e && e.message ? e.message : e);
+    }
+
     return res.json({
       ok: true,
       action: normalizedAction,
@@ -6462,7 +6512,8 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
         demoStartDate: targetUser.demoStartDate || null,
         demoEndDate: targetUser.demoEndDate || null
       },
-      subscription: subscriptionRecord || null
+      subscription: subscriptionRecord || null,
+      accessSummary
     });
   } catch (e) {
     console.error('[api] admin/subscription/manage:', e);

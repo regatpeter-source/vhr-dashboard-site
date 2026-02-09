@@ -4,6 +4,18 @@ const API_BASE = OFFICIAL_HOSTS.includes(window.location.hostname)
   : 'https://www.vhr-dashboard-site.com/api';
 let currentUser = null;
 let cachedUsers = [];
+let lastRealtimeErrorAt = 0;
+
+function setRealtimeBadge(status = 'on', note = '') {
+  const badge = document.getElementById('realtimeBadge');
+  if (!badge) return;
+  const isWarn = status === 'warn';
+  badge.classList.toggle('realtime-on', !isWarn);
+  badge.classList.toggle('realtime-warn', isWarn);
+  badge.textContent = isWarn ? 'Temps réel (ralenti)' : 'Temps réel';
+  const hint = note ? ` — ${note}` : '';
+  badge.title = isWarn ? `Synchronisation dégradée${hint}` : `Synchronisation active${hint}`;
+}
 
 function computeRemainingDaysFromEnd(demoEndDate) {
   if (!demoEndDate) return null;
@@ -188,9 +200,12 @@ async function loadStats() {
       document.getElementById('totalUsers').textContent = data.stats.totalUsers;
       document.getElementById('activeSubscriptions').textContent = data.stats.activeSubscriptions;
       document.getElementById('unreadMessages').textContent = data.stats.unreadMessages;
+      setRealtimeBadge('on');
     }
   } catch (e) {
     console.error('Error loading stats:', e);
+    lastRealtimeErrorAt = Date.now();
+    setRealtimeBadge('warn');
   }
 }
 
@@ -213,12 +228,15 @@ async function loadUsers() {
       });
 
       applyUserFilters();
+      setRealtimeBadge('on');
     } else {
       document.getElementById('usersMessage').innerHTML = '<div class="empty-state"><p>No users found</p></div>';
     }
   } catch (e) {
     console.error('Error loading users:', e);
     document.getElementById('usersMessage').innerHTML = `<div class="error">Error loading users</div>`;
+    lastRealtimeErrorAt = Date.now();
+    setRealtimeBadge('warn');
   }
 }
 
@@ -790,6 +808,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (dateToInput) dateToInput.value = '';
     applyUserFilters();
   });
+
+  // Live refresh (light polling) to keep admin view in sync
+  setInterval(() => {
+    if (document.hidden) return;
+    loadStats();
+    loadUsers();
+  }, 15000);
 });
 
 // Simple debounce to avoid spamming filter while typing
@@ -812,6 +837,7 @@ async function init() {
   console.log('[admin-dashboard] Users loaded');
   await loadMessages();
   console.log('[admin-dashboard] Messages loaded - Init complete');
+  setRealtimeBadge('on');
 }
 
 // Render monthly grouping of users
