@@ -3529,7 +3529,8 @@ function isElectronRequest(req) {
 function shouldForceRemoteDemo(req) {
   if (!FORCE_REMOTE_DEMO) return false;
   if (!req) return true;
-  if (isElectronRequest(req)) return false;
+  // Forcer la démo centrale pour l'app Electron (priorité à la synchro serveur)
+  if (isElectronRequest(req)) return true;
   if (isLocalRequest(req)) return false;
   return true;
 }
