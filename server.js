@@ -1999,7 +1999,6 @@ if (!stripeKey) {
   throw new Error('Stripe secret key required: STRIPE_SECRET_KEY must be an sk_ key.');
 }
 const stripe = require('stripe')(stripeKey);
-const WebSocket = require('ws');
 
 // Verify the Stripe secret key early at startup (fail fast on invalid / publishable key)
 async function verifyStripeKeyAtStartup() {
