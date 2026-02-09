@@ -2180,6 +2180,7 @@ function normalizeUserRecord(user) {
   normalized.emailVerificationExpiresAt = normalized.emailVerificationExpiresAt || normalized.emailverificationexpiresat || null;
   normalized.emailVerificationSentAt = normalized.emailVerificationSentAt || normalized.emailverificationsentat || null;
   normalized.emailVerifiedAt = normalized.emailVerifiedAt || normalized.emailverifiedat || (normalized.emailVerified ? normalized.emailVerifiedAt || new Date().toISOString() : null);
+  normalized.subscriptionConfirmationSentAt = normalized.subscriptionConfirmationSentAt || normalized.subscriptionconfirmationsentat || null;
 
   // Normalize activity & timestamps
   normalized.createdAt = normalized.createdAt || normalized.createdat || null;
@@ -2232,6 +2233,7 @@ function saveUsers() {
       emailVerificationExpiresAt: u.emailVerificationExpiresAt || null,
       emailVerificationSentAt: u.emailVerificationSentAt || null,
       emailVerifiedAt: u.emailVerifiedAt || null,
+      subscriptionConfirmationSentAt: u.subscriptionConfirmationSentAt || null,
       status: u.status || null,
       isDeleted: !!u.isDeleted,
       isDisabled: !!u.isDisabled,
@@ -2477,7 +2479,8 @@ if (USE_POSTGRES && db && db.getUsers) {
           emailVerificationToken: u.emailverificationtoken || u.emailVerificationToken || null,
           emailVerificationExpiresAt: u.emailverificationexpiresat || u.emailVerificationExpiresAt || null,
           emailVerificationSentAt: u.emailverificationsentat || u.emailVerificationSentAt || null,
-          emailVerifiedAt: u.emailverifiedat || u.emailVerifiedAt || null
+          emailVerifiedAt: u.emailverifiedat || u.emailVerifiedAt || null,
+          subscriptionConfirmationSentAt: u.subscriptionconfirmationsentat || u.subscriptionConfirmationSentAt || null
         }));
         console.log(`[users] Hydrated ${users.length} user(s) from PostgreSQL`);
       }
@@ -2513,7 +2516,7 @@ function isPlaceholderSubscriptionId(id) {
 
 async function reconcilePendingSubscriptions() {
   if (!stripe) return;
-  let dirty = false;
+  const updatedUsers = new Set();
   // Best-effort: check users with a Stripe subscriptionId and ensure status + email confirmation
   for (const user of users) {
     if (!user || !user.subscriptionId) continue;
@@ -2524,7 +2527,8 @@ async function reconcilePendingSubscriptions() {
       console.warn('[subscription] Detected placeholder subscriptionId, clearing:', subId);
       user.subscriptionId = null;
       user.subscriptionStatus = null;
-      dirty = true;
+      user.updatedAt = new Date().toISOString();
+      updatedUsers.add(user);
       continue;
     }
 
@@ -2539,7 +2543,8 @@ async function reconcilePendingSubscriptions() {
     const status = subscription?.status || user.subscriptionStatus || 'unknown';
     if (status !== user.subscriptionStatus) {
       user.subscriptionStatus = status;
-      dirty = true;
+      user.updatedAt = new Date().toISOString();
+      updatedUsers.add(user);
     }
 
     // Send confirmation email once when active and not already sent
@@ -2563,7 +2568,8 @@ async function reconcilePendingSubscriptions() {
 
         if (!emailResult || emailResult.success !== false) {
           user.subscriptionConfirmationSentAt = new Date().toISOString();
-          dirty = true;
+          user.updatedAt = new Date().toISOString();
+          updatedUsers.add(user);
           console.log('[subscription] Confirmation email sent (reconcile) to', user.email);
         } else {
           console.error('[subscription] Confirmation email failed (reconcile):', emailResult.error);
@@ -2574,15 +2580,15 @@ async function reconcilePendingSubscriptions() {
     }
   }
 
-  if (dirty) {
-    try {
-      saveUsers();
-    } catch (e) {
-      console.error('[subscription] Failed to persist subscription updates:', e && e.message);
+  if (updatedUsers.size > 0) {
+    for (const updatedUser of updatedUsers) {
+      try {
+        persistUser(updatedUser);
+      } catch (e) {
+        console.error('[subscription] Failed to persist subscription updates:', e && e.message);
+      }
     }
   }
-
-  saveUsers();
 }
 
 function startSubscriptionReconciler() {
@@ -2592,6 +2598,58 @@ function startSubscriptionReconciler() {
   subscriptionReconcileTimer = setInterval(() => {
     reconcilePendingSubscriptions().catch(err => console.error('[subscription] reconcile loop error:', err && err.message));
   }, SUBSCRIPTION_RECONCILE_INTERVAL_MS);
+}
+
+async function backfillSubscriptionConfirmationSentAt({ reason = 'startup' } = {}) {
+  const nowIso = new Date().toISOString();
+  let updated = 0;
+
+  if (USE_POSTGRES && db && db.getUsers && db.updateUser) {
+    try {
+      const dbUsers = await db.getUsers();
+      for (const row of dbUsers || []) {
+        const normalized = normalizeUserRecord(row);
+        if (!normalized) continue;
+        const status = String(normalized.subscriptionStatus || '').toLowerCase();
+        const subId = String(normalized.subscriptionId || '').trim();
+        if (!normalized.subscriptionConfirmationSentAt
+          && status === 'active'
+          && subId.startsWith('sub_')
+          && !isPlaceholderSubscriptionId(subId)) {
+          await db.updateUser(normalized.id || row.id, {
+            subscriptionconfirmationsentat: nowIso,
+            updatedat: nowIso
+          });
+          updated += 1;
+        }
+      }
+    } catch (e) {
+      console.error('[subscription] backfill failed (postgres):', e && e.message ? e.message : e);
+    }
+  } else {
+    for (const user of users) {
+      if (!user) continue;
+      const status = String(user.subscriptionStatus || '').toLowerCase();
+      const subId = String(user.subscriptionId || '').trim();
+      if (!user.subscriptionConfirmationSentAt
+        && status === 'active'
+        && subId.startsWith('sub_')
+        && !isPlaceholderSubscriptionId(subId)) {
+        user.subscriptionConfirmationSentAt = nowIso;
+        user.updatedAt = nowIso;
+        try {
+          persistUser(user);
+        } catch (e) {
+          console.warn('[subscription] backfill persist failed:', e && e.message ? e.message : e);
+        }
+        updated += 1;
+      }
+    }
+  }
+
+  if (updated > 0) {
+    console.log(`[subscription] Backfill confirmation timestamps (${reason}): ${updated} user(s)`);
+  }
 }
 
 function loadMessages() {
@@ -2691,6 +2749,8 @@ async function initializeApp() {
     ensureDefaultUsers();
     console.log('[server] Users loaded at startup: ' + users.length);
   }
+
+  await backfillSubscriptionConfirmationSentAt({ reason: 'startup' });
 
   await recordInstallationAccess().catch(err => console.error('[installation] startup record failed:', err && err.message ? err.message : err));
 
@@ -2799,7 +2859,8 @@ function reloadUsers() {
           emailVerificationToken: u.emailverificationtoken || u.emailVerificationToken || null,
           emailVerificationExpiresAt: u.emailverificationexpiresat || u.emailVerificationExpiresAt || null,
           emailVerificationSentAt: u.emailverificationsentat || u.emailVerificationSentAt || null,
-          emailVerifiedAt: u.emailverifiedat || u.emailVerifiedAt || null
+          emailVerifiedAt: u.emailverifiedat || u.emailVerifiedAt || null,
+          subscriptionConfirmationSentAt: u.subscriptionconfirmationsentat || u.subscriptionConfirmationSentAt || null
         }));
       }
     }).catch(e => console.error('[users] reload from Postgres failed:', e && e.message));
@@ -2864,6 +2925,7 @@ function persistUser(user) {
     if (Object.prototype.hasOwnProperty.call(user, 'emailVerificationExpiresAt')) updatePayload.emailverificationexpiresat = user.emailVerificationExpiresAt || null;
     if (Object.prototype.hasOwnProperty.call(user, 'emailVerificationSentAt')) updatePayload.emailverificationsentat = user.emailVerificationSentAt || null;
     if (Object.prototype.hasOwnProperty.call(user, 'emailVerifiedAt')) updatePayload.emailverifiedat = user.emailVerifiedAt || null;
+    if (Object.prototype.hasOwnProperty.call(user, 'subscriptionConfirmationSentAt')) updatePayload.subscriptionconfirmationsentat = user.subscriptionConfirmationSentAt || null;
     if (Object.prototype.hasOwnProperty.call(user, 'demoStartDate')) updatePayload.demostartdate = user.demoStartDate || null;
     if (Object.prototype.hasOwnProperty.call(user, 'demoEndDate')) updatePayload.demoenddate = user.demoEndDate || null;
 
@@ -9545,24 +9607,32 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
             planName: obj.metadata?.purchaseName || 'Abonnement Professionnel',
             startDate: new Date().toISOString()
           });
-          
-          try {
-            const subscriptionData = {
-              planName: obj.metadata?.purchaseName || 'Abonnement Professionnel',
-              billingPeriod: 'month',
-              price: (obj.amount_total / 100).toFixed(2),
-              subscriptionId: obj.subscription,
-              userName: user.username
-            };
-            
-            const emailResult = await emailService.sendSubscriptionSuccessEmail(user, subscriptionData);
-            console.log('[webhook] Subscription success email sent:', emailResult);
-            
-            if (!emailResult.success) {
-              console.error('[webhook] Email send failed:', emailResult.error);
+
+          const alreadySent = !!user.subscriptionConfirmationSentAt;
+          if (alreadySent) {
+            console.log('[webhook] Subscription confirmation already sent, skipping email for', user.username);
+          } else {
+            try {
+              const subscriptionData = {
+                planName: obj.metadata?.purchaseName || 'Abonnement Professionnel',
+                billingPeriod: 'month',
+                price: (obj.amount_total / 100).toFixed(2),
+                subscriptionId: obj.subscription,
+                userName: user.username
+              };
+
+              const emailResult = await emailService.sendSubscriptionSuccessEmail(user, subscriptionData);
+              console.log('[webhook] Subscription success email sent:', emailResult);
+
+              if (!emailResult || emailResult.success !== false) {
+                user.subscriptionConfirmationSentAt = new Date().toISOString();
+                persistUser(user);
+              } else {
+                console.error('[webhook] Email send failed:', emailResult.error);
+              }
+            } catch (e) {
+              console.error('[webhook] Error sending subscription email:', e.message);
             }
-          } catch (e) {
-            console.error('[webhook] Error sending subscription email:', e.message);
           }
         }
       }

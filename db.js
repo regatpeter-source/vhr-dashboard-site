@@ -38,6 +38,7 @@ function initSqlite(dbFile) {
       emailVerificationExpiresAt TEXT,
       emailVerificationSentAt TEXT,
       emailVerifiedAt TEXT,
+      subscriptionConfirmationSentAt TEXT,
       status TEXT,
       deletedAt TEXT,
       disabledAt TEXT,
@@ -52,6 +53,7 @@ function initSqlite(dbFile) {
       "ALTER TABLE users ADD COLUMN emailVerificationExpiresAt TEXT",
       "ALTER TABLE users ADD COLUMN emailVerificationSentAt TEXT",
       "ALTER TABLE users ADD COLUMN emailVerifiedAt TEXT",
+      "ALTER TABLE users ADD COLUMN subscriptionConfirmationSentAt TEXT",
       "ALTER TABLE users ADD COLUMN demoStartDate TEXT",
       "ALTER TABLE users ADD COLUMN demoStartSource TEXT",
       "ALTER TABLE users ADD COLUMN demoStartReason TEXT",
@@ -121,7 +123,7 @@ function addOrUpdateUser(user) {
   // Upsert by username
   const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(user.username);
   if (existing) {
-    db.prepare(`UPDATE users SET passwordHash = ?, role = ?, email = ?, stripeCustomerId = ?, latestInvoiceId = ?, lastInvoicePaidAt = ?, subscriptionStatus = ?, subscriptionId = ?, demoStartDate = ?, demoStartSource = ?, demoStartReason = ?, demoStartAt = ?, demoEndDate = ?, demoExtensionDays = ?, lastLogin = ?, lastActivity = ?, emailVerified = ?, emailVerificationToken = ?, emailVerificationExpiresAt = ?, emailVerificationSentAt = ?, emailVerifiedAt = ?, status = ?, deletedAt = ?, disabledAt = ?, updatedAt = ? WHERE username = ?`).run(
+    db.prepare(`UPDATE users SET passwordHash = ?, role = ?, email = ?, stripeCustomerId = ?, latestInvoiceId = ?, lastInvoicePaidAt = ?, subscriptionStatus = ?, subscriptionId = ?, demoStartDate = ?, demoStartSource = ?, demoStartReason = ?, demoStartAt = ?, demoEndDate = ?, demoExtensionDays = ?, lastLogin = ?, lastActivity = ?, emailVerified = ?, emailVerificationToken = ?, emailVerificationExpiresAt = ?, emailVerificationSentAt = ?, emailVerifiedAt = ?, subscriptionConfirmationSentAt = ?, status = ?, deletedAt = ?, disabledAt = ?, updatedAt = ? WHERE username = ?`).run(
       user.passwordHash || null,
       user.role || null,
       user.email || null,
@@ -143,6 +145,7 @@ function addOrUpdateUser(user) {
       user.emailVerificationExpiresAt || null,
       user.emailVerificationSentAt || null,
       user.emailVerifiedAt || null,
+      user.subscriptionConfirmationSentAt || null,
       user.status || null,
       user.deletedAt || null,
       user.disabledAt || null,
@@ -150,7 +153,7 @@ function addOrUpdateUser(user) {
       user.username
     );
   } else {
-    db.prepare(`INSERT INTO users (username, passwordHash, role, email, stripeCustomerId, latestInvoiceId, lastInvoicePaidAt, subscriptionStatus, subscriptionId, demoStartDate, demoStartSource, demoStartReason, demoStartAt, demoEndDate, demoExtensionDays, lastLogin, lastActivity, emailVerified, emailVerificationToken, emailVerificationExpiresAt, emailVerificationSentAt, emailVerifiedAt, status, deletedAt, disabledAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`) 
+    db.prepare(`INSERT INTO users (username, passwordHash, role, email, stripeCustomerId, latestInvoiceId, lastInvoicePaidAt, subscriptionStatus, subscriptionId, demoStartDate, demoStartSource, demoStartReason, demoStartAt, demoEndDate, demoExtensionDays, lastLogin, lastActivity, emailVerified, emailVerificationToken, emailVerificationExpiresAt, emailVerificationSentAt, emailVerifiedAt, subscriptionConfirmationSentAt, status, deletedAt, disabledAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`) 
       .run(
         user.username,
         user.passwordHash || null,
@@ -174,6 +177,7 @@ function addOrUpdateUser(user) {
         user.emailVerificationExpiresAt || null,
         user.emailVerificationSentAt || null,
         user.emailVerifiedAt || null,
+        user.subscriptionConfirmationSentAt || null,
         user.status || null,
         user.deletedAt || null,
         user.disabledAt || null,
@@ -186,7 +190,7 @@ function addOrUpdateUser(user) {
 
 function getAllUsers() {
   if (!enabled) return [];
-  return db.prepare('SELECT username, role, email, stripeCustomerId, latestInvoiceId, lastInvoicePaidAt, subscriptionStatus, subscriptionId, demoStartDate, demoStartSource, demoStartReason, demoStartAt, demoEndDate, demoExtensionDays, lastLogin, lastActivity, emailVerified, emailVerificationToken, emailVerificationExpiresAt, emailVerificationSentAt, emailVerifiedAt, status, deletedAt, disabledAt, createdAt, updatedAt FROM users').all();
+  return db.prepare('SELECT username, role, email, stripeCustomerId, latestInvoiceId, lastInvoicePaidAt, subscriptionStatus, subscriptionId, demoStartDate, demoStartSource, demoStartReason, demoStartAt, demoEndDate, demoExtensionDays, lastLogin, lastActivity, emailVerified, emailVerificationToken, emailVerificationExpiresAt, emailVerificationSentAt, emailVerifiedAt, subscriptionConfirmationSentAt, status, deletedAt, disabledAt, createdAt, updatedAt FROM users').all();
 }
 
 function findUserByUsername(username) {
@@ -201,7 +205,7 @@ function findUserByStripeCustomerId(customerId) {
 
 function updateUserFields(username, fields) {
   if (!enabled) return false;
-  const allowed = ['username', 'passwordHash', 'role', 'email', 'stripeCustomerId', 'latestInvoiceId', 'lastInvoicePaidAt', 'subscriptionStatus', 'subscriptionId', 'demoStartDate', 'demoStartSource', 'demoStartReason', 'demoStartAt', 'demoEndDate', 'demoExtensionDays', 'lastLogin', 'lastActivity', 'emailVerified', 'emailVerificationToken', 'emailVerificationExpiresAt', 'emailVerificationSentAt', 'emailVerifiedAt', 'status', 'deletedAt', 'disabledAt', 'updatedAt'];
+  const allowed = ['username', 'passwordHash', 'role', 'email', 'stripeCustomerId', 'latestInvoiceId', 'lastInvoicePaidAt', 'subscriptionStatus', 'subscriptionId', 'demoStartDate', 'demoStartSource', 'demoStartReason', 'demoStartAt', 'demoEndDate', 'demoExtensionDays', 'lastLogin', 'lastActivity', 'emailVerified', 'emailVerificationToken', 'emailVerificationExpiresAt', 'emailVerificationSentAt', 'emailVerifiedAt', 'subscriptionConfirmationSentAt', 'status', 'deletedAt', 'disabledAt', 'updatedAt'];
   const updates = Object.keys(fields).filter(k => allowed.includes(k)).map(k => `${k} = @${k}`);
   if (updates.length === 0) return false;
   const setSql = updates.join(', ');

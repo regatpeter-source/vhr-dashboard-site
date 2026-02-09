@@ -102,6 +102,7 @@ async function initDatabase() {
           emailverificationexpiresat TIMESTAMPTZ,
           emailverificationsentat TIMESTAMPTZ,
           emailverifiedat TIMESTAMPTZ,
+          subscriptionconfirmationsentat TIMESTAMPTZ,
           createdat TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
           updatedat TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         )
@@ -122,7 +123,8 @@ async function initDatabase() {
         { name: 'emailverificationtoken', type: 'TEXT' },
         { name: 'emailverificationexpiresat', type: 'TIMESTAMPTZ' },
         { name: 'emailverificationsentat', type: 'TIMESTAMPTZ' },
-        { name: 'emailverifiedat', type: 'TIMESTAMPTZ' }
+        { name: 'emailverifiedat', type: 'TIMESTAMPTZ' },
+        { name: 'subscriptionconfirmationsentat', type: 'TIMESTAMPTZ' }
       ];
 
       for (const col of columnChecks) {
@@ -367,7 +369,7 @@ async function deleteMessage(id) {
 async function getUsers() {
   try {
     const result = await pool.query(
-      'SELECT id, username, email, role, createdat, updatedat, lastlogin, lastactivity, demostartdate, demoenddate, subscriptionstatus, subscriptionid, stripecustomerid, emailverified, emailverificationtoken, emailverificationexpiresat, emailverificationsentat, emailverifiedat FROM users ORDER BY createdat DESC'
+      'SELECT id, username, email, role, createdat, updatedat, lastlogin, lastactivity, demostartdate, demoenddate, subscriptionstatus, subscriptionid, stripecustomerid, emailverified, emailverificationtoken, emailverificationexpiresat, emailverificationsentat, emailverifiedat, subscriptionconfirmationsentat FROM users ORDER BY createdat DESC'
     );
     return result.rows || [];
   } catch (err) {
@@ -418,7 +420,8 @@ async function getUserByUsername(username) {
            emailverificationtoken,
            emailverificationexpiresat,
            emailverificationsentat,
-           emailverifiedat
+           emailverifiedat,
+           subscriptionconfirmationsentat
          FROM users
          WHERE username = $1
          LIMIT 1`,
@@ -467,6 +470,8 @@ async function getUserByUsername(username) {
       emailVerificationSentAt: optionalFields.emailverificationsentat || null,
       emailverifiedat: optionalFields.emailverifiedat || null,
       emailVerifiedAt: optionalFields.emailverifiedat || null,
+      subscriptionconfirmationsentat: optionalFields.subscriptionconfirmationsentat || null,
+      subscriptionConfirmationSentAt: optionalFields.subscriptionconfirmationsentat || null,
       createdat: optionalFields.createdat || null,
       createdAt: optionalFields.createdat || null,
       updatedat: optionalFields.updatedat || null,
@@ -519,7 +524,8 @@ async function updateUser(id, updates) {
       'emailverificationtoken',
       'emailverificationexpiresat',
       'emailverificationsentat',
-      'emailverifiedat'
+      'emailverifiedat',
+      'subscriptionconfirmationsentat'
     ]);
 
     const fields = [];
