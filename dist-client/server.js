@@ -3450,6 +3450,14 @@ function isElectronRequest(req) {
   return userAgent.includes('electron') || electronHeader === 'electron';
 }
 
+function shouldForceRemoteDemo(req) {
+  if (!FORCE_REMOTE_DEMO) return false;
+  if (!req) return true;
+  if (isElectronRequest(req)) return false;
+  if (isLocalRequest(req)) return false;
+  return true;
+}
+
 function isGuestAccount(user) {
   if (!user) return false;
   const role = String(user.role || '').toLowerCase();
@@ -3575,7 +3583,7 @@ async function handleApiLogin(req, res) {
   } else {
     console.log('[api/login] local guest login: skipping remote sync');
   }
-  if (!FORCE_REMOTE_DEMO) {
+  if (!shouldForceRemoteDemo(req)) {
     ensureElectronTrialStarted(user, { reason: 'login' });
   }
   const elevatedUser = elevateAdminIfAllowlisted(user);
@@ -3625,7 +3633,7 @@ app.post('/api/remote-login', async (req, res) => {
     if (remoteDemo) {
       applyRemoteDemoToUser(elevatedUser, remoteDemo, { reason: 'remote-login' });
     }
-    if (!FORCE_REMOTE_DEMO) {
+    if (!shouldForceRemoteDemo(req)) {
       ensureElectronTrialStarted(elevatedUser, { reason: 'remote-login' });
     }
     const token = jwt.sign({ username: elevatedUser.username, role: elevatedUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
@@ -4515,7 +4523,7 @@ app.post('/api/auth/login', async (req, res) => {
   } else {
     console.log('[api/auth/login] local guest login: skipping remote sync');
   }
-  if (!FORCE_REMOTE_DEMO) {
+  if (!shouldForceRemoteDemo(req)) {
     ensureElectronTrialStarted(user, { reason: 'auth-login' });
   }
   
@@ -4795,8 +4803,9 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
     res.setHeader('Expires', '0');
     const demoUserAgent = String(req.headers['user-agent'] || '').toLowerCase();
     const demoIsElectron = demoUserAgent.includes('electron') || String(req.headers['x-vhr-electron'] || '').toLowerCase() === 'electron';
-    const bypassRemoteReturn = FORCE_REMOTE_DEMO ? false : demoIsElectron;
-    const shouldStartTrialOnAccess = FORCE_REMOTE_DEMO ? false : true;
+    const forceRemoteDemo = shouldForceRemoteDemo(req);
+    const bypassRemoteReturn = forceRemoteDemo ? false : demoIsElectron;
+    const shouldStartTrialOnAccess = forceRemoteDemo ? false : true;
     const cachedDemo = getCachedRemoteDemo(req.user.username);
     if (cachedDemo) {
       console.log('[demo/status] returning cached remote demo for', req.user.username);
@@ -4878,7 +4887,7 @@ app.get('/api/demo/status', authMiddleware, async (req, res) => {
         }
       }
     }
-    if (FORCE_REMOTE_DEMO) {
+    if (shouldForceRemoteDemo(req)) {
       return res.status(403).json({
         ok: false,
         error: 'remote_demo_required',

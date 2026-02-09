@@ -5773,7 +5773,8 @@ async function checkJWTAuth() {
 			}
 			const resolvedUsername = res.user.username || res.user.name || res.user.email;
 			const resolvedRole = normalizeRoleForUser(resolvedUsername, res.user.role || authenticatedUsers?.[resolvedUsername]?.role);
-			if (resolvedRole === 'guest') {
+			const allowGuestSession = (typeof isLocalAuthContext !== 'undefined' && isLocalAuthContext) || isElectronRuntime();
+			if (resolvedRole === 'guest' && !allowGuestSession) {
 				console.warn('[auth] Guest session requires login');
 				try {
 					await api('/api/logout', { method: 'POST', skipAuthHeader: true });
@@ -5786,6 +5787,8 @@ async function checkJWTAuth() {
 				if (overlay) overlay.style.display = 'none';
 				showAuthModal('login');
 				return false;
+			} else if (resolvedRole === 'guest') {
+				console.log('[auth] Guest session allowed in local/Electron context');
 			}
 			if (res.token) {
 				saveAuthToken(res.token);

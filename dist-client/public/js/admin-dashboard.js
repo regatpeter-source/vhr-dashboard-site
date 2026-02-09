@@ -128,16 +128,30 @@ function updateCachedUserAccessFromResponse(username, payload) {
   const cached = getCachedUserByUsername(username);
   if (!cached) return;
   const updatedUser = payload.user || {};
-  const demoStartDate = updatedUser.demoStartDate || cached.demoStartDate || cached.demostartdate || null;
-  const demoEndDate = updatedUser.demoEndDate || cached.demoEndDate || cached.demoenddate || null;
+  const accessPayload = payload.accessSummary || payload.demo || updatedUser.accessSummary || {};
+  const demoStartDate = updatedUser.demoStartDate
+    || accessPayload.demoStartDate
+    || cached.demoStartDate
+    || cached.demostartdate
+    || null;
+  const demoEndDate = updatedUser.demoEndDate
+    || accessPayload.demoEndDate
+    || accessPayload.demoenddate
+    || cached.demoEndDate
+    || cached.demoenddate
+    || null;
   cached.demoStartDate = demoStartDate || cached.demoStartDate || null;
   cached.demoEndDate = demoEndDate || cached.demoEndDate || null;
-  if (updatedUser.subscriptionStatus) {
-    cached.subscriptionStatus = updatedUser.subscriptionStatus;
+  if (updatedUser.subscriptionStatus || accessPayload.subscriptionStatus) {
+    cached.subscriptionStatus = updatedUser.subscriptionStatus || accessPayload.subscriptionStatus || cached.subscriptionStatus;
   }
   cached.updatedAt = updatedUser.updatedAt || cached.updatedAt || new Date().toISOString();
-
-  cached.accessSummary = normalizeAccessSummary(cached);
+  const normalized = normalizeAccessSummary(cached);
+  if (Number.isFinite(accessPayload.demoRemainingDays)) {
+    normalized.demoRemainingDays = accessPayload.demoRemainingDays;
+    normalized.demoExpired = accessPayload.demoRemainingDays <= 0;
+  }
+  cached.accessSummary = normalized;
 
   refreshUserModalIfNeeded(username);
 }
