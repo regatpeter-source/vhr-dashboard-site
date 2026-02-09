@@ -3280,6 +3280,24 @@ function getRemoteStatusTokenFromRequest(req) {
   return '';
 }
 
+function shouldProxyRemoteStatus(req) {
+  if (!FORCE_REMOTE_USER_STATUS) return false;
+  if (!REMOTE_AUTH_ORIGIN) return false;
+  if (req && req.user && isGuestAccount(req.user)) return false;
+  const username = req && req.user && req.user.username ? String(req.user.username) : '';
+  const remoteToken = getRemoteStatusTokenFromRequest(req)
+    || (username ? (getCachedRemoteAuthToken(username) || getPersistedRemoteAuthToken(username)) : '');
+  if (!remoteToken) return false;
+  try {
+    const target = new URL(REMOTE_AUTH_ORIGIN);
+    const hostHeader = (req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+    if (!hostHeader) return true;
+    return target.host && target.host !== hostHeader;
+  } catch (e) {
+    return true;
+  }
+}
+
 async function proxyRemoteUserStatus(req, res, pathOverride) {
   if (!REMOTE_AUTH_ORIGIN) {
     return res.status(503).json({ ok: false, error: 'Remote status unavailable' });
@@ -4233,7 +4251,7 @@ app.get('/api/admin/diagnose', authMiddleware, async (req, res) => {
 
 // Return authenticated user info (uses auth middleware)
 app.get('/api/me', authMiddleware, (req, res) => {
-  if (FORCE_REMOTE_USER_STATUS) {
+  if (shouldProxyRemoteStatus(req)) {
     return proxyRemoteUserStatus(req, res, req.originalUrl);
   }
   const user = { username: req.user.username, role: req.user.role, isPrimary: isPrimaryAccount(req.user) };
@@ -4768,7 +4786,7 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
 
 // Get demo/trial status - also check Stripe subscription status
 app.get('/api/demo/status', authMiddleware, async (req, res) => {
-  if (FORCE_REMOTE_USER_STATUS) {
+  if (shouldProxyRemoteStatus(req)) {
     return proxyRemoteUserStatus(req, res, '/api/demo/status');
   }
   try {
@@ -5412,7 +5430,7 @@ app.get('/api/subscriptions/plans', (req, res) => {
 
 // Get current user's subscription status
 app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) => {
-  if (FORCE_REMOTE_USER_STATUS) {
+  if (shouldProxyRemoteStatus(req)) {
     return proxyRemoteUserStatus(req, res, '/api/subscriptions/my-subscription');
   }
   try {

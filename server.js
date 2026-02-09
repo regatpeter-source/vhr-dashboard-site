@@ -3481,6 +3481,10 @@ function getRemoteStatusTokenFromRequest(req) {
 function shouldProxyRemoteStatus(req) {
   if (!FORCE_REMOTE_USER_STATUS) return false;
   if (!AUTH_API_BASE) return false;
+  if (req && req.user && isGuestAccount(req.user)) return false;
+  const username = req && req.user && req.user.username ? String(req.user.username) : '';
+  const remoteToken = getRemoteStatusTokenFromRequest(req) || (username ? getCachedRemoteAuthToken(username) : '');
+  if (!remoteToken) return false;
   try {
     const target = new URL(AUTH_API_BASE);
     const hostHeader = (req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();

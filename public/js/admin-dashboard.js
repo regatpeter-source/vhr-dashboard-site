@@ -5,6 +5,33 @@ const API_BASE = OFFICIAL_HOSTS.includes(window.location.hostname)
 let currentUser = null;
 let cachedUsers = [];
 
+function computeRemainingDaysFromEnd(demoEndDate) {
+  if (!demoEndDate) return null;
+  const endMs = new Date(demoEndDate).getTime();
+  if (!Number.isFinite(endMs)) return null;
+  return Math.max(0, Math.ceil((endMs - Date.now()) / (24 * 60 * 60 * 1000)));
+}
+
+function normalizeAccessSummary(user) {
+  if (!user) return { hasDemo: false };
+  const access = user.accessSummary || {};
+  const demoStartDate = user.demoStartDate || user.demostartdate || access.demoStartDate || access.demostartdate || null;
+  const demoEndDate = user.demoEndDate || user.demoenddate || access.demoEndDate || access.demoenddate || null;
+  const remainingDays = computeRemainingDaysFromEnd(demoEndDate);
+  const demoExpired = Number.isFinite(remainingDays)
+    ? remainingDays <= 0
+    : Boolean(access.demoExpired);
+  return {
+    ...access,
+    hasDemo: access.hasDemo ?? Boolean(demoStartDate || demoEndDate),
+    demoStartDate: demoStartDate || access.demoStartDate || null,
+    demoEndDate: demoEndDate || access.demoEndDate || null,
+    demoRemainingDays: Number.isFinite(remainingDays) ? remainingDays : access.demoRemainingDays,
+    demoExpired,
+    subscriptionStatus: access.subscriptionStatus || user.subscriptionStatus || 'none'
+  };
+}
+
 // Helper to make authenticated fetch requests with cookies
 async function authFetch(url, options = {}) {
   return fetch(url, {
@@ -107,19 +134,7 @@ function updateCachedUserAccessFromResponse(username, payload) {
   }
   cached.updatedAt = updatedUser.updatedAt || cached.updatedAt || new Date().toISOString();
 
-  const endMs = demoEndDate ? new Date(demoEndDate).getTime() : null;
-  const remainingDays = endMs && Number.isFinite(endMs)
-    ? Math.max(0, Math.ceil((endMs - Date.now()) / (24 * 60 * 60 * 1000)))
-    : null;
-  const demoExpired = Number.isFinite(remainingDays) ? remainingDays <= 0 : false;
-  cached.accessSummary = {
-    ...(cached.accessSummary || {}),
-    hasDemo: true,
-    demoExpired,
-    demoRemainingDays: Number.isFinite(remainingDays) ? remainingDays : (cached.accessSummary?.demoRemainingDays ?? 0),
-    demoMessage: cached.accessSummary?.demoMessage || null,
-    subscriptionStatus: updatedUser.subscriptionStatus || cached.accessSummary?.subscriptionStatus || cached.subscriptionStatus || 'none'
-  };
+  cached.accessSummary = normalizeAccessSummary(cached);
 
   refreshUserModalIfNeeded(username);
 }
@@ -171,13 +186,17 @@ async function loadUsers() {
     const res = await authFetch(`${API_BASE}/admin/users`);
     const data = await res.json();
     if (data.ok && data.users.length > 0) {
-      cachedUsers = data.users.map(u => ({
-        ...u,
-        createdAt: u.createdAt || u.createdat || u.created || u.updatedAt || null,
-        updatedAt: u.updatedAt || u.updatedat || null,
-        lastLogin: u.lastLogin || u.lastlogin || u.last_connection || null,
-        lastActivity: u.lastActivity || u.lastactivity || u.last_active || null
-      }));
+      cachedUsers = data.users.map(u => {
+        const normalized = {
+          ...u,
+          createdAt: u.createdAt || u.createdat || u.created || u.updatedAt || null,
+          updatedAt: u.updatedAt || u.updatedat || null,
+          lastLogin: u.lastLogin || u.lastlogin || u.last_connection || null,
+          lastActivity: u.lastActivity || u.lastactivity || u.last_active || null
+        };
+        normalized.accessSummary = normalizeAccessSummary(normalized);
+        return normalized;
+      });
 
       applyUserFilters();
     } else {
