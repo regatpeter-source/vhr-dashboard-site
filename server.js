@@ -9276,23 +9276,7 @@ function startPrimaryServer(initializationFailed = false) {
   serverStarted = true;
 }
 
-if (listenerServer && typeof listenerServer.on === 'function') {
-  listenerServer.on('upgrade', (req, socket, head) => {
-    if (!RELAY_STREAM_ENABLED) return;
-    if (req.url.startsWith('/api/relay/stream')) {
-      wssRelayVideo.handleUpgrade(req, socket, head, (ws) => {
-        handleRelaySocket('video', ws, req);
-      });
-      return;
-    }
-    if (req.url.startsWith('/api/relay/audio')) {
-      wssRelayAudio.handleUpgrade(req, socket, head, (ws) => {
-        handleRelaySocket('audio', ws, req);
-      });
-      return;
-    }
-  });
-}
+// Note: relay upgrade handling is already wired on appServer.on('upgrade') above.
 
 // Start server after initializing app
 initializeApp().then(() => {
