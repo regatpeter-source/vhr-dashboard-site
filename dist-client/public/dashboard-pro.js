@@ -525,6 +525,8 @@ let sessionRunningAppsByUser = {};
 let sessionRequestCounter = 0;
 const pendingSessionRequests = new Map();
 const SESSION_API_TIMEOUT_MS = 20000;
+const SESSION_DEVICE_PING_INTERVAL_MS = 15000;
+let sessionDevicePingTimer = null;
 
 function isSessionActive() {
 	return !!(currentSession && currentSession.code);
@@ -560,14 +562,35 @@ function refreshMergedDevices() {
 	renderDevices();
 }
 
+function hasSharedSessionDevices() {
+	const entries = Object.entries(sessionDevicesByUser || {});
+	return entries.some(([owner, list]) => owner && owner !== currentUser && Array.isArray(list) && list.length > 0);
+}
+
 function publishSessionDevices() {
 	const activeSocket = getSessionSocket();
 	if (!isSessionActive() || !activeSocket) return;
 	const safeDevices = Array.isArray(localDevices) ? localDevices : [];
 	activeSocket.emit('session-action', {
 		action: 'session-devices',
-		payload: { devices: safeDevices, runningApps: runningApps || {} }
+		payload: { devices: safeDevices, runningApps: runningApps || {}, owner: currentUser || null }
 	});
+}
+
+function startSessionDevicePing() {
+	if (sessionDevicePingTimer) return;
+	sessionDevicePingTimer = setInterval(() => {
+		if (isSessionActive()) {
+			publishSessionDevices();
+		}
+	}, SESSION_DEVICE_PING_INTERVAL_MS);
+}
+
+function stopSessionDevicePing() {
+	if (sessionDevicePingTimer) {
+		clearInterval(sessionDevicePingTimer);
+		sessionDevicePingTimer = null;
+	}
 }
 
 function getSessionDeviceOwner(serial) {
@@ -982,6 +1005,7 @@ function bindSessionSocketHandlers(activeSocket) {
 		// Show the code prominently
 		showSessionCodePopup(data.sessionCode);
 		publishSessionDevices();
+		startSessionDevicePing();
 		refreshMergedDevices();
 		if (!SESSION_USE_CENTRAL) {
 			pushSessionHostInfo();
@@ -993,6 +1017,7 @@ function bindSessionSocketHandlers(activeSocket) {
 		showToast(`✅ Connecté à la session ${data.sessionCode}`, 'success');
 		document.getElementById('sessionMenu')?.remove();
 		publishSessionDevices();
+		startSessionDevicePing();
 		refreshMergedDevices();
 		if (!SESSION_USE_CENTRAL) {
 			if (isCurrentUserSessionHost(data.users)) {
@@ -1084,10 +1109,11 @@ function handleSessionAction(data) {
 			showToast(`⚙️ ${from} a modifié les paramètres`, 'info');
 			break;
 		case 'session-devices': {
-			if (!from || from === currentUser) return;
+			const owner = from || payload?.owner || '';
+			if (!owner || owner === currentUser) return;
 			const remoteDevices = Array.isArray(payload?.devices) ? payload.devices : [];
-			sessionDevicesByUser[from] = remoteDevices;
-			sessionRunningAppsByUser[from] = payload?.runningApps || {};
+			sessionDevicesByUser[owner] = remoteDevices;
+			sessionRunningAppsByUser[owner] = payload?.runningApps || {};
 			refreshMergedDevices();
 			break;
 		}
@@ -1154,6 +1180,7 @@ window.leaveSession = function() {
 		showToast('👋 Session quittée', 'info');
 		document.getElementById('sessionMenu')?.remove();
 		updateSessionIndicator();
+		stopSessionDevicePing();
 		if (SESSION_USE_CENTRAL) {
 			try { activeSocket.close(); } catch (e) {}
 			sessionSocket = null;
@@ -3209,6 +3236,14 @@ function renderDevicesTable() {
 	container.style.padding = '20px';
 	container.style.opacity = '1';
 	container.style.pointerEvents = 'auto';
+
+	if (hasSharedSessionDevices()) {
+		container.innerHTML += `
+			<div style='display:inline-flex;align-items:center;gap:8px;background:#1f2a3a;color:#9b59b6;border:1px solid #9b59b6;padding:6px 12px;border-radius:999px;font-weight:600;font-size:12px;margin-bottom:12px;'>
+				🛰️ Casques partagés
+			</div>
+		`;
+	}
 	
 	if (devices.length === 0) {
 		container.innerHTML = `<div style='text-align:center;color:#fff;font-size:18px;padding:40px;'>
