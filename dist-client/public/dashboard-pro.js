@@ -5388,6 +5388,14 @@ async function checkLicense() {
 		
 		if (!res || !res.ok) {
 			console.error('[license] demo status check failed');
+			const statusCode = res?._status || 0;
+			const authError = statusCode === 401 || statusCode === 403 || res?.error === 'unauthorized' || res?.error === 'invalid_token' || res?.error === 'missing_token';
+			if (authError) {
+				showToast('🔐 Session expirée : merci de vous reconnecter', 'warning');
+				saveAuthToken('');
+				showAuthModal('login');
+				return false;
+			}
 			if (res && res.error === 'remote_demo_required') {
 				showToast(res.message || '🔒 Vérification centrale requise pour la période d\'essai', 'warning');
 				showUnlockModal({
@@ -5400,8 +5408,8 @@ async function checkLicense() {
 				});
 				return false;
 			}
-			// Bloquer l'accès par défaut si la vérification échoue (éviter l'accès sans abo)
-			showUnlockModal({ expired: true, accessBlocked: true, subscriptionStatus: res?.demo?.subscriptionStatus || 'unknown' });
+			// Éviter d'afficher la modal d'abonnement si la vérification a échoué
+			showToast('⚠️ Vérification de l\'abonnement indisponible. Réessayez après connexion.', 'warning');
 			return false;
 		}
 

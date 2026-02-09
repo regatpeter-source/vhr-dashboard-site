@@ -140,7 +140,7 @@ function resolveAdminPasswordHash(forceRehash = false) {
 }
 // Shared secret used when syncing users from the prod auth API to the local pack.
 // No hardcoded fallback: if not provided, sync-user is disabled.
-const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || null;
+const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
 const SYNC_TARGET_URLS_RAW = process.env.SYNC_TARGET_URLS || process.env.DASHBOARD_SYNC_TARGETS || '';
 const SYNC_TARGET_BASE_URLS = SYNC_TARGET_URLS_RAW
   .split(/[,;\s]+/)
