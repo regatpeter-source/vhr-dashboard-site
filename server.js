@@ -7951,6 +7951,32 @@ function handleAudioWebSocket(serial, ws, req) {
 // ---------- WebSocket ----------
 appServer.on('upgrade', (req, res, head) => {
   console.log(`[Upgrade] Request for URL: ${req.url}`);
+  if (req.url.startsWith('/api/relay/stream')) {
+    try {
+      wssRelayVideo.handleUpgrade(req, res, head, (ws) => {
+        handleRelaySocket('video', ws, req);
+      });
+      return;
+    } catch (err) {
+      console.error('[Relay] Video upgrade error:', err);
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end('Internal server error');
+      return;
+    }
+  }
+  if (req.url.startsWith('/api/relay/audio')) {
+    try {
+      wssRelayAudio.handleUpgrade(req, res, head, (ws) => {
+        handleRelaySocket('audio', ws, req);
+      });
+      return;
+    } catch (err) {
+      console.error('[Relay] Audio upgrade error:', err);
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end('Internal server error');
+      return;
+    }
+  }
   // Audio streaming endpoint
   if (req.url.startsWith('/api/audio/stream')) {
     try {

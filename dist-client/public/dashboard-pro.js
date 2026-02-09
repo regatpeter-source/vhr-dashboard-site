@@ -1836,12 +1836,25 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 
 	if (useRelayForRemote) {
 		showToast('🛰️ Voix distante via relais…', 'info');
+		const targetUser = getSessionDeviceOwner(serial);
 		try {
-			await api('/api/relay/audio/register', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ serial, sessionCode })
-			});
+			if (targetUser) {
+				await sendSessionApiRequest({
+					targetUser,
+					path: '/api/relay/audio/register',
+					opts: {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ serial, sessionCode })
+					}
+				});
+			} else {
+				await api('/api/relay/audio/register', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ serial, sessionCode })
+				});
+			}
 		} catch (e) {
 			console.warn('[relay audio] register failed', e);
 		}
