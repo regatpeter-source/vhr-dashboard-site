@@ -7475,6 +7475,8 @@ async function startStream(serial, opts = {}) {
       if (err.code !== 'EPIPE') console.error('[ffmpeg stdin]', err);
     });
 
+    let relayVideoBytes = 0;
+    let relayVideoLastLogAt = 0;
     ffmpegProc.stdout.on('data', chunk => {
       for (const ws of entry.mpeg1Clients || []) {
         if (ws.readyState === 1) {
@@ -7484,6 +7486,13 @@ async function startStream(serial, opts = {}) {
 
       if (entry.relayWs && entry.relayWs.readyState === WebSocket.OPEN) {
         try { entry.relayWs.send(chunk); } catch (e) {}
+        relayVideoBytes += chunk.length || 0;
+        const now = Date.now();
+        if (!relayVideoLastLogAt || (now - relayVideoLastLogAt) > 2000) {
+          relayVideoLastLogAt = now;
+          console.log(`[relay-video] sent ${relayVideoBytes} bytes to relay for ${serial}`);
+          relayVideoBytes = 0;
+        }
       }
     });
   } catch (e) {

@@ -8968,7 +8968,19 @@ function handleRelaySocket(kind, ws, req) {
       try { entry.sender.close(); } catch (e) {}
     }
     entry.sender = ws;
+    if (kind === 'video') {
+      console.log(`[Relay] Video sender connected session=${sessionCode} serial=${serial}`);
+    }
     ws.on('message', (data) => {
+      if (kind === 'video') {
+        entry._bytes = (entry._bytes || 0) + (data && data.length ? data.length : 0);
+        const now = Date.now();
+        if (!entry._lastLogAt || (now - entry._lastLogAt) > 2000) {
+          entry._lastLogAt = now;
+          console.log(`[Relay] Video data ${serial}: ${entry._bytes} bytes sent to ${entry.viewers.size} viewer(s)`);
+          entry._bytes = 0;
+        }
+      }
       for (const viewer of entry.viewers) {
         if (viewer.readyState === WebSocket.OPEN) {
           try { viewer.send(data); } catch (e) {}
@@ -8977,6 +8989,9 @@ function handleRelaySocket(kind, ws, req) {
     });
   } else {
     entry.viewers.add(ws);
+    if (kind === 'video') {
+      console.log(`[Relay] Video viewer connected session=${sessionCode} serial=${serial}. Total viewers=${entry.viewers.size}`);
+    }
   }
 
   ws.on('close', () => {
