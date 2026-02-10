@@ -1218,8 +1218,8 @@ function handleSessionAction(data) {
 		}
 		case 'session-voice-start': {
 			if (!payload || !payload.serial) return;
-			if (payload.requester && payload.requester !== currentUser) return;
-			if (from && from !== currentUser) return;
+			if (!payload.requester) return;
+			if (payload.requester !== currentUser) return;
 			const sessionCode = payload.sessionCode || getActiveSessionCode();
 			window.sendVoiceToHeadset(payload.serial, { viaSession: true, sessionCode });
 			break;
@@ -4050,18 +4050,30 @@ window.initStreamPlayer = function(serial) {
 	// Vérifier si JSMpeg est chargé
 	if (typeof JSMpeg === 'undefined') {
 		console.log('[stream] JSMpeg not loaded, loading from CDN...');
-		// Charger JSMpeg dynamiquement
-		const script = document.createElement('script');
-		script.src = 'https://cdn.jsdelivr.net/npm/jsmpeg-player@0.2.8/jsmpeg.min.js';
-		script.onerror = () => {
-			console.error('[stream] Failed to load JSMpeg library');
-			showToast('� Erreur: impossible de charger la librairie vidéo', 'error');
+		// Charger JSMpeg dynamiquement (CDN fallback)
+		const sources = [
+			'https://cdn.jsdelivr.net/npm/jsmpeg@0.2.1/jsmpeg.min.js',
+			'https://unpkg.com/jsmpeg@0.2.1/jsmpeg.min.js'
+		];
+		const tryLoad = (index) => {
+			if (index >= sources.length) {
+				console.error('[stream] Failed to load JSMpeg library');
+				showToast('⚠️ Erreur: impossible de charger la librairie vidéo', 'error');
+				return;
+			}
+			const script = document.createElement('script');
+			script.src = sources[index];
+			script.onerror = () => {
+				console.warn('[stream] JSMpeg load failed, trying next source:', sources[index]);
+				tryLoad(index + 1);
+			};
+			script.onload = () => {
+				console.log('[stream] JSMpeg library loaded successfully');
+				connectStreamSocket(serial);
+			};
+			document.head.appendChild(script);
 		};
-		script.onload = () => {
-			console.log('[stream] JSMpeg library loaded successfully');
-			connectStreamSocket(serial);
-		};
-		document.head.appendChild(script);
+		tryLoad(0);
 	} else {
 		console.log('[stream] JSMpeg already loaded, using it');
 		connectStreamSocket(serial);
