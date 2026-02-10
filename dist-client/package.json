@@ -76,6 +76,10 @@
       {
         "from": "scrcpy",
         "to": "scrcpy"
+      },
+      {
+        "from": "ffmpeg",
+        "to": "ffmpeg"
       }
     ],
     "files": [
@@ -109,6 +113,7 @@
     ],
     "asarUnpack": [
       "platform-tools/**",
+      "ffmpeg/**",
       "scrcpy/**",
       "public/downloads/**",
       "public/**/*.apk"

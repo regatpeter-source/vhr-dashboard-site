@@ -8593,20 +8593,24 @@ app.post('/api/adb/command', async (req, res) => {
 
 // Open audio receiver in Quest - supports both browser and background app
 app.post('/api/device/open-audio-receiver', async (req, res) => {
-  const { serial, serverUrl, useBackgroundApp } = req.body || {};
+  const { serial, serverUrl, useBackgroundApp, relay, sessionCode, relayBase, name } = req.body || {};
   if (!serial) {
     return res.status(400).json({ ok: false, error: 'serial required' });
   }
 
   try {
+    const wantsRelay = Boolean(relay || relayBase || sessionCode);
     // Correction : forcer l'utilisation de l'IP LAN si serverUrl est localhost ou absent
     let server = (serverUrl || '').trim();
+    if (wantsRelay) {
+      server = (relayBase || server || process.env.RELAY_STREAM_BASE_URL || process.env.RELAY_BASE_URL || '').trim();
+    }
     // Corrige une éventuelle faute de frappe (locahost)
     if (server.includes('locahost')) {
       server = server.replace(/locahost/gi, 'localhost');
     }
 
-    if (!server || server.includes('localhost') || server.includes('127.0.0.1')) {
+    if (!wantsRelay && (!server || server.includes('localhost') || server.includes('127.0.0.1'))) {
       const lanIp = resolveLanIpForClient(req);
       if (lanIp) {
         server = `http://${lanIp}:3000`;
@@ -8623,9 +8627,23 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
         }
       }
     }
-    console.log(`[open-audio-receiver] URL envoyée au Quest: ${server}/audio-receiver.html?serial=${encodeURIComponent(serial)}&autoconnect=true`);
+    if (server && !/^https?:\/\//i.test(server)) {
+      server = `http://${server.replace(/^\/+/, '')}`;
+    }
+    const receiverParams = new URLSearchParams({
+      serial: String(serial),
+      name: String(name || ''),
+      autoconnect: 'true'
+    });
+    if (wantsRelay && sessionCode) {
+      receiverParams.set('relay', '1');
+      receiverParams.set('session', String(sessionCode).trim().toUpperCase());
+      receiverParams.set('relayBase', relayBase || server || '');
+    }
+    const receiverUrl = `${server}/audio-receiver.html?${receiverParams.toString()}`;
+    console.log(`[open-audio-receiver] URL envoyée au Quest: ${receiverUrl}`);
     
-    if (useBackgroundApp) {
+    if (!wantsRelay && useBackgroundApp) {
       // Use VHR Voice app (background service) - doesn't interrupt games
       console.log(`[open-audio-receiver] Starting background voice app on ${serial}`);
       
@@ -8673,8 +8691,6 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
     }
     
     // Browser method (may pause games)
-    const receiverUrl = `${server}/audio-receiver.html?serial=${encodeURIComponent(serial)}&autoconnect=true`;
-    
     console.log(`[open-audio-receiver] Opening ${receiverUrl} on ${serial}`);
     
     const result = await runAdbCommand(serial, [

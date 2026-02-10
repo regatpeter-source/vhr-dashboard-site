@@ -589,22 +589,34 @@ function openRelayAudioReceiver(serial, sessionCode) {
 		relayBase: relayBase
 	});
 	const targetUrl = `/audio-receiver.html?${params.toString()}`;
-	try {
-		const opened = window.open(targetUrl, '_blank', 'noopener,noreferrer');
-		if (!opened) {
-			showToast('🔗 Onglet bloqué, ouverture dans cette page...', 'warning');
-			setTimeout(() => {
-				try {
-					window.location.href = targetUrl;
-				} catch (navErr) {
-					console.warn('[relay audio] fallback nav failed', navErr);
-				}
-			}, 400);
+	const base = (relayBase || '').replace(/\/$/, '') || window.location.origin;
+	const absoluteUrl = `${base}${targetUrl}`;
+	const payload = {
+		serial,
+		name: deviceName,
+		sessionCode,
+		relay: true,
+		relayBase
+	};
+	api('/api/device/open-audio-receiver', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload)
+	}).then(res => {
+		if (res && res.ok) {
+			showToast(`📱 Récepteur voix lancé sur ${deviceName}`, 'success');
+			return;
 		}
-	} catch (e) {
-		console.warn('[relay audio] open failed', e);
-	}
-	return targetUrl;
+		const errMsg = (res && res.error) ? res.error : 'Ouverture automatique impossible';
+		console.warn('[relay audio] open-audio-receiver failed:', errMsg);
+		showToast(`⚠️ ${errMsg}. Ouvrez manuellement le récepteur.`, 'warning');
+		showVoiceReceiverFallback(absoluteUrl, deviceName);
+	}).catch(err => {
+		console.warn('[relay audio] open-audio-receiver error', err);
+		showToast('⚠️ Ouverture automatique impossible. Ouvrez manuellement le récepteur.', 'warning');
+		showVoiceReceiverFallback(absoluteUrl, deviceName);
+	});
+	return absoluteUrl;
 }
 
 function openSessionHostViewer({ mode, serial }) {

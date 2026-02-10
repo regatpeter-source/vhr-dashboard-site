@@ -272,6 +272,7 @@ if (useHttps && FORCE_HTTP) {
 // ========== ADB BINARY DISCOVERY & AUTO-PATH ==========
 const PROJECT_ROOT = __dirname;
 const ADB_FILENAME = process.platform === 'win32' ? 'adb.exe' : 'adb';
+const FFMPEG_FILENAME = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
 const sanitizePath = directory => directory ? path.resolve(directory) : null;
 
 const candidatePlatformToolsDirs = (() => {
@@ -320,6 +321,47 @@ const BUNDLED_ADB_PATH = locateBundledAdb();
 const HAS_BUNDLED_ADB = Boolean(BUNDLED_ADB_PATH && fs.existsSync(BUNDLED_ADB_PATH));
 const ADB_BIN = HAS_BUNDLED_ADB ? BUNDLED_ADB_PATH : ADB_FILENAME;
 
+// ========== FFMPEG BINARY DISCOVERY & AUTO-PATH ==========
+const candidateFfmpegDirs = (() => {
+  const dirs = [
+    sanitizePath(path.join(PROJECT_ROOT, 'ffmpeg')),
+    sanitizePath(path.join(PROJECT_ROOT, 'bin')),
+    sanitizePath(path.join(PROJECT_ROOT, 'local', 'ffmpeg')),
+    sanitizePath(path.join(PROJECT_ROOT, '..', 'ffmpeg')),
+    sanitizePath(path.join(PROJECT_ROOT, 'resources', 'app.asar.unpacked', 'ffmpeg')),
+    sanitizePath(path.join(PROJECT_ROOT, 'resources', 'app.asar.unpacked', 'local', 'ffmpeg'))
+  ];
+
+  if (process && process.resourcesPath) {
+    dirs.push(sanitizePath(path.join(process.resourcesPath, 'app.asar.unpacked', 'ffmpeg')));
+    dirs.push(sanitizePath(path.join(process.resourcesPath, 'app.asar.unpacked', 'local', 'ffmpeg')));
+    dirs.push(sanitizePath(path.join(process.resourcesPath, 'app', 'ffmpeg')));
+    dirs.push(sanitizePath(path.join(process.resourcesPath, 'ffmpeg')));
+  }
+
+  if (process.env.FFMPEG_HOME) {
+    dirs.push(sanitizePath(process.env.FFMPEG_HOME));
+    dirs.push(sanitizePath(path.join(process.env.FFMPEG_HOME, 'bin')));
+  }
+
+  const unique = Array.from(new Set(dirs.filter(Boolean)));
+  return unique.filter(dir => !/app\.asar(?!\.unpacked)/i.test(dir));
+})();
+
+const locateBundledFfmpeg = () => {
+  for (const ffmpegDir of candidateFfmpegDirs) {
+    const candidate = path.join(ffmpegDir, FFMPEG_FILENAME);
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
+const BUNDLED_FFMPEG_PATH = locateBundledFfmpeg();
+const HAS_BUNDLED_FFMPEG = Boolean(BUNDLED_FFMPEG_PATH && fs.existsSync(BUNDLED_FFMPEG_PATH));
+const FFMPEG_BIN = HAS_BUNDLED_FFMPEG ? BUNDLED_FFMPEG_PATH : FFMPEG_FILENAME;
+
 if (HAS_BUNDLED_ADB) {
   try {
     const adbDir = path.dirname(BUNDLED_ADB_PATH);
@@ -330,6 +372,20 @@ if (HAS_BUNDLED_ADB) {
   } catch (e) {
     console.warn('[ADB] Impossible d\'ajouter le binaire au PATH:', e && e.message ? e.message : e);
   }
+}
+
+if (HAS_BUNDLED_FFMPEG) {
+  try {
+    const ffmpegDir = path.dirname(BUNDLED_FFMPEG_PATH);
+    if (ffmpegDir && !process.env.PATH.includes(ffmpegDir)) {
+      process.env.PATH = `${ffmpegDir}${path.delimiter}${process.env.PATH || ''}`;
+      console.log(`[FFmpeg] Binaire embarqué détecté: ${FFMPEG_BIN}. Ajouté au PATH.`);
+    }
+  } catch (e) {
+    console.warn('[FFmpeg] Impossible d\'ajouter le binaire au PATH:', e && e.message ? e.message : e);
+  }
+} else {
+  console.warn('[FFmpeg] Binaire non détecté dans l\'app. Assurez-vous d\'embarquer ffmpeg dans le dossier ffmpeg/.');
 }
 
 
@@ -7374,7 +7430,7 @@ async function startStream(serial, opts = {}) {
   ];
 
   try {
-    ffmpegProc = spawn('ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
+    ffmpegProc = spawn(FFMPEG_BIN, ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
     entry.ffmpegProc = ffmpegProc;
     ffmpegProc.stderr && ffmpegProc.stderr.on('data', d => {
       console.error('[ffmpeg stderr]', d.toString());
@@ -8539,20 +8595,24 @@ app.post('/api/adb/command', async (req, res) => {
 
 // Open audio receiver in Quest - supports both browser and background app
 app.post('/api/device/open-audio-receiver', async (req, res) => {
-  const { serial, serverUrl, useBackgroundApp } = req.body || {};
+  const { serial, serverUrl, useBackgroundApp, relay, sessionCode, relayBase, name } = req.body || {};
   if (!serial) {
     return res.status(400).json({ ok: false, error: 'serial required' });
   }
 
   try {
+    const wantsRelay = Boolean(relay || relayBase || sessionCode);
     // Correction : forcer l'utilisation de l'IP LAN si serverUrl est localhost ou absent
     let server = (serverUrl || '').trim();
+    if (wantsRelay) {
+      server = (relayBase || server || RELAY_STREAM_BASE_URL || '').trim();
+    }
     // Corrige une éventuelle faute de frappe (locahost)
     if (server.includes('locahost')) {
       server = server.replace(/locahost/gi, 'localhost');
     }
 
-    if (!server || server.includes('localhost') || server.includes('127.0.0.1')) {
+    if (!wantsRelay && (!server || server.includes('localhost') || server.includes('127.0.0.1'))) {
       const lanIp = resolveLanIpForClient(req);
       if (lanIp) {
         server = `http://${lanIp}:3000`;
@@ -8569,9 +8629,23 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
         }
       }
     }
-    console.log(`[open-audio-receiver] URL envoyée au Quest: ${server}/audio-receiver.html?serial=${encodeURIComponent(serial)}&autoconnect=true`);
+    if (server && !/^https?:\/\//i.test(server)) {
+      server = `http://${server.replace(/^\/+/, '')}`;
+    }
+    const receiverParams = new URLSearchParams({
+      serial: String(serial),
+      name: String(name || ''),
+      autoconnect: 'true'
+    });
+    if (wantsRelay && sessionCode) {
+      receiverParams.set('relay', '1');
+      receiverParams.set('session', String(sessionCode).trim().toUpperCase());
+      receiverParams.set('relayBase', relayBase || server || '');
+    }
+    const receiverUrl = `${server}/audio-receiver.html?${receiverParams.toString()}`;
+    console.log(`[open-audio-receiver] URL envoyée au Quest: ${receiverUrl}`);
     
-    if (useBackgroundApp) {
+    if (!wantsRelay && useBackgroundApp) {
       // Use VHR Voice app (background service) - doesn't interrupt games
       console.log(`[open-audio-receiver] Starting background voice app on ${serial}`);
       
@@ -8629,8 +8703,6 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
     }
     
     // Browser method (may pause games)
-    const receiverUrl = `${server}/audio-receiver.html?serial=${encodeURIComponent(serial)}&autoconnect=true`;
-    
     console.log(`[open-audio-receiver] Opening ${receiverUrl} on ${serial}`);
     
     const result = await runAdbCommand(serial, [

@@ -341,8 +341,33 @@
       errorBox: document.getElementById('errorBox')
     };
 
+    const urlParams = new URLSearchParams(window.location.search || '');
+    const relayMode = urlParams.get('relay') === '1';
+    const relaySession = urlParams.get('session') || '';
+    const relayBaseParam = urlParams.get('relayBase') || '';
+    const querySerial = urlParams.get('serial') || '';
+    const autoConnect = urlParams.get('autoconnect') === 'true';
+
+    function resolveRelayBase(base) {
+      if (!base) return '';
+      let url = String(base).trim();
+      if (!/^wss?:\/\//i.test(url) && !/^https?:\/\//i.test(url)) {
+        url = `https://${url.replace(/^\/+/, '')}`;
+      }
+      return url;
+    }
+
+    function buildRelayWsUrl(base, serial, session) {
+      const resolved = resolveRelayBase(base);
+      if (!resolved || !serial || !session) return '';
+      const parsed = new URL(resolved);
+      const protocol = (parsed.protocol === 'https:' || parsed.protocol === 'wss:') ? 'wss:' : 'ws:';
+      return `${protocol}//${parsed.host}/api/relay/audio?session=${encodeURIComponent(session)}&serial=${encodeURIComponent(serial)}&role=viewer`;
+    }
+
     // Détection automatique de l'IP du PC (backend)
     async function autoDetectServerIP() {
+      if (relayMode) return;
       // On tente de récupérer l'IP du serveur via une API dédiée
       try {
         const res = await fetch('/api/server-info');
@@ -428,6 +453,10 @@
     
     // Load persisted serial from localStorage
     function loadSerialFromStorage() {
+      if (querySerial) {
+        elements.serialInput.value = querySerial;
+        return;
+      }
       const stored = localStorage.getItem('vhr-audio-serial');
       if (stored) {
         elements.serialInput.value = stored;
@@ -445,7 +474,7 @@
         return;
       }
       // Bloque toute connexion à localhost ou 127.0.0.1
-      if (server.includes('localhost') || server.includes('127.0.0.1')) {
+      if (!relayMode && (server.includes('localhost') || server.includes('127.0.0.1'))) {
         showError('Connexion à localhost impossible depuis le casque. Merci d\'utiliser l\'adresse LAN (ws://<LAN_IP>:3000) fournie par le bouton 🗣️ Voix.');
         return;
       }
@@ -462,16 +491,26 @@
       }
       
       // Build WebSocket URL
-      // Support both ws:// and http:// formats
-      let wsUrl = server;
-      if (!wsUrl.startsWith('ws')) {
-        wsUrl = wsUrl.replace(/^https?:\/\//, '');
-        wsUrl = 'ws://' + wsUrl;
+      let wsUrl = '';
+      if (relayMode) {
+        const base = relayBaseParam || server;
+        if (!relaySession) {
+          showError('Session relay manquante (paramètre session).');
+          return;
+        }
+        wsUrl = buildRelayWsUrl(base, serial, relaySession);
+      } else {
+        // Support both ws:// and http:// formats
+        wsUrl = server;
+        if (!wsUrl.startsWith('ws')) {
+          wsUrl = wsUrl.replace(/^https?:\/\//, '');
+          wsUrl = 'ws://' + wsUrl;
+        }
+
+        // Ensure no trailing slash and add path
+        wsUrl = wsUrl.replace(/\/$/, '');
+        wsUrl += `/api/audio/stream?serial=${encodeURIComponent(serial)}&mode=receiver`;
       }
-      
-      // Ensure no trailing slash and add path
-      wsUrl = wsUrl.replace(/\/$/, '');
-      wsUrl += `/api/audio/stream?serial=${encodeURIComponent(serial)}&mode=receiver`;
       
       console.log('Connecting to:', wsUrl);
       updateStatus('connecting', 'Connecting...');
@@ -629,9 +668,13 @@
 
     // Détection automatique de l'IP serveur si localhost détecté ou sur Quest
     window.addEventListener('DOMContentLoaded', () => {
+      if (relayMode) {
+        const base = relayBaseParam || window.location.origin;
+        elements.serverInput.value = resolveRelayBase(base);
+      }
       // Si la page est ouverte sur localhost, on tente de rediriger automatiquement vers l'IP du PC
       const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      if (isLocalhost) {
+      if (!relayMode && isLocalhost) {
         // On tente de détecter l'IP du serveur et de rediriger
         fetch('/api/server-info').then(async res => {
           if (res.ok) {
@@ -646,8 +689,11 @@
           // Si pas d'IP, affiche une erreur
           showError("Impossible de détecter l'adresse IP du serveur. Ouvrez plutôt le dashboard sur http://localhost:3000/vhr-dashboard-pro.html et cliquez sur le bouton 🗣️ Voix pour être redirigé ici via l'IP LAN.");
         });
-      } else if (elements.serverInput.value.includes('localhost') || elements.serverInput.value.includes('127.0.0.1') || !elements.serverInput.value) {
+      } else if (!relayMode && (elements.serverInput.value.includes('localhost') || elements.serverInput.value.includes('127.0.0.1') || !elements.serverInput.value)) {
         autoDetectServerIP();
+      }
+      if (autoConnect) {
+        setTimeout(connect, 200);
       }
     });
 
