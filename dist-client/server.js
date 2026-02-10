@@ -7389,6 +7389,7 @@ async function startStream(serial, opts = {}) {
 
   const entry = streams.get(serial) || { clients: new Set(), mpeg1Clients: new Set(), h264Clients: new Set() };
   entry.adbProc = adbProc;
+  entry.hasH264Data = false;
   entry.shouldRun = true;
   entry.autoReconnect = Boolean(opts.autoReconnect);
   entry.relaySessionCode = opts.sessionCode || entry.relaySessionCode || null;
@@ -7407,9 +7408,23 @@ async function startStream(serial, opts = {}) {
   
   streams.set(serial, entry);
 
+  adbProc.stderr && adbProc.stderr.on('data', d => {
+    console.error('[adb stderr]', d.toString());
+  });
+
+  const adbFirstDataTimer = setTimeout(() => {
+    if (!entry.hasH264Data) {
+      console.warn(`[adb] no H264 data received for ${serial} after 2s. Verify headset is awake/authorized.`);
+    }
+  }, 2000);
+
   // ---------- Pipeline H264 with Frame Stabilization ----------
   // Buffer incoming frames and send them at a steady rate to prevent flickering
   adbProc.stdout.on('data', chunk => {
+    if (!entry.hasH264Data) {
+      entry.hasH264Data = true;
+      clearTimeout(adbFirstDataTimer);
+    }
     // Add chunk to buffer
     if (entry.frameBuffer.length < entry.maxBufferSize) {
       entry.frameBuffer.push(chunk);
@@ -7501,6 +7516,9 @@ async function startStream(serial, opts = {}) {
 
   adbProc.on('exit', code => {
     console.log(`[adb] EXIT code=${code}`);
+    if (!entry.hasH264Data) {
+      console.warn(`[adb] screenrecord ended before outputting data for ${serial}`);
+    }
     const ent = streams.get(serial);
     if (!ent) return cleanup();
     const stillHasViewers = (ent.clients && ent.clients.size > 0) || (ent.h264Clients && ent.h264Clients.size > 0) || (ent.mpeg1Clients && ent.mpeg1Clients.size > 0);
