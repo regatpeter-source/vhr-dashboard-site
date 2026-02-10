@@ -7474,19 +7474,20 @@ async function startStream(serial, opts = {}) {
   // ---------- Pipeline JSMpeg (MPEG1) ----------
   // ffmpeg: H264 (adb) -> MPEG1-TS (JSMpeg)
   const ffmpegArgs = [
-    '-fflags', 'nobuffer',
+    '-fflags', '+genpts',
+    '-use_wallclock_as_timestamps', '1',
     '-flags', 'low_delay',
-    '-probesize', '32',
-    '-analyzeduration', '0',
-    '-flush_packets', '1',
+    '-probesize', '1000000',
+    '-analyzeduration', '1000000',
     '-i', 'pipe:0',
     '-f', 'mpegts',
     '-codec:v', 'mpeg1video',
     '-b:v', '2000k',
-    '-vf', 'fps=25,scale=640:368',
+    '-r', '25',
+    '-vf', 'scale=640:368',
     '-pix_fmt', 'yuv420p',
     '-bf', '0',
-    '-muxdelay', '0.001',
+    '-muxdelay', '0.1',
     'pipe:1'
   ];
 
@@ -7507,7 +7508,17 @@ async function startStream(serial, opts = {}) {
 
     let relayVideoBytes = 0;
     let relayVideoLastLogAt = 0;
+    let mpeg1FirstData = false;
+    const mpeg1FirstDataTimer = setTimeout(() => {
+      if (!mpeg1FirstData) {
+        console.warn(`[ffmpeg] no MPEG1 output produced for ${serial} after 3s`);
+      }
+    }, 3000);
     ffmpegProc.stdout.on('data', chunk => {
+      if (!mpeg1FirstData) {
+        mpeg1FirstData = true;
+        clearTimeout(mpeg1FirstDataTimer);
+      }
       for (const ws of entry.mpeg1Clients || []) {
         if (ws.readyState === 1) {
           try { ws.send(chunk); } catch {}
