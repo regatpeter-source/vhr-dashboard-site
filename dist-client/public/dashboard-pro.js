@@ -1873,31 +1873,18 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 
 	if (useRelayForRemote) {
 		showToast('🛰️ Voix distante via relais…', 'info');
-		const targetUser = getSessionDeviceOwner(serial);
 		try {
-			if (targetUser) {
-				await sendSessionApiRequest({
-					targetUser,
-					path: '/api/relay/audio/register',
-					opts: {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ serial, sessionCode })
-					}
-				});
-			} else {
-				await api('/api/relay/audio/register', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ serial, sessionCode })
-				});
-			}
+			await api('/api/relay/audio/register', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ serial, sessionCode }),
+				_skipSessionProxy: true
+			});
 		} catch (e) {
 			console.warn('[relay audio] register failed', e);
 		}
-		broadcastSessionAction('session-voice-start', { serial, sessionCode, requester: currentUser || '' });
 		openRelayAudioReceiver(serial, sessionCode);
-		return;
+		showToast('⚠️ Ne pas ouvrir le receiver sur ce PC (B). Le receiver doit rester sur le casque.', 'warning', 5500);
 	}
 	// Close any existing stream first (same or different device)
 	if (activeAudioStream) {
@@ -1999,7 +1986,7 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 	try {
 		// Build headset-accessible server URL (avoid localhost inside headset)
 		let resolvedServerUrl = await resolveAudioServerUrl();
-		if (isRemoteDevice) {
+		if (isRemoteDevice && !useRelayForRemote) {
 			const hostUrl = getSessionHostLanUrl();
 			if (!hostUrl) {
 				showToast('⚠️ URL hôte introuvable. Demandez à l’hôte de relancer la session.', 'warning');
@@ -2041,6 +2028,7 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 		activeAudioStream.setLocalMonitoring(false);
 		
 		// Start audio receiver on headset - browser only (pas d'ouverture forcée sur le Quest)
+		if (!useRelayForRemote) {
 		try {
 			const serverUrl = resolvedServerUrl || window.location.origin;
 			console.log('[voice] Receiver serverUrl:', serverUrl);
@@ -2109,6 +2097,7 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 			// Ne pas forcer l'ouverture via ADB pour éviter qu'une page prenne le focus dans le casque
 		} catch (openError) {
 			console.warn('[sendVoiceToHeadset] Could not open audio receiver:', openError);
+		}
 		}
 		
 		// Also start audio relay to headset via WebSocket for simple receivers

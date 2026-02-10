@@ -361,6 +361,24 @@ const locateBundledFfmpeg = () => {
 const BUNDLED_FFMPEG_PATH = locateBundledFfmpeg();
 const HAS_BUNDLED_FFMPEG = Boolean(BUNDLED_FFMPEG_PATH && fs.existsSync(BUNDLED_FFMPEG_PATH));
 const FFMPEG_BIN = HAS_BUNDLED_FFMPEG ? BUNDLED_FFMPEG_PATH : FFMPEG_FILENAME;
+let cachedFfmpegAvailable = null;
+
+function checkFfmpegAvailability() {
+  if (cachedFfmpegAvailable !== null) return cachedFfmpegAvailable;
+  if (HAS_BUNDLED_FFMPEG) {
+    cachedFfmpegAvailable = true;
+    return true;
+  }
+  try {
+    const cmd = `"${FFMPEG_BIN}" -version`;
+    execSync(cmd, { stdio: 'ignore', timeout: 4000 });
+    cachedFfmpegAvailable = true;
+    return true;
+  } catch (e) {
+    cachedFfmpegAvailable = false;
+    return false;
+  }
+}
 
 if (HAS_BUNDLED_ADB) {
   try {
@@ -7272,6 +7290,9 @@ function broadcastToSerial(serial, chunk) {
 async function startStream(serial, opts = {}) {
   // Compat: variable ffmpegProc définie même si non utilisée (pipeline MPEG1 désactivée)
   let ffmpegProc = null;
+  if (!checkFfmpegAvailability()) {
+    throw new Error('FFmpeg introuvable. Placez ffmpeg.exe dans dist-client/ffmpeg ou ajoutez-le au PATH.');
+  }
   function cleanup() {
     const ent = streams.get(serial) || entry;
     try { if (ent && ent.adbProc && ent.adbProc.pid) spawn('taskkill', ['/F', '/T', '/PID', ent.adbProc.pid.toString()]) } catch {}
@@ -7832,6 +7853,13 @@ app.post('/api/relay/audio/register', authMiddleware, (req, res) => {
 app.post('/api/stream/start', async (req, res) => {
   const { serial, profile, cropLeftEye, sessionCode } = req.body || {};
   if (!serial) return res.status(400).json({ ok: false, error: 'serial required' });
+
+  if (!checkFfmpegAvailability()) {
+    return res.status(500).json({
+      ok: false,
+      error: 'FFmpeg introuvable. Placez ffmpeg.exe dans dist-client/ffmpeg (ou ajoutez-le au PATH) puis relancez l’app.'
+    });
+  }
 
   let finalProfile = profile;
   if (!finalProfile || finalProfile === 'default') {
