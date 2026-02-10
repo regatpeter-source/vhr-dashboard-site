@@ -679,6 +679,10 @@ function getSessionDeviceOwner(serial) {
 		if (!owner || owner === currentUser) continue;
 		if ((list || []).some(d => d && d.serial === serial)) return owner;
 	}
+	const deviceMatch = (devices || []).find(d => d && d.serial === serial);
+	if (deviceMatch && deviceMatch.sessionOwner && deviceMatch.sessionOwner !== currentUser) {
+		return deviceMatch.sessionOwner;
+	}
 	return '';
 }
 
@@ -1215,6 +1219,7 @@ function handleSessionAction(data) {
 		case 'session-voice-start': {
 			if (!payload || !payload.serial) return;
 			if (payload.requester && payload.requester !== currentUser) return;
+			if (from && from !== currentUser) return;
 			const sessionCode = payload.sessionCode || getActiveSessionCode();
 			window.sendVoiceToHeadset(payload.serial, { viaSession: true, sessionCode });
 			break;
