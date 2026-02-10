@@ -7219,8 +7219,10 @@ async function startStream(serial, opts = {}) {
   function cleanup() {
     const ent = streams.get(serial) || entry;
     try { if (ent && ent.adbProc && ent.adbProc.pid) spawn('taskkill', ['/F', '/T', '/PID', ent.adbProc.pid.toString()]) } catch {}
+    try { if (ent && ent.ffmpegProc && ent.ffmpegProc.pid) spawn('taskkill', ['/F', '/T', '/PID', ent.ffmpegProc.pid.toString()]) } catch {}
     try { if (ent && ent.ffplayProc && ent.ffplayProc.pid) spawn('taskkill', ['/F', '/T', '/PID', ent.ffplayProc.pid.toString()]) } catch {}
     for (const ws of (ent && ent.clients) || []) { try { ws.close() } catch {} }
+    for (const ws of (ent && ent.mpeg1Clients) || []) { try { ws.close() } catch {} }
     streams.delete(serial)
   }
   if (streams.has(serial)) {
@@ -7346,17 +7348,56 @@ async function startStream(serial, opts = {}) {
             }
           }
 
-          if (entry.relayWs && entry.relayWs.readyState === WebSocket.OPEN) {
-            try { entry.relayWs.send(chunk); } catch (e) {}
-          }
-          
           entry.lastSendTime = Date.now();
         }
       }, entry.targetFPS); // Send at ~30 FPS (33ms intervals)
     }
   });
 
-  // MPEG1 / ffmpeg pipeline désactivée (supprimée)
+  // ---------- Pipeline JSMpeg (MPEG1) ----------
+  // ffmpeg: H264 (adb) -> MPEG1-TS (JSMpeg)
+  const ffmpegArgs = [
+    '-fflags', 'nobuffer',
+    '-flags', 'low_delay',
+    '-probesize', '32',
+    '-analyzeduration', '0',
+    '-flush_packets', '1',
+    '-i', 'pipe:0',
+    '-f', 'mpegts',
+    '-codec:v', 'mpeg1video',
+    '-b:v', '2000k',
+    '-vf', 'fps=25,scale=640:368',
+    '-pix_fmt', 'yuv420p',
+    '-bf', '0',
+    '-muxdelay', '0.001',
+    'pipe:1'
+  ];
+
+  try {
+    ffmpegProc = spawn('ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
+    entry.ffmpegProc = ffmpegProc;
+    ffmpegProc.stderr && ffmpegProc.stderr.on('data', d => {
+      console.error('[ffmpeg stderr]', d.toString());
+    });
+    adbProc.stdout.pipe(ffmpegProc.stdin);
+    ffmpegProc.stdin.on('error', err => {
+      if (err.code !== 'EPIPE') console.error('[ffmpeg stdin]', err);
+    });
+
+    ffmpegProc.stdout.on('data', chunk => {
+      for (const ws of entry.mpeg1Clients || []) {
+        if (ws.readyState === 1) {
+          try { ws.send(chunk); } catch {}
+        }
+      }
+
+      if (entry.relayWs && entry.relayWs.readyState === WebSocket.OPEN) {
+        try { entry.relayWs.send(chunk); } catch (e) {}
+      }
+    });
+  } catch (e) {
+    console.error('[ffmpeg] Unable to start:', e.message);
+  }
 
   adbProc.on('exit', code => {
     console.log(`[adb] EXIT code=${code}`);
@@ -7376,7 +7417,11 @@ async function startStream(serial, opts = {}) {
     }
   });
 
-  // ffmpeg désactivé: pas d'écouteur exit
+  if (ffmpegProc) {
+    ffmpegProc.on('exit', (code) => {
+      console.log(`[ffmpeg] EXIT code=${code}`);
+    });
+  }
 
   io.emit('stream-event', { type: 'start', serial, config: { size, bitrate } });
   return true;
@@ -7413,6 +7458,11 @@ function stopStream(serial) {
       spawn('taskkill', ['/F', '/T', '/PID', entry.ffplayProc.pid.toString()]);
     }
   } catch {}
+  try {
+    if (entry.ffmpegProc && entry.ffmpegProc.pid) {
+      spawn('taskkill', ['/F', '/T', '/PID', entry.ffmpegProc.pid.toString()]);
+    }
+  } catch {}
 
     if (entry.relayWs) {
       try { entry.relayWs.close(); } catch (e) {}
@@ -7420,6 +7470,9 @@ function stopStream(serial) {
     }
 
   for (const ws of entry.clients) {
+    try { ws.close(); } catch {}
+  }
+  for (const ws of entry.mpeg1Clients || []) {
     try { ws.close(); } catch {}
   }
 
@@ -7631,17 +7684,17 @@ appServer.on('upgrade', (req, res, head) => {
       }
 
       wssMpeg1.handleUpgrade(req, res, head, (ws) => {
-        entry.h264Clients.add(ws);
-        console.log(`[WebSocket] H264 Client connected to stream ${serial}, total clients: ${entry.h264Clients.size}`);
+        entry.mpeg1Clients.add(ws);
+        console.log(`[WebSocket] MPEG1 Client connected to stream ${serial}, total clients: ${entry.mpeg1Clients.size}`);
         
         ws.on('close', () => {
-          entry.h264Clients.delete(ws);
-          console.log(`[WebSocket] H264 Client disconnected from stream ${serial}, remaining: ${entry.h264Clients.size}`);
+          entry.mpeg1Clients.delete(ws);
+          console.log(`[WebSocket] MPEG1 Client disconnected from stream ${serial}, remaining: ${entry.mpeg1Clients.size}`);
         });
 
         ws.on('error', (err) => {
           console.error(`[WebSocket] Error on stream ${serial}:`, err.message);
-          entry.h264Clients.delete(ws);
+          entry.mpeg1Clients.delete(ws);
         });
       });
     } catch (err) {

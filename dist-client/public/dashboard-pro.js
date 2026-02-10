@@ -527,6 +527,8 @@ const pendingSessionRequests = new Map();
 const SESSION_API_TIMEOUT_MS = 20000;
 const SESSION_DEVICE_PING_INTERVAL_MS = 15000;
 let sessionDevicePingTimer = null;
+const RELAY_VOICE_OPEN_COOLDOWN_MS = 2000;
+const relayVoiceOpenTracker = new Map();
 
 function isSessionActive() {
 	return !!(currentSession && currentSession.code);
@@ -590,7 +592,14 @@ function openRelayAudioReceiver(serial, sessionCode) {
 	try {
 		const opened = window.open(targetUrl, '_blank', 'noopener,noreferrer');
 		if (!opened) {
-			showToast('🔗 Ouvrez le récepteur audio (onglet bloqué)', 'warning');
+			showToast('🔗 Onglet bloqué, ouverture dans cette page...', 'warning');
+			setTimeout(() => {
+				try {
+					window.location.href = targetUrl;
+				} catch (navErr) {
+					console.warn('[relay audio] fallback nav failed', navErr);
+				}
+			}, 400);
 		}
 	} catch (e) {
 		console.warn('[relay audio] open failed', e);
@@ -1839,6 +1848,16 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 	const isRemoteDevice = isRemoteSessionSerial(serial);
 	const sessionCode = options.sessionCode || getActiveSessionCode();
 	const useRelayForRemote = isRemoteDevice && shouldUseRelayForSession(serial) && sessionCode && !options.viaSession;
+	if (useRelayForRemote) {
+		const relayKey = `${sessionCode}:${serial}`;
+		const lastOpen = relayVoiceOpenTracker.get(relayKey) || 0;
+		const now = Date.now();
+		if (now - lastOpen < RELAY_VOICE_OPEN_COOLDOWN_MS) {
+			console.log('[relay audio] open ignored (cooldown)', relayKey);
+			return;
+		}
+		relayVoiceOpenTracker.set(relayKey, now);
+	}
 
 	if (useRelayForRemote) {
 		showToast('🛰️ Voix distante via relais…', 'info');
