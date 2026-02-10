@@ -4052,8 +4052,7 @@ window.initStreamPlayer = function(serial) {
 		console.log('[stream] JSMpeg not loaded, loading from CDN...');
 		// Charger JSMpeg dynamiquement (CDN fallback)
 		const sources = [
-			'https://cdn.jsdelivr.net/npm/jsmpeg@0.2.1/jsmpeg.min.js',
-			'https://unpkg.com/jsmpeg@0.2.1/jsmpeg.min.js'
+			'https://cdn.jsdelivr.net/gh/phoboslab/jsmpeg@master/jsmpeg.min.js'
 		];
 		const tryLoad = (index) => {
 			if (index >= sources.length) {

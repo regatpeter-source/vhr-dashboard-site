@@ -3684,7 +3684,7 @@ window.initStreamPlayer = function(serial) {
 		console.log('[stream] JSMpeg not loaded, loading from CDN...');
 		// Charger JSMpeg dynamiquement
 		const script = document.createElement('script');
-		script.src = 'https://cdn.jsdelivr.net/npm/jsmpeg-player@0.2.8/jsmpeg.min.js';
+		script.src = 'https://cdn.jsdelivr.net/gh/phoboslab/jsmpeg@master/jsmpeg.min.js';
 		script.onerror = () => {
 			console.error('[stream] Failed to load JSMpeg library');
 			showToast('❌ Erreur: impossible de charger la librairie vidéo', 'error');
