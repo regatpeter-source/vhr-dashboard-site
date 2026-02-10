@@ -477,7 +477,16 @@ class VHRAudioStream {
       const relayBase = this.config.relayBase || window.location.origin;
       const relayUrl = new URL(relayBase);
       const wsProtocol = relayUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${wsProtocol}//${relayUrl.host}/api/audio/stream?serial=${encodeURIComponent(targetSerial)}&mode=sender&format=${wsFormat}`;
+      let wsUrl = '';
+      if (opts.relay === true) {
+        const relaySession = String(opts.sessionCode || '').trim().toUpperCase();
+        if (!relaySession) {
+          throw new Error('sessionCode requis pour le relais audio');
+        }
+        wsUrl = `${wsProtocol}//${relayUrl.host}/api/relay/audio?session=${encodeURIComponent(relaySession)}&serial=${encodeURIComponent(targetSerial)}&role=sender`;
+      } else {
+        wsUrl = `${wsProtocol}//${relayUrl.host}/api/audio/stream?serial=${encodeURIComponent(targetSerial)}&mode=sender&format=${wsFormat}`;
+      }
       
       this._log('Connecting to relay: ' + wsUrl);
       

@@ -8952,7 +8952,8 @@ function handleRelaySocket(kind, ws, req) {
     return;
   }
 
-  if (role === 'sender' && RELAY_STREAM_SECRET && secret !== RELAY_STREAM_SECRET) {
+  if (role === 'sender' && kind === 'video' && RELAY_STREAM_SECRET && secret !== RELAY_STREAM_SECRET) {
+    console.warn('[Relay] Video sender rejected (secret mismatch) session=', sessionCode, 'serial=', serial);
     ws.close();
     return;
   }

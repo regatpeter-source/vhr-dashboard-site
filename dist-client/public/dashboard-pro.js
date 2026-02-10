@@ -609,12 +609,10 @@ function openRelayAudioReceiver(serial, sessionCode) {
 		}
 		const errMsg = (res && res.error) ? res.error : 'Ouverture automatique impossible';
 		console.warn('[relay audio] open-audio-receiver failed:', errMsg);
-		showToast(`⚠️ ${errMsg}. Ouvrez manuellement le récepteur.`, 'warning');
-		showVoiceReceiverFallback(absoluteUrl, deviceName);
+		showToast(`⚠️ ${errMsg}. Demandez à l’hôte d’ouvrir le receiver sur le casque.`, 'warning');
 	}).catch(err => {
 		console.warn('[relay audio] open-audio-receiver error', err);
-		showToast('⚠️ Ouverture automatique impossible. Ouvrez manuellement le récepteur.', 'warning');
-		showVoiceReceiverFallback(absoluteUrl, deviceName);
+		showToast('⚠️ Ouverture automatique impossible. Demandez à l’hôte d’ouvrir le receiver sur le casque.', 'warning');
 	});
 	return absoluteUrl;
 }
@@ -2003,10 +2001,11 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 			signalingToken = await syncTokenFromCookie();
 		}
 
+		const relayBase = useRelayForRemote ? getRelayBaseUrl() : resolvedServerUrl;
 		activeAudioStream = new window.VHRAudioStream({
 			signalingServer: resolvedServerUrl,
 			signalingPath: '/api/audio/signal',
-			relayBase: resolvedServerUrl,
+			relayBase: relayBase,
 			authToken: signalingToken || ''
 		});
 		console.log('[voice] Starting VHRAudioStream (WebRTC+relay) for', serial);
@@ -2105,8 +2104,12 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 		try {
 			const relayFormat = useBackgroundApp ? 'ogg' : 'webm';
 			if (activeAudioStream && typeof activeAudioStream.startAudioRelay === 'function' && activeAudioStream.localStream) {
-				console.log('[voice] Starting audio relay WS sender for', serial, 'format=', relayFormat, 'startOk=', startOk);
-				await activeAudioStream.startAudioRelay(serial, { format: relayFormat });
+				console.log('[voice] Starting audio relay WS sender for', serial, 'format=', relayFormat, 'startOk=', startOk, 'relay=', useRelayForRemote);
+				await activeAudioStream.startAudioRelay(serial, {
+					format: relayFormat,
+					relay: useRelayForRemote,
+					sessionCode: useRelayForRemote ? sessionCode : undefined
+				});
 				console.log('[sendVoiceToHeadset] Audio relay started for headset receivers');
 			} else {
 				console.warn('[sendVoiceToHeadset] Audio relay skipped: stream not ready or no mic stream');
@@ -2117,7 +2120,11 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 			if (useBackgroundApp && activeAudioStream && typeof activeAudioStream.startAudioRelay === 'function') {
 				try {
 					console.log('[voice] Fallback relay in webm for', serial);
-					await activeAudioStream.startAudioRelay(serial, { format: 'webm' });
+					await activeAudioStream.startAudioRelay(serial, {
+						format: 'webm',
+						relay: useRelayForRemote,
+						sessionCode: useRelayForRemote ? sessionCode : undefined
+					});
 					console.log('[sendVoiceToHeadset] Fallback WebM relay started');
 				} catch (fallbackErr) {
 					console.warn('[sendVoiceToHeadset] Fallback relay failed:', fallbackErr);

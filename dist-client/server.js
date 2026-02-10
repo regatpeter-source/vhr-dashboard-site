@@ -2663,8 +2663,18 @@ function ensureRelayVideoSender(serial, sessionCode) {
   if (!wsUrl) return null;
   const ws = new WebSocket(wsUrl);
   relayVideoSenders.set(serial, ws);
-  ws.on('close', () => relayVideoSenders.delete(serial));
-  ws.on('error', () => relayVideoSenders.delete(serial));
+  console.log(`[relay-video] sender connecting ${serial} -> ${wsUrl}`);
+  ws.on('open', () => {
+    console.log(`[relay-video] sender connected ${serial}`);
+  });
+  ws.on('close', (code, reason) => {
+    console.warn(`[relay-video] sender closed ${serial} code=${code} reason=${reason || ''}`);
+    relayVideoSenders.delete(serial);
+  });
+  ws.on('error', (err) => {
+    console.warn(`[relay-video] sender error ${serial}:`, err && err.message ? err.message : err);
+    relayVideoSenders.delete(serial);
+  });
   return ws;
 }
 
@@ -7451,8 +7461,12 @@ async function startStream(serial, opts = {}) {
   ];
 
   try {
+    console.log(`[ffmpeg] Launching: ${FFMPEG_BIN}`);
     ffmpegProc = spawn(FFMPEG_BIN, ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
     entry.ffmpegProc = ffmpegProc;
+    ffmpegProc.on('error', (err) => {
+      console.error('[ffmpeg] spawn error:', err && err.message ? err.message : err);
+    });
     ffmpegProc.stderr && ffmpegProc.stderr.on('data', d => {
       console.error('[ffmpeg stderr]', d.toString());
     });
