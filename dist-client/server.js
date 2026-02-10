@@ -7296,6 +7296,19 @@ function broadcastToSerial(serial, chunk) {
   }
 }
 
+async function ensureDeviceStreamingReady(serial) {
+  if (!serial) return;
+  try {
+    await runAdbCommandSafe(serial, ['shell', 'svc', 'power', 'stayon', 'true']);
+    await runAdbCommandSafe(serial, ['shell', 'input', 'keyevent', 'KEYCODE_WAKEUP']);
+    await runAdbCommandSafe(serial, ['shell', 'input', 'keyevent', 'KEYCODE_MENU']);
+    await runAdbCommandSafe(serial, ['shell', 'wm', 'dismiss-keyguard']);
+    await runAdbCommandSafe(serial, ['shell', 'settings', 'put', 'system', 'screen_off_timeout', '2147483647']);
+  } catch (e) {
+    console.warn('[adb] ensureDeviceStreamingReady failed:', e && e.message ? e.message : e);
+  }
+}
+
 // ---------- ADB screenrecord (H264 direct) ----------
 async function startStream(serial, opts = {}) {
   // Compat: variable ffmpegProc définie même si non utilisée (pipeline MPEG1 désactivée)
@@ -7303,6 +7316,7 @@ async function startStream(serial, opts = {}) {
   if (!checkFfmpegAvailability()) {
     throw new Error('FFmpeg introuvable. Placez ffmpeg.exe dans dist-client/ffmpeg ou ajoutez-le au PATH.');
   }
+  await ensureDeviceStreamingReady(serial);
   function cleanup() {
     const ent = streams.get(serial) || entry;
     try { if (ent && ent.adbProc && ent.adbProc.pid) spawn('taskkill', ['/F', '/T', '/PID', ent.adbProc.pid.toString()]) } catch {}
@@ -7373,6 +7387,7 @@ async function startStream(serial, opts = {}) {
     '--output-format=h264',
     `--bit-rate=${bitrateNum}`,
     `--size=${size}`,
+    '--time-limit=1800',
     '-'
   ];
   
