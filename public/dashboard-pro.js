@@ -3725,6 +3725,7 @@ window.connectStreamSocket = function(serial) {
 			canvas: canvas,
 			autoplay: true,
 			progressive: true,
+			disableWebAssembly: true,
 			// Optimisations pour éviter le scintillement:
 			bufferSize: 512 * 1024,  // 512KB buffer client-side (accepte +100-200ms pour la stabilité)
 			chunkSize: 1024 * 10,    // Traiter les chunks par 10KB
