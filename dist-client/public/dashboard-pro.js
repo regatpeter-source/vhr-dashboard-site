@@ -1214,6 +1214,7 @@ function handleSessionAction(data) {
 		}
 		case 'session-voice-start': {
 			if (!payload || !payload.serial) return;
+			if (payload.requester && payload.requester !== currentUser) return;
 			const sessionCode = payload.sessionCode || getActiveSessionCode();
 			window.sendVoiceToHeadset(payload.serial, { viaSession: true, sessionCode });
 			break;

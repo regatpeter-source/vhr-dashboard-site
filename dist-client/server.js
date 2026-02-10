@@ -7230,6 +7230,12 @@ async function startStream(serial, opts = {}) {
       console.log(`[stream] already streaming on ${serial}, reusing existing session`);
       existing.shouldRun = true;
       existing.autoReconnect = Boolean(opts.autoReconnect);
+      if (opts.sessionCode) {
+        existing.relaySessionCode = String(opts.sessionCode).trim().toUpperCase();
+        if (!existing.relayWs || existing.relayWs.readyState !== WebSocket.OPEN) {
+          existing.relayWs = ensureRelayVideoSender(serial, existing.relaySessionCode);
+        }
+      }
       streams.set(serial, existing);
       return true;
     }
