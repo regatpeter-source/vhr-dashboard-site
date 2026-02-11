@@ -1869,7 +1869,7 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 	console.log('[voice] sendVoiceToHeadset invoked for serial:', serial);
 	const isRemoteDevice = isRemoteSessionSerial(serial);
 	const sessionCode = options.sessionCode || getActiveSessionCode();
-	const useRelayForRemote = isRemoteDevice && shouldUseRelayForSession(serial) && sessionCode && !options.viaSession;
+	const useRelayForRemote = isRemoteDevice && shouldUseRelayForSession(serial) && sessionCode;
 	if (useRelayForRemote) {
 		const relayKey = `${sessionCode}:${serial}`;
 		const lastOpen = relayVoiceOpenTracker.get(relayKey) || 0;
