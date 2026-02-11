@@ -8790,8 +8790,24 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
         }
       }
     }
+    const relayDefault = (RELAY_STREAM_BASE_URL || '').trim();
+    if (wantsRelay && relayDefault) {
+      const serverLower = server.toLowerCase();
+      const looksLocal = serverLower.includes('localhost') || serverLower.includes('127.0.0.1') || serverLower.startsWith('http://') && serverLower.includes(':3000');
+      if (!server || looksLocal) {
+        server = relayDefault;
+      }
+    }
     if (server && !/^https?:\/\//i.test(server)) {
       server = `http://${server.replace(/^\/+/, '')}`;
+    }
+    let relayBaseResolved = relayBase || server || '';
+    if (wantsRelay && relayDefault) {
+      const relayLower = String(relayBaseResolved || '').toLowerCase();
+      const relayLooksLocal = relayLower.includes('localhost') || relayLower.includes('127.0.0.1');
+      if (!relayBaseResolved || relayLooksLocal) {
+        relayBaseResolved = relayDefault;
+      }
     }
     const receiverParams = new URLSearchParams({
       serial: String(serial),
@@ -8801,7 +8817,7 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
     if (wantsRelay && sessionCode) {
       receiverParams.set('relay', '1');
       receiverParams.set('session', String(sessionCode).trim().toUpperCase());
-      receiverParams.set('relayBase', relayBase || server || '');
+      receiverParams.set('relayBase', relayBaseResolved || '');
     }
     const receiverUrl = `${server}/audio-receiver.html?${receiverParams.toString()}`;
     console.log(`[open-audio-receiver] URL envoyée au Quest: ${receiverUrl}`);

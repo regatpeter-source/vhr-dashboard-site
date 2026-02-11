@@ -546,7 +546,19 @@ function getSessionHostLanUrl() {
 
 function getRelayBaseUrl() {
 	const raw = (localStorage.getItem('vhr_relay_base') || '').trim();
-	return raw || SESSION_HUB_URL || window.location.origin;
+	const fallback = SESSION_HUB_URL || window.location.origin;
+	if (!raw) return fallback;
+	try {
+		const rawUrl = new URL(raw);
+		const origin = window.location.origin;
+		const isLocalHost = rawUrl.hostname === 'localhost' || rawUrl.hostname === '127.0.0.1';
+		if ((isLocalHost || rawUrl.origin === origin) && SESSION_HUB_URL && SESSION_HUB_URL !== origin) {
+			return SESSION_HUB_URL;
+		}
+		return raw;
+	} catch (e) {
+		return fallback;
+	}
 }
 
 function buildRelayWsUrl(kind, serial, sessionCode, role = 'viewer') {
