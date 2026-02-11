@@ -25,9 +25,10 @@
   let mseReady = false;
   const oggMime = 'audio/ogg;codecs=opus';
   const webmMime = 'audio/webm;codecs=opus';
-  // Force webm/opus for consistency with sender
-  const preferredMseType = (typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(webmMime)) ? webmMime : oggMime;
-  let preferredBlobType = preferredMseType;
+  // Sender always emits WebM/Opus; keep receiver aligned to avoid decode mismatch.
+  const canUseWebmMse = (typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(webmMime));
+  const preferredMseType = canUseWebmMse ? webmMime : null;
+  let preferredBlobType = webmMime;
   let chunksReceived = 0;
   let nextPlayTime = 0;
   let isContextReady = false;
@@ -131,6 +132,10 @@
   function initMediaSource() {
     if (mediaSource) return;
     if (!audioPlayer) return;
+    if (!preferredMseType) {
+      log('MSE disabled: WebM not supported, using decodeAudioData only');
+      return;
+    }
     mediaSource = new MediaSource();
     audioPlayer.src = URL.createObjectURL(mediaSource);
     audioPlayer.autoplay = true;
@@ -145,20 +150,6 @@
         flushMseQueue();
       } catch (e) {
         log('MSE init error: ' + e.message + ' type=' + preferredMseType);
-        // Fallback to webm if ogg unsupported
-        if (preferredMseType !== webmMime && typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(webmMime)) {
-          try {
-            sourceBuffer = mediaSource.addSourceBuffer(webmMime);
-            preferredBlobType = webmMime;
-            sourceBuffer.mode = 'sequence';
-            sourceBuffer.addEventListener('updateend', flushMseQueue);
-            mseReady = true;
-            flushMseQueue();
-            log('MSE fallback to webm/opus');
-          } catch (e2) {
-            log('MSE fallback failed: ' + e2.message);
-          }
-        }
       }
     });
   }
@@ -182,6 +173,7 @@
 
   function enqueueMse(blob) {
     if (!blob) return;
+    if (!preferredMseType) return;
     if (!mediaSource) initMediaSource();
     mseQueue.push(blob);
     flushMseQueue();
