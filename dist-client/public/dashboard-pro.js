@@ -5282,6 +5282,10 @@ function showSetupNotice() {
 			<strong>Voix & Streaming</strong>
 			<p style='margin:6px 0 0;'>Le premier clic sur les fonctions voix ou streaming peut parfois rester bloqué. Si le flux n'apparaît pas immédiatement, relancez la même fonction une seconde fois : cela réinitialise la chaîne audio/vidéo côté casque et permet de déclencher le streaming.</p>
 		</div>
+		<div style='margin-top:16px;padding:14px;background:#1b1f2b;border:1px solid #e67e22;border-radius:8px;'>
+			<strong>Session collaborative : Voix vs Vidéo</strong>
+			<p style='margin:6px 0 0;'>En mode relais/session collaborative, la voix et le streaming vidéo ne peuvent pas être utilisés en même temps. Pour lancer la vidéo, fermez d'abord la fenêtre de la fonction voix dans le casque, puis relancez le streaming vidéo.</p>
+		</div>
 		<p style='margin-top:18px;font-size:13px;color:#95a5a6;'>Cette notice est disponible à tout moment depuis la barre d'outils. En cas de doutes sur la détection des casques, revérifiez le PATH et relancez la fonction voix/streaming.</p>
 	`;
 	showModal(noticeHTML);
