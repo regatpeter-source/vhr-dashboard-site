@@ -8963,16 +8963,46 @@ function handleRelaySocket(kind, ws, req) {
   const entry = map.get(key) || { sender: null, viewers: new Set() };
   map.set(key, entry);
 
+  const clearNoViewerTimer = () => {
+    if (entry.noViewerTimer) {
+      clearTimeout(entry.noViewerTimer);
+      entry.noViewerTimer = null;
+    }
+    entry.noViewerSince = null;
+  };
+
+  const scheduleSenderClose = () => {
+    if (entry.noViewerTimer) return;
+    entry.noViewerSince = entry.noViewerSince || Date.now();
+    entry.noViewerTimer = setTimeout(() => {
+      entry.noViewerTimer = null;
+      if (entry.viewers.size === 0 && entry.sender && entry.sender.readyState === WebSocket.OPEN) {
+        console.log(`[Relay] Closing ${kind} sender (no viewers) session=${sessionCode} serial=${serial}`);
+        try { entry.sender.close(); } catch (e) {}
+        entry.sender = null;
+      }
+      if (!entry.sender && entry.viewers.size === 0) {
+        map.delete(key);
+      }
+    }, 5000);
+  };
+
   if (role === 'sender') {
     if (entry.sender && entry.sender.readyState === WebSocket.OPEN) {
       try { entry.sender.close(); } catch (e) {}
     }
     entry.sender = ws;
+    clearNoViewerTimer();
     if (kind === 'video') {
       console.log(`[Relay] Video sender connected session=${sessionCode} serial=${serial}`);
     }
     ws.on('message', (data) => {
-      if (kind === 'video') {
+      if (entry.viewers.size === 0) {
+        scheduleSenderClose();
+      } else {
+        clearNoViewerTimer();
+      }
+      if (kind === 'video' && entry.viewers.size > 0) {
         entry._bytes = (entry._bytes || 0) + (data && data.length ? data.length : 0);
         const now = Date.now();
         if (!entry._lastLogAt || (now - entry._lastLogAt) > 2000) {
@@ -8989,15 +9019,23 @@ function handleRelaySocket(kind, ws, req) {
     });
   } else {
     entry.viewers.add(ws);
+    clearNoViewerTimer();
     if (kind === 'video') {
       console.log(`[Relay] Video viewer connected session=${sessionCode} serial=${serial}. Total viewers=${entry.viewers.size}`);
     }
   }
 
   ws.on('close', () => {
-    if (entry.sender === ws) entry.sender = null;
+    if (entry.sender === ws) {
+      entry.sender = null;
+      clearNoViewerTimer();
+    }
     entry.viewers.delete(ws);
+    if (entry.viewers.size === 0 && entry.sender) {
+      scheduleSenderClose();
+    }
     if (!entry.sender && entry.viewers.size === 0) {
+      clearNoViewerTimer();
       map.delete(key);
     }
   });
