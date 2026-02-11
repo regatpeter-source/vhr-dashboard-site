@@ -1627,7 +1627,18 @@ app.get('/vhr-dashboard-app.html', (req, res) => {
 // Serve the up-to-date audio receiver from public (avoid legacy root file)
 app.get('/audio-receiver.html', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.sendFile(path.join(__dirname, 'public', 'audio-receiver.html'));
+});
+
+// No-cache for audio receiver JS to avoid stale relay logic
+app.get('/audio-receiver.js', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.sendFile(path.join(__dirname, 'public', 'audio-receiver.js'));
 });
 
 // Test route to verify HTML serving works
