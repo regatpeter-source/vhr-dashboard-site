@@ -8748,13 +8748,21 @@ app.post('/api/adb/command', async (req, res) => {
 
 // Open audio receiver in Quest - supports both browser and background app
 app.post('/api/device/open-audio-receiver', async (req, res) => {
-  const { serial, serverUrl, useBackgroundApp, relay, sessionCode, relayBase, name } = req.body || {};
+  const { serial, serverUrl, useBackgroundApp, relay, relayBase, name } = req.body || {};
+  let sessionCode = (req.body && req.body.sessionCode) ? String(req.body.sessionCode) : '';
   if (!serial) {
     return res.status(400).json({ ok: false, error: 'serial required' });
   }
 
   try {
     const wantsRelay = Boolean(relay || relayBase || sessionCode);
+    if (wantsRelay && !sessionCode) {
+      const fallbackSession = relayAudioSessions.get(serial);
+      if (fallbackSession) {
+        sessionCode = String(fallbackSession);
+        console.log(`[open-audio-receiver] Using cached relay session for ${serial}: ${sessionCode}`);
+      }
+    }
     // Correction : forcer l'utilisation de l'IP LAN si serverUrl est localhost ou absent
     let server = (serverUrl || '').trim();
     if (wantsRelay) {
