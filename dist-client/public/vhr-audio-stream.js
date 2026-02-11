@@ -46,6 +46,16 @@ class VHRAudioStream {
     this.localMonitorGain = null;  // For controlling local playback volume
     this.isLocalMonitoring = false;  // Local monitoring OFF by default (sound goes to headset)
     this.micSource = null;  // Store reference to mic source
+
+    // Relay audio sender state (for remote relay reliability)
+    this.relayWs = null;
+    this.mediaRecorder = null;
+    this.relayReconnectTimer = null;
+    this.relayReconnectDelayMs = 1500;
+    this.relayActive = false;
+    this.relayConnectInFlight = false;
+    this.relayTargetSerial = null;
+    this.relayOpts = null;
   }
 
   /**
@@ -150,6 +160,9 @@ class VHRAudioStream {
   async stop() {
     try {
       this._setState('stopped');
+
+      // Stop any relay sender first
+      this.stopAudioRelay();
       
       // Disconnect mic source first to prevent further audio processing
       if (this.micSource) {
@@ -467,76 +480,12 @@ class VHRAudioStream {
       const wsFormat = 'webm';
       this._log('Relay mime type: ' + chosenMime);
       
-      // Create MediaRecorder to encode audio
-      const mediaRecorder = new MediaRecorder(this.localStream, {
-        mimeType: chosenMime,
-        audioBitsPerSecond: 128000 // 128 kbps
-      });
-      
-      // Build WebSocket URL
-      const relayBase = this.config.relayBase || window.location.origin;
-      const relayUrl = new URL(relayBase);
-      const wsProtocol = relayUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-      let wsUrl = '';
-      if (opts.relay === true) {
-        const relaySession = String(opts.sessionCode || '').trim().toUpperCase();
-        if (!relaySession) {
-          throw new Error('sessionCode requis pour le relais audio');
-        }
-        wsUrl = `${wsProtocol}//${relayUrl.host}/api/relay/audio?session=${encodeURIComponent(relaySession)}&serial=${encodeURIComponent(targetSerial)}&role=sender`;
-      } else {
-        wsUrl = `${wsProtocol}//${relayUrl.host}/api/audio/stream?serial=${encodeURIComponent(targetSerial)}&mode=sender&format=${wsFormat}`;
-      }
-      
-      this._log('Connecting to relay: ' + wsUrl);
-      
-      this._log('Connecting relay WebSocket (sender) to ' + wsUrl);
-      const relayWs = new WebSocket(wsUrl);
-      relayWs.binaryType = 'arraybuffer';
-      
-      relayWs.onopen = () => {
-        this._log('Relay WebSocket connected, starting recording');
-        try {
-          // Moderate timeslice for steady pages
-          mediaRecorder.start(250);
-        } catch (e) {
-          this._log('MediaRecorder start error: ' + e.message);
-          throw e;
-        }
-      };
-      
-      mediaRecorder.ondataavailable = (event) => {
-        const size = event.data?.size || 0;
-        if (size < 100) {
-          // Skip too-small fragments that are not decodable
-          return;
-        }
-        if (relayWs.readyState === WebSocket.OPEN) {
-          console.log('[VHR-AudioRelay] Sending chunk:', size, 'bytes');
-          relayWs.send(event.data);
-        } else {
-          console.warn('[VHR-AudioRelay] Chunk not sent: ws not open');
-        }
-      };
-      
-      mediaRecorder.onerror = (event) => {
-        this._log('MediaRecorder error: ' + event.error);
-      };
-      
-      relayWs.onerror = (error) => {
-        this._log('Relay WebSocket error: ' + (error?.message || '')); 
-        try { mediaRecorder.stop(); } catch {}
-      };
-      
-      relayWs.onclose = () => {
-        this._log('Relay WebSocket closed');
-        try { mediaRecorder.stop(); } catch {}
-      };
-      
-      // Store reference for cleanup
-      this.relayWs = relayWs;
-      this.mediaRecorder = mediaRecorder;
-      
+      this.relayActive = true;
+      this.relayTargetSerial = targetSerial;
+      this.relayOpts = { ...opts, format: format, wsFormat, chosenMime };
+      this._clearRelayReconnect();
+
+      await this._connectAudioRelay();
       this._log('Audio relay started');
       return true;
       
@@ -551,15 +500,124 @@ class VHRAudioStream {
    */
   stopAudioRelay() {
     try {
+      this.relayActive = false;
+      this._clearRelayReconnect();
       if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
         this.mediaRecorder.stop();
       }
-      if (this.relayWs && this.relayWs.readyState === WebSocket.OPEN) {
+      if (this.relayWs && this.relayWs.readyState !== WebSocket.CLOSED) {
         this.relayWs.close();
       }
+      this.mediaRecorder = null;
+      this.relayWs = null;
       this._log('Audio relay stopped');
     } catch (error) {
       this._log('Error stopping audio relay: ' + error.message);
+    }
+  }
+
+  _clearRelayReconnect() {
+    if (this.relayReconnectTimer) {
+      clearTimeout(this.relayReconnectTimer);
+      this.relayReconnectTimer = null;
+    }
+  }
+
+  _scheduleRelayReconnect() {
+    if (!this.relayActive) return;
+    if (this.relayReconnectTimer) return;
+    this.relayReconnectTimer = setTimeout(() => {
+      this.relayReconnectTimer = null;
+      if (this.relayActive) {
+        this._connectAudioRelay().catch(err => this._log('Relay reconnect failed: ' + err.message));
+      }
+    }, this.relayReconnectDelayMs);
+  }
+
+  async _connectAudioRelay() {
+    if (this.relayConnectInFlight) return false;
+    if (!this.localStream) throw new Error('No local audio stream available');
+    this.relayConnectInFlight = true;
+
+    try {
+      const opts = this.relayOpts || {};
+      const targetSerial = this.relayTargetSerial;
+      const wsFormat = opts.wsFormat || 'webm';
+      const chosenMime = opts.chosenMime || 'audio/webm;codecs=opus';
+
+      // Clean previous relay if any
+      if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+        try { this.mediaRecorder.stop(); } catch {}
+      }
+      if (this.relayWs && this.relayWs.readyState !== WebSocket.CLOSED) {
+        try { this.relayWs.close(); } catch {}
+      }
+
+      const mediaRecorder = new MediaRecorder(this.localStream, {
+        mimeType: chosenMime,
+        audioBitsPerSecond: 128000
+      });
+
+      const relayBase = this.config.relayBase || window.location.origin;
+      const relayUrl = new URL(relayBase);
+      const wsProtocol = relayUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+      let wsUrl = '';
+      if (opts.relay === true) {
+        const relaySession = String(opts.sessionCode || '').trim().toUpperCase();
+        if (!relaySession) {
+          throw new Error('sessionCode requis pour le relais audio');
+        }
+        wsUrl = `${wsProtocol}//${relayUrl.host}/api/relay/audio?session=${encodeURIComponent(relaySession)}&serial=${encodeURIComponent(targetSerial)}&role=sender`;
+      } else {
+        wsUrl = `${wsProtocol}//${relayUrl.host}/api/audio/stream?serial=${encodeURIComponent(targetSerial)}&mode=sender&format=${wsFormat}`;
+      }
+
+      this._log('Connecting relay WebSocket (sender) to ' + wsUrl);
+      const relayWs = new WebSocket(wsUrl);
+      relayWs.binaryType = 'arraybuffer';
+
+      relayWs.onopen = () => {
+        this._log('Relay WebSocket connected, starting recording');
+        try {
+          mediaRecorder.start(250);
+        } catch (e) {
+          this._log('MediaRecorder start error: ' + e.message);
+          throw e;
+        }
+      };
+
+      mediaRecorder.ondataavailable = (event) => {
+        const size = event.data?.size || 0;
+        if (size < 100) return;
+        if (relayWs.readyState === WebSocket.OPEN) {
+          console.log('[VHR-AudioRelay] Sending chunk:', size, 'bytes');
+          relayWs.send(event.data);
+        } else {
+          console.warn('[VHR-AudioRelay] Chunk not sent: ws not open');
+        }
+      };
+
+      mediaRecorder.onerror = (event) => {
+        this._log('MediaRecorder error: ' + event.error);
+      };
+
+      relayWs.onerror = (error) => {
+        this._log('Relay WebSocket error: ' + (error?.message || ''));
+        try { mediaRecorder.stop(); } catch {}
+        this._scheduleRelayReconnect();
+      };
+
+      relayWs.onclose = () => {
+        this._log('Relay WebSocket closed');
+        try { mediaRecorder.stop(); } catch {}
+        this._scheduleRelayReconnect();
+      };
+
+      this.relayWs = relayWs;
+      this.mediaRecorder = mediaRecorder;
+      return true;
+    } finally {
+      this.relayConnectInFlight = false;
     }
   }
 

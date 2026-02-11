@@ -2638,6 +2638,9 @@ let subscriptionIdCounter = 1;
 const relayVideoSenders = new Map(); // serial -> ws
 const relayAudioSenders = new Map(); // serial -> ws
 const relayAudioSessions = new Map(); // serial -> sessionCode
+const relayVideoRetryTimers = new Map(); // serial -> timeout
+const relayAudioRetryTimers = new Map(); // serial -> timeout
+const RELAY_SENDER_RETRY_DELAY_MS = 1500;
 
 function buildRelayWsUrl(kind, serial, sessionCode, role, extra = {}) {
   if (!RELAY_STREAM_BASE_URL) return '';
@@ -2656,6 +2659,50 @@ function buildRelayWsUrl(kind, serial, sessionCode, role, extra = {}) {
   return `${protocol}//${base.host}${path}?${params.toString()}`;
 }
 
+function clearRelayVideoRetry(serial) {
+  const timer = relayVideoRetryTimers.get(serial);
+  if (timer) clearTimeout(timer);
+  relayVideoRetryTimers.delete(serial);
+}
+
+function clearRelayAudioRetry(serial) {
+  const timer = relayAudioRetryTimers.get(serial);
+  if (timer) clearTimeout(timer);
+  relayAudioRetryTimers.delete(serial);
+}
+
+function scheduleRelayVideoReconnect(serial, sessionCode) {
+  if (!RELAY_STREAM_ENABLED || !serial || !sessionCode) return;
+  if (relayVideoRetryTimers.has(serial)) return;
+  const entry = streams.get(serial);
+  if (!entry || !entry.shouldRun) return;
+  const timer = setTimeout(() => {
+    relayVideoRetryTimers.delete(serial);
+    const current = streams.get(serial);
+    if (!current || !current.shouldRun || current.relaySessionCode !== sessionCode) return;
+    if (!current.relayWs || current.relayWs.readyState !== WebSocket.OPEN) {
+      current.relayWs = ensureRelayVideoSender(serial, sessionCode);
+    }
+  }, RELAY_SENDER_RETRY_DELAY_MS);
+  relayVideoRetryTimers.set(serial, timer);
+}
+
+function scheduleRelayAudioReconnect(serial, sessionCode) {
+  if (!RELAY_STREAM_ENABLED || !serial || !sessionCode) return;
+  if (relayAudioRetryTimers.has(serial)) return;
+  const audioEntry = audioStreams.get(serial);
+  if (!audioEntry || !audioEntry.sender || audioEntry.sender.readyState !== WebSocket.OPEN) return;
+  const timer = setTimeout(() => {
+    relayAudioRetryTimers.delete(serial);
+    const current = audioStreams.get(serial);
+    if (!current || !current.sender || current.sender.readyState !== WebSocket.OPEN) return;
+    if (!current.relayWs || current.relayWs.readyState !== WebSocket.OPEN) {
+      current.relayWs = ensureRelayAudioSender(serial, sessionCode);
+    }
+  }, RELAY_SENDER_RETRY_DELAY_MS);
+  relayAudioRetryTimers.set(serial, timer);
+}
+
 function ensureRelayVideoSender(serial, sessionCode) {
   if (!RELAY_STREAM_ENABLED || !sessionCode || !serial) return null;
   if (relayVideoSenders.has(serial)) return relayVideoSenders.get(serial);
@@ -2670,10 +2717,12 @@ function ensureRelayVideoSender(serial, sessionCode) {
   ws.on('close', (code, reason) => {
     console.warn(`[relay-video] sender closed ${serial} code=${code} reason=${reason || ''}`);
     relayVideoSenders.delete(serial);
+    scheduleRelayVideoReconnect(serial, sessionCode);
   });
   ws.on('error', (err) => {
     console.warn(`[relay-video] sender error ${serial}:`, err && err.message ? err.message : err);
     relayVideoSenders.delete(serial);
+    scheduleRelayVideoReconnect(serial, sessionCode);
   });
   return ws;
 }
@@ -2685,8 +2734,14 @@ function ensureRelayAudioSender(serial, sessionCode) {
   if (!wsUrl) return null;
   const ws = new WebSocket(wsUrl);
   relayAudioSenders.set(serial, ws);
-  ws.on('close', () => relayAudioSenders.delete(serial));
-  ws.on('error', () => relayAudioSenders.delete(serial));
+  ws.on('close', () => {
+    relayAudioSenders.delete(serial);
+    scheduleRelayAudioReconnect(serial, sessionCode);
+  });
+  ws.on('error', () => {
+    relayAudioSenders.delete(serial);
+    scheduleRelayAudioReconnect(serial, sessionCode);
+  });
   return ws;
 }
 
@@ -7576,6 +7631,7 @@ function stopStream(serial) {
   if (!entry) return false;
 
   entry.shouldRun = false;
+  clearRelayVideoRetry(serial);
   
   // Clear the stabilization interval
   if (entry.sendInterval) {
@@ -7608,10 +7664,10 @@ function stopStream(serial) {
     }
   } catch {}
 
-    if (entry.relayWs) {
-      try { entry.relayWs.close(); } catch (e) {}
-      relayVideoSenders.delete(serial);
-    }
+  if (entry.relayWs) {
+    try { entry.relayWs.close(); } catch (e) {}
+    relayVideoSenders.delete(serial);
+  }
 
   for (const ws of entry.clients) {
     try { ws.close(); } catch {}
@@ -7659,6 +7715,7 @@ function handleAudioWebSocket(serial, ws, req) {
     // PC sending audio
     audioEntry.sender = ws;
     audioEntry.format = format;
+    clearRelayAudioRetry(serial);
     const relaySession = relayAudioSessions.get(serial);
     if (relaySession) {
       audioEntry.relayWs = ensureRelayAudioSender(serial, relaySession);
@@ -7704,6 +7761,7 @@ function handleAudioWebSocket(serial, ws, req) {
     ws.on('close', () => {
       console.log(`[Audio] Sender disconnected: ${serial}`);
       audioEntry.sender = null;
+      clearRelayAudioRetry(serial);
       if (audioEntry.relayWs) {
         try { audioEntry.relayWs.close(); } catch (e) {}
         relayAudioSenders.delete(serial);
