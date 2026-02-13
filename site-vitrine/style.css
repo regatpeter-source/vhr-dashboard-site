@@ -33,16 +33,20 @@ nav {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 32px;
-  height: 64px;
-  background: rgba(24,28,36,0.95);
-  box-shadow: 0 2px 8px #0002;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 32px;
+  width: 100%;
+  min-height: 64px;
+  background: #0b1220;
+  box-shadow: 0 6px 18px rgba(5, 8, 14, 0.45);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .logo {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   color: #fff;
   font-weight: 800;
   letter-spacing: 0.8px;
@@ -52,20 +56,39 @@ nav {
   user-select: none;
 }
 
-.logo::before {
-  content: '';
-  display: inline-block;
-  width: 54px;
-  height: 54px;
-  background: url('/assets/logo-vd.svg') center center / contain no-repeat;
-  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.28));
+.logo img.brand-logo {
+  display: block;
+  height: 38px;
+  max-height: 42px;
+  width: auto;
+  object-fit: contain;
+  margin-right: 4px;
+  background-color: transparent;
+  -webkit-mask-image: none;
+  mask-image: none;
+  -webkit-mask-size: auto;
+  mask-size: auto;
+  mix-blend-mode: normal;
+  filter: none;
+}
+
+.logo img {
+  height: 38px;
+  max-height: 42px;
+  width: auto;
+  object-fit: contain;
+  mix-blend-mode: multiply;
+  filter: brightness(0.95) contrast(1.05);
 }
 
 nav ul {
   list-style: none;
   display: flex;
-  gap: 24px;
+  flex-wrap: wrap;
+  gap: 16px 24px;
   padding: 0;
+  margin: 0;
+  justify-content: flex-end;
 }
 
 nav ul li a {
@@ -80,8 +103,8 @@ nav ul li a {
 
 nav ul li a.active,
 nav ul li a:hover {
-  background: #2196f3;
-  color: #fff;
+  background: rgba(56, 189, 248, 0.18);
+  color: #e8f1ff;
 }
 
 nav ul li a.cta-nav {
@@ -171,10 +194,10 @@ nav ul li a.cta-nav:hover {
 
 .dashboard-hero-img {
   display: block;
-  width: 100%;
-  max-width: none;
+  width: min(100%, 360px);
+  max-width: 360px;
   height: auto;
-  max-height: 1450px;
+  max-height: 220px;
   object-fit: contain;
   margin: 0 auto;
   border-radius: 18px;
@@ -365,9 +388,13 @@ nav ul li a.cta-nav:hover {
     gap: 18px;
   }
   .logo {
-    padding-left: 58px;
-    background-size: 46px auto;
     font-size: 1em;
+  }
+  .logo img.brand-logo {
+    height: 24px;
+    max-height: 28px;
+  }
+  .logo img {
   }
   .feature,
   .download-block,
