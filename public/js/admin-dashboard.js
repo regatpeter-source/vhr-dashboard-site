@@ -5,6 +5,7 @@ const API_BASE = OFFICIAL_HOSTS.includes(window.location.hostname)
 let currentUser = null;
 let cachedUsers = [];
 let lastRealtimeErrorAt = 0;
+let realtimeSocket = null;
 
 function setRealtimeBadge(status = 'on', note = '') {
   const badge = document.getElementById('realtimeBadge');
@@ -139,11 +140,14 @@ function updateCachedUserAccessFromResponse(username, payload) {
   const updatedUser = payload.user || {};
   const accessPayload = payload.accessSummary || payload.demo || updatedUser.accessSummary || {};
   const demoStartDate = updatedUser.demoStartDate
+    || payload.demoStartDate
     || accessPayload.demoStartDate
+    || accessPayload.demostartdate
     || cached.demoStartDate
     || cached.demostartdate
     || null;
   const demoEndDate = updatedUser.demoEndDate
+    || payload.demoEndDate
     || accessPayload.demoEndDate
     || accessPayload.demoenddate
     || cached.demoEndDate
@@ -162,7 +166,51 @@ function updateCachedUserAccessFromResponse(username, payload) {
   }
   cached.accessSummary = normalized;
 
+  applyUserFilters();
   refreshUserModalIfNeeded(username);
+}
+
+function initRealtimeSync() {
+  if (typeof io !== 'function') {
+    lastRealtimeErrorAt = Date.now();
+    setRealtimeBadge('warn', 'socket indisponible');
+    return;
+  }
+
+  try {
+    realtimeSocket = io({
+      transports: ['websocket', 'polling'],
+      withCredentials: true
+    });
+
+    realtimeSocket.on('connect', () => {
+      setRealtimeBadge('on', 'socket connecté');
+    });
+
+    realtimeSocket.on('disconnect', () => {
+      lastRealtimeErrorAt = Date.now();
+      setRealtimeBadge('warn', 'socket déconnecté');
+    });
+
+    realtimeSocket.on('connect_error', () => {
+      lastRealtimeErrorAt = Date.now();
+      setRealtimeBadge('warn', 'connexion socket impossible');
+    });
+
+    // Emitted by backend after admin actions (extend_trial, cancel, etc.)
+    realtimeSocket.on('access-update', (payload = {}) => {
+      const username = payload.username || payload.user?.username;
+      if (!username) return;
+
+      updateCachedUserAccessFromResponse(username, payload);
+      loadStats();
+      setRealtimeBadge('on', 'mise à jour instantanée');
+    });
+  } catch (e) {
+    console.error('[realtime] socket init error:', e);
+    lastRealtimeErrorAt = Date.now();
+    setRealtimeBadge('warn', 'erreur socket');
+  }
 }
 
 // Initialize Android Installer when tab is clicked
@@ -786,6 +834,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize
   init();
+  initRealtimeSync();
 
   // Filters
   const searchInput = document.getElementById('filterUserSearch');

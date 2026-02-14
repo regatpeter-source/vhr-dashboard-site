@@ -7,6 +7,7 @@ const API_BASE = (OFFICIAL_HOSTS.includes(window.location.hostname) || isLocalHo
   : 'https://vhr-dashboard-site.com/api';
 let currentUser = null;
 let cachedUsers = [];
+let realtimeSocket = null;
 
 function computeRemainingDaysFromEnd(demoEndDate) {
   if (!demoEndDate) return null;
@@ -130,11 +131,14 @@ function updateCachedUserAccessFromResponse(username, payload) {
   const updatedUser = payload.user || {};
   const accessPayload = payload.accessSummary || payload.demo || updatedUser.accessSummary || {};
   const demoStartDate = updatedUser.demoStartDate
+    || payload.demoStartDate
     || accessPayload.demoStartDate
+    || accessPayload.demostartdate
     || cached.demoStartDate
     || cached.demostartdate
     || null;
   const demoEndDate = updatedUser.demoEndDate
+    || payload.demoEndDate
     || accessPayload.demoEndDate
     || accessPayload.demoenddate
     || cached.demoEndDate
@@ -153,7 +157,28 @@ function updateCachedUserAccessFromResponse(username, payload) {
   }
   cached.accessSummary = normalized;
 
+  applyUserFilters();
   refreshUserModalIfNeeded(username);
+}
+
+function initRealtimeSync() {
+  if (typeof io !== 'function') return;
+
+  try {
+    realtimeSocket = io({
+      transports: ['websocket', 'polling'],
+      withCredentials: true
+    });
+
+    realtimeSocket.on('access-update', (payload = {}) => {
+      const username = payload.username || payload.user?.username;
+      if (!username) return;
+      updateCachedUserAccessFromResponse(username, payload);
+      loadStats();
+    });
+  } catch (e) {
+    console.error('[realtime] socket init error:', e);
+  }
 }
 
 // Initialize Android Installer when tab is clicked
@@ -771,6 +796,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize
   init();
+  initRealtimeSync();
 
   // Filters
   const searchInput = document.getElementById('filterUserSearch');
