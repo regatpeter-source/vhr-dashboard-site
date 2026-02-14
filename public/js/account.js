@@ -442,9 +442,14 @@
   // Load subscription info
   async function loadSubscription() {
     try {
+      const subscriptionContent = document.getElementById('subscriptionContent');
+      if (!subscriptionContent) {
+        console.warn('[loadSubscription] subscriptionContent introuvable dans le DOM');
+        return;
+      }
       // Si hors domaine officiel, rediriger l'utilisateur vers la page billing du site vitrine
       if (!isOfficialHost()) {
-        document.getElementById('subscriptionContent').innerHTML = `
+        subscriptionContent.innerHTML = `
           <p>Pour gérer votre abonnement, annuler ou mettre à jour vos moyens de paiement, utilisez la page sécurisée :</n>
           <p><a class="cta" href="${BILLING_URL}" target="_blank" rel="noopener">Gérer mon abonnement</a></p>
         `;
@@ -453,7 +458,7 @@
 
       const res = await api('/api/subscriptions/my-subscription');
       if (!res || !res.ok) {
-        document.getElementById('subscriptionContent').innerHTML = '<p>Pas d\'abonnement actif actuellement.</p>';
+        subscriptionContent.innerHTML = '<p>Pas d\'abonnement actif actuellement.</p>';
         return;
       }
       
@@ -480,7 +485,7 @@
             `;
           }
         } catch (e) {}
-        document.getElementById('subscriptionContent').innerHTML = trialHtml;
+        subscriptionContent.innerHTML = trialHtml;
         return;
       }
 
@@ -509,7 +514,7 @@
           <div id="cancelSubscriptionMessage" style="margin-top: 12px;"></div>
         </div>
       `;
-      document.getElementById('subscriptionContent').innerHTML = html;
+      subscriptionContent.innerHTML = html;
       
       // Attach cancel button handler
       const cancelBtn = document.getElementById('cancelSubscriptionBtn');
@@ -550,7 +555,10 @@
       }
     } catch (e) {
       console.error('[loadSubscription] error:', e);
-      document.getElementById('subscriptionContent').innerHTML = '<p>Erreur lors du chargement de l\'abonnement.</p>';
+      const subscriptionContent = document.getElementById('subscriptionContent');
+      if (subscriptionContent) {
+        subscriptionContent.innerHTML = '<p>Erreur lors du chargement de l\'abonnement.</p>';
+      }
     }
   }
 
