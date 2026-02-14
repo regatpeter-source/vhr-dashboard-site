@@ -2484,6 +2484,8 @@ if (USE_POSTGRES && db && db.getUsers) {
           stripeCustomerId: u.stripecustomerid || u.stripeCustomerId || null,
           subscriptionStatus: u.subscriptionstatus || u.subscriptionStatus || null,
           subscriptionId: u.subscriptionid || u.subscriptionId || null,
+          demoStartDate: u.demostartdate || u.demoStartDate || null,
+          demoEndDate: u.demoenddate || u.demoEndDate || null,
           createdAt: u.createdat || u.createdAt || null,
           updatedAt: u.updatedat || u.updatedAt || null,
           emailVerified: u.emailverified ?? u.emailVerified,
@@ -2862,6 +2864,8 @@ function reloadUsers() {
           stripeCustomerId: u.stripecustomerid || u.stripeCustomerId || null,
           subscriptionStatus: u.subscriptionstatus || u.subscriptionStatus || null,
           subscriptionId: u.subscriptionid || u.subscriptionId || null,
+          demoStartDate: u.demostartdate || u.demoStartDate || null,
+          demoEndDate: u.demoenddate || u.demoEndDate || null,
           lastLogin: u.lastlogin || u.lastLogin || null,
           lastActivity: u.lastactivity || u.lastActivity || null,
           createdAt: u.createdat || u.createdAt || null,
@@ -6412,10 +6416,14 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
     };
 
     // ---------- Locate user ----------
-    let targetUser = getUserByUsername(normalizedUser);
-    if (!targetUser && USE_POSTGRES && db && db.getUserByUsername) {
+    let targetUser = null;
+    if (USE_POSTGRES && db && db.getUserByUsername) {
       targetUser = await db.getUserByUsername(normalizedUser);
     }
+    if (!targetUser) {
+      targetUser = getUserByUsername(normalizedUser);
+    }
+    targetUser = normalizeUserRecord(targetUser);
     if (!targetUser) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
 
     if (targetUser.role === 'admin' && isAllowedAdminUser(targetUser.username)) {
