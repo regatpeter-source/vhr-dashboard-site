@@ -3713,11 +3713,22 @@ function isElectronRequest(req) {
   return userAgent.includes('electron') || electronHeader === 'electron';
 }
 
+function hasRemoteTokenForRequest(req) {
+  if (!req) return false;
+  const username = req.user && req.user.username ? String(req.user.username) : '';
+  const token = getRemoteStatusTokenFromRequest(req)
+    || (username ? (getCachedRemoteAuthToken(username) || getPersistedRemoteAuthToken(username)) : '');
+  return !!token;
+}
+
 function shouldForceRemoteDemo(req) {
   if (!FORCE_REMOTE_DEMO) return false;
   if (!req) return true;
-  // Forcer la démo centrale pour l'app Electron (priorité à la synchro serveur)
-  if (isElectronRequest(req)) return true;
+  // En Electron: ne forcer la démo centrale que si un token distant est disponible.
+  // Sinon, fallback local pour éviter un 403 remote_demo_required au boot.
+  if (isElectronRequest(req)) {
+    return hasRemoteTokenForRequest(req);
+  }
   if (isLocalRequest(req)) return false;
   return true;
 }

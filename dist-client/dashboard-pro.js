@@ -4380,6 +4380,11 @@ async function checkLicense() {
 		
 		if (!res || !res.ok) {
 			console.error('[license] demo status check failed');
+			if (res && res.error === 'remote_demo_required') {
+				showToast('ℹ️ Vérification centrale temporairement indisponible, accès local maintenu.', 'info');
+				showTrialBanner(0);
+				return true;
+			}
 			// Bloquer l'accès par défaut si la vérification échoue (éviter l'accès sans abo)
 			showUnlockModal({ expired: true, accessBlocked: true, subscriptionStatus: res?.demo?.subscriptionStatus || 'unknown' });
 			return false;
@@ -4889,14 +4894,15 @@ async function ensureInstallationVerified() {
 async function checkJWTAuth() {
 	console.log('[auth] Checking JWT authentication...');
 	try {
-		const res = await api('/api/check-auth', { skipAuthHeader: true });
+		const res = await api('/api/check-auth?includeToken=1', { skipAuthHeader: true });
 		console.log('[auth] API response:', res);
 		
 		if (res && res.ok && res.authenticated && res.user) {
 			if (res.token) {
 				saveAuthToken(res.token);
-			}
-			if (!readAuthToken()) {
+			} else {
+				// Empêche l'envoi d'un ancien token local devenu invalide.
+				saveAuthToken('');
 				await syncTokenFromCookie();
 			}
 			// User is authenticated
@@ -4907,13 +4913,7 @@ async function checkJWTAuth() {
 		} else {
 			console.log('[auth] � No valid JWT - authenticated =', res?.authenticated);
 			saveAuthToken('');
-			console.log('[auth] Attempting guest demo activation...');
-			const guestActivated = await activateGuestDemo();
-			if (guestActivated) {
-				console.log('[auth] Guest demo activated, proceeding');
-				return true;
-			}
-			console.log('[auth] Guest demo activation failed, showing auth modal');
+			console.log('[auth] Showing authentication modal (guest auto-activation disabled)');
 			// Hide the loading overlay immediately
 			const overlay = document.getElementById('authOverlay');
 			if (overlay) {

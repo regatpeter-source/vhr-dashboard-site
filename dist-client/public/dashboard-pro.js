@@ -3150,7 +3150,7 @@ async function api(path, opts = {}) {
 				...electronHeader
 			};
 		}
-		if (remoteToken && typeof path === 'string') {
+		if (remoteToken && !skipAuthHeader && typeof path === 'string') {
 			const statusPaths = [
 				'/api/demo/status',
 				'/api/me',
@@ -3178,7 +3178,7 @@ async function api(path, opts = {}) {
 		// On retente une fois sans ces en-têtes pour laisser le cookie faire foi.
 		if (
 			res &&
-			res.status === 401 &&
+			(res.status === 401 || res.status === 403) &&
 			storedToken &&
 			!skipAuthHeader &&
 			typeof path === 'string' &&
@@ -3187,6 +3187,9 @@ async function api(path, opts = {}) {
 			const retryHeaders = { ...(fetchOpts.headers || {}) };
 			delete retryHeaders.Authorization;
 			delete retryHeaders['x-remote-auth'];
+			if (res.status === 403 && remoteToken) {
+				saveRemoteAuthToken('');
+			}
 			res = await fetch(path, {
 				...fetchOpts,
 				headers: retryHeaders
@@ -5468,23 +5471,16 @@ async function checkLicense() {
 		if (!res || !res.ok) {
 			console.error('[license] demo status check failed');
 			const statusCode = res?._status || 0;
-			const authError = statusCode === 401 || statusCode === 403 || res?.error === 'unauthorized' || res?.error === 'invalid_token' || res?.error === 'missing_token';
+			const isRemoteDemoRequired = Boolean(res && res.error === 'remote_demo_required');
+			const authError = !isRemoteDemoRequired && (statusCode === 401 || statusCode === 403 || res?.error === 'unauthorized' || res?.error === 'invalid_token' || res?.error === 'missing_token');
+			if (isRemoteDemoRequired) {
+				showToast('ℹ️ Vérification centrale temporairement indisponible, accès local maintenu.', 'info');
+				return true;
+			}
 			if (authError) {
 				showToast('🔐 Session expirée : merci de vous reconnecter', 'warning');
 				saveAuthToken('');
 				showAuthModal('login');
-				return false;
-			}
-			if (res && res.error === 'remote_demo_required') {
-				showToast(res.message || '🔒 Vérification centrale requise pour la période d\'essai', 'warning');
-				showUnlockModal({
-					expired: true,
-					accessBlocked: true,
-					subscriptionStatus: res?.demo?.subscriptionStatus || 'unknown',
-					reason: res.error,
-					message: res.message,
-					demo: res.demo
-				});
 				return false;
 			}
 			// Éviter d'afficher la modal d'abonnement si la vérification a échoué
@@ -5854,14 +5850,16 @@ window.loginUser = async function() {
 		};
 
 		const blockRemoteForGuest = isKnownGuestIdentifier(identifier);
-		// 1) En contexte local/Electron: tenter le login local d'abord
-		if (isLocalAuthContext) {
-			({ res, data, source: authSource } = await tryLocalAuth());
+		const canTryRemoteFirst = !FORCE_LOCAL_AUTH && !blockRemoteForGuest;
+
+		// 1) En contexte Electron/local, prioriser l'auth distante pour garder la synchro vitrine.
+		if (canTryRemoteFirst) {
+			({ res, data, source: authSource } = await tryRemoteAuth());
 		}
 
-		// 2) Si échec local et pas d'override local forcé, tenter le site central
-		if (!(res && res.ok && data && data.ok) && !FORCE_LOCAL_AUTH && !blockRemoteForGuest) {
-			({ res, data, source: authSource } = await tryRemoteAuth());
+		// 2) Si échec distant (ou mode local forcé), tenter le login local.
+		if (!(res && res.ok && data && data.ok) && isLocalAuthContext) {
+			({ res, data, source: authSource } = await tryLocalAuth());
 		}
 
 		// 3) Si remote OK, synchroniser vers backend local + cookie local
@@ -6078,7 +6076,7 @@ async function ensureInstallationVerified() {
 async function checkJWTAuth() {
 	console.log('[auth] Checking JWT authentication...');
 	try {
-		const res = await api('/api/check-auth', { skipAuthHeader: true });
+		const res = await api('/api/check-auth?includeToken=1', { skipAuthHeader: true });
 		console.log('[auth] API response:', res);
 		
 		if (res && res.ok && res.authenticated && res.user) {
@@ -6112,8 +6110,9 @@ async function checkJWTAuth() {
 			}
 			if (res.token) {
 				saveAuthToken(res.token);
-			}
-			if (!readAuthToken()) {
+			} else {
+				// Empêche l'envoi d'un ancien token local devenu invalide.
+				saveAuthToken('');
 				await syncTokenFromCookie();
 			}
 			// User is authenticated
@@ -6137,13 +6136,7 @@ async function checkJWTAuth() {
 		} else {
 			console.log('[auth] � No valid JWT - authenticated =', res?.authenticated);
 			saveAuthToken('');
-			console.log('[auth] Attempting guest demo activation...');
-			const guestActivated = await activateGuestDemo();
-			if (guestActivated) {
-				console.log('[auth] Guest demo activated, proceeding');
-				return true;
-			}
-			console.log('[auth] Guest demo activation failed, showing auth modal');
+			console.log('[auth] Showing authentication modal (guest auto-activation disabled)');
 			// Hide the loading overlay immediately
 			const overlay = document.getElementById('authOverlay');
 			if (overlay) {
