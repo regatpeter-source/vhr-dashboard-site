@@ -600,6 +600,8 @@
     if (!info) return '<p>Statut de l\'essai indisponible.</p>';
     const hasSubscription = Boolean(info.hasValidSubscription);
     const isTrialActive = !hasSubscription && !info.demoExpired && info.remainingDays > 0;
+    const remainingDays = Number.isFinite(Number(info.remainingDays)) ? Math.max(0, Number(info.remainingDays)) : 0;
+    const remainingDaysColor = remainingDays > 3 ? '#16a34a' : remainingDays > 0 ? '#f59e0b' : '#dc2626';
     const statusLabel = isTrialActive
       ? `Essai gratuit : ${info.remainingDays} jour(s) restants`
       : hasSubscription
@@ -617,6 +619,7 @@
     return `
       <p style="margin:4px 0;font-size:16px;font-weight:bold;">${statusLabel}</p>
       <p style="margin:4px 0 8px 0;color:#475569;">${infoMessage}</p>
+      <p style="margin:4px 0 8px 0;"><strong>Jours restants :</strong> <span style="color:${remainingDaysColor};font-weight:700;">${remainingDays} jour(s)</span></p>
       ${renderTrialProgressBar(info)}
       <p style="margin:8px 0 0 0;font-size:12px;color:#64748b;">Expiration : ${expiration}</p>
       <div style="margin-top:12px;">${actionButton}</div>
@@ -633,10 +636,6 @@
         throw new Error(res && res.error ? res.error : 'Impossible de récupérer le statut de l\'essai');
       }
       const info = normalizeDemoStatus(res.demo);
-      if (info && info.hasValidSubscription) {
-        if (trialStatusSection) trialStatusSection.style.display = 'none';
-        return;
-      }
       trialStatusContent.innerHTML = buildTrialStatusHtml(info);
       if (trialStatusSection) trialStatusSection.style.display = 'block';
     } catch (err) {
