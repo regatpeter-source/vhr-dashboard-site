@@ -6342,6 +6342,7 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
   const now = new Date();
   const toIso = d => (d instanceof Date ? d.toISOString() : new Date(d).toISOString());
   const extraDays = Number(days || 0) || 7;
+  const DAY_MS = 24 * 60 * 60 * 1000;
 
   try {
     // ---------- Helper: upsert subscription in local/SQLite mode ----------
@@ -6419,6 +6420,14 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
 
     if (targetUser.role === 'admin' && isAllowedAdminUser(targetUser.username)) {
       return res.status(403).json({ ok: false, error: 'Compte administrateur protégé' });
+    }
+
+    // Snapshot du statut courant avant mutation (source de vérité identique à l'affichage admin)
+    let currentDemoStatus = null;
+    try {
+      currentDemoStatus = await buildDemoStatusForUser(targetUser);
+    } catch (e) {
+      console.warn('[admin] buildDemoStatusForUser (pre-mutation) failed:', e && e.message ? e.message : e);
     }
 
     // ---------- Action handlers ----------
@@ -6499,12 +6508,31 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
         break;
       }
       case 'extend_trial': {
-        const addedMs = extraDays * 24 * 60 * 60 * 1000;
-        const referenceStart = targetUser.demoStartDate ? new Date(targetUser.demoStartDate) : now;
-        const fallbackExpiration = new Date(referenceStart.getTime() + demoConfig.DEMO_DURATION_MS);
-        const baseExpiration = getDemoExpirationDate(targetUser) || fallbackExpiration;
-        const baseTime = Math.max(baseExpiration.getTime(), now.getTime());
+        const addedMs = extraDays * DAY_MS;
+
+        // 1) Expiration persistée (si dispo)
+        const persistedExpiration = getDemoExpirationDate(targetUser);
+
+        // 2) Expiration calculée depuis le solde effectivement affiché à l'admin
+        const currentRemainingDays = Number.isFinite(currentDemoStatus?.remainingDays)
+          ? Math.max(0, currentDemoStatus.remainingDays)
+          : 0;
+        const statusBasedExpiration = currentRemainingDays > 0
+          ? new Date(now.getTime() + (currentRemainingDays * DAY_MS))
+          : null;
+
+        // 3) On prend la base la plus favorable (jamais réduire le solde)
+        const candidateTimes = [now.getTime()];
+        if (persistedExpiration && !Number.isNaN(persistedExpiration.getTime())) {
+          candidateTimes.push(persistedExpiration.getTime());
+        }
+        if (statusBasedExpiration && !Number.isNaN(statusBasedExpiration.getTime())) {
+          candidateTimes.push(statusBasedExpiration.getTime());
+        }
+
+        const baseTime = Math.max(...candidateTimes);
         const newExpiration = new Date(baseTime + addedMs);
+
         if (!targetUser.demoStartDate) {
           targetUser.demoStartDate = toIso(now);
         }
