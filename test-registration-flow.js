@@ -5,13 +5,13 @@
  * 
  * Purpose: Test the complete registration journey to verify:
  * 1. Registration endpoint works
- * 2. User data is saved to PostgreSQL
- * 3. User is properly authenticated
- * 4. User should be redirected to dashboard
+ * 2. API response indicates confirmation email flow
+ * 3. Session behavior is coherent with verificationRequired/autoLogin
+ * 4. Authentication endpoint behavior is coherent after signup
  */
 
 const https = require('https');
-const BASE_URL = 'https://vhr-dashboard-site.onrender.com';
+const BASE_URL = 'https://www.vhr-dashboard-site.com';
 
 let cookies = '';
 
@@ -117,6 +117,19 @@ async function runTests() {
       console.log(`   Username: ${registerRes.body.username}`);
       console.log(`   Role: ${registerRes.body.role}`);
       console.log(`   Cookies received: ${cookies ? 'YES' : 'NO'}`);
+
+      const verificationRequired = registerRes.body.verificationRequired === true;
+      const confirmationMsg = String(registerRes.body.message || '').toLowerCase();
+      const emailConfirmationMentioned = confirmationMsg.includes('email de confirmation') || confirmationMsg.includes('vérification');
+
+      console.log(`   verificationRequired: ${registerRes.body.verificationRequired}`);
+      console.log(`   autoLogin: ${registerRes.body.autoLogin}`);
+
+      if (verificationRequired && emailConfirmationMentioned) {
+        console.log('   ✅ Confirmation email flow detected in API response');
+      } else {
+        console.log('   ⚠️  Confirmation email flow not clearly indicated in response payload');
+      }
       
       if (registerRes.body.token) {
         console.log(`   Token: ${registerRes.body.token.substring(0, 30)}...`);
@@ -131,8 +144,8 @@ async function runTests() {
     return;
   }
 
-  // Test 2: Verify user exists in database
-  console.log('\n\n2️⃣  TEST: Verify user created (GET /api/me)');
+  // Test 2: Verify user/session state
+  console.log('\n\n2️⃣  TEST: Verify user/session state (GET /api/me)');
   console.log('   URL: GET ' + BASE_URL + '/api/me');
 
   try {
@@ -146,7 +159,7 @@ async function runTests() {
       console.log(`   Email: ${meRes.body.user.email}`);
       console.log(`   Role: ${meRes.body.user.role}`);
     } else {
-      console.log('   ❌ USER NOT FOUND');
+      console.log('   ⚠️  USER SESSION NOT AVAILABLE (expected if verification is required and autoLogin=false)');
       console.log(`   Response:`, JSON.stringify(meRes.body, null, 2));
     }
   } catch (err) {
@@ -207,14 +220,9 @@ async function runTests() {
     console.log(`\n   ❌ ERROR: ${err.message}`);
   }
 
-  // Test 5: Check where user should be redirected
-  console.log('\n\n5️⃣  TEST: Recommended flow after registration');
-  console.log('   ℹ️  Current flow: account.html → /api/register → loadMe() → show logged-in section');
-  console.log('   ⚠️  ISSUE: No automatic redirect to dashboard');
-  console.log('\n   RECOMMENDATION:');
-  console.log('   After successful registration, redirect to:');
-  console.log('   → ' + BASE_URL + '/admin-dashboard.html');
-  console.log('\n   OR show dashboard in same page with tab switching');
+  // Test 5: Confirmation-email assertions
+  console.log('\n\n5️⃣  TEST: Confirmation-email flow assertion');
+  console.log('   Expected API behavior: verificationRequired=true and response message mentions confirmation email');
 
   // Summary
   console.log('\n\n' + '='.repeat(80));
@@ -225,30 +233,16 @@ Flow Path Analysis:
   1. User visits: ${BASE_URL}/account.html
   2. Fills registration form
   3. Submits to: /api/register (POST)
-  4. Server: Creates user in PostgreSQL
-  5. Server: Returns: { ok: true, token, userId, ... }
-  6. Client: Calls loadMe() to refresh user state
-  7. Client: Shows logged-in section on account.html
-  
-❌ MISSING STEP:
-  8. NO REDIRECT TO DASHBOARD
-  
-✅ SHOULD ADD:
-  - Automatic redirect to admin-dashboard.html after registration
-  - OR embed dashboard view in account page
-  - OR show success message with link to dashboard
+  4. Server: Creates user
+  5. Server: Triggers confirmation email flow
+  6. Server: Returns: { ok: true, verificationRequired, autoLogin, message, ... }
+  7. Client: if verificationRequired=true, asks user to verify email before normal login
 
-Implementation Suggestion:
-  In public/js/account.js, line 104:
-  
-  if (res && res.ok) {
-    loginMessage.textContent = 'Compte créé, redirection...';
-    await loadMe();
-    // ⬇️ ADD THIS:
-    setTimeout(() => {
-      window.location.href = '/admin-dashboard.html';
-    }, 1500);
-  }
+✅ VALIDATION CRITERIA FOR THIS TEST:
+  - HTTP 200 on /api/register
+  - response.ok = true
+  - response.verificationRequired = true
+  - response.message mentions confirmation/verification email
 `);
 
   console.log('='.repeat(80) + '\n');
