@@ -551,12 +551,62 @@ async function updateUser(id, updates) {
 }
 
 async function deleteUser(id) {
+  if (!id) return null;
+  let client = null;
   try {
-    const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING id', [id]);
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    // Remove dependent subscriptions first (foreign key users(id) -> subscriptions(userid))
+    const userRes = await client.query('SELECT username FROM users WHERE id = $1 LIMIT 1', [id]);
+    const username = userRes.rows?.[0]?.username || null;
+    if (username) {
+      await client.query('DELETE FROM subscriptions WHERE userid = $1 OR LOWER(username) = LOWER($2)', [id, username]);
+    } else {
+      await client.query('DELETE FROM subscriptions WHERE userid = $1', [id]);
+    }
+
+    const result = await client.query('DELETE FROM users WHERE id = $1 RETURNING id', [id]);
+    await client.query('COMMIT');
     return result.rows?.[0]?.id || null;
   } catch (err) {
+    try { if (client) await client.query('ROLLBACK'); } catch (_) {}
     console.error('[DB] Error deleting user:', err && err.message ? err.message : err);
     return null;
+  } finally {
+    try { if (client) client.release(); } catch (_) {}
+  }
+}
+
+async function deleteUserByUsername(username) {
+  const normalized = String(username || '').trim();
+  if (!normalized) return null;
+
+  let client = null;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const userRes = await client.query('SELECT id, username FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1', [normalized]);
+    if (!userRes.rows || userRes.rows.length === 0) {
+      await client.query('COMMIT');
+      return null;
+    }
+
+    const userId = userRes.rows[0].id;
+    const uname = userRes.rows[0].username;
+
+    await client.query('DELETE FROM subscriptions WHERE userid = $1 OR LOWER(username) = LOWER($2)', [userId, uname]);
+    const deleted = await client.query('DELETE FROM users WHERE LOWER(username) = LOWER($1) RETURNING id', [normalized]);
+
+    await client.query('COMMIT');
+    return deleted.rows?.[0]?.id || null;
+  } catch (err) {
+    try { if (client) await client.query('ROLLBACK'); } catch (_) {}
+    console.error('[DB] Error deleting user by username:', err && err.message ? err.message : err);
+    return null;
+  } finally {
+    try { if (client) client.release(); } catch (_) {}
   }
 }
 
@@ -750,6 +800,7 @@ module.exports = {
   createUser,
   updateUser,
   deleteUser,
+  deleteUserByUsername,
   // subscriptions
   addSubscription,
   getAllSubscriptions,

@@ -6629,8 +6629,27 @@ app.delete('/api/admin/users/:username', authMiddleware, async (req, res) => {
       return res.status(403).json({ ok: false, error: 'Compte administrateur protégé' });
     }
 
-    if (USE_POSTGRES && db && db.deleteUser) {
-      const deletedId = await db.deleteUser(targetUser.id);
+    if (USE_POSTGRES && db) {
+      let deletedId = null;
+
+      // Primary path: delete by internal id when available
+      if (db.deleteUser && targetUser.id) {
+        deletedId = await db.deleteUser(targetUser.id);
+      }
+
+      // Fallback path: delete by username (handles stale cache / missing id)
+      if (!deletedId && db.deleteUserByUsername) {
+        deletedId = await db.deleteUserByUsername(targetUser.username);
+      }
+
+      // Last verification: if user no longer exists, consider deletion successful
+      if (!deletedId && db.getUserByUsername) {
+        const stillThere = await db.getUserByUsername(targetUser.username);
+        if (!stillThere) {
+          deletedId = targetUser.id || targetUser.username;
+        }
+      }
+
       if (!deletedId) throw new Error('Suppression PostgreSQL non confirmée');
     } else if (dbEnabled) {
       const adapter = require('./db');
