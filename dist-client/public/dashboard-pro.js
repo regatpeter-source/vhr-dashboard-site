@@ -3171,7 +3171,27 @@ async function api(path, opts = {}) {
 		const controller = new AbortController();
 		const t = setTimeout(() => controller.abort(), opts.timeout || API_TIMEOUT_MS);
 		const { _skipSessionProxy, serial, ...fetchOpts } = opts;
-		const res = await fetch(path, { ...fetchOpts, signal: controller.signal }).finally(() => clearTimeout(t));
+		let res = await fetch(path, { ...fetchOpts, signal: controller.signal }).finally(() => clearTimeout(t));
+
+		// Fallback: si le token local est périmé mais la session cookie est valide,
+		// /api/demo/status peut renvoyer 401 quand Authorization/x-remote-auth sont envoyés.
+		// On retente une fois sans ces en-têtes pour laisser le cookie faire foi.
+		if (
+			res &&
+			res.status === 401 &&
+			storedToken &&
+			!skipAuthHeader &&
+			typeof path === 'string' &&
+			path.startsWith('/api/demo/status')
+		) {
+			const retryHeaders = { ...(fetchOpts.headers || {}) };
+			delete retryHeaders.Authorization;
+			delete retryHeaders['x-remote-auth'];
+			res = await fetch(path, {
+				...fetchOpts,
+				headers: retryHeaders
+			});
+		}
 		
 		// Check if response is JSON
 		const contentType = res.headers.get('content-type');
@@ -3202,9 +3222,12 @@ async function syncVitrineAccessStatus() {
 		if (!storedToken) {
 			storedToken = await syncTokenFromCookie();
 		}
-		if (!storedToken) return null;
-		const demoUrl = `/api/demo/status?token=${encodeURIComponent(storedToken)}`;
-		const res = await api(demoUrl, { skipAuthHeader: true, timeout: 8000 });
+		const authCheck = await api('/api/check-auth?includeToken=1', { skipAuthHeader: true, timeout: 8000 });
+		if (!authCheck || !authCheck.ok || !authCheck.authenticated) return null;
+		if (authCheck.token) {
+			storedToken = saveAuthToken(authCheck.token);
+		}
+		const res = await api('/api/demo/status', { skipAuthHeader: true, timeout: 8000 });
 		if (res && res.ok && res.demo) {
 			applyDemoStatusSnapshot(res.demo);
 			const hasActiveSubscription = Boolean(
@@ -5431,7 +5454,7 @@ async function checkLicense() {
 		const authCheck = await api('/api/check-auth?includeToken=1', { skipAuthHeader: true });
 		if (authCheck && authCheck.ok && authCheck.authenticated) {
 			if (authCheck.token) {
-				storedToken = authCheck.token;
+				storedToken = saveAuthToken(authCheck.token);
 			} else if (!storedToken) {
 				storedToken = readAuthToken();
 			}
@@ -5440,12 +5463,7 @@ async function checkLicense() {
 			console.warn('[license] skipped demo check: not authenticated locally');
 			return false;
 		}
-		if (!storedToken) {
-			console.warn('[license] skipped demo check: no auth token');
-			return false;
-		}
-		const demoUrl = `/api/demo/status?token=${encodeURIComponent(storedToken)}`;
-		const res = await api(demoUrl, { skipAuthHeader: true });
+		const res = await api('/api/demo/status', { skipAuthHeader: true });
 		
 		if (!res || !res.ok) {
 			console.error('[license] demo status check failed');
