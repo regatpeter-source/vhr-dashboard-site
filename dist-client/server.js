@@ -1208,7 +1208,7 @@ function ensureElectronTrialStarted(user, options = {}) {
 }
 
 function getDemoExtensionDays(user) {
-  const raw = user && user.demoExtensionDays;
+  const raw = user && (user.demoExtensionDays ?? user.demoextensiondays);
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
@@ -5002,6 +5002,12 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
     } else {
       reloadUsers();
       user = getUserByUsername(normalized);
+    }
+
+    // Normalize mixed casing from storage adapters (Postgres/SQLite)
+    if (user) {
+      user.demoStartDate = user.demoStartDate || user.demostartdate || null;
+      user.demoExtensionDays = getDemoExtensionDays(user);
     }
 
     if (!user) {
