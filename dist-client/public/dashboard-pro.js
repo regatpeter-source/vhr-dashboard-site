@@ -4028,9 +4028,9 @@ window.startStreamFromCard = async function(serial) {
 const COLLAB_AMBIENT_PREF_KEY = 'vhr_collab_ambient_enabled';
 let collaborativeAmbientEnabled = (() => {
 	try {
-		return localStorage.getItem(COLLAB_AMBIENT_PREF_KEY) !== '0';
+		return localStorage.getItem(COLLAB_AMBIENT_PREF_KEY) === '1';
 	} catch (e) {
-		return true;
+		return false;
 	}
 })();
 
@@ -4173,8 +4173,10 @@ window.startStreamJSMpeg = async function(serial, audioOutput = 'headset') {
 		body: JSON.stringify({ serial, profile: 'default', sessionCode: sessionCode || undefined, audioOutput })
 	});
 	if (res.ok) {
-		if (useRelay) {
-			await ensureCollaborativeAmbientAudio(serial, sessionCode);
+		// Important: starting video stream must NOT auto-start voice/mic ambient pipeline.
+		// Ambient uplink remains manual via the "Environnement" toggle only.
+		if (!collaborativeAmbientEnabled) {
+			stopCollaborativeAmbientAudio(serial);
 		}
 		showToast('✅ Stream JSMpeg démarré !', 'success');
 		setTimeout(() => showStreamViewer(serial), 500);
@@ -4237,7 +4239,7 @@ window.showStreamViewer = function(serial) {
 			<div style='background:#23272f;padding:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;'>
 				<h2 style='color:#2ecc71;margin:0;'>📹 Stream - ${deviceName}</h2>
 				<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;'>
-					${isCollaborativeRelay ? "<button id='collabAmbientToggleBtn' onclick='window.toggleCollaborativeAmbientAudio()' style='background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>🎧 Environnement: ON</button>" : ''}
+					${isCollaborativeRelay ? "<button id='collabAmbientToggleBtn' onclick='window.toggleCollaborativeAmbientAudio()' style='background:linear-gradient(135deg, #7f8c8d 0%, #95a5a6 100%);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>🎧 Environnement: OFF</button>" : ''}
 					<label style='color:#fff;font-size:12px;display:flex;align-items:center;gap:6px;'>
 						🔊 Son:
 						<select id='audioOutputSelect' style='background:#1a1d24;color:#fff;border:1px solid #2ecc71;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;'>
