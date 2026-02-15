@@ -7384,25 +7384,6 @@ async function ensureDeviceStreamingReady(serial) {
   }
 }
 
-const screenrecordAudioSupportCache = new Map(); // serial -> boolean
-
-async function supportsScreenrecordAudio(serial) {
-  if (!serial) return false;
-  if (screenrecordAudioSupportCache.has(serial)) {
-    return Boolean(screenrecordAudioSupportCache.get(serial));
-  }
-  try {
-    const result = await runAdbCommandSafe(serial, ['shell', 'screenrecord', '--help']);
-    const text = `${result.stdout || ''}\n${result.stderr || ''}`.toLowerCase();
-    const ok = text.includes('--audio');
-    screenrecordAudioSupportCache.set(serial, ok);
-    return ok;
-  } catch (e) {
-    screenrecordAudioSupportCache.set(serial, false);
-    return false;
-  }
-}
-
 // ---------- ADB screenrecord (H264 direct) ----------
 async function startStream(serial, opts = {}) {
   // Compat: variable ffmpegProc définie même si non utilisée (pipeline MPEG1 désactivée)
@@ -7474,24 +7455,16 @@ async function startStream(serial, opts = {}) {
   console.log(`[server] ­ƒôØ Window: ${windowTitle} at (${windowX},${windowY})`);
 
   // Ô£à ADB screenrecord en continu (streaming direct vers stdout)
-  const wantsPcAudio = String(opts.audioOutput || 'headset').toLowerCase() !== 'headset';
-  const canCaptureAudio = wantsPcAudio ? await supportsScreenrecordAudio(serial) : false;
-
   const adbArgs = [
     '-s', serial,
     'exec-out',
     'screenrecord',
-    `--output-format=${canCaptureAudio ? 'mp4' : 'h264'}`,
+    '--output-format=h264',
     `--bit-rate=${bitrateNum}`,
     `--size=${size}`,
     '--time-limit=1800',
-    ...(canCaptureAudio ? ['--audio'] : []),
     '-'
   ];
-
-  if (wantsPcAudio && !canCaptureAudio) {
-    console.warn(`[stream] Audio demandé pour ${serial}, mais screenrecord --audio non supporté sur ce casque/ROM`);
-  }
   
 
   const adbProc = spawn(ADB_BIN, adbArgs);
@@ -7575,29 +7548,7 @@ async function startStream(serial, opts = {}) {
 
   // ---------- Pipeline JSMpeg (MPEG1) ----------
   // ffmpeg: H264 (adb) -> MPEG1-TS (JSMpeg)
-  const ffmpegArgs = canCaptureAudio ? [
-    '-fflags', '+genpts',
-    '-use_wallclock_as_timestamps', '1',
-    '-flags', 'low_delay',
-    '-probesize', '1000000',
-    '-analyzeduration', '1000000',
-    '-i', 'pipe:0',
-    '-map', '0:v:0',
-    '-map', '0:a:0?',
-    '-f', 'mpegts',
-    '-codec:v', 'mpeg1video',
-    '-b:v', '2000k',
-    '-r', '25',
-    '-vf', 'scale=640:368',
-    '-pix_fmt', 'yuv420p',
-    '-bf', '0',
-    '-codec:a', 'mp2',
-    '-ar', '44100',
-    '-ac', '2',
-    '-b:a', '128k',
-    '-muxdelay', '0.1',
-    'pipe:1'
-  ] : [
+  const ffmpegArgs = [
     '-fflags', '+genpts',
     '-use_wallclock_as_timestamps', '1',
     '-flags', 'low_delay',
@@ -8152,7 +8103,7 @@ app.post('/api/relay/audio/register', authMiddleware, (req, res) => {
 });
 
 app.post('/api/stream/start', async (req, res) => {
-  const { serial, profile, cropLeftEye, sessionCode, audioOutput } = req.body || {};
+  const { serial, profile, cropLeftEye, sessionCode } = req.body || {};
   if (!serial) return res.status(400).json({ ok: false, error: 'serial required' });
 
   if (!checkFfmpegAvailability()) {
@@ -8174,8 +8125,7 @@ app.post('/api/stream/start', async (req, res) => {
       profile: finalProfile, 
       autoReconnect: true,
       cropLeftEye: false,  // Désactiver le crop par défaut
-      sessionCode: sessionCode ? String(sessionCode).trim().toUpperCase() : null,
-      audioOutput: String(audioOutput || 'headset').toLowerCase()
+      sessionCode: sessionCode ? String(sessionCode).trim().toUpperCase() : null
     });
     res.json({ ok: true });
   } catch (e) {
@@ -8925,7 +8875,7 @@ app.post('/api/adb/command', async (req, res) => {
 
 // Open audio receiver in Quest - supports both browser and background app
 app.post('/api/device/open-audio-receiver', async (req, res) => {
-  const { serial, serverUrl, useBackgroundApp, relay, relayBase, name, talkback, bidirectional, uplink, uplinkFormat, noUiFallback, noBrowserFallback } = req.body || {};
+  const { serial, serverUrl, useBackgroundApp, relay, relayBase, name, talkback, bidirectional, uplink, uplinkFormat, noBrowserFallback, noUiFallback } = req.body || {};
   let sessionCode = (req.body && req.body.sessionCode) ? String(req.body.sessionCode) : '';
   if (!serial) {
     return res.status(400).json({ ok: false, error: 'serial required' });
@@ -8991,8 +8941,20 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
       name: String(name || ''),
       autoconnect: 'true'
     });
-    if (talkback) {
+    const wantsTalkback = talkback === true || bidirectional === true || uplink === true;
+    const wantsUplink = wantsTalkback;
+    const uplinkFmt = String(uplinkFormat || (wantsTalkback ? 'pcm16' : 'webm')).toLowerCase();
+    const disableBrowserFallback = noBrowserFallback === true || noUiFallback === true;
+
+    if (wantsTalkback) {
       receiverParams.set('talkback', '1');
+    }
+    if (bidirectional === true) {
+      receiverParams.set('bidirectional', '1');
+    }
+    if (uplink === true) {
+      receiverParams.set('uplink', '1');
+      receiverParams.set('uplinkFormat', uplinkFmt);
     }
     if (wantsRelay && sessionCode) {
       receiverParams.set('relay', '1');
@@ -9003,7 +8965,7 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
     console.log(`[open-audio-receiver] URL envoyée au Quest: ${receiverUrl}`);
 
     // In talkback web mode, ensure native app is not running (it can lock microphone)
-    if (talkback && !useBackgroundApp) {
+    if (wantsTalkback && !useBackgroundApp) {
       try {
         await runAdbCommand(serial, ['shell', 'am', 'broadcast', '-a', 'com.vhr.voice.STOP']);
       } catch (e) {}
@@ -9017,12 +8979,8 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
     }
     
     if (useBackgroundApp) {
-      // Use VHR Voice app (background service) - doesn't interrupt games
-      console.log(`[open-audio-receiver] Starting background voice app on ${serial}`);
-      const wantsTalkback = talkback === true || bidirectional === true || uplink === true;
-      const uplinkFmt = String(uplinkFormat || (wantsTalkback ? 'pcm16' : 'webm')).toLowerCase();
-      const appServerUrl = wantsRelay ? (relayBaseResolved || server) : server;
-      const disableUiFallback = noUiFallback === true;
+      // Use VHR Voice app (background service) - doesn't interrupt games, including relay sessions
+      console.log(`[open-audio-receiver] Starting background voice app on ${serial} (relay=${wantsRelay}, talkback=${wantsTalkback}, uplinkFormat=${uplinkFmt})`);
       
       // First try to start via broadcast (if app is installed)
       let broadcastResult = null;
@@ -9030,21 +8988,22 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
         broadcastResult = await runAdbCommand(serial, [
           'shell', 'am', 'broadcast',
           '-a', 'com.vhr.voice.START',
-          '--es', 'serverUrl', appServerUrl,
+          '--es', 'serverUrl', server,
           '--es', 'serial', serial,
-          '--ez', 'relay', wantsRelay ? 'true' : 'false',
-          '--es', 'sessionCode', wantsRelay && sessionCode ? String(sessionCode).trim().toUpperCase() : '',
-          '--es', 'relayBase', wantsRelay ? (relayBaseResolved || '') : '',
           '--ez', 'talkback', wantsTalkback ? 'true' : 'false',
           '--ez', 'bidirectional', wantsTalkback ? 'true' : 'false',
-          '--ez', 'uplink', wantsTalkback ? 'true' : 'false',
+          '--ez', 'uplink', wantsUplink ? 'true' : 'false',
           '--es', 'uplinkFormat', uplinkFmt
         ]);
       } catch (e) {
         broadcastResult = { code: 1, stdout: '', stderr: e.message || String(e) };
       }
       
-      if (broadcastResult.code === 0 && !String(broadcastResult.stderr || '').includes('No broadcast receiver')) {
+      const broadcastSuccess =
+        broadcastResult.code === 0
+        || /result=0/i.test(String(broadcastResult.stdout || ''))
+        || /Broadcast completed:\s*result=0/i.test(String(broadcastResult.stdout || ''));
+      if (broadcastSuccess && !String(broadcastResult.stderr || '').includes('No broadcast receiver')) {
         console.log(`[open-audio-receiver] Background app started via broadcast`);
         res.json({ 
           ok: true, 
@@ -9054,17 +9013,6 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
         });
         return;
       }
-
-      if (disableUiFallback) {
-        console.warn('[open-audio-receiver] Broadcast failed and UI fallback disabled for stream-safe mode');
-        return res.status(409).json({
-          ok: false,
-          error: 'voice_background_start_failed',
-          message: 'Démarrage voix en arrière-plan impossible (fallback UI désactivé pour éviter conflit stream)',
-          stdout: broadcastResult && broadcastResult.stdout,
-          stderr: broadcastResult && broadcastResult.stderr
-        });
-      }
       
       // Fallback: try to launch the app directly
       let appResult = null;
@@ -9072,22 +9020,23 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
         appResult = await runAdbCommand(serial, [
           'shell', 'am', 'start',
           '-n', 'com.vhr.voice/.MainActivity',
-          '--es', 'serverUrl', appServerUrl,
+          '--es', 'serverUrl', server,
           '--es', 'serial', serial,
-          '--ez', 'relay', wantsRelay ? 'true' : 'false',
-          '--es', 'sessionCode', wantsRelay && sessionCode ? String(sessionCode).trim().toUpperCase() : '',
-          '--es', 'relayBase', wantsRelay ? (relayBaseResolved || '') : '',
           '--ez', 'autostart', 'true',
           '--ez', 'talkback', wantsTalkback ? 'true' : 'false',
           '--ez', 'bidirectional', wantsTalkback ? 'true' : 'false',
-          '--ez', 'uplink', wantsTalkback ? 'true' : 'false',
+          '--ez', 'uplink', wantsUplink ? 'true' : 'false',
           '--es', 'uplinkFormat', uplinkFmt
         ]);
       } catch (e) {
         appResult = { code: 1, stdout: '', stderr: e.message || String(e) };
       }
       
-      if (appResult.code === 0) {
+      const appLaunchSuccess =
+        appResult.code === 0
+        || /starting:\s*intent/i.test(String(appResult.stdout || ''))
+        || /starting:\s*intent/i.test(String(appResult.stderr || ''));
+      if (appLaunchSuccess) {
         console.log(`[open-audio-receiver] Background app launched`);
         res.json({ 
           ok: true, 
@@ -9097,19 +9046,17 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
         });
         return;
       }
-
-      if (noBrowserFallback === true) {
-        console.warn('[open-audio-receiver] Browser fallback disabled; keeping stream-safe mode');
-        return res.status(409).json({
+      
+      // App not installed, optionally fall through to browser method
+      if (disableBrowserFallback) {
+        return res.status(500).json({
           ok: false,
-          error: 'voice_receiver_browser_fallback_disabled',
-          message: 'Receiver navigateur désactivé pour éviter conflit avec le streaming vidéo',
-          stdout: appResult && appResult.stdout,
-          stderr: appResult && appResult.stderr
+          error: 'Ouverture automatique impossible (app native indisponible et fallback navigateur désactivé)',
+          method: 'background-app',
+          stdout: `${broadcastResult?.stdout || ''}\n${appResult?.stdout || ''}`.trim(),
+          stderr: `${broadcastResult?.stderr || ''}\n${appResult?.stderr || ''}`.trim()
         });
       }
-      
-      // App not installed, fall through to browser method
       console.log(`[open-audio-receiver] Background app not available, using browser`);
     }
     
@@ -9137,7 +9084,7 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
 
 // Start VHR Voice app with pre-filled parameters
 app.post('/api/device/start-voice-app', async (req, res) => {
-  const { serial, serverUrl, talkback, bidirectional, uplink, uplinkFormat, relay, sessionCode, relayBase, noUiFallback } = req.body || {};
+  const { serial, serverUrl, talkback, bidirectional, uplink, uplinkFormat } = req.body || {};
   if (!serial) {
     return res.status(400).json({ ok: false, error: 'serial required' });
   }
@@ -9164,16 +9111,9 @@ app.post('/api/device/start-voice-app', async (req, res) => {
       }
     }
     
-    const wantsRelay = Boolean(relay || relayBase || sessionCode);
-    const normalizedSession = sessionCode ? String(sessionCode).trim().toUpperCase() : '';
-    const relayBaseResolved = (relayBase || RELAY_STREAM_BASE_URL || hostUrl || '').trim();
-    if (wantsRelay && relayBaseResolved) {
-      hostUrl = relayBaseResolved;
-    }
-
     const wantsTalkback = talkback === true || bidirectional === true || uplink === true;
     const uplinkFmt = String(uplinkFormat || (wantsTalkback ? 'pcm16' : 'webm')).toLowerCase();
-    console.log(`[start-voice-app] Starting VHR Voice on ${serial} with URL ${hostUrl} (relay=${wantsRelay}, talkback=${wantsTalkback}, format=${uplinkFmt})`);
+    console.log(`[start-voice-app] Starting VHR Voice on ${serial} with URL ${hostUrl} (talkback=${wantsTalkback}, format=${uplinkFmt})`);
 
     // Ensure microphone permissions are granted for native talkback mode
     if (wantsTalkback) {
@@ -9208,9 +9148,6 @@ app.post('/api/device/start-voice-app', async (req, res) => {
         '--es', 'serial', serial,
         '--es', 'adbSerial', serial,
         '--es', 'cleanSerial', serial.split(':')[0] || serial,
-        '--ez', 'relay', wantsRelay ? 'true' : 'false',
-        '--es', 'sessionCode', normalizedSession,
-        '--es', 'relayBase', wantsRelay ? relayBaseResolved : '',
         '--ez', 'autostart', 'true',
         '--ez', 'talkback', wantsTalkback ? 'true' : 'false',
         '--ez', 'bidirectional', wantsTalkback ? 'true' : 'false',
@@ -9241,9 +9178,6 @@ app.post('/api/device/start-voice-app', async (req, res) => {
         '-e', 'serial', serial,
         '-e', 'adbSerial', serial,
         '-e', 'cleanSerial', serial.split(':')[0] || serial,
-        '--ez', 'relay', wantsRelay ? 'true' : 'false',
-        '--es', 'sessionCode', normalizedSession,
-        '--es', 'relayBase', wantsRelay ? relayBaseResolved : '',
         '--ez', 'autostart', 'true',
         '--ez', 'talkback', wantsTalkback ? 'true' : 'false',
         '--ez', 'bidirectional', wantsTalkback ? 'true' : 'false',
@@ -9258,15 +9192,6 @@ app.post('/api/device/start-voice-app', async (req, res) => {
       ]);
 
       if (!(result.code === 0 || String(result.stdout || '').includes('Starting'))) {
-        if (noUiFallback === true) {
-          return res.status(409).json({
-            ok: false,
-            error: 'voice_background_start_failed',
-            message: 'Démarrage background impossible (fallback UI désactivé pour éviter conflit stream)',
-            stdout: result && result.stdout,
-            stderr: result && result.stderr
-          });
-        }
         result = await runAdbCommand(serial, [
           'shell', 'am', 'start',
           '-n', 'com.vhr.dashboard/.MainActivity',
@@ -9286,16 +9211,6 @@ app.post('/api/device/start-voice-app', async (req, res) => {
       });
     } else {
       // Try just opening the app without extras if first method fails
-      if (noUiFallback === true) {
-        return res.status(409).json({
-          ok: false,
-          error: 'voice_background_start_failed',
-          message: 'Fallback UI désactivé pour mode parallèle stream+voix',
-          stdout: result && result.stdout,
-          stderr: result && result.stderr
-        });
-      }
-
       let fallbackResult = null;
       try {
         fallbackResult = await runAdbCommand(serial, [

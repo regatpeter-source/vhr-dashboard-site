@@ -587,18 +587,28 @@ function shouldUseRelayForSession(serial) {
 	return true;
 }
 
-function openRelayAudioReceiver(serial, sessionCode) {
+function openRelayAudioReceiver(serial, sessionCode, options = {}) {
 	if (!serial || !sessionCode) return '';
 	const device = devices.find(d => d.serial === serial);
 	const deviceName = device ? device.name : serial;
 	const relayBase = getRelayBaseUrl();
+	const forceBackgroundApp = options.forceBackgroundApp !== false;
+	const disableBrowserFallback = options.disableBrowserFallback !== false;
+	const talkbackEnabled = options.talkback !== false;
+	const bidirectionalEnabled = options.bidirectional !== false;
+	const uplinkEnabled = options.uplink !== false;
+	const uplinkFormat = options.uplinkFormat || 'pcm16';
 	const params = new URLSearchParams({
 		serial: serial,
 		name: deviceName,
 		autoconnect: 'true',
 		relay: '1',
 		session: sessionCode,
-		relayBase: relayBase
+		relayBase: relayBase,
+		talkback: talkbackEnabled ? '1' : '0',
+		bidirectional: bidirectionalEnabled ? '1' : '0',
+		uplink: uplinkEnabled ? '1' : '0',
+		uplinkFormat: uplinkFormat
 	});
 	const targetUrl = `/audio-receiver.html?${params.toString()}`;
 	const base = (relayBase || '').replace(/\/$/, '') || window.location.origin;
@@ -606,51 +616,36 @@ function openRelayAudioReceiver(serial, sessionCode) {
 	const payload = {
 		serial,
 		name: deviceName,
+		serverUrl: relayBase,
 		sessionCode,
 		relay: true,
 		relayBase,
-		useBackgroundApp: true,
-		noUiFallback: true,
-		noBrowserFallback: true,
-		talkback: true,
-		bidirectional: true,
-		uplink: true,
-		uplinkFormat: 'pcm16'
+		useBackgroundApp: forceBackgroundApp,
+		noUiFallback: disableBrowserFallback,
+		noBrowserFallback: disableBrowserFallback,
+		talkback: talkbackEnabled,
+		bidirectional: bidirectionalEnabled,
+		uplink: uplinkEnabled,
+		uplinkFormat: uplinkFormat
 	};
-	api('/api/device/open-audio-receiver', {
+	return api('/api/device/open-audio-receiver', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(payload)
 	}).then(res => {
 		if (res && res.ok) {
 			showToast(`📱 Récepteur voix lancé sur ${deviceName}`, 'success');
-			return;
+			return { ok: true, method: res.method || 'unknown', url: absoluteUrl };
 		}
-
-		// Some headset builds fail in strict background-only mode.
-		// Retry once with UI fallback allowed so voice actually starts when user explicitly requested it.
-		if (res && res.error === 'voice_background_start_failed') {
-			console.warn('[relay audio] strict background start failed, retrying with UI fallback allowed');
-			const fallbackRes = await api('/api/device/open-audio-receiver', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ ...payload, noUiFallback: false, noBrowserFallback: true })
-			}).catch(err => ({ ok: false, error: err && err.message ? err.message : String(err) }));
-
-			if (fallbackRes && fallbackRes.ok) {
-				showToast(`📱 Voix lancée sur ${deviceName} (fallback UI activé)`, 'warning', 4500);
-				return;
-			}
-		}
-
 		const errMsg = (res && res.error) ? res.error : 'Ouverture automatique impossible';
 		console.warn('[relay audio] open-audio-receiver failed:', errMsg);
 		showToast(`⚠️ ${errMsg}. Demandez à l’hôte d’ouvrir le receiver sur le casque.`, 'warning');
+		return { ok: false, error: errMsg, url: absoluteUrl };
 	}).catch(err => {
 		console.warn('[relay audio] open-audio-receiver error', err);
 		showToast('⚠️ Ouverture automatique impossible. Demandez à l’hôte d’ouvrir le receiver sur le casque.', 'warning');
+		return { ok: false, error: err && err.message ? err.message : 'open-audio-receiver error', url: absoluteUrl };
 	});
-	return absoluteUrl;
 }
 
 function openSessionHostViewer({ mode, serial }) {
@@ -1864,9 +1859,6 @@ let activeAudioStream = null;  // Global audio stream instance
 let activeAudioSerial = null;  // Serial of device receiving audio
 const ENABLE_HEADSET_TALKBACK = false; // mode stable: app native casque (PC -> casque)
 const ENABLE_NATIVE_APP_UPLINK = true; // écoute micro casque -> PC via app native
-let collaborativeAmbientAudioStream = null;
-let collaborativeAmbientSerial = null;
-let collaborativeAmbientSessionCode = null;
 
 console.log('[voice] dashboard-pro.js build stamp: 2026-02-03 23:45');
 
@@ -1915,9 +1907,16 @@ window.updateTalkbackIndicator = function(state = 'off', label = 'OFF') {
 
 window.sendVoiceToHeadset = async function(serial, options = {}) {
 	console.log('[voice] sendVoiceToHeadset invoked for serial:', serial);
+	const isCollabMode = isSessionActive();
+	const forceNonSessionNativeProfile = !isCollabMode;
 	const isRemoteDevice = isRemoteSessionSerial(serial);
 	const sessionCode = options.sessionCode || getActiveSessionCode();
-	const useRelayForRemote = isRemoteDevice && shouldUseRelayForSession(serial) && sessionCode;
+	const useRelayForRemote = (!forceNonSessionNativeProfile) && isRemoteDevice && shouldUseRelayForSession(serial) && sessionCode;
+	const useNativeSessionAudioCompat = Boolean(useRelayForRemote);
+	const useRelayAudioTransport = Boolean(useRelayForRemote && !useNativeSessionAudioCompat);
+	if (forceNonSessionNativeProfile) {
+		console.log('[voice] Non-session profile locked: native app + downlink PCM16 + uplink PCM16');
+	}
 	if (useRelayForRemote) {
 		const relayKey = `${sessionCode}:${serial}`;
 		const lastOpen = relayVoiceOpenTracker.get(relayKey) || 0;
@@ -1931,17 +1930,29 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 
 	if (useRelayForRemote) {
 		showToast('🛰️ Voix distante via relais…', 'info');
-		try {
-			await api('/api/relay/audio/register', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ serial, sessionCode }),
-				_skipSessionProxy: true
-			});
-		} catch (e) {
-			console.warn('[relay audio] register failed', e);
+		if (useRelayAudioTransport) {
+			try {
+				await api('/api/relay/audio/register', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ serial, sessionCode }),
+					_skipSessionProxy: true
+				});
+			} catch (e) {
+				console.warn('[relay audio] register failed', e);
+			}
 		}
-		openRelayAudioReceiver(serial, sessionCode);
+		if (useNativeSessionAudioCompat) {
+			console.log('[voice] Collaborative remote audio: native app compatibility mode enabled (/api/audio/stream)');
+		}
+		await openRelayAudioReceiver(serial, sessionCode, {
+			forceBackgroundApp: true,
+			disableBrowserFallback: true,
+			talkback: true,
+			bidirectional: true,
+			uplink: true,
+			uplinkFormat: 'pcm16'
+		});
 		showToast('⚠️ Ne pas ouvrir le receiver sur ce PC (B). Le receiver doit rester sur le casque.', 'warning', 5500);
 	}
 	// Close any existing stream first (same or different device)
@@ -2055,7 +2066,7 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 			showToast('🔗 Connexion audio via le serveur de l’hôte…', 'info');
 			openSessionHostViewer({ mode: 'voice', serial });
 		}
-		const useBackgroundApp = !ENABLE_HEADSET_TALKBACK; // en talkback, forcer le receiver web
+		const useBackgroundApp = forceNonSessionNativeProfile ? true : !ENABLE_HEADSET_TALKBACK;
 		// Ensure we have a token for signaling (LAN origin may not share localStorage)
 		let signalingToken = readAuthToken();
 		if (!signalingToken) {
@@ -2213,18 +2224,15 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 		} catch (openError) {
 			console.warn('[sendVoiceToHeadset] Could not open audio receiver:', openError);
 		}
-		}
 
-		// Important: start uplink receiver on this PC in both local and collaborative relay modes.
-		// In collaborative mode (B controlling headset on A), this is what allows mic casque A -> PC B.
 		if ((ENABLE_HEADSET_TALKBACK || ENABLE_NATIVE_APP_UPLINK) && activeAudioStream && typeof activeAudioStream.startTalkbackReceiver === 'function') {
 			try {
 				await activeAudioStream.startTalkbackReceiver(serial, {
-					relay: useRelayForRemote,
-					sessionCode: useRelayForRemote ? sessionCode : undefined,
+					relay: useRelayAudioTransport,
+					sessionCode: useRelayAudioTransport ? sessionCode : undefined,
 					format: ENABLE_NATIVE_APP_UPLINK && !ENABLE_HEADSET_TALKBACK ? 'pcm16' : 'webm'
 				});
-				console.log('[voice] Uplink receiver started on PC for', serial, 'relay=', useRelayForRemote);
+				console.log('[voice] Uplink receiver started on PC for', serial);
 				if (ENABLE_NATIVE_APP_UPLINK && !ENABLE_HEADSET_TALKBACK) {
 					showToast('🎙️ Micro casque→PC: écoute uplink active (app native)', 'info');
 				}
@@ -2232,17 +2240,18 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 				console.warn('[voice] Talkback receiver failed:', talkbackErr);
 			}
 		}
+		}
 		
 		// Also start audio relay to headset via WebSocket for simple receivers
-		// Priorité app casque : tente OGG, sinon fallback WebM. Même si WebRTC a échoué, on pousse le relais.
+		// Priorité app casque native : mode strict PCM16 pour éviter tout mismatch de format.
 		try {
 			const relayFormat = useBackgroundApp ? 'pcm16' : 'webm';
 			if (activeAudioStream && typeof activeAudioStream.startAudioRelay === 'function' && activeAudioStream.localStream) {
-				console.log('[voice] Starting audio relay WS sender for', serial, 'format=', relayFormat, 'startOk=', startOk, 'relay=', useRelayForRemote);
+				console.log('[voice] Starting audio relay WS sender for', serial, 'format=', relayFormat, 'startOk=', startOk, 'relay=', useRelayAudioTransport);
 				await activeAudioStream.startAudioRelay(serial, {
 					format: relayFormat,
-					relay: useRelayForRemote,
-					sessionCode: useRelayForRemote ? sessionCode : undefined
+					relay: useRelayAudioTransport,
+					sessionCode: useRelayAudioTransport ? sessionCode : undefined
 				});
 				console.log('[sendVoiceToHeadset] Audio relay started for headset receivers');
 			} else {
@@ -2250,19 +2259,8 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 			}
 		} catch (relayError) {
 			console.warn('[sendVoiceToHeadset] Audio relay failed (attempted', useBackgroundApp ? 'pcm16' : 'webm', '):', relayError);
-			// Fallback: retry in webm if ogg failed
-			if (useBackgroundApp && activeAudioStream && typeof activeAudioStream.startAudioRelay === 'function') {
-				try {
-					console.log('[voice] Fallback relay in webm for', serial);
-					await activeAudioStream.startAudioRelay(serial, {
-						format: 'webm',
-						relay: useRelayForRemote,
-						sessionCode: useRelayForRemote ? sessionCode : undefined
-					});
-					console.log('[sendVoiceToHeadset] Fallback WebM relay started');
-				} catch (fallbackErr) {
-					console.warn('[sendVoiceToHeadset] Fallback relay failed:', fallbackErr);
-				}
+			if (useBackgroundApp) {
+				showToast('⚠️ Flux voix natif indisponible (PCM16). Aucun fallback WebM appliqué pour éviter la voix dégradée.', 'warning', 5000);
 			}
 		}
 		
@@ -2304,6 +2302,7 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 		
 		window.animateAudioVisualizer();
 		showToast(`🎤 Streaming vers ${deviceName} (+ PC)`, 'success');
+		window.updateStreamVoiceGuideButton();
 	} catch (e) {
 		console.error('[sendVoiceToHeadset] Error:', e);
 		window.closeAudioStream();
@@ -3983,20 +3982,17 @@ window.showStreamAudioDialog = function(serial, callback) {
 // Prevent multiple Scrcpy launches from rapid clicks
 window.scrcpyLaunchRequests = window.scrcpyLaunchRequests || new Map();
 window.scrcpyLastLaunch = window.scrcpyLastLaunch || new Map();
-window.streamAudioModes = window.streamAudioModes || new Map();
 const SCRCPY_LAUNCH_DEBOUNCE_MS = 2000;
 
 window.launchStreamWithAudio = async function(serial, audioOutput) {
-	const normalizedAudioOutput = String(audioOutput || 'headset').toLowerCase();
-	window.streamAudioModes.set(String(serial || ''), normalizedAudioOutput);
 	if (isRemoteSessionSerial(serial)) {
 		if (shouldUseRelayForSession(serial)) {
 			showToast('🛰️ Casque distant: ouverture du viewer relais…', 'info');
-			await window.startStreamJSMpeg(serial, normalizedAudioOutput);
+			await window.startStreamJSMpeg(serial);
 			return;
 		}
 		showToast('🛰️ Casque distant: ouverture du viewer sur l’hôte…', 'info');
-		await window.startStreamJSMpeg(serial, normalizedAudioOutput);
+		await window.startStreamJSMpeg(serial);
 		openSessionHostViewer({ mode: 'stream', serial });
 		return;
 	}
@@ -4023,11 +4019,11 @@ window.launchStreamWithAudio = async function(serial, audioOutput) {
 	const res = await api('/api/scrcpy-gui', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ serial, audioOutput: normalizedAudioOutput })
+		body: JSON.stringify({ serial, audioOutput })
 	});
 	
 	if (res.ok) {
-		const audioMsg = normalizedAudioOutput === 'headset' ? '(son sur casque)' : normalizedAudioOutput === 'pc' ? '(son sur PC)' : '(son sur casque + PC)';
+		const audioMsg = audioOutput === 'headset' ? '(son sur casque)' : audioOutput === 'pc' ? '(son sur PC)' : '(son sur casque + PC)';
 		showToast(`🎮 Scrcpy lancé ! ${audioMsg}`, 'success');
 		incrementStat('totalSessions');
 	} else {
@@ -4047,162 +4043,14 @@ window.startStreamFromCard = async function(serial) {
 	window.showStreamAudioDialog(serial);
 };
 
-const COLLAB_AMBIENT_PREF_KEY = 'vhr_collab_ambient_enabled';
-let collaborativeAmbientEnabled = (() => {
-	try {
-		return localStorage.getItem(COLLAB_AMBIENT_PREF_KEY) === '1';
-	} catch (e) {
-		return false;
-	}
-})();
-
-function saveCollaborativeAmbientPref(enabled) {
-	try {
-		localStorage.setItem(COLLAB_AMBIENT_PREF_KEY, enabled ? '1' : '0');
-	} catch (e) {
-		// ignore storage errors
-	}
-}
-
-function updateCollaborativeAmbientToggleUI() {
-	const btn = document.getElementById('collabAmbientToggleBtn');
-	if (!btn) return;
-	if (collaborativeAmbientEnabled) {
-		btn.textContent = '🎧 Environnement: ON';
-		btn.style.background = 'linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)';
-		btn.style.color = '#fff';
-	} else {
-		btn.textContent = '🎧 Environnement: OFF';
-		btn.style.background = 'linear-gradient(135deg, #7f8c8d 0%, #95a5a6 100%)';
-		btn.style.color = '#fff';
-	}
-}
-
-async function ensureCollaborativeAmbientAudio(serial, sessionCode) {
-	if (!collaborativeAmbientEnabled) return;
-	if (!serial || !sessionCode) return;
-	if (!isRemoteSessionSerial(serial)) return;
-	if (!shouldUseRelayForSession(serial)) return;
-
-	const normalizedSession = String(sessionCode).trim().toUpperCase();
-	if (
-		collaborativeAmbientAudioStream &&
-		collaborativeAmbientSerial === serial &&
-		collaborativeAmbientSessionCode === normalizedSession
-	) {
-		return;
-	}
-
-	if (collaborativeAmbientAudioStream) {
-		try {
-			collaborativeAmbientAudioStream.stopTalkbackReceiver();
-		} catch (e) {
-			console.warn('[session ambient] stop previous listener failed:', e);
-		}
-		collaborativeAmbientAudioStream = null;
-		collaborativeAmbientSerial = null;
-		collaborativeAmbientSessionCode = null;
-	}
-
-	try {
-		// Ensure A-side native voice app/uplink is started in collaborative relay mode
-		const relayBase = getRelayBaseUrl() || window.location.origin;
-		const startRes = await api('/api/device/start-voice-app', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				serial,
-				serverUrl: relayBase,
-				relay: true,
-				sessionCode: normalizedSession,
-				relayBase,
-				noUiFallback: true,
-				talkback: true,
-				bidirectional: true,
-				uplink: true,
-				uplinkFormat: 'pcm16'
-			})
-		});
-
-		if (!startRes || !startRes.ok) {
-			console.warn('[session ambient] start-voice-app failed, fallback open receiver:', startRes?.error || startRes);
-		}
-
-		// Keep legacy fallback (opens receiver path / starts app depending on device state)
-		openRelayAudioReceiver(serial, normalizedSession);
-
-		const ambient = new window.VHRAudioStream({ relayBase });
-		await ambient.startTalkbackReceiver(serial, {
-			relay: true,
-			sessionCode: normalizedSession,
-			format: 'pcm16'
-		});
-
-		collaborativeAmbientAudioStream = ambient;
-		collaborativeAmbientSerial = serial;
-		collaborativeAmbientSessionCode = normalizedSession;
-		showToast('🎧 Retour audio environnement actif (session collaborative)', 'success', 3500);
-	} catch (e) {
-		console.warn('[session ambient] start failed:', e);
-	}
-}
-
-function stopCollaborativeAmbientAudio(serial = null) {
-	if (!collaborativeAmbientAudioStream) return;
-	if (serial && collaborativeAmbientSerial && String(serial) !== String(collaborativeAmbientSerial)) return;
-
-	try {
-		collaborativeAmbientAudioStream.stopTalkbackReceiver();
-	} catch (e) {
-		console.warn('[session ambient] stop failed:', e);
-	}
-
-	collaborativeAmbientAudioStream = null;
-	collaborativeAmbientSerial = null;
-	collaborativeAmbientSessionCode = null;
-}
-
-window.toggleCollaborativeAmbientAudio = async function() {
-	collaborativeAmbientEnabled = !collaborativeAmbientEnabled;
-	saveCollaborativeAmbientPref(collaborativeAmbientEnabled);
-	updateCollaborativeAmbientToggleUI();
-
-	const modal = document.getElementById('streamModal');
-	const serial = modal?.dataset?.serial || null;
+window.startStreamJSMpeg = async function(serial) {
 	const sessionCode = getActiveSessionCode();
-	const canUseRelay = Boolean(serial && sessionCode && isRemoteSessionSerial(serial) && shouldUseRelayForSession(serial));
-
-	if (!collaborativeAmbientEnabled) {
-		stopCollaborativeAmbientAudio(serial);
-		showToast('🔇 Retour environnement désactivé', 'info');
-		return;
-	}
-
-	if (!canUseRelay) {
-		showToast('⚠️ Retour environnement indisponible hors session collaborative relais', 'warning');
-		return;
-	}
-
-	await ensureCollaborativeAmbientAudio(serial, sessionCode);
-	showToast('🎧 Retour environnement activé', 'success');
-};
-
-window.startStreamJSMpeg = async function(serial, audioOutput = 'headset') {
-	const normalizedAudioOutput = String(audioOutput || 'headset').toLowerCase();
-	window.streamAudioModes.set(String(serial || ''), normalizedAudioOutput);
-	const sessionCode = getActiveSessionCode();
-	const useRelay = isRemoteSessionSerial(serial) && shouldUseRelayForSession(serial) && sessionCode;
 	const res = await api('/api/stream/start', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ serial, profile: 'default', sessionCode: sessionCode || undefined, audioOutput: normalizedAudioOutput })
+		body: JSON.stringify({ serial, profile: 'default', sessionCode: sessionCode || undefined })
 	});
 	if (res.ok) {
-		// Important: starting video stream must NOT auto-start voice/mic ambient pipeline.
-		// Ambient uplink remains manual via the "Environnement" toggle only.
-		if (!collaborativeAmbientEnabled) {
-			stopCollaborativeAmbientAudio(serial);
-		}
 		showToast('✅ Stream JSMpeg démarré !', 'success');
 		setTimeout(() => showStreamViewer(serial), 500);
 	}
@@ -4245,8 +4093,6 @@ window.showStreamViewer = function(serial) {
 	// Récupérer le nom du casque
 	const device = devices.find(d => d.serial === serial);
 	const deviceName = device ? device.name : serial;
-	const sessionCode = getActiveSessionCode();
-	const isCollaborativeRelay = Boolean(isRemoteSessionSerial(serial) && shouldUseRelayForSession(serial) && sessionCode);
 	
 	let modal = document.getElementById('streamModal');
 	if (!modal) {
@@ -4290,6 +4136,7 @@ window.showStreamViewer = function(serial) {
 					🟢 En direct - <span id='streamTime'>${new Date().toLocaleTimeString('fr-FR')}</span>
 				</div>
 				<div style='display:flex;gap:8px;font-size:12px;'>
+					<button id='streamVoiceGuideBtn' onclick='window.toggleStreamVoiceGuide()' style='background:#16a085;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>🗣️ Guide vocal</button>
 					<button onclick='toggleStreamFullscreen()' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>⛶ Plein écran</button>
 					<button onclick='captureStreamScreenshot()' style='background:#2ecc71;color:#000;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>📸 Capture</button>
 				</div>
@@ -4297,6 +4144,7 @@ window.showStreamViewer = function(serial) {
 		</div>
 	`;
 	modal.style.display = 'flex';
+	window.updateStreamVoiceGuideButton();
 	
 	// Attendre 1 seconde que le stream soit bien lancé côté serveur avant de connecter le player
 	console.log('[stream] Modal opened, waiting for stream to stabilize...');
@@ -4305,54 +4153,23 @@ window.showStreamViewer = function(serial) {
 	setTimeout(() => {
 		const audioSelect = document.getElementById('audioOutputSelect');
 		if (audioSelect) {
-			const rememberedMode = (window.streamAudioModes && window.streamAudioModes.get(String(serial || ''))) || 'headset';
-			if (Array.from(audioSelect.options || []).some(opt => opt.value === rememberedMode)) {
-				audioSelect.value = rememberedMode;
-			}
 			audioSelect.addEventListener('change', (e) => {
-				const audioMode = String(e.target.value || 'headset').toLowerCase();
+				const audioMode = e.target.value;
 				const serialFromModal = document.getElementById('streamModal').dataset.serial || serial;
-				window.streamAudioModes.set(String(serialFromModal || ''), audioMode);
 				console.log('[stream] Audio mode changed to:', audioMode, 'Serial:', serialFromModal);
-				showToast('🔄 Application du mode audio…', 'info');
-				(async () => {
-					const activeSessionCode = getActiveSessionCode();
-					await api('/api/stream/stop', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ serial: serialFromModal })
-					});
-
-					const restartRes = await api('/api/stream/start', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({
-							serial: serialFromModal,
-							profile: 'default',
-							sessionCode: activeSessionCode || undefined,
-							audioOutput: audioMode
-						})
-					});
-
-					if (!restartRes || !restartRes.ok) {
-						showToast('❌ Changement audio impossible: ' + (restartRes?.error || 'inconnu'), 'error');
-						return;
+				showToast('🔊 Audio: ' + (audioMode === 'headset' ? 'Casque' : audioMode === 'pc' ? 'PC' : 'Les deux'), 'info');
+				// Envoyer au serveur
+				api('/api/stream/audio-output', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ serial: serialFromModal, audioOutput: audioMode })
+				}).then(res => {
+					if (res && res.ok) {
+						console.log('[stream audio] Success:', res);
+					} else {
+						console.error('[stream audio] Failed:', res);
 					}
-
-					if (window.jsmpegPlayer) {
-						try { window.jsmpegPlayer.destroy(); } catch (e) {}
-						window.jsmpegPlayer = null;
-					}
-
-					setTimeout(() => window.initStreamPlayer(serialFromModal), 350);
-					showToast('🔊 Audio: ' + (audioMode === 'headset' ? 'Casque' : audioMode === 'pc' ? 'PC (si support casque)' : 'Les deux'), 'success');
-					if (audioMode === 'pc') {
-						showToast('ℹ️ Si le son reste sur casque: le casque ne supporte pas capture audio système pour le stream', 'info', 5000);
-					}
-				})().catch(err => {
-					console.error('[stream audio] restart failed:', err);
-					showToast('❌ Erreur lors du changement audio', 'error');
-				});
+				}).catch(err => console.error('[stream audio]', err));
 			});
 		} else {
 			console.warn('[stream] audioOutputSelect element not found');
@@ -4369,6 +4186,43 @@ window.showStreamViewer = function(serial) {
 	setTimeout(() => {
 		initStreamPlayer(serial);
 	}, 1000);
+};
+
+window.updateStreamVoiceGuideButton = function() {
+	const modal = document.getElementById('streamModal');
+	const btn = document.getElementById('streamVoiceGuideBtn');
+	if (!modal || !btn) return;
+	const serial = modal.dataset.serial || '';
+	const activeOnSameSerial = !!(activeAudioStream && activeAudioSerial && serial && activeAudioSerial === serial);
+	if (activeOnSameSerial) {
+		btn.textContent = '🔇 Couper guide vocal';
+		btn.style.background = '#e74c3c';
+	} else {
+		btn.textContent = '🗣️ Guide vocal';
+		btn.style.background = '#16a085';
+	}
+};
+
+window.toggleStreamVoiceGuide = async function() {
+	const modal = document.getElementById('streamModal');
+	if (!modal) return;
+	const serial = modal.dataset.serial || '';
+	if (!serial) {
+		showToast('⚠️ Aucun casque sélectionné pour la voix', 'warning');
+		return;
+	}
+
+	const activeOnSameSerial = !!(activeAudioStream && activeAudioSerial && activeAudioSerial === serial);
+	if (activeOnSameSerial) {
+		await window.closeAudioStream(true);
+		showToast('🔇 Guide vocal arrêté', 'info');
+		window.updateStreamVoiceGuideButton();
+		return;
+	}
+
+	const sessionCode = getActiveSessionCode();
+	await window.sendVoiceToHeadset(serial, { viaSession: true, sessionCode });
+	window.updateStreamVoiceGuideButton();
 };
 
 window.toggleStreamFullscreen = function() {
@@ -4401,9 +4255,7 @@ window.captureStreamScreenshot = function() {
 
 window.closeStreamViewer = function() {
 	const modal = document.getElementById('streamModal');
-	const serial = modal?.dataset?.serial || null;
 	if (modal) modal.style.display = 'none';
-	stopCollaborativeAmbientAudio(serial);
 	
 	// Clean up stream time interval
 	if (window.streamTimeInterval) {
@@ -4415,6 +4267,7 @@ window.closeStreamViewer = function() {
 		window.jsmpegPlayer.destroy();
 		window.jsmpegPlayer = null;
 	}
+	window.updateStreamVoiceGuideButton();
 };
 
 window.initStreamPlayer = function(serial) {
@@ -4522,7 +4375,6 @@ window.stopStreamFromTable = async function(serial) {
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ serial })
 	});
-	stopCollaborativeAmbientAudio(serial);
 	if (res.ok) showToast('�� Stream arrêté !', 'success');
 	else showToast('� Erreur: ' + (res.error || 'inconnue'), 'error');
 	setTimeout(loadDevices, 500);
@@ -4601,6 +4453,7 @@ window.closeAudioStream = async function(silent = false) {
 		if (!silent) {
 			showToast('�� Streaming arrêté', 'success');
 		}
+		window.updateStreamVoiceGuideButton();
 	} catch (error) {
 		console.error('[Audio Stream] Error closing:', error);
 		if (!silent) {
