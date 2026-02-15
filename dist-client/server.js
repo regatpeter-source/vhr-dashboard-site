@@ -8936,15 +8936,27 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
         relayBaseResolved = relayDefault;
       }
     }
+    const collaborativeVoiceLocked = Boolean(wantsRelay);
     const receiverParams = new URLSearchParams({
       serial: String(serial),
       name: String(name || ''),
       autoconnect: 'true'
     });
-    const wantsTalkback = talkback === true || bidirectional === true || uplink === true;
+    const wantsTalkback = collaborativeVoiceLocked
+      ? true
+      : (talkback === true || bidirectional === true || uplink === true);
     const wantsUplink = wantsTalkback;
-    const uplinkFmt = String(uplinkFormat || (wantsTalkback ? 'pcm16' : 'webm')).toLowerCase();
-    const disableBrowserFallback = noBrowserFallback === true || noUiFallback === true;
+    const uplinkFmt = collaborativeVoiceLocked
+      ? 'pcm16'
+      : String(uplinkFormat || (wantsTalkback ? 'pcm16' : 'webm')).toLowerCase();
+    const disableBrowserFallback = collaborativeVoiceLocked
+      ? true
+      : (noBrowserFallback === true || noUiFallback === true);
+    const forceBackgroundApp = collaborativeVoiceLocked ? true : useBackgroundApp;
+
+    if (collaborativeVoiceLocked) {
+      console.log(`[open-audio-receiver] Collaborative voice config locked for ${serial}: background-app + no-browser-fallback + talkback/uplink pcm16`);
+    }
 
     if (wantsTalkback) {
       receiverParams.set('talkback', '1');
@@ -8952,7 +8964,7 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
     if (bidirectional === true) {
       receiverParams.set('bidirectional', '1');
     }
-    if (uplink === true) {
+    if (wantsUplink) {
       receiverParams.set('uplink', '1');
       receiverParams.set('uplinkFormat', uplinkFmt);
     }
@@ -8978,7 +8990,7 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
       await new Promise(resolve => setTimeout(resolve, 250));
     }
     
-    if (useBackgroundApp) {
+    if (forceBackgroundApp) {
       // Use VHR Voice app (background service) - doesn't interrupt games, including relay sessions
       console.log(`[open-audio-receiver] Starting background voice app on ${serial} (relay=${wantsRelay}, talkback=${wantsTalkback}, uplinkFormat=${uplinkFmt})`);
       
