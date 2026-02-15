@@ -9004,14 +9004,10 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
         || /result=0/i.test(String(broadcastResult.stdout || ''))
         || /Broadcast completed:\s*result=0/i.test(String(broadcastResult.stdout || ''));
       if (broadcastSuccess && !String(broadcastResult.stderr || '').includes('No broadcast receiver')) {
-        console.log(`[open-audio-receiver] Background app started via broadcast`);
-        res.json({ 
-          ok: true, 
-          method: 'background-app',
-          stdout: broadcastResult.stdout, 
-          stderr: broadcastResult.stderr 
-        });
-        return;
+        // IMPORTANT:
+        // ADB broadcast can return result=0 even when no component effectively handles the intent.
+        // Do not return success yet: enforce explicit activity launch below to guarantee startup.
+        console.log(`[open-audio-receiver] Broadcast acknowledged; verifying with explicit activity launch`);
       }
       
       // Fallback: try to launch the app directly
