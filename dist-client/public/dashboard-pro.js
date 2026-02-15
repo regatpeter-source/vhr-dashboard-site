@@ -3964,17 +3964,20 @@ window.showStreamAudioDialog = function(serial, callback) {
 // Prevent multiple Scrcpy launches from rapid clicks
 window.scrcpyLaunchRequests = window.scrcpyLaunchRequests || new Map();
 window.scrcpyLastLaunch = window.scrcpyLastLaunch || new Map();
+window.streamAudioModes = window.streamAudioModes || new Map();
 const SCRCPY_LAUNCH_DEBOUNCE_MS = 2000;
 
 window.launchStreamWithAudio = async function(serial, audioOutput) {
+	const normalizedAudioOutput = String(audioOutput || 'headset').toLowerCase();
+	window.streamAudioModes.set(String(serial || ''), normalizedAudioOutput);
 	if (isRemoteSessionSerial(serial)) {
 		if (shouldUseRelayForSession(serial)) {
 			showToast('🛰️ Casque distant: ouverture du viewer relais…', 'info');
-			await window.startStreamJSMpeg(serial, audioOutput || 'headset');
+			await window.startStreamJSMpeg(serial, normalizedAudioOutput);
 			return;
 		}
 		showToast('🛰️ Casque distant: ouverture du viewer sur l’hôte…', 'info');
-		await window.startStreamJSMpeg(serial, audioOutput || 'headset');
+		await window.startStreamJSMpeg(serial, normalizedAudioOutput);
 		openSessionHostViewer({ mode: 'stream', serial });
 		return;
 	}
@@ -4001,11 +4004,11 @@ window.launchStreamWithAudio = async function(serial, audioOutput) {
 	const res = await api('/api/scrcpy-gui', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ serial, audioOutput })
+		body: JSON.stringify({ serial, audioOutput: normalizedAudioOutput })
 	});
 	
 	if (res.ok) {
-		const audioMsg = audioOutput === 'headset' ? '(son sur casque)' : audioOutput === 'pc' ? '(son sur PC)' : '(son sur casque + PC)';
+		const audioMsg = normalizedAudioOutput === 'headset' ? '(son sur casque)' : normalizedAudioOutput === 'pc' ? '(son sur PC)' : '(son sur casque + PC)';
 		showToast(`🎮 Scrcpy lancé ! ${audioMsg}`, 'success');
 		incrementStat('totalSessions');
 	} else {
@@ -4165,12 +4168,14 @@ window.toggleCollaborativeAmbientAudio = async function() {
 };
 
 window.startStreamJSMpeg = async function(serial, audioOutput = 'headset') {
+	const normalizedAudioOutput = String(audioOutput || 'headset').toLowerCase();
+	window.streamAudioModes.set(String(serial || ''), normalizedAudioOutput);
 	const sessionCode = getActiveSessionCode();
 	const useRelay = isRemoteSessionSerial(serial) && shouldUseRelayForSession(serial) && sessionCode;
 	const res = await api('/api/stream/start', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ serial, profile: 'default', sessionCode: sessionCode || undefined, audioOutput })
+		body: JSON.stringify({ serial, profile: 'default', sessionCode: sessionCode || undefined, audioOutput: normalizedAudioOutput })
 	});
 	if (res.ok) {
 		// Important: starting video stream must NOT auto-start voice/mic ambient pipeline.
@@ -4239,7 +4244,6 @@ window.showStreamViewer = function(serial) {
 			<div style='background:#23272f;padding:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;'>
 				<h2 style='color:#2ecc71;margin:0;'>📹 Stream - ${deviceName}</h2>
 				<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;'>
-					${isCollaborativeRelay ? "<button id='collabAmbientToggleBtn' onclick='window.toggleCollaborativeAmbientAudio()' style='background:linear-gradient(135deg, #7f8c8d 0%, #95a5a6 100%);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>🎧 Environnement: OFF</button>" : ''}
 					<label style='color:#fff;font-size:12px;display:flex;align-items:center;gap:6px;'>
 						🔊 Son:
 						<select id='audioOutputSelect' style='background:#1a1d24;color:#fff;border:1px solid #2ecc71;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;'>
@@ -4281,30 +4285,56 @@ window.showStreamViewer = function(serial) {
 	setTimeout(() => {
 		const audioSelect = document.getElementById('audioOutputSelect');
 		if (audioSelect) {
+			const rememberedMode = (window.streamAudioModes && window.streamAudioModes.get(String(serial || ''))) || 'headset';
+			if (Array.from(audioSelect.options || []).some(opt => opt.value === rememberedMode)) {
+				audioSelect.value = rememberedMode;
+			}
 			audioSelect.addEventListener('change', (e) => {
-				const audioMode = e.target.value;
+				const audioMode = String(e.target.value || 'headset').toLowerCase();
 				const serialFromModal = document.getElementById('streamModal').dataset.serial || serial;
+				window.streamAudioModes.set(String(serialFromModal || ''), audioMode);
 				console.log('[stream] Audio mode changed to:', audioMode, 'Serial:', serialFromModal);
-				showToast('🔊 Audio: ' + (audioMode === 'headset' ? 'Casque' : audioMode === 'pc' ? 'PC' : 'Les deux'), 'info');
-				// Envoyer au serveur
-				api('/api/stream/audio-output', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ serial: serialFromModal, audioOutput: audioMode })
-				}).then(res => {
-					if (res && res.ok) {
-						console.log('[stream audio] Success:', res);
-					} else {
-						console.error('[stream audio] Failed:', res);
+				showToast('🔄 Application du mode audio…', 'info');
+				(async () => {
+					const activeSessionCode = getActiveSessionCode();
+					await api('/api/stream/stop', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ serial: serialFromModal })
+					});
+
+					const restartRes = await api('/api/stream/start', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							serial: serialFromModal,
+							profile: 'default',
+							sessionCode: activeSessionCode || undefined,
+							audioOutput: audioMode
+						})
+					});
+
+					if (!restartRes || !restartRes.ok) {
+						showToast('❌ Changement audio impossible: ' + (restartRes?.error || 'inconnu'), 'error');
+						return;
 					}
-				}).catch(err => console.error('[stream audio]', err));
+
+					if (window.jsmpegPlayer) {
+						try { window.jsmpegPlayer.destroy(); } catch (e) {}
+						window.jsmpegPlayer = null;
+					}
+
+					setTimeout(() => window.initStreamPlayer(serialFromModal), 350);
+					showToast('🔊 Audio: ' + (audioMode === 'headset' ? 'Casque' : audioMode === 'pc' ? 'PC' : 'Les deux'), 'success');
+				})().catch(err => {
+					console.error('[stream audio] restart failed:', err);
+					showToast('❌ Erreur lors du changement audio', 'error');
+				});
 			});
 		} else {
 			console.warn('[stream] audioOutputSelect element not found');
 		}
 	}, 100);
-
-	updateCollaborativeAmbientToggleUI();
 	
 	// Mettre à jour l'heure en temps réel (store reference for cleanup)
 	if (window.streamTimeInterval) clearInterval(window.streamTimeInterval);
