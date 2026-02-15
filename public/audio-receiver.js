@@ -39,6 +39,11 @@
   const relaySession = urlParams.get('session') || '';
   const relayBaseParam = urlParams.get('relayBase') || '';
   const relayEnabled = urlParams.get('relay') === '1' || !!relaySession;
+  const talkbackEnabled = (urlParams.get('talkback') === '1' || urlParams.get('bidirectional') === '1');
+
+  let uplinkWs = null;
+  let uplinkStream = null;
+  let uplinkRecorder = null;
 
   function log(msg) {
     console.log('[Audio Receiver]', msg);
@@ -283,6 +288,112 @@
     return `${protocol}//${host}/api/audio/stream?serial=${encodeURIComponent(serial)}&mode=receiver`;
   }
 
+  async function resolveUplinkWsUrl(serial) {
+    if (relayEnabled && relaySession) {
+      let baseUrl;
+      try {
+        baseUrl = new URL(relayBaseParam || window.location.origin);
+      } catch (e) {
+        baseUrl = new URL(window.location.origin);
+      }
+      const protocol = baseUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${protocol}//${baseUrl.host}/api/relay/audio?session=${encodeURIComponent(relaySession)}&serial=${encodeURIComponent(serial)}&role=uplink-sender`;
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let host = window.location.host;
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      try {
+        const res = await fetch('/api/server-info');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.lanIp) {
+            host = `${data.lanIp}:${data.port || window.location.port || 3000}`;
+          }
+        }
+      } catch (e) {}
+    }
+    return `${protocol}//${host}/api/audio/stream?serial=${encodeURIComponent(serial)}&mode=uplink-sender&format=webm`;
+  }
+
+  async function startUplink(serial) {
+    if (!talkbackEnabled) return;
+    if (uplinkWs || uplinkRecorder) return;
+
+    try {
+      uplinkStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: { ideal: 48000 }
+        }
+      });
+
+      const uplinkUrl = await resolveUplinkWsUrl(serial);
+      uplinkWs = new WebSocket(uplinkUrl);
+
+      uplinkWs.onopen = () => {
+        log('Talkback uplink connecté (micro casque -> PC)');
+        setStatus('✅ Connecté - Talkback actif', true);
+
+        try {
+          uplinkRecorder = new MediaRecorder(uplinkStream, {
+            mimeType: webmMime,
+            audioBitsPerSecond: 96000
+          });
+        } catch (e) {
+          log('MediaRecorder uplink fallback: ' + e.message);
+          uplinkRecorder = new MediaRecorder(uplinkStream);
+        }
+
+        uplinkRecorder.ondataavailable = (event) => {
+          const size = event.data?.size || 0;
+          if (size < 100) return;
+          if (uplinkWs && uplinkWs.readyState === WebSocket.OPEN) {
+            uplinkWs.send(event.data);
+          }
+        };
+
+        uplinkRecorder.onerror = (event) => {
+          log('Erreur enregistrement uplink: ' + (event?.error?.message || 'inconnue'));
+        };
+
+        uplinkRecorder.start(250);
+      };
+
+      uplinkWs.onerror = () => {
+        log('Talkback uplink WebSocket error');
+      };
+
+      uplinkWs.onclose = () => {
+        log('Talkback uplink fermé');
+        stopUplink();
+      };
+    } catch (e) {
+      log('Talkback non activé (micro refusé/indisponible): ' + e.message);
+    }
+  }
+
+  function stopUplink() {
+    try {
+      if (uplinkRecorder && uplinkRecorder.state !== 'inactive') {
+        uplinkRecorder.stop();
+      }
+    } catch (e) {}
+    uplinkRecorder = null;
+
+    if (uplinkWs) {
+      try { uplinkWs.close(); } catch (e) {}
+      uplinkWs = null;
+    }
+
+    if (uplinkStream) {
+      try { uplinkStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+      uplinkStream = null;
+    }
+  }
+
   async function connect() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
       log('Already connected or connecting, skipping.');
@@ -327,6 +438,7 @@
         serialInput.disabled = true;
         isConnecting = false;
         resetBuffers();
+        startUplink(serial);
       };
 
       ws.onmessage = async (event) => {
@@ -390,6 +502,7 @@
 
   function disconnect() {
     log('Disconnecting...');
+    stopUplink();
     if (ws) {
       ws.close();
       ws = null;

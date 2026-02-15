@@ -7882,10 +7882,12 @@ function stopStream(serial) {
 // ---------- Audio WebSocket Handler ----------
 /**
  * Relays audio chunks from PC sender to headset receiver
- * Endpoint: /api/audio/stream?serial=<device-serial>&mode=sender|receiver
+ * Endpoint: /api/audio/stream?serial=<device-serial>&mode=sender|receiver|uplink-sender|uplink-receiver
  * 
  * sender: PC sends audio chunks (Blob binary data)
  * receiver: Headset receives and plays audio chunks
+ * uplink-sender: Headset microphone sends chunks back to PC
+ * uplink-receiver: PC listens to headset microphone uplink
  */
 function handleAudioWebSocket(serial, ws, req) {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -7896,10 +7898,28 @@ function handleAudioWebSocket(serial, ws, req) {
   
   // Get or create audio stream entry for this serial
   if (!audioStreams.has(serial)) {
-    audioStreams.set(serial, { sender: null, receivers: new Set(), buffer: [], headerChunk: null, format });
+    audioStreams.set(serial, {
+      sender: null,
+      receivers: new Set(),
+      buffer: [],
+      headerChunk: null,
+      format,
+      uplinkSender: null,
+      uplinkReceivers: new Set(),
+      uplinkBuffer: [],
+      uplinkHeaderChunk: null,
+      uplinkFormat: 'webm'
+    });
   }
   
   const audioEntry = audioStreams.get(serial);
+  const cleanupIfUnused = () => {
+    const noDownlink = !audioEntry.sender && audioEntry.receivers.size === 0;
+    const noUplink = !audioEntry.uplinkSender && audioEntry.uplinkReceivers.size === 0;
+    if (noDownlink && noUplink) {
+      audioStreams.delete(serial);
+    }
+  };
   
   if (mode === 'sender') {
     // PC sending audio
@@ -7956,6 +7976,7 @@ function handleAudioWebSocket(serial, ws, req) {
     ws.on('error', (err) => {
       console.error(`[Audio] Sender error:`, err.message);
       audioEntry.sender = null;
+      cleanupIfUnused();
     });
     
   } else if (mode === 'receiver') {
@@ -7999,16 +8020,107 @@ function handleAudioWebSocket(serial, ws, req) {
     ws.on('close', () => {
       console.log(`[Audio] Receiver disconnected: ${serial}`);
       audioEntry.receivers.delete(ws);
-      
-      // If no more receivers and no sender, clean up
-      if (!audioEntry.sender && audioEntry.receivers.size === 0) {
-        audioStreams.delete(serial);
-      }
+      cleanupIfUnused();
     });
     
     ws.on('error', (err) => {
       console.error(`[Audio] Receiver error:`, err.message);
       audioEntry.receivers.delete(ws);
+      cleanupIfUnused();
+    });
+  } else if (mode === 'uplink-sender') {
+    // Headset microphone sending back to PC
+    if (audioEntry.uplinkSender && audioEntry.uplinkSender !== ws && audioEntry.uplinkSender.readyState === WebSocket.OPEN) {
+      try { audioEntry.uplinkSender.close(); } catch (e) {}
+    }
+
+    audioEntry.uplinkSender = ws;
+    audioEntry.uplinkFormat = format || 'webm';
+    audioEntry.uplinkBuffer = [];
+    audioEntry.uplinkHeaderChunk = null;
+    console.log(`[Audio] Uplink sender connected: ${serial}`);
+
+    for (const listenerWs of audioEntry.uplinkReceivers) {
+      if (listenerWs.readyState === WebSocket.OPEN) {
+        try { listenerWs.send(JSON.stringify({ type: 'uplink-sender-connected' })); } catch (e) {}
+      }
+    }
+
+    ws.on('message', (data) => {
+      if (!audioEntry.uplinkHeaderChunk) {
+        audioEntry.uplinkHeaderChunk = data;
+      }
+      audioEntry.uplinkBuffer.push(data);
+      if (audioEntry.uplinkBuffer.length > AUDIO_BUFFER_SIZE) {
+        audioEntry.uplinkBuffer.shift();
+      }
+
+      const listeners = audioEntry.uplinkReceivers;
+      let sentCount = 0;
+      for (const listenerWs of listeners) {
+        if (listenerWs.readyState === WebSocket.OPEN) {
+          try {
+            listenerWs.send(data);
+            sentCount++;
+          } catch (e) {
+            listeners.delete(listenerWs);
+          }
+        }
+      }
+      if (sentCount === 0) {
+        // No listener currently connected; keep buffering last chunks only
+      }
+    });
+
+    ws.on('close', () => {
+      console.log(`[Audio] Uplink sender disconnected: ${serial}`);
+      if (audioEntry.uplinkSender === ws) {
+        audioEntry.uplinkSender = null;
+      }
+      for (const listenerWs of audioEntry.uplinkReceivers) {
+        if (listenerWs.readyState === WebSocket.OPEN) {
+          try { listenerWs.send(JSON.stringify({ type: 'uplink-sender-disconnected' })); } catch (e) {}
+        }
+      }
+      cleanupIfUnused();
+    });
+
+    ws.on('error', (err) => {
+      console.error(`[Audio] Uplink sender error:`, err.message);
+      if (audioEntry.uplinkSender === ws) {
+        audioEntry.uplinkSender = null;
+      }
+      cleanupIfUnused();
+    });
+  } else if (mode === 'uplink-receiver') {
+    // PC listening to headset microphone uplink
+    audioEntry.uplinkReceivers.add(ws);
+    console.log(`[Audio] Uplink receiver connected: ${serial}, total listeners: ${audioEntry.uplinkReceivers.size}`);
+
+    if (audioEntry.uplinkHeaderChunk && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(audioEntry.uplinkHeaderChunk);
+      } catch (e) {
+        console.error(`[Audio] Failed to send uplink header to receiver:`, e.message);
+      }
+    }
+
+    if (audioEntry.uplinkSender && audioEntry.uplinkSender.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: 'uplink-sender-connected' }));
+      } catch (e) {}
+    }
+
+    ws.on('close', () => {
+      console.log(`[Audio] Uplink receiver disconnected: ${serial}`);
+      audioEntry.uplinkReceivers.delete(ws);
+      cleanupIfUnused();
+    });
+
+    ws.on('error', (err) => {
+      console.error(`[Audio] Uplink receiver error:`, err.message);
+      audioEntry.uplinkReceivers.delete(ws);
+      cleanupIfUnused();
     });
   }
 }
@@ -8659,7 +8771,7 @@ app.post('/api/adb/command', async (req, res) => {
 
 // Open audio receiver in Quest - supports both browser and background app
 app.post('/api/device/open-audio-receiver', async (req, res) => {
-  const { serial, serverUrl, useBackgroundApp, relay, sessionCode, relayBase, name } = req.body || {};
+  const { serial, serverUrl, useBackgroundApp, relay, sessionCode, relayBase, name, talkback } = req.body || {};
   if (!serial) {
     return res.status(400).json({ ok: false, error: 'serial required' });
   }
@@ -8701,6 +8813,9 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
       name: String(name || ''),
       autoconnect: 'true'
     });
+    if (talkback) {
+      receiverParams.set('talkback', '1');
+    }
     if (wantsRelay && sessionCode) {
       receiverParams.set('relay', '1');
       receiverParams.set('session', String(sessionCode).trim().toUpperCase());
@@ -9026,7 +9141,12 @@ function handleRelaySocket(kind, ws, req) {
 
   const key = buildRelayKey(sessionCode, serial);
   const map = kind === 'audio' ? relayAudioSessions : relayVideoSessions;
-  const entry = map.get(key) || { sender: null, viewers: new Set() };
+  const entry = map.get(key) || {
+    sender: null,
+    viewers: new Set(),
+    uplinkSender: null,
+    uplinkViewers: new Set()
+  };
   map.set(key, entry);
 
   const clearNoViewerTimer = () => {
@@ -9083,12 +9203,41 @@ function handleRelaySocket(kind, ws, req) {
         }
       }
     });
-  } else {
+  } else if (role === 'viewer') {
     entry.viewers.add(ws);
     clearNoViewerTimer();
     if (kind === 'video') {
       console.log(`[Relay] Video viewer connected session=${sessionCode} serial=${serial}. Total viewers=${entry.viewers.size}`);
     }
+  } else if (kind === 'audio' && role === 'uplink-sender') {
+    if (entry.uplinkSender && entry.uplinkSender.readyState === WebSocket.OPEN) {
+      try { entry.uplinkSender.close(); } catch (e) {}
+    }
+    entry.uplinkSender = ws;
+    console.log(`[Relay] Audio uplink sender connected session=${sessionCode} serial=${serial}`);
+
+    for (const viewer of entry.uplinkViewers) {
+      if (viewer.readyState === WebSocket.OPEN) {
+        try { viewer.send(JSON.stringify({ type: 'uplink-sender-connected' })); } catch (e) {}
+      }
+    }
+
+    ws.on('message', (data) => {
+      for (const viewer of entry.uplinkViewers) {
+        if (viewer.readyState === WebSocket.OPEN) {
+          try { viewer.send(data); } catch (e) {}
+        }
+      }
+    });
+  } else if (kind === 'audio' && (role === 'uplink-viewer' || role === 'uplink-receiver')) {
+    entry.uplinkViewers.add(ws);
+    if (entry.uplinkSender && entry.uplinkSender.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: 'uplink-sender-connected' })); } catch (e) {}
+    }
+    console.log(`[Relay] Audio uplink viewer connected session=${sessionCode} serial=${serial}. Total viewers=${entry.uplinkViewers.size}`);
+  } else {
+    ws.close();
+    return;
   }
 
   ws.on('close', () => {
@@ -9096,11 +9245,20 @@ function handleRelaySocket(kind, ws, req) {
       entry.sender = null;
       clearNoViewerTimer();
     }
+    if (entry.uplinkSender === ws) {
+      entry.uplinkSender = null;
+      for (const viewer of entry.uplinkViewers) {
+        if (viewer.readyState === WebSocket.OPEN) {
+          try { viewer.send(JSON.stringify({ type: 'uplink-sender-disconnected' })); } catch (e) {}
+        }
+      }
+    }
     entry.viewers.delete(ws);
+    entry.uplinkViewers.delete(ws);
     if (entry.viewers.size === 0 && entry.sender) {
       scheduleSenderClose();
     }
-    if (!entry.sender && entry.viewers.size === 0) {
+    if (!entry.sender && entry.viewers.size === 0 && !entry.uplinkSender && entry.uplinkViewers.size === 0) {
       clearNoViewerTimer();
       map.delete(key);
     }

@@ -1,4 +1,4 @@
-package com.vhr.dashboard
+package com.vhr.voice
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope

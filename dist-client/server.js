@@ -2098,11 +2098,14 @@ app.post('/api/device/install-voice-app', async (req, res) => {
 
     if (needsReinstall) {
       console.warn('[install-voice-app] Detected incompatible/old signature, uninstalling then retrying...');
-      try {
-        const adbExecutable = ADB_BIN || 'adb';
-        await execp(`"${adbExecutable}" -s ${serial} uninstall com.vhr.voice`, { timeout: 30000 });
-      } catch (e) {
-        console.warn('[install-voice-app] Uninstall failed (continuing):', e && e.message ? e.message : e);
+      const packagesToRemove = ['com.vhr.voice', 'com.vhr.dashboard'];
+      for (const pkg of packagesToRemove) {
+        try {
+          const adbExecutable = ADB_BIN || 'adb';
+          await execp(`"${adbExecutable}" -s ${serial} uninstall ${pkg}`, { timeout: 30000 });
+        } catch (e) {
+          console.warn(`[install-voice-app] Uninstall failed for ${pkg} (continuing):`, e && e.message ? e.message : e);
+        }
       }
 
       result = await runAdbInstall();
@@ -7381,6 +7384,25 @@ async function ensureDeviceStreamingReady(serial) {
   }
 }
 
+const screenrecordAudioSupportCache = new Map(); // serial -> boolean
+
+async function supportsScreenrecordAudio(serial) {
+  if (!serial) return false;
+  if (screenrecordAudioSupportCache.has(serial)) {
+    return Boolean(screenrecordAudioSupportCache.get(serial));
+  }
+  try {
+    const result = await runAdbCommandSafe(serial, ['shell', 'screenrecord', '--help']);
+    const text = `${result.stdout || ''}\n${result.stderr || ''}`.toLowerCase();
+    const ok = text.includes('--audio');
+    screenrecordAudioSupportCache.set(serial, ok);
+    return ok;
+  } catch (e) {
+    screenrecordAudioSupportCache.set(serial, false);
+    return false;
+  }
+}
+
 // ---------- ADB screenrecord (H264 direct) ----------
 async function startStream(serial, opts = {}) {
   // Compat: variable ffmpegProc définie même si non utilisée (pipeline MPEG1 désactivée)
@@ -7452,16 +7474,24 @@ async function startStream(serial, opts = {}) {
   console.log(`[server] ­ƒôØ Window: ${windowTitle} at (${windowX},${windowY})`);
 
   // Ô£à ADB screenrecord en continu (streaming direct vers stdout)
+  const wantsPcAudio = String(opts.audioOutput || 'headset').toLowerCase() !== 'headset';
+  const canCaptureAudio = wantsPcAudio ? await supportsScreenrecordAudio(serial) : false;
+
   const adbArgs = [
     '-s', serial,
     'exec-out',
     'screenrecord',
-    '--output-format=h264',
+    `--output-format=${canCaptureAudio ? 'mp4' : 'h264'}`,
     `--bit-rate=${bitrateNum}`,
     `--size=${size}`,
     '--time-limit=1800',
+    ...(canCaptureAudio ? ['--audio'] : []),
     '-'
   ];
+
+  if (wantsPcAudio && !canCaptureAudio) {
+    console.warn(`[stream] Audio demandé pour ${serial}, mais screenrecord --audio non supporté sur ce casque/ROM`);
+  }
   
 
   const adbProc = spawn(ADB_BIN, adbArgs);
@@ -7545,7 +7575,29 @@ async function startStream(serial, opts = {}) {
 
   // ---------- Pipeline JSMpeg (MPEG1) ----------
   // ffmpeg: H264 (adb) -> MPEG1-TS (JSMpeg)
-  const ffmpegArgs = [
+  const ffmpegArgs = canCaptureAudio ? [
+    '-fflags', '+genpts',
+    '-use_wallclock_as_timestamps', '1',
+    '-flags', 'low_delay',
+    '-probesize', '1000000',
+    '-analyzeduration', '1000000',
+    '-i', 'pipe:0',
+    '-map', '0:v:0',
+    '-map', '0:a:0?',
+    '-f', 'mpegts',
+    '-codec:v', 'mpeg1video',
+    '-b:v', '2000k',
+    '-r', '25',
+    '-vf', 'scale=640:368',
+    '-pix_fmt', 'yuv420p',
+    '-bf', '0',
+    '-codec:a', 'mp2',
+    '-ar', '44100',
+    '-ac', '2',
+    '-b:a', '128k',
+    '-muxdelay', '0.1',
+    'pipe:1'
+  ] : [
     '-fflags', '+genpts',
     '-use_wallclock_as_timestamps', '1',
     '-flags', 'low_delay',
@@ -7709,10 +7761,12 @@ function stopStream(serial) {
 // ---------- Audio WebSocket Handler ----------
 /**
  * Relays audio chunks from PC sender to headset receiver
- * Endpoint: /api/audio/stream?serial=<device-serial>&mode=sender|receiver
+ * Endpoint: /api/audio/stream?serial=<device-serial>&mode=sender|receiver|uplink-sender|uplink-receiver
  * 
  * sender: PC sends audio chunks (Blob binary data)
  * receiver: Headset receives and plays audio chunks
+ * uplink-sender: Headset microphone sends chunks back to PC
+ * uplink-receiver: PC listens to headset microphone uplink
  */
 function handleAudioWebSocket(serial, ws, req) {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -7723,10 +7777,28 @@ function handleAudioWebSocket(serial, ws, req) {
   
   // Get or create audio stream entry for this serial
   if (!audioStreams.has(serial)) {
-    audioStreams.set(serial, { sender: null, receivers: new Set(), buffer: [], headerChunk: null, format });
+    audioStreams.set(serial, {
+      sender: null,
+      receivers: new Set(),
+      buffer: [],
+      headerChunk: null,
+      format,
+      uplinkSender: null,
+      uplinkReceivers: new Set(),
+      uplinkBuffer: [],
+      uplinkHeaderChunk: null,
+      uplinkFormat: 'webm'
+    });
   }
   
   const audioEntry = audioStreams.get(serial);
+  const cleanupIfUnused = () => {
+    const noDownlink = !audioEntry.sender && audioEntry.receivers.size === 0;
+    const noUplink = !audioEntry.uplinkSender && audioEntry.uplinkReceivers.size === 0;
+    if (noDownlink && noUplink) {
+      audioStreams.delete(serial);
+    }
+  };
   
   if (mode === 'sender') {
     // PC sending audio
@@ -7797,6 +7869,7 @@ function handleAudioWebSocket(serial, ws, req) {
     ws.on('error', (err) => {
       console.error(`[Audio] Sender error:`, err.message);
       audioEntry.sender = null;
+      cleanupIfUnused();
     });
     
   } else if (mode === 'receiver') {
@@ -7840,16 +7913,102 @@ function handleAudioWebSocket(serial, ws, req) {
     ws.on('close', () => {
       console.log(`[Audio] Receiver disconnected: ${serial}`);
       audioEntry.receivers.delete(ws);
-      
-      // If no more receivers and no sender, clean up
-      if (!audioEntry.sender && audioEntry.receivers.size === 0) {
-        audioStreams.delete(serial);
-      }
+      cleanupIfUnused();
     });
     
     ws.on('error', (err) => {
       console.error(`[Audio] Receiver error:`, err.message);
       audioEntry.receivers.delete(ws);
+      cleanupIfUnused();
+    });
+  } else if (mode === 'uplink-sender') {
+    // Headset microphone sending back to PC
+    if (audioEntry.uplinkSender && audioEntry.uplinkSender !== ws && audioEntry.uplinkSender.readyState === WebSocket.OPEN) {
+      try { audioEntry.uplinkSender.close(); } catch (e) {}
+    }
+
+    audioEntry.uplinkSender = ws;
+    audioEntry.uplinkFormat = format || 'webm';
+    audioEntry.uplinkBuffer = [];
+    audioEntry.uplinkHeaderChunk = null;
+    console.log(`[Audio] Uplink sender connected: ${serial}`);
+
+    for (const listenerWs of audioEntry.uplinkReceivers) {
+      if (listenerWs.readyState === WebSocket.OPEN) {
+        try { listenerWs.send(JSON.stringify({ type: 'uplink-sender-connected' })); } catch (e) {}
+      }
+    }
+
+    ws.on('message', (data) => {
+      if (!audioEntry.uplinkHeaderChunk) {
+        audioEntry.uplinkHeaderChunk = data;
+      }
+      audioEntry.uplinkBuffer.push(data);
+      if (audioEntry.uplinkBuffer.length > AUDIO_BUFFER_SIZE) {
+        audioEntry.uplinkBuffer.shift();
+      }
+
+      const listeners = audioEntry.uplinkReceivers;
+      for (const listenerWs of listeners) {
+        if (listenerWs.readyState === WebSocket.OPEN) {
+          try {
+            listenerWs.send(data);
+          } catch (e) {
+            listeners.delete(listenerWs);
+          }
+        }
+      }
+    });
+
+    ws.on('close', () => {
+      console.log(`[Audio] Uplink sender disconnected: ${serial}`);
+      if (audioEntry.uplinkSender === ws) {
+        audioEntry.uplinkSender = null;
+      }
+      for (const listenerWs of audioEntry.uplinkReceivers) {
+        if (listenerWs.readyState === WebSocket.OPEN) {
+          try { listenerWs.send(JSON.stringify({ type: 'uplink-sender-disconnected' })); } catch (e) {}
+        }
+      }
+      cleanupIfUnused();
+    });
+
+    ws.on('error', (err) => {
+      console.error(`[Audio] Uplink sender error:`, err.message);
+      if (audioEntry.uplinkSender === ws) {
+        audioEntry.uplinkSender = null;
+      }
+      cleanupIfUnused();
+    });
+  } else if (mode === 'uplink-receiver') {
+    // PC listening to headset microphone uplink
+    audioEntry.uplinkReceivers.add(ws);
+    console.log(`[Audio] Uplink receiver connected: ${serial}, total listeners: ${audioEntry.uplinkReceivers.size}`);
+
+    if (audioEntry.uplinkHeaderChunk && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(audioEntry.uplinkHeaderChunk);
+      } catch (e) {
+        console.error(`[Audio] Failed to send uplink header to receiver:`, e.message);
+      }
+    }
+
+    if (audioEntry.uplinkSender && audioEntry.uplinkSender.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ type: 'uplink-sender-connected' }));
+      } catch (e) {}
+    }
+
+    ws.on('close', () => {
+      console.log(`[Audio] Uplink receiver disconnected: ${serial}`);
+      audioEntry.uplinkReceivers.delete(ws);
+      cleanupIfUnused();
+    });
+
+    ws.on('error', (err) => {
+      console.error(`[Audio] Uplink receiver error:`, err.message);
+      audioEntry.uplinkReceivers.delete(ws);
+      cleanupIfUnused();
     });
   }
 }
@@ -7993,7 +8152,7 @@ app.post('/api/relay/audio/register', authMiddleware, (req, res) => {
 });
 
 app.post('/api/stream/start', async (req, res) => {
-  const { serial, profile, cropLeftEye, sessionCode } = req.body || {};
+  const { serial, profile, cropLeftEye, sessionCode, audioOutput } = req.body || {};
   if (!serial) return res.status(400).json({ ok: false, error: 'serial required' });
 
   if (!checkFfmpegAvailability()) {
@@ -8015,7 +8174,8 @@ app.post('/api/stream/start', async (req, res) => {
       profile: finalProfile, 
       autoReconnect: true,
       cropLeftEye: false,  // Désactiver le crop par défaut
-      sessionCode: sessionCode ? String(sessionCode).trim().toUpperCase() : null
+      sessionCode: sessionCode ? String(sessionCode).trim().toUpperCase() : null,
+      audioOutput: String(audioOutput || 'headset').toLowerCase()
     });
     res.json({ ok: true });
   } catch (e) {
@@ -8765,7 +8925,7 @@ app.post('/api/adb/command', async (req, res) => {
 
 // Open audio receiver in Quest - supports both browser and background app
 app.post('/api/device/open-audio-receiver', async (req, res) => {
-  const { serial, serverUrl, useBackgroundApp, relay, relayBase, name } = req.body || {};
+  const { serial, serverUrl, useBackgroundApp, relay, relayBase, name, talkback, bidirectional, uplink, uplinkFormat } = req.body || {};
   let sessionCode = (req.body && req.body.sessionCode) ? String(req.body.sessionCode) : '';
   if (!serial) {
     return res.status(400).json({ ok: false, error: 'serial required' });
@@ -8831,6 +8991,9 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
       name: String(name || ''),
       autoconnect: 'true'
     });
+    if (talkback) {
+      receiverParams.set('talkback', '1');
+    }
     if (wantsRelay && sessionCode) {
       receiverParams.set('relay', '1');
       receiverParams.set('session', String(sessionCode).trim().toUpperCase());
@@ -8838,10 +9001,27 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
     }
     const receiverUrl = `${server}/audio-receiver.html?${receiverParams.toString()}`;
     console.log(`[open-audio-receiver] URL envoyée au Quest: ${receiverUrl}`);
+
+    // In talkback web mode, ensure native app is not running (it can lock microphone)
+    if (talkback && !useBackgroundApp) {
+      try {
+        await runAdbCommand(serial, ['shell', 'am', 'broadcast', '-a', 'com.vhr.voice.STOP']);
+      } catch (e) {}
+      try {
+        await runAdbCommand(serial, ['shell', 'am', 'force-stop', 'com.vhr.voice']);
+      } catch (e) {}
+      try {
+        await runAdbCommand(serial, ['shell', 'am', 'force-stop', 'com.vhr.voicebackground']);
+      } catch (e) {}
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
     
-    if (!wantsRelay && useBackgroundApp) {
+    if (useBackgroundApp) {
       // Use VHR Voice app (background service) - doesn't interrupt games
       console.log(`[open-audio-receiver] Starting background voice app on ${serial}`);
+      const wantsTalkback = talkback === true || bidirectional === true || uplink === true;
+      const uplinkFmt = String(uplinkFormat || (wantsTalkback ? 'pcm16' : 'webm')).toLowerCase();
+      const appServerUrl = wantsRelay ? (relayBaseResolved || server) : server;
       
       // First try to start via broadcast (if app is installed)
       let broadcastResult = null;
@@ -8849,8 +9029,15 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
         broadcastResult = await runAdbCommand(serial, [
           'shell', 'am', 'broadcast',
           '-a', 'com.vhr.voice.START',
-          '--es', 'serverUrl', server,
-          '--es', 'serial', serial
+          '--es', 'serverUrl', appServerUrl,
+          '--es', 'serial', serial,
+          '--ez', 'relay', wantsRelay ? 'true' : 'false',
+          '--es', 'sessionCode', wantsRelay && sessionCode ? String(sessionCode).trim().toUpperCase() : '',
+          '--es', 'relayBase', wantsRelay ? (relayBaseResolved || '') : '',
+          '--ez', 'talkback', wantsTalkback ? 'true' : 'false',
+          '--ez', 'bidirectional', wantsTalkback ? 'true' : 'false',
+          '--ez', 'uplink', wantsTalkback ? 'true' : 'false',
+          '--es', 'uplinkFormat', uplinkFmt
         ]);
       } catch (e) {
         broadcastResult = { code: 1, stdout: '', stderr: e.message || String(e) };
@@ -8873,9 +9060,16 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
         appResult = await runAdbCommand(serial, [
           'shell', 'am', 'start',
           '-n', 'com.vhr.voice/.MainActivity',
-          '--es', 'serverUrl', server,
+          '--es', 'serverUrl', appServerUrl,
           '--es', 'serial', serial,
-          '--ez', 'autostart', 'true'
+          '--ez', 'relay', wantsRelay ? 'true' : 'false',
+          '--es', 'sessionCode', wantsRelay && sessionCode ? String(sessionCode).trim().toUpperCase() : '',
+          '--es', 'relayBase', wantsRelay ? (relayBaseResolved || '') : '',
+          '--ez', 'autostart', 'true',
+          '--ez', 'talkback', wantsTalkback ? 'true' : 'false',
+          '--ez', 'bidirectional', wantsTalkback ? 'true' : 'false',
+          '--ez', 'uplink', wantsTalkback ? 'true' : 'false',
+          '--es', 'uplinkFormat', uplinkFmt
         ]);
       } catch (e) {
         appResult = { code: 1, stdout: '', stderr: e.message || String(e) };
@@ -8920,7 +9114,7 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
 
 // Start VHR Voice app with pre-filled parameters
 app.post('/api/device/start-voice-app', async (req, res) => {
-  const { serial, serverUrl } = req.body || {};
+  const { serial, serverUrl, talkback, bidirectional, uplink, uplinkFormat, relay, sessionCode, relayBase } = req.body || {};
   if (!serial) {
     return res.status(400).json({ ok: false, error: 'serial required' });
   }
@@ -8947,20 +9141,106 @@ app.post('/api/device/start-voice-app', async (req, res) => {
       }
     }
     
-    console.log(`[start-voice-app] Starting VHR Voice on ${serial} with URL ${hostUrl}`);
+    const wantsRelay = Boolean(relay || relayBase || sessionCode);
+    const normalizedSession = sessionCode ? String(sessionCode).trim().toUpperCase() : '';
+    const relayBaseResolved = (relayBase || RELAY_STREAM_BASE_URL || hostUrl || '').trim();
+    if (wantsRelay && relayBaseResolved) {
+      hostUrl = relayBaseResolved;
+    }
+
+    const wantsTalkback = talkback === true || bidirectional === true || uplink === true;
+    const uplinkFmt = String(uplinkFormat || (wantsTalkback ? 'pcm16' : 'webm')).toLowerCase();
+    console.log(`[start-voice-app] Starting VHR Voice on ${serial} with URL ${hostUrl} (relay=${wantsRelay}, talkback=${wantsTalkback}, format=${uplinkFmt})`);
+
+    // Ensure microphone permissions are granted for native talkback mode
+    if (wantsTalkback) {
+      const micPrepCommands = [
+        ['shell', 'pm', 'grant', 'com.vhr.voice', 'android.permission.RECORD_AUDIO'],
+        ['shell', 'pm', 'grant', 'com.vhr.voice', 'android.permission.MODIFY_AUDIO_SETTINGS'],
+        ['shell', 'appops', 'set', 'com.vhr.voice', 'RECORD_AUDIO', 'allow'],
+        ['shell', 'appops', 'set', 'com.vhr.voice', 'CAPTURE_AUDIO_OUTPUT', 'allow'],
+        ['shell', 'cmd', 'appops', 'set', 'com.vhr.voice', 'RECORD_AUDIO', 'allow'],
+        ['shell', 'pm', 'grant', 'com.vhr.dashboard', 'android.permission.RECORD_AUDIO'],
+        ['shell', 'pm', 'grant', 'com.vhr.dashboard', 'android.permission.MODIFY_AUDIO_SETTINGS'],
+        ['shell', 'appops', 'set', 'com.vhr.dashboard', 'RECORD_AUDIO', 'allow'],
+        ['shell', 'appops', 'set', 'com.vhr.dashboard', 'CAPTURE_AUDIO_OUTPUT', 'allow'],
+        ['shell', 'cmd', 'appops', 'set', 'com.vhr.dashboard', 'RECORD_AUDIO', 'allow']
+      ];
+
+      for (const cmdArgs of micPrepCommands) {
+        try {
+          await runAdbCommand(serial, cmdArgs);
+        } catch (e) {
+          // best effort only
+        }
+      }
+    }
+
+    // Try broadcast start first (background service style)
+    try {
+      await runAdbCommand(serial, [
+        'shell', 'am', 'broadcast',
+        '-a', 'com.vhr.voice.START',
+        '--es', 'serverUrl', hostUrl,
+        '--es', 'serial', serial,
+        '--es', 'adbSerial', serial,
+        '--es', 'cleanSerial', serial.split(':')[0] || serial,
+        '--ez', 'relay', wantsRelay ? 'true' : 'false',
+        '--es', 'sessionCode', normalizedSession,
+        '--es', 'relayBase', wantsRelay ? relayBaseResolved : '',
+        '--ez', 'autostart', 'true',
+        '--ez', 'talkback', wantsTalkback ? 'true' : 'false',
+        '--ez', 'bidirectional', wantsTalkback ? 'true' : 'false',
+        '--ez', 'uplink', wantsTalkback ? 'true' : 'false',
+        '--es', 'uplinkFormat', uplinkFmt
+      ]);
+    } catch (e) {}
+
+    if (wantsTalkback) {
+      // Optional dedicated action used by some builds
+      try {
+        await runAdbCommand(serial, [
+          'shell', 'am', 'broadcast',
+          '-a', 'com.vhr.voice.TALKBACK',
+          '--ez', 'enabled', 'true',
+          '--es', 'serverUrl', hostUrl,
+          '--es', 'serial', serial,
+          '--es', 'uplinkFormat', uplinkFmt
+        ]);
+      } catch (e) {}
+    }
     
     // Launch the app with intent extras for auto-configuration
     let result = null;
     try {
-      result = await runAdbCommand(serial, [
-        'shell', 'am', 'start',
-        '-n', 'com.vhr.voice/.MainActivity',
+      const baseExtras = [
         '-e', 'serverUrl', hostUrl,
         '-e', 'serial', serial,
         '-e', 'adbSerial', serial,
         '-e', 'cleanSerial', serial.split(':')[0] || serial,
-        '--ez', 'autostart', 'true'
+        '--ez', 'relay', wantsRelay ? 'true' : 'false',
+        '--es', 'sessionCode', normalizedSession,
+        '--es', 'relayBase', wantsRelay ? relayBaseResolved : '',
+        '--ez', 'autostart', 'true',
+        '--ez', 'talkback', wantsTalkback ? 'true' : 'false',
+        '--ez', 'bidirectional', wantsTalkback ? 'true' : 'false',
+        '--ez', 'uplink', wantsTalkback ? 'true' : 'false',
+        '--es', 'uplinkFormat', uplinkFmt
+      ];
+
+      result = await runAdbCommand(serial, [
+        'shell', 'am', 'start',
+        '-n', 'com.vhr.voice/.MainActivity',
+        ...baseExtras
       ]);
+
+      if (!(result.code === 0 || String(result.stdout || '').includes('Starting'))) {
+        result = await runAdbCommand(serial, [
+          'shell', 'am', 'start',
+          '-n', 'com.vhr.dashboard/.MainActivity',
+          ...baseExtras
+        ]);
+      }
     } catch (e) {
       result = { code: 1, stdout: '', stderr: e.message || String(e) };
     }
@@ -9006,10 +9286,17 @@ app.post('/api/device/stop-audio-receiver', async (req, res) => {
   try {
     console.log(`[stop-audio-receiver] Stopping voice app on ${serial}`);
     
-    const result = await runAdbCommand(serial, [
+    let result = await runAdbCommand(serial, [
       'shell', 'am', 'broadcast',
       '-a', 'com.vhr.voice.STOP'
     ]);
+    try {
+      await runAdbCommand(serial, ['shell', 'am', 'broadcast', '-a', 'com.vhr.dashboard.STOP']);
+    } catch (e) {}
+    try {
+      await runAdbCommand(serial, ['shell', 'am', 'force-stop', 'com.vhr.voice']);
+      await runAdbCommand(serial, ['shell', 'am', 'force-stop', 'com.vhr.dashboard']);
+    } catch (e) {}
     
     res.json({ 
       ok: result.code === 0, 

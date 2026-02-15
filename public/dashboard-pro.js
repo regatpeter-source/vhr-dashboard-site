@@ -1626,6 +1626,7 @@ window.switchAccountTab = async function(tab) {
 // ========== AUDIO STREAMING (WebRTC) ==========
 let activeAudioStream = null;  // Global audio stream instance
 let activeAudioSerial = null;  // Serial of device receiving audio
+const ENABLE_HEADSET_TALKBACK = true; // casque micro -> PC
 
 console.log('[voice] dashboard-pro.js build stamp: 2026-02-03 23:45');
 
@@ -1651,6 +1652,25 @@ function setAudioPanelMinimized() {
 
 window.toggleAudioPanelSize = function() {
 	return false; // always compact
+};
+
+window.updateTalkbackIndicator = function(state = 'off', label = 'OFF') {
+	const badge = document.getElementById('talkbackStatusBadge');
+	if (!badge) return;
+	let bg = '#7f8c8d';
+	let text = label || 'OFF';
+	if (state === 'active') {
+		bg = '#2ecc71';
+		text = label || 'ON';
+	} else if (state === 'connecting' || state === 'ready') {
+		bg = '#3498db';
+		text = label || 'Connexion...';
+	} else if (state === 'error') {
+		bg = '#e74c3c';
+		text = label || 'Erreur';
+	}
+	badge.style.background = bg;
+	badge.textContent = `🎙️ Talkback: ${text}`;
 };
 
 window.sendVoiceToHeadset = async function(serial) {
@@ -1721,6 +1741,7 @@ window.sendVoiceToHeadset = async function(serial) {
 				</div>
 				<div style='margin-top:15px;padding:12px;background:rgba(46,204,113,0.1);border-left:4px solid #2ecc71;border-radius:4px;font-size:12px;color:#bdc3c7;'>
 					<strong>📊 Status:</strong> Streaming en direct depuis votre micro vers ${deviceName} (+ PC si activé)
+					<div id='talkbackStatusBadge' style='margin-top:8px;display:inline-block;background:#7f8c8d;color:#fff;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:bold;'>🎙️ Talkback: OFF</div>
 				</div>
 			</div>
 		</div>
@@ -1753,9 +1774,11 @@ window.sendVoiceToHeadset = async function(serial) {
 	
 	// Start audio streaming
 	try {
+		const sessionCode = currentSession && currentSession.code ? String(currentSession.code).trim().toUpperCase() : '';
+		const useRelaySessionAudio = !!sessionCode;
 		// Build headset-accessible server URL (avoid localhost inside headset)
 		const resolvedServerUrl = await resolveAudioServerUrl();
-		const useBackgroundApp = true; // casque app prioritaire
+		const useBackgroundApp = !ENABLE_HEADSET_TALKBACK; // en talkback, forcer le receiver web
 		// Ensure we have a token for signaling (LAN origin may not share localStorage)
 		let signalingToken = readAuthToken();
 		if (!signalingToken) {
@@ -1768,6 +1791,10 @@ window.sendVoiceToHeadset = async function(serial) {
 			relayBase: resolvedServerUrl,
 			authToken: signalingToken || ''
 		});
+		activeAudioStream.onTalkbackStateChange = ({ state, label }) => {
+			window.updateTalkbackIndicator(state, label);
+		};
+		window.updateTalkbackIndicator('off', 'OFF');
 		console.log('[voice] Starting VHRAudioStream (WebRTC+relay) for', serial);
 		let startOk = false;
 		try {
@@ -1794,7 +1821,7 @@ window.sendVoiceToHeadset = async function(serial) {
 
 			// Forcer toujours l'ouverture en localhost pour autoriser le micro sur le PC
 			const displayName = deviceName || serial || 'casque';
-			const path = `/audio-receiver.html?serial=${encodeURIComponent(serial)}&name=${encodeURIComponent(displayName)}&autoconnect=true`;
+			const path = `/audio-receiver.html?serial=${encodeURIComponent(serial)}&name=${encodeURIComponent(displayName)}&autoconnect=true${ENABLE_HEADSET_TALKBACK ? '&talkback=1' : ''}`;
 			const port = window.location.port || 3000;
 			let storedToken = readAuthToken() || await syncTokenFromCookie();
 			let receiverUrl = `${resolvedServerUrl}${path}`;
@@ -1802,54 +1829,79 @@ window.sendVoiceToHeadset = async function(serial) {
 			console.log('[voice] receiverUrl (casque):', receiverUrl);
 			// Pas de bouton ni d'ouverture sur le PC : le récepteur reste uniquement dans le casque
 			window.lastAudioReceiverUrl = receiverUrl;
-			// Ne jamais ouvrir le récepteur web dans le casque (l'app native doit être utilisée)
-			console.log('[voice] Web receiver launch on headset disabled (native app enforced)');
 
-			// Lancer aussi l'app native VHR Voice sur le casque avec autostart
-			try {
-				const startRes = await api('/api/device/start-voice-app', {
+			if (ENABLE_HEADSET_TALKBACK) {
+				const openRes = await api('/api/device/open-audio-receiver', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ serial, serverUrl: resolvedServerUrl })
+					body: JSON.stringify({
+						serial,
+						serverUrl: resolvedServerUrl,
+						useBackgroundApp: false,
+						relay: useRelaySessionAudio,
+						sessionCode: useRelaySessionAudio ? sessionCode : undefined,
+						relayBase: useRelaySessionAudio ? resolvedServerUrl : undefined,
+						talkback: true,
+						name: displayName
+					})
 				});
-				if (startRes && startRes.ok) {
-					console.log('[voice] Voice app launch request sent');
-					showToast('📱 App VHR Voice lancée sur le casque', 'success');
+				if (openRes && openRes.ok) {
+					console.log('[voice] Talkback receiver opened on headset (web)');
+					showToast('🎙️ Talkback activé: micro casque → PC', 'success');
 				} else {
-					console.warn('[voice] Voice app launch failed:', startRes?.error);
-					let installed = false;
-					try {
-						showToast('📲 Installation VHR Voice en cours...', 'info');
-						const installRes = await api('/api/device/install-voice-app', {
-							method: 'POST',
-							headers: { 'Content-Type': 'application/json' },
-							body: JSON.stringify({ serial }),
-							timeout: 60000
-						});
-						if (installRes && installRes.ok) {
-							installed = true;
-							showToast('✅ VHR Voice installé. Lancement...', 'success');
-							const retryRes = await api('/api/device/start-voice-app', {
+					console.warn('[voice] Unable to open talkback receiver on headset:', openRes?.error);
+					showToast('⚠️ Impossible d’ouvrir le mode talkback sur le casque', 'warning');
+				}
+			} else {
+				// Ne jamais ouvrir le récepteur web dans le casque (l'app native doit être utilisée)
+				console.log('[voice] Web receiver launch on headset disabled (native app enforced)');
+
+				// Lancer aussi l'app native VHR Voice sur le casque avec autostart
+				try {
+					const startRes = await api('/api/device/start-voice-app', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ serial, serverUrl: resolvedServerUrl })
+					});
+					if (startRes && startRes.ok) {
+						console.log('[voice] Voice app launch request sent');
+						showToast('📱 App VHR Voice lancée sur le casque', 'success');
+					} else {
+						console.warn('[voice] Voice app launch failed:', startRes?.error);
+						let installed = false;
+						try {
+							showToast('📲 Installation VHR Voice en cours...', 'info');
+							const installRes = await api('/api/device/install-voice-app', {
 								method: 'POST',
 								headers: { 'Content-Type': 'application/json' },
-								body: JSON.stringify({ serial, serverUrl: resolvedServerUrl })
+								body: JSON.stringify({ serial }),
+								timeout: 60000
 							});
-							if (retryRes && retryRes.ok) {
-								console.log('[voice] Voice app launched after install');
-								showToast('📱 App VHR Voice lancée sur le casque', 'success');
-								return;
+							if (installRes && installRes.ok) {
+								installed = true;
+								showToast('✅ VHR Voice installé. Lancement...', 'success');
+								const retryRes = await api('/api/device/start-voice-app', {
+									method: 'POST',
+									headers: { 'Content-Type': 'application/json' },
+									body: JSON.stringify({ serial, serverUrl: resolvedServerUrl })
+								});
+								if (retryRes && retryRes.ok) {
+									console.log('[voice] Voice app launched after install');
+									showToast('📱 App VHR Voice lancée sur le casque', 'success');
+									return;
+								}
 							}
+						} catch (installErr) {
+							console.warn('[voice] Voice app install failed:', installErr);
 						}
-					} catch (installErr) {
-						console.warn('[voice] Voice app install failed:', installErr);
+						if (!installed) {
+							showToast('⚠️ Impossible de lancer VHR Voice. Vérifiez l’APK ou lancez l’app manuellement.', 'warning');
+						}
 					}
-					if (!installed) {
-						showToast('⚠️ Impossible de lancer VHR Voice. Vérifiez l’APK ou lancez l’app manuellement.', 'warning');
-					}
+				} catch (adbLaunchErr) {
+					console.warn('[voice] ADB launch voice app error:', adbLaunchErr);
+					showToast('⚠️ ADB indisponible, app VHR Voice non lancée.', 'warning');
 				}
-			} catch (adbLaunchErr) {
-				console.warn('[voice] ADB launch voice app error:', adbLaunchErr);
-				showToast('⚠️ ADB indisponible, app VHR Voice non lancée.', 'warning');
 			}
 
 			// Ne pas forcer l'ouverture via ADB pour éviter qu'une page prenne le focus dans le casque
@@ -1863,7 +1915,11 @@ window.sendVoiceToHeadset = async function(serial) {
 			const relayFormat = useBackgroundApp ? 'ogg' : 'webm';
 			if (activeAudioStream && typeof activeAudioStream.startAudioRelay === 'function' && activeAudioStream.localStream) {
 				console.log('[voice] Starting audio relay WS sender for', serial, 'format=', relayFormat, 'startOk=', startOk);
-				await activeAudioStream.startAudioRelay(serial, { format: relayFormat });
+				await activeAudioStream.startAudioRelay(serial, {
+					format: relayFormat,
+					relay: useRelaySessionAudio,
+					sessionCode: useRelaySessionAudio ? sessionCode : undefined
+				});
 				console.log('[sendVoiceToHeadset] Audio relay started for headset receivers');
 			} else {
 				console.warn('[sendVoiceToHeadset] Audio relay skipped: stream not ready or no mic stream');
@@ -1874,11 +1930,27 @@ window.sendVoiceToHeadset = async function(serial) {
 			if (useBackgroundApp && activeAudioStream && typeof activeAudioStream.startAudioRelay === 'function') {
 				try {
 					console.log('[voice] Fallback relay in webm for', serial);
-					await activeAudioStream.startAudioRelay(serial, { format: 'webm' });
+					await activeAudioStream.startAudioRelay(serial, {
+						format: 'webm',
+						relay: useRelaySessionAudio,
+						sessionCode: useRelaySessionAudio ? sessionCode : undefined
+					});
 					console.log('[sendVoiceToHeadset] Fallback WebM relay started');
 				} catch (fallbackErr) {
 					console.warn('[sendVoiceToHeadset] Fallback relay failed:', fallbackErr);
 				}
+			}
+		}
+
+		if (ENABLE_HEADSET_TALKBACK && activeAudioStream && typeof activeAudioStream.startTalkbackReceiver === 'function') {
+			try {
+				await activeAudioStream.startTalkbackReceiver(serial, {
+					relay: useRelaySessionAudio,
+					sessionCode: useRelaySessionAudio ? sessionCode : undefined
+				});
+				console.log('[voice] Talkback receiver started on PC for', serial);
+			} catch (talkbackErr) {
+				console.warn('[voice] Talkback receiver failed:', talkbackErr);
 			}
 		}
 		
@@ -3817,6 +3889,14 @@ window.closeAudioStream = async function(silent = false) {
 		}
 		
 		if (streamToClose) {
+			try {
+				if (typeof streamToClose.stopTalkbackReceiver === 'function') {
+					streamToClose.stopTalkbackReceiver();
+				}
+			} catch (e) {
+				console.warn('[closeAudioStream] Error stopping talkback receiver:', e);
+			}
+
 			// Stop audio relay first
 			try {
 				if (typeof streamToClose.stopAudioRelay === 'function') {

@@ -37,6 +37,7 @@ class VHRAudioStream {
     this.onRemoteAudio = null;
     this.onStateChange = null;
     this.onError = null;
+    this.onTalkbackStateChange = null;
     
     // Audio context for advanced processing
     this.audioContext = null;
@@ -56,6 +57,15 @@ class VHRAudioStream {
     this.relayConnectInFlight = false;
     this.relayTargetSerial = null;
     this.relayOpts = null;
+
+    // Headset -> PC talkback (micro uplink) receiver state
+    this.talkbackWs = null;
+    this.talkbackActive = false;
+    this.talkbackAudioEl = null;
+    this.talkbackMediaSource = null;
+    this.talkbackSourceBuffer = null;
+    this.talkbackQueue = [];
+    this.talkbackMseReady = false;
   }
 
   /**
@@ -163,6 +173,7 @@ class VHRAudioStream {
 
       // Stop any relay sender first
       this.stopAudioRelay();
+      this.stopTalkbackReceiver();
       
       // Disconnect mic source first to prevent further audio processing
       if (this.micSource) {
@@ -622,6 +633,170 @@ class VHRAudioStream {
   }
 
   /**
+   * Start listening to headset microphone uplink (headset -> PC)
+   */
+  async startTalkbackReceiver(targetSerial, opts = {}) {
+    try {
+      if (!targetSerial) throw new Error('targetSerial requis pour talkback');
+
+      if (this.talkbackWs && this.talkbackWs.readyState === WebSocket.OPEN && this.relayTargetSerial === targetSerial) {
+        return true;
+      }
+
+      this.stopTalkbackReceiver();
+      this._ensureTalkbackAudioElement();
+      this._initTalkbackMediaSource();
+
+      const relayBase = this.config.relayBase || window.location.origin;
+      const relayUrl = new URL(relayBase);
+      const wsProtocol = relayUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+      let wsUrl = '';
+      if (opts.relay === true) {
+        const relaySession = String(opts.sessionCode || '').trim().toUpperCase();
+        if (!relaySession) {
+          throw new Error('sessionCode requis pour talkback relay');
+        }
+        wsUrl = `${wsProtocol}//${relayUrl.host}/api/relay/audio?session=${encodeURIComponent(relaySession)}&serial=${encodeURIComponent(targetSerial)}&role=uplink-viewer`;
+      } else {
+        wsUrl = `${wsProtocol}//${relayUrl.host}/api/audio/stream?serial=${encodeURIComponent(targetSerial)}&mode=uplink-receiver&format=webm`;
+      }
+
+      this._log('Connecting talkback receiver to ' + wsUrl);
+      this._setTalkbackState('connecting', 'Connexion...');
+      this.talkbackWs = new WebSocket(wsUrl);
+      this.talkbackWs.binaryType = 'arraybuffer';
+      this.talkbackActive = true;
+
+      this.talkbackWs.onopen = () => {
+        this._log('Talkback receiver connected');
+        this._setTalkbackState('ready', 'Prêt');
+      };
+
+      this.talkbackWs.onmessage = async (event) => {
+        if (event.data instanceof ArrayBuffer) {
+          this._enqueueTalkbackBlob(new Blob([event.data], { type: 'audio/webm;codecs=opus' }));
+        } else if (event.data instanceof Blob) {
+          this._enqueueTalkbackBlob(event.data);
+        } else if (typeof event.data === 'string') {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'uplink-sender-connected') {
+              this._log('Talkback sender connected (headset mic active)');
+              this._setTalkbackState('active', 'ON');
+            } else if (msg.type === 'uplink-sender-disconnected') {
+              this._log('Talkback sender disconnected');
+              this._setTalkbackState('ready', 'Prêt');
+            }
+          } catch (e) {
+            // ignore non-JSON control messages
+          }
+        }
+      };
+
+      this.talkbackWs.onerror = (error) => {
+        this._log('Talkback WebSocket error: ' + (error?.message || ''));
+        this._setTalkbackState('error', 'Erreur');
+      };
+
+      this.talkbackWs.onclose = () => {
+        this._log('Talkback receiver closed');
+        this.talkbackWs = null;
+        this.talkbackActive = false;
+        this._setTalkbackState('off', 'OFF');
+      };
+
+      return true;
+    } catch (error) {
+      this._setTalkbackState('error', 'Erreur');
+      this._handleError('Failed to start talkback receiver', error);
+      throw error;
+    }
+  }
+
+  stopTalkbackReceiver() {
+    try {
+      this.talkbackActive = false;
+      if (this.talkbackWs && this.talkbackWs.readyState !== WebSocket.CLOSED) {
+        this.talkbackWs.close();
+      }
+      this.talkbackWs = null;
+      this.talkbackQueue = [];
+      this.talkbackMseReady = false;
+      if (this.talkbackSourceBuffer) {
+        try { this.talkbackSourceBuffer.removeEventListener('updateend', this._boundFlushTalkbackQueue); } catch {}
+      }
+      this.talkbackSourceBuffer = null;
+      this.talkbackMediaSource = null;
+      this._setTalkbackState('off', 'OFF');
+    } catch (e) {
+      this._log('Error stopping talkback receiver: ' + e.message);
+    }
+  }
+
+  _ensureTalkbackAudioElement() {
+    if (this.talkbackAudioEl) return;
+    const el = document.createElement('audio');
+    el.autoplay = true;
+    el.controls = false;
+    el.muted = false;
+    el.style.display = 'none';
+    document.body.appendChild(el);
+    this.talkbackAudioEl = el;
+  }
+
+  _initTalkbackMediaSource() {
+    if (!this.talkbackAudioEl) return;
+    if (this.talkbackMediaSource) return;
+    if (typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported('audio/webm;codecs=opus')) {
+      this._log('Talkback MSE unsupported on this browser');
+      return;
+    }
+
+    this.talkbackMediaSource = new MediaSource();
+    this.talkbackAudioEl.src = URL.createObjectURL(this.talkbackMediaSource);
+    this.talkbackAudioEl.play().catch(() => {});
+
+    this._boundFlushTalkbackQueue = this._boundFlushTalkbackQueue || (() => this._flushTalkbackQueue());
+
+    this.talkbackMediaSource.addEventListener('sourceopen', () => {
+      try {
+        this.talkbackSourceBuffer = this.talkbackMediaSource.addSourceBuffer('audio/webm;codecs=opus');
+        this.talkbackSourceBuffer.mode = 'sequence';
+        this.talkbackSourceBuffer.addEventListener('updateend', this._boundFlushTalkbackQueue);
+        this.talkbackMseReady = true;
+        this._flushTalkbackQueue();
+      } catch (e) {
+        this._log('Talkback MSE init error: ' + e.message);
+      }
+    });
+  }
+
+  _enqueueTalkbackBlob(blob) {
+    if (!blob || blob.size < 80) return;
+    if (!this.talkbackMediaSource) this._initTalkbackMediaSource();
+    this.talkbackQueue.push(blob);
+    this._flushTalkbackQueue();
+  }
+
+  _flushTalkbackQueue() {
+    if (!this.talkbackMseReady || !this.talkbackSourceBuffer) return;
+    if (this.talkbackSourceBuffer.updating) return;
+    const next = this.talkbackQueue.shift();
+    if (!next) return;
+
+    next.arrayBuffer().then((buf) => {
+      try {
+        this.talkbackSourceBuffer.appendBuffer(buf);
+        if (this.talkbackAudioEl && this.talkbackAudioEl.paused) {
+          this.talkbackAudioEl.play().catch(() => {});
+        }
+      } catch (e) {
+        this._log('Talkback append error: ' + e.message);
+      }
+    }).catch((e) => this._log('Talkback blob error: ' + e.message));
+  }
+
+  /**
    * Private: Generate unique session ID
    */
   _generateSessionId() {
@@ -634,6 +809,12 @@ class VHRAudioStream {
   _setState(newState) {
     if (this.onStateChange) {
       this.onStateChange(newState);
+    }
+  }
+
+  _setTalkbackState(state, label = '') {
+    if (this.onTalkbackStateChange) {
+      this.onTalkbackStateChange({ state, label });
     }
   }
 

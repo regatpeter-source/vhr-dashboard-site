@@ -37,6 +37,7 @@ class VHRAudioStream {
     this.onRemoteAudio = null;
     this.onStateChange = null;
     this.onError = null;
+    this.onTalkbackStateChange = null;
     
     // Audio context for advanced processing
     this.audioContext = null;
@@ -56,6 +57,27 @@ class VHRAudioStream {
     this.relayConnectInFlight = false;
     this.relayTargetSerial = null;
     this.relayOpts = null;
+    this.relayPcmSource = null;
+    this.relayPcmProcessor = null;
+    this.relayPcmMuteGain = null;
+    this.relayPcmTargetSampleRate = 16000;
+
+    // Headset -> PC talkback (micro uplink) receiver state
+    this.talkbackWs = null;
+    this.talkbackActive = false;
+    this.talkbackAudioEl = null;
+    this.talkbackMediaSource = null;
+    this.talkbackSourceBuffer = null;
+    this.talkbackQueue = [];
+    this.talkbackMseReady = false;
+    this.talkbackFormat = 'webm';
+    this.talkbackPcmSampleRate = 16000;
+    this.talkbackPcmNextTime = 0;
+    this.talkbackReconnectTimer = null;
+    this.talkbackReconnectDelayMs = 1200;
+    this.talkbackShouldRun = false;
+    this.talkbackTargetSerial = null;
+    this.talkbackOpts = null;
   }
 
   /**
@@ -163,6 +185,7 @@ class VHRAudioStream {
 
       // Stop any relay sender first
       this.stopAudioRelay();
+      this.stopTalkbackReceiver();
       
       // Disconnect mic source first to prevent further audio processing
       if (this.micSource) {
@@ -467,7 +490,7 @@ class VHRAudioStream {
    */
   async startAudioRelay(targetSerial, opts = {}) {
     try {
-      const format = opts.format === 'ogg' ? 'ogg' : 'webm';
+      const format = opts.format === 'pcm16' ? 'pcm16' : (opts.format === 'ogg' ? 'ogg' : 'webm');
       this._log(`Starting audio relay to ${targetSerial} (format=${format})`);
       
       if (!this.localStream) {
@@ -475,9 +498,8 @@ class VHRAudioStream {
       }
 
       const webmMime = 'audio/webm;codecs=opus';
-      // Stabilisation: on force WebM/Opus, plus robuste côté Quest et récepteur web
-      const chosenMime = webmMime;
-      const wsFormat = 'webm';
+      const chosenMime = format === 'pcm16' ? null : webmMime;
+      const wsFormat = format === 'pcm16' ? 'pcm16' : 'webm';
       this._log('Relay mime type: ' + chosenMime);
       
       this.relayActive = true;
@@ -502,6 +524,19 @@ class VHRAudioStream {
     try {
       this.relayActive = false;
       this._clearRelayReconnect();
+      if (this.relayPcmProcessor) {
+        try { this.relayPcmProcessor.disconnect(); } catch {}
+        this.relayPcmProcessor.onaudioprocess = null;
+      }
+      if (this.relayPcmSource) {
+        try { this.relayPcmSource.disconnect(); } catch {}
+      }
+      if (this.relayPcmMuteGain) {
+        try { this.relayPcmMuteGain.disconnect(); } catch {}
+      }
+      this.relayPcmProcessor = null;
+      this.relayPcmSource = null;
+      this.relayPcmMuteGain = null;
       if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
         this.mediaRecorder.stop();
       }
@@ -534,6 +569,42 @@ class VHRAudioStream {
     }, this.relayReconnectDelayMs);
   }
 
+  _downsampleFloat32(input, inRate, outRate) {
+    if (!input || !input.length) return new Float32Array(0);
+    if (!inRate || !outRate || inRate === outRate) return input;
+
+    const ratio = inRate / outRate;
+    const newLength = Math.max(1, Math.floor(input.length / ratio));
+    const result = new Float32Array(newLength);
+
+    let offsetResult = 0;
+    let offsetBuffer = 0;
+    while (offsetResult < result.length) {
+      const nextOffsetBuffer = Math.min(input.length, Math.round((offsetResult + 1) * ratio));
+      let accum = 0;
+      let count = 0;
+      for (let i = offsetBuffer; i < nextOffsetBuffer; i++) {
+        accum += input[i];
+        count++;
+      }
+      result[offsetResult] = count > 0 ? (accum / count) : 0;
+      offsetResult++;
+      offsetBuffer = nextOffsetBuffer;
+    }
+    return result;
+  }
+
+  _floatToPcm16Buffer(floatSamples) {
+    const pcm = new Int16Array(floatSamples.length);
+    for (let i = 0; i < floatSamples.length; i++) {
+      let s = floatSamples[i];
+      if (s > 1) s = 1;
+      if (s < -1) s = -1;
+      pcm[i] = s < 0 ? (s * 0x8000) : (s * 0x7fff);
+    }
+    return pcm.buffer;
+  }
+
   async _connectAudioRelay() {
     if (this.relayConnectInFlight) return false;
     if (!this.localStream) throw new Error('No local audio stream available');
@@ -545,6 +616,20 @@ class VHRAudioStream {
       const wsFormat = opts.wsFormat || 'webm';
       const chosenMime = opts.chosenMime || 'audio/webm;codecs=opus';
 
+      if (this.relayPcmProcessor) {
+        try { this.relayPcmProcessor.disconnect(); } catch {}
+        this.relayPcmProcessor.onaudioprocess = null;
+      }
+      if (this.relayPcmSource) {
+        try { this.relayPcmSource.disconnect(); } catch {}
+      }
+      if (this.relayPcmMuteGain) {
+        try { this.relayPcmMuteGain.disconnect(); } catch {}
+      }
+      this.relayPcmProcessor = null;
+      this.relayPcmSource = null;
+      this.relayPcmMuteGain = null;
+
       // Clean previous relay if any
       if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
         try { this.mediaRecorder.stop(); } catch {}
@@ -553,10 +638,13 @@ class VHRAudioStream {
         try { this.relayWs.close(); } catch {}
       }
 
-      const mediaRecorder = new MediaRecorder(this.localStream, {
-        mimeType: chosenMime,
-        audioBitsPerSecond: 128000
-      });
+      let mediaRecorder = null;
+      if (wsFormat !== 'pcm16') {
+        mediaRecorder = new MediaRecorder(this.localStream, {
+          mimeType: chosenMime,
+          audioBitsPerSecond: 128000
+        });
+      }
 
       const relayBase = this.config.relayBase || window.location.origin;
       const relayUrl = new URL(relayBase);
@@ -578,38 +666,115 @@ class VHRAudioStream {
 
       relayWs.onopen = () => {
         this._log('Relay WebSocket connected, starting recording');
-        try {
-          mediaRecorder.start(250);
-        } catch (e) {
-          this._log('MediaRecorder start error: ' + e.message);
-          throw e;
-        }
-      };
+        if (wsFormat === 'pcm16') {
+          try {
+            if (!this.audioContext || this.audioContext.state === 'closed') {
+              const AudioContext = window.AudioContext || window.webkitAudioContext;
+              this.audioContext = new AudioContext();
+            }
+            if (this.audioContext.state === 'suspended') {
+              this.audioContext.resume().catch(() => {});
+            }
 
-      mediaRecorder.ondataavailable = (event) => {
-        const size = event.data?.size || 0;
-        if (size < 100) return;
-        if (relayWs.readyState === WebSocket.OPEN) {
-          console.log('[VHR-AudioRelay] Sending chunk:', size, 'bytes');
-          relayWs.send(event.data);
+            const source = this.audioContext.createMediaStreamSource(this.localStream);
+            const processor = this.audioContext.createScriptProcessor(2048, 1, 1);
+            const muteGain = this.audioContext.createGain();
+            muteGain.gain.value = 0;
+
+            const inputRate = this.audioContext.sampleRate || 48000;
+            const outputRate = this.relayPcmTargetSampleRate || 16000;
+            this._log(`PCM relay rates: in=${inputRate}Hz, out=${outputRate}Hz`);
+
+            source.connect(processor);
+            processor.connect(muteGain);
+            muteGain.connect(this.audioContext.destination);
+
+            processor.onaudioprocess = (event) => {
+              if (relayWs.readyState !== WebSocket.OPEN) return;
+              const input = event.inputBuffer.getChannelData(0);
+              if (!input || !input.length) return;
+
+              const mono = new Float32Array(input.length);
+              mono.set(input);
+              const downsampled = this._downsampleFloat32(mono, inputRate, outputRate);
+              if (!downsampled.length) return;
+
+              relayWs.send(this._floatToPcm16Buffer(downsampled));
+            };
+
+            this.relayPcmSource = source;
+            this.relayPcmProcessor = processor;
+            this.relayPcmMuteGain = muteGain;
+          } catch (e) {
+            this._log('PCM relay start error: ' + e.message);
+            throw e;
+          }
         } else {
-          console.warn('[VHR-AudioRelay] Chunk not sent: ws not open');
+          try {
+            mediaRecorder.start(250);
+          } catch (e) {
+            this._log('MediaRecorder start error: ' + e.message);
+            throw e;
+          }
         }
       };
 
-      mediaRecorder.onerror = (event) => {
-        this._log('MediaRecorder error: ' + event.error);
-      };
+      if (mediaRecorder) {
+        mediaRecorder.ondataavailable = (event) => {
+          const size = event.data?.size || 0;
+          if (size < 100) return;
+          if (relayWs.readyState === WebSocket.OPEN) {
+            console.log('[VHR-AudioRelay] Sending chunk:', size, 'bytes');
+            relayWs.send(event.data);
+          } else {
+            console.warn('[VHR-AudioRelay] Chunk not sent: ws not open');
+          }
+        };
+
+        mediaRecorder.onerror = (event) => {
+          this._log('MediaRecorder error: ' + event.error);
+        };
+      }
 
       relayWs.onerror = (error) => {
         this._log('Relay WebSocket error: ' + (error?.message || ''));
-        try { mediaRecorder.stop(); } catch {}
+        if (mediaRecorder) {
+          try { mediaRecorder.stop(); } catch {}
+        }
+        if (this.relayPcmProcessor) {
+          try { this.relayPcmProcessor.disconnect(); } catch {}
+          this.relayPcmProcessor.onaudioprocess = null;
+          this.relayPcmProcessor = null;
+        }
+        if (this.relayPcmSource) {
+          try { this.relayPcmSource.disconnect(); } catch {}
+          this.relayPcmSource = null;
+        }
+        if (this.relayPcmMuteGain) {
+          try { this.relayPcmMuteGain.disconnect(); } catch {}
+          this.relayPcmMuteGain = null;
+        }
         this._scheduleRelayReconnect();
       };
 
       relayWs.onclose = () => {
         this._log('Relay WebSocket closed');
-        try { mediaRecorder.stop(); } catch {}
+        if (mediaRecorder) {
+          try { mediaRecorder.stop(); } catch {}
+        }
+        if (this.relayPcmProcessor) {
+          try { this.relayPcmProcessor.disconnect(); } catch {}
+          this.relayPcmProcessor.onaudioprocess = null;
+          this.relayPcmProcessor = null;
+        }
+        if (this.relayPcmSource) {
+          try { this.relayPcmSource.disconnect(); } catch {}
+          this.relayPcmSource = null;
+        }
+        if (this.relayPcmMuteGain) {
+          try { this.relayPcmMuteGain.disconnect(); } catch {}
+          this.relayPcmMuteGain = null;
+        }
         this._scheduleRelayReconnect();
       };
 
@@ -618,6 +783,257 @@ class VHRAudioStream {
       return true;
     } finally {
       this.relayConnectInFlight = false;
+    }
+  }
+
+  /**
+   * Start listening to headset microphone uplink (headset -> PC)
+   */
+  async startTalkbackReceiver(targetSerial, opts = {}) {
+    try {
+      if (!targetSerial) throw new Error('targetSerial requis pour talkback');
+
+      this.talkbackShouldRun = true;
+      this.talkbackTargetSerial = targetSerial;
+      this.talkbackOpts = { ...(opts || {}) };
+      this._clearTalkbackReconnect();
+
+      if (this.talkbackWs && this.talkbackWs.readyState === WebSocket.OPEN && this.relayTargetSerial === targetSerial) {
+        return true;
+      }
+
+      this.stopTalkbackReceiver();
+      this._ensureTalkbackAudioElement();
+      const talkbackFormat = String(opts.format || 'webm').toLowerCase();
+      this.talkbackFormat = talkbackFormat;
+      if (talkbackFormat !== 'pcm16') {
+        this._initTalkbackMediaSource();
+      }
+
+      const relayBase = this.config.relayBase || window.location.origin;
+      const relayUrl = new URL(relayBase);
+      const wsProtocol = relayUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+      let wsUrl = '';
+      if (opts.relay === true) {
+        const relaySession = String(opts.sessionCode || '').trim().toUpperCase();
+        if (!relaySession) {
+          throw new Error('sessionCode requis pour talkback relay');
+        }
+        wsUrl = `${wsProtocol}//${relayUrl.host}/api/relay/audio?session=${encodeURIComponent(relaySession)}&serial=${encodeURIComponent(targetSerial)}&role=uplink-viewer`;
+      } else {
+        wsUrl = `${wsProtocol}//${relayUrl.host}/api/audio/stream?serial=${encodeURIComponent(targetSerial)}&mode=uplink-receiver&format=${encodeURIComponent(talkbackFormat)}`;
+      }
+
+      this._log('Connecting talkback receiver to ' + wsUrl);
+      this._setTalkbackState('connecting', 'Connexion...');
+      this.talkbackWs = new WebSocket(wsUrl);
+      this.talkbackWs.binaryType = 'arraybuffer';
+      this.talkbackActive = true;
+
+      this.talkbackWs.onopen = () => {
+        this._log('Talkback receiver connected');
+        this._setTalkbackState('ready', 'Prêt');
+      };
+
+      this.talkbackWs.onmessage = async (event) => {
+        if (event.data instanceof ArrayBuffer) {
+          if (this.talkbackFormat === 'pcm16') {
+            this._playTalkbackPcmChunk(event.data);
+          } else {
+            this._enqueueTalkbackBlob(new Blob([event.data], { type: 'audio/webm;codecs=opus' }));
+          }
+        } else if (event.data instanceof Blob) {
+          if (this.talkbackFormat === 'pcm16') {
+            const pcmBuf = await event.data.arrayBuffer();
+            this._playTalkbackPcmChunk(pcmBuf);
+          } else {
+            this._enqueueTalkbackBlob(event.data);
+          }
+        } else if (typeof event.data === 'string') {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'uplink-sender-connected') {
+              this._log('Talkback sender connected (headset mic active)');
+              this._setTalkbackState('active', 'ON');
+            } else if (msg.type === 'uplink-sender-disconnected') {
+              this._log('Talkback sender disconnected');
+              this._setTalkbackState('ready', 'Prêt');
+            }
+          } catch (e) {
+            // ignore non-JSON control messages
+          }
+        }
+      };
+
+      this.talkbackWs.onerror = (error) => {
+        this._log('Talkback WebSocket error: ' + (error?.message || ''));
+        this._setTalkbackState('error', 'Erreur');
+        this._scheduleTalkbackReconnect();
+      };
+
+      this.talkbackWs.onclose = () => {
+        this._log('Talkback receiver closed');
+        this.talkbackWs = null;
+        this.talkbackActive = false;
+        this._setTalkbackState('off', 'OFF');
+        this._scheduleTalkbackReconnect();
+      };
+
+      return true;
+    } catch (error) {
+      this._setTalkbackState('error', 'Erreur');
+      this._handleError('Failed to start talkback receiver', error);
+      throw error;
+    }
+  }
+
+  stopTalkbackReceiver() {
+    try {
+      this.talkbackShouldRun = false;
+      this._clearTalkbackReconnect();
+      this.talkbackActive = false;
+      if (this.talkbackWs && this.talkbackWs.readyState !== WebSocket.CLOSED) {
+        this.talkbackWs.close();
+      }
+      this.talkbackWs = null;
+      this.talkbackQueue = [];
+      this.talkbackMseReady = false;
+      this.talkbackPcmNextTime = 0;
+      if (this.talkbackSourceBuffer) {
+        try { this.talkbackSourceBuffer.removeEventListener('updateend', this._boundFlushTalkbackQueue); } catch {}
+      }
+      this.talkbackSourceBuffer = null;
+      this.talkbackMediaSource = null;
+      this.talkbackTargetSerial = null;
+      this.talkbackOpts = null;
+      this._setTalkbackState('off', 'OFF');
+    } catch (e) {
+      this._log('Error stopping talkback receiver: ' + e.message);
+    }
+  }
+
+  _clearTalkbackReconnect() {
+    if (this.talkbackReconnectTimer) {
+      clearTimeout(this.talkbackReconnectTimer);
+      this.talkbackReconnectTimer = null;
+    }
+  }
+
+  _scheduleTalkbackReconnect() {
+    if (!this.talkbackShouldRun) return;
+    if (!this.talkbackTargetSerial) return;
+    if (this.talkbackReconnectTimer) return;
+
+    this.talkbackReconnectTimer = setTimeout(() => {
+      this.talkbackReconnectTimer = null;
+      if (!this.talkbackShouldRun || !this.talkbackTargetSerial) return;
+      this.startTalkbackReceiver(this.talkbackTargetSerial, this.talkbackOpts || {})
+        .catch((e) => this._log('Talkback reconnect failed: ' + (e && e.message ? e.message : e)));
+    }, this.talkbackReconnectDelayMs);
+  }
+
+  _ensureTalkbackAudioElement() {
+    if (this.talkbackAudioEl) return;
+    const el = document.createElement('audio');
+    el.autoplay = true;
+    el.controls = false;
+    el.muted = false;
+    el.style.display = 'none';
+    document.body.appendChild(el);
+    this.talkbackAudioEl = el;
+  }
+
+  _initTalkbackMediaSource() {
+    if (!this.talkbackAudioEl) return;
+    if (this.talkbackMediaSource) return;
+    if (typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported('audio/webm;codecs=opus')) {
+      this._log('Talkback MSE unsupported on this browser');
+      return;
+    }
+
+    this.talkbackMediaSource = new MediaSource();
+    this.talkbackAudioEl.src = URL.createObjectURL(this.talkbackMediaSource);
+    this.talkbackAudioEl.play().catch(() => {});
+
+    this._boundFlushTalkbackQueue = this._boundFlushTalkbackQueue || (() => this._flushTalkbackQueue());
+
+    this.talkbackMediaSource.addEventListener('sourceopen', () => {
+      try {
+        this.talkbackSourceBuffer = this.talkbackMediaSource.addSourceBuffer('audio/webm;codecs=opus');
+        this.talkbackSourceBuffer.mode = 'sequence';
+        this.talkbackSourceBuffer.addEventListener('updateend', this._boundFlushTalkbackQueue);
+        this.talkbackMseReady = true;
+        this._flushTalkbackQueue();
+      } catch (e) {
+        this._log('Talkback MSE init error: ' + e.message);
+      }
+    });
+  }
+
+  _enqueueTalkbackBlob(blob) {
+    if (!blob || blob.size < 80) return;
+    if (!this.talkbackMediaSource) this._initTalkbackMediaSource();
+    this.talkbackQueue.push(blob);
+    this._flushTalkbackQueue();
+  }
+
+  _flushTalkbackQueue() {
+    if (!this.talkbackMseReady || !this.talkbackSourceBuffer) return;
+    if (this.talkbackSourceBuffer.updating) return;
+    const next = this.talkbackQueue.shift();
+    if (!next) return;
+
+    next.arrayBuffer().then((buf) => {
+      try {
+        this.talkbackSourceBuffer.appendBuffer(buf);
+        if (this.talkbackAudioEl && this.talkbackAudioEl.paused) {
+          this.talkbackAudioEl.play().catch(() => {});
+        }
+      } catch (e) {
+        this._log('Talkback append error: ' + e.message);
+      }
+    }).catch((e) => this._log('Talkback blob error: ' + e.message));
+  }
+
+  _playTalkbackPcmChunk(arrayBuffer) {
+    try {
+      if (!(arrayBuffer instanceof ArrayBuffer) || arrayBuffer.byteLength < 2) return;
+
+      const sampleRate = this.talkbackPcmSampleRate || 16000;
+
+      if (!this.audioContext || this.audioContext.state === 'closed') {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        this.audioContext = new AudioContext();
+      }
+
+      if (this.audioContext.state === 'suspended') {
+        this.audioContext.resume().catch(() => {});
+      }
+
+      const view = new DataView(arrayBuffer);
+      const sampleCount = Math.floor(view.byteLength / 2);
+      if (sampleCount <= 0) return;
+
+      const audioBuffer = this.audioContext.createBuffer(1, sampleCount, sampleRate);
+      const ch = audioBuffer.getChannelData(0);
+
+      for (let i = 0; i < sampleCount; i++) {
+        const s = view.getInt16(i * 2, true);
+        ch[i] = Math.max(-1, Math.min(1, s / 32768));
+      }
+
+      const source = this.audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(this.audioContext.destination);
+
+      const now = this.audioContext.currentTime;
+      if (!this.talkbackPcmNextTime || this.talkbackPcmNextTime < now) {
+        this.talkbackPcmNextTime = now + 0.01;
+      }
+      source.start(this.talkbackPcmNextTime);
+      this.talkbackPcmNextTime += audioBuffer.duration;
+    } catch (e) {
+      this._log('Talkback PCM decode/play error: ' + e.message);
     }
   }
 
@@ -634,6 +1050,12 @@ class VHRAudioStream {
   _setState(newState) {
     if (this.onStateChange) {
       this.onStateChange(newState);
+    }
+  }
+
+  _setTalkbackState(state, label = '') {
+    if (this.onTalkbackStateChange) {
+      this.onTalkbackStateChange({ state, label });
     }
   }
 

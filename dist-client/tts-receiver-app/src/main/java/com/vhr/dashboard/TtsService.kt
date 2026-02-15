@@ -1,4 +1,4 @@
-package com.vhr.dashboard
+package com.vhr.voice
 
 import android.app.Service
 import android.content.Intent
@@ -14,7 +14,7 @@ class TtsService : Service(), TextToSpeech.OnInitListener {
     private val scope = CoroutineScope(Dispatchers.Main + Job())
     
     companion object {
-        const val ACTION_SPEAK = "com.vhr.dashboard.SPEAK"
+        const val ACTION_SPEAK = "com.vhr.voice.SPEAK"
         const val EXTRA_TEXT = "text"
         const val EXTRA_ID = "utteranceId"
         private const val TAG = "TtsService"
@@ -52,7 +52,7 @@ class TtsService : Service(), TextToSpeech.OnInitListener {
                 
                 // Configuration audio
                 tts.setSpeechRate(1.0f)  // Vitesse normale
-                tts.pitch = 1.0f         // Ton normal
+                tts.setPitch(1.0f)       // Ton normal
                 
                 true
             } catch (e: Exception) {
