@@ -2241,6 +2241,22 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 			}
 		}
 		}
+
+		if (useRelayForRemote && (ENABLE_HEADSET_TALKBACK || ENABLE_NATIVE_APP_UPLINK) && activeAudioStream && typeof activeAudioStream.startTalkbackReceiver === 'function') {
+			try {
+				await activeAudioStream.startTalkbackReceiver(serial, {
+					relay: useRelayAudioTransport,
+					sessionCode: useRelayAudioTransport ? sessionCode : undefined,
+					format: ENABLE_NATIVE_APP_UPLINK && !ENABLE_HEADSET_TALKBACK ? 'pcm16' : 'webm'
+				});
+				console.log('[voice] Uplink receiver started (remote collaborative mode) for', serial);
+				if (ENABLE_NATIVE_APP_UPLINK && !ENABLE_HEADSET_TALKBACK) {
+					showToast('🎙️ Micro casque→PC: écoute uplink active (collaboratif)', 'info');
+				}
+			} catch (talkbackErr) {
+				console.warn('[voice] Talkback receiver failed (remote collaborative mode):', talkbackErr);
+			}
+		}
 		
 		// Also start audio relay to headset via WebSocket for simple receivers
 		// Priorité app casque native : mode strict PCM16 pour éviter tout mismatch de format.
@@ -4573,7 +4589,17 @@ window.installVoiceApp = async function(serial) {
 						</ul>
 					</div>
 					
-					<!-- Bouton téléchargement retiré -->
+					<div style="margin-top: 14px;">
+						<button onclick="downloadVoiceApk()" style="
+							background: linear-gradient(135deg, #3498db, #2980b9);
+							color: #fff;
+							border: none;
+							padding: 10px 18px;
+							border-radius: 8px;
+							cursor: pointer;
+							font-weight: bold;
+						">⬇️ Télécharger l'APK VHR Voice</button>
+					</div>
 				</div>
 			`;
 			
@@ -4597,7 +4623,17 @@ window.installVoiceApp = async function(serial) {
 					<small style="color:#7f8c8d;">${e.message}</small>
 				</p>
 				
-				<!-- Bouton téléchargement retiré -->
+				<div style="margin-top: 12px;">
+					<button onclick="downloadVoiceApk()" style="
+						background: linear-gradient(135deg, #3498db, #2980b9);
+						color: #fff;
+						border: none;
+						padding: 10px 18px;
+						border-radius: 8px;
+						cursor: pointer;
+						font-weight: bold;
+					">⬇️ Télécharger l'APK VHR Voice</button>
+				</div>
 			</div>
 		`;
 		
@@ -4611,9 +4647,15 @@ window.installVoiceApp = async function(serial) {
 	}
 };
 
-// Bouton de téléchargement de la voix désactivé (supprimé)
+// Téléchargement APK voix (version serveur la plus récente)
 window.downloadVoiceApk = function() {
-	showToast('❌ Téléchargement désactivé pour la voix.', 'warning');
+	const apkUrl = `/download/vhr-voice-apk?t=${Date.now()}`;
+	try {
+		window.open(apkUrl, '_blank', 'noopener,noreferrer');
+		showToast('⬇️ Téléchargement APK VHR Voice lancé', 'info');
+	} catch (e) {
+		showToast('⚠️ Téléchargement bloqué. Ouvrez: ' + apkUrl, 'warning', 6000);
+	}
 };
 
 window.startVoiceApp = async function(serial) {
@@ -4690,7 +4732,18 @@ window.showVoiceAppDialog = function(serial) {
 			</div>
 			` : ''}
 			
-			<!-- Bouton téléchargement retiré -->
+			<div style="margin-bottom: 14px;">
+				<button onclick="downloadVoiceApk()" style="
+					background: linear-gradient(135deg, #3498db, #2980b9);
+					color: #fff;
+					border: none;
+					padding: 12px 22px;
+					border-radius: 8px;
+					font-size: 14px;
+					font-weight: bold;
+					cursor: pointer;
+				">⬇️ Télécharger l'APK VHR Voice</button>
+			</div>
 			
 			<div style="margin-top: 24px; padding: 12px; background: rgba(26, 188, 156, 0.1); border-radius: 8px; border-left: 4px solid #1abc9c;">
 				<p style="color:#95a5a6; font-size: 12px; margin: 0;">

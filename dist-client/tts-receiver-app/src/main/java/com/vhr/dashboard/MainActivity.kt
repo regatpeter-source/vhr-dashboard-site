@@ -45,7 +45,6 @@ class MainActivity : ComponentActivity() {
         val serviceIntent = android.content.Intent(this, TtsService::class.java)
         startService(serviceIntent)
 
-        configureAudioDownlinkFromIntent(intent)
         configureMicUplinkFromIntent(intent)
         
         Log.d("MainActivity", "✅ Service TTS démarré")
@@ -58,36 +57,8 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent?) {
         super.onNewIntent(intent)
         if (intent != null) {
-            configureAudioDownlinkFromIntent(intent)
             configureMicUplinkFromIntent(intent)
         }
-    }
-
-    private fun configureAudioDownlinkFromIntent(intent: android.content.Intent?) {
-        if (intent == null) return
-
-        val serverUrl = intent.getStringExtra("serverUrl")?.trim().orEmpty()
-        val serial = intent.getStringExtra("serial")?.trim().orEmpty()
-        val relayEnabled = intent.getBooleanExtra("relay", false)
-        val sessionCode = intent.getStringExtra("sessionCode")?.trim().orEmpty()
-        val relayBase = intent.getStringExtra("relayBase")?.trim().orEmpty()
-
-        if (serverUrl.isBlank() || serial.isBlank()) {
-            stopService(android.content.Intent(this, AudioDownlinkService::class.java))
-            return
-        }
-
-        val downlinkIntent = android.content.Intent(this, AudioDownlinkService::class.java).apply {
-            action = AudioDownlinkService.ACTION_START
-            putExtra(AudioDownlinkService.EXTRA_SERVER_URL, serverUrl)
-            putExtra(AudioDownlinkService.EXTRA_SERIAL, serial)
-            putExtra(AudioDownlinkService.EXTRA_SAMPLE_RATE, 16000)
-            putExtra(AudioDownlinkService.EXTRA_RELAY_ENABLED, relayEnabled)
-            putExtra(AudioDownlinkService.EXTRA_SESSION_CODE, sessionCode)
-            putExtra(AudioDownlinkService.EXTRA_RELAY_BASE, relayBase)
-        }
-        startService(downlinkIntent)
-        Log.d("MainActivity", "🔊 Audio downlink service started (serial=$serial)")
     }
 
     private fun configureMicUplinkFromIntent(intent: android.content.Intent?) {
@@ -95,13 +66,25 @@ class MainActivity : ComponentActivity() {
 
         val serverUrl = intent.getStringExtra("serverUrl")?.trim().orEmpty()
         val serial = intent.getStringExtra("serial")?.trim().orEmpty()
+        val shouldStartDownlink = serverUrl.isNotBlank() && serial.isNotBlank()
+
+        if (shouldStartDownlink) {
+            val downlinkIntent = android.content.Intent(this, AudioDownlinkService::class.java).apply {
+                action = AudioDownlinkService.ACTION_START
+                putExtra(AudioDownlinkService.EXTRA_SERVER_URL, serverUrl)
+                putExtra(AudioDownlinkService.EXTRA_SERIAL, serial)
+                putExtra(AudioDownlinkService.EXTRA_SAMPLE_RATE, 16000)
+            }
+            startService(downlinkIntent)
+            Log.d("MainActivity", "🔈 Audio downlink service started (serial=$serial)")
+        } else {
+            stopService(android.content.Intent(this, AudioDownlinkService::class.java))
+        }
+
         val wantsUplink = intent.getBooleanExtra("uplink", false)
             || intent.getBooleanExtra("talkback", false)
             || intent.getBooleanExtra("bidirectional", false)
         val uplinkFormat = intent.getStringExtra("uplinkFormat")?.trim().orEmpty().ifBlank { "pcm16" }
-        val relayEnabled = intent.getBooleanExtra("relay", false)
-        val sessionCode = intent.getStringExtra("sessionCode")?.trim().orEmpty()
-        val relayBase = intent.getStringExtra("relayBase")?.trim().orEmpty()
 
         if (!wantsUplink || serverUrl.isBlank() || serial.isBlank()) {
             stopService(android.content.Intent(this, MicUplinkService::class.java))
@@ -117,9 +100,6 @@ class MainActivity : ComponentActivity() {
             putExtra(MicUplinkService.EXTRA_SERVER_URL, serverUrl)
             putExtra(MicUplinkService.EXTRA_SERIAL, serial)
             putExtra(MicUplinkService.EXTRA_SAMPLE_RATE, 16000)
-            putExtra(MicUplinkService.EXTRA_RELAY_ENABLED, relayEnabled)
-            putExtra(MicUplinkService.EXTRA_SESSION_CODE, sessionCode)
-            putExtra(MicUplinkService.EXTRA_RELAY_BASE, relayBase)
         }
         startService(uplinkIntent)
         Log.d("MainActivity", "🎙️ Mic uplink service started (serial=$serial)")

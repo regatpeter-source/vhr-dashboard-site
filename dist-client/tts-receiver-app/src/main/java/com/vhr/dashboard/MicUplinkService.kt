@@ -14,7 +14,6 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString.Companion.toByteString
 import java.util.concurrent.Executors
-import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -28,33 +27,18 @@ class MicUplinkService : Service() {
         const val EXTRA_SERVER_URL = "serverUrl"
         const val EXTRA_SERIAL = "serial"
         const val EXTRA_SAMPLE_RATE = "sampleRate"
-        const val EXTRA_RELAY_ENABLED = "relayEnabled"
-        const val EXTRA_SESSION_CODE = "sessionCode"
-        const val EXTRA_RELAY_BASE = "relayBase"
     }
 
     private var ws: WebSocket? = null
     private var wsClient: OkHttpClient? = null
     private var recorder: AudioRecord? = null
     private var ioExecutor = Executors.newSingleThreadExecutor()
-    private val reconnectExecutor = Executors.newSingleThreadScheduledExecutor()
     private val isStreaming = AtomicBoolean(false)
-    private val shouldRun = AtomicBoolean(false)
-    private var reconnectFuture: ScheduledFuture<*>? = null
-
-    @Volatile private var lastServerUrl: String = ""
-    @Volatile private var lastSerial: String = ""
-    @Volatile private var lastSampleRate: Int = 16000
-    @Volatile private var lastRelayEnabled: Boolean = false
-    @Volatile private var lastSessionCode: String = ""
-    @Volatile private var lastRelayBase: String = ""
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action ?: ACTION_START
 
         if (action == ACTION_STOP) {
-            shouldRun.set(false)
-            cancelReconnect()
             stopStreaming()
             stopSelf()
             return START_NOT_STICKY
@@ -63,37 +47,22 @@ class MicUplinkService : Service() {
         val serverUrl = intent?.getStringExtra(EXTRA_SERVER_URL).orEmpty().trim()
         val serial = intent?.getStringExtra(EXTRA_SERIAL).orEmpty().trim()
         val sampleRate = intent?.getIntExtra(EXTRA_SAMPLE_RATE, 16000) ?: 16000
-        val relayEnabled = intent?.getBooleanExtra(EXTRA_RELAY_ENABLED, false) ?: false
-        val sessionCode = intent?.getStringExtra(EXTRA_SESSION_CODE).orEmpty().trim()
-        val relayBase = intent?.getStringExtra(EXTRA_RELAY_BASE).orEmpty().trim()
 
         if (serverUrl.isBlank() || serial.isBlank()) {
             Log.w(TAG, "Missing serverUrl/serial; uplink not started")
             return START_NOT_STICKY
         }
 
-        shouldRun.set(true)
-        lastServerUrl = serverUrl
-        lastSerial = serial
-        lastSampleRate = sampleRate
-        lastRelayEnabled = relayEnabled
-        lastSessionCode = sessionCode
-        lastRelayBase = relayBase
-
-        cancelReconnect()
-        startStreaming(serverUrl, serial, sampleRate, relayEnabled, sessionCode, relayBase)
+        startStreaming(serverUrl, serial, sampleRate)
         return START_STICKY
     }
 
-    private fun startStreaming(serverUrl: String, serial: String, sampleRate: Int, relayEnabled: Boolean, sessionCode: String, relayBase: String) {
-        if (!shouldRun.get()) return
+    private fun startStreaming(serverUrl: String, serial: String, sampleRate: Int) {
+        if (isStreaming.get()) return
 
-        if (isStreaming.get() || ws != null) return
-
-        val wsUrl = buildWsUrl(serverUrl, serial, relayEnabled, sessionCode, relayBase)
+        val wsUrl = buildWsUrl(serverUrl, serial)
         if (wsUrl.isBlank()) {
             Log.e(TAG, "Invalid ws url from serverUrl=$serverUrl")
-            scheduleReconnect("invalid-ws-url")
             return
         }
 
@@ -106,61 +75,23 @@ class MicUplinkService : Service() {
             ws = wsClient?.newWebSocket(req, object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     Log.i(TAG, "Uplink WebSocket open: $wsUrl")
-                    cancelReconnect()
                     startRecorderLoop(sampleRate)
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     Log.e(TAG, "Uplink WebSocket failure: ${t.message}")
-                    handleSocketDrop("failure")
+                    stopStreaming()
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     Log.i(TAG, "Uplink WebSocket closed: $code/$reason")
-                    handleSocketDrop("closed-$code")
+                    stopStreaming()
                 }
             })
         } catch (e: Exception) {
             Log.e(TAG, "startStreaming error: ${e.message}")
             stopStreaming()
-            scheduleReconnect("start-exception")
         }
-    }
-
-    private fun handleSocketDrop(reason: String) {
-        stopStreaming()
-        if (shouldRun.get()) {
-            scheduleReconnect(reason)
-        }
-    }
-
-    private fun scheduleReconnect(reason: String) {
-        if (!shouldRun.get()) return
-        if (lastServerUrl.isBlank() || lastSerial.isBlank()) return
-        if (reconnectFuture?.isDone == false) return
-
-        Log.w(TAG, "Scheduling uplink reconnect in 1200ms (reason=$reason)")
-        reconnectFuture = reconnectExecutor.schedule({
-            reconnectFuture = null
-            if (!shouldRun.get()) return@schedule
-            Log.i(TAG, "Reconnecting uplink websocket...")
-            startStreaming(
-                lastServerUrl,
-                lastSerial,
-                lastSampleRate,
-                lastRelayEnabled,
-                lastSessionCode,
-                lastRelayBase
-            )
-        }, 1200, TimeUnit.MILLISECONDS)
-    }
-
-    private fun cancelReconnect() {
-        try {
-            reconnectFuture?.cancel(false)
-        } catch (_: Exception) {
-        }
-        reconnectFuture = null
     }
 
     private fun startRecorderLoop(sampleRate: Int) {
@@ -225,35 +156,25 @@ class MicUplinkService : Service() {
         wsClient = null
     }
 
-    private fun buildWsUrl(serverUrl: String, serial: String, relayEnabled: Boolean, sessionCode: String, relayBase: String): String {
+    private fun buildWsUrl(serverUrl: String, serial: String): String {
         return try {
-            val effectiveBase = (if (relayEnabled) relayBase else "").ifBlank { serverUrl }.trim().removeSuffix("/")
-            val trimmed = effectiveBase
+            val trimmed = serverUrl.trim().removeSuffix("/")
             val wsBase = when {
                 trimmed.startsWith("https://", ignoreCase = true) -> "wss://${trimmed.removePrefix("https://")}"
                 trimmed.startsWith("http://", ignoreCase = true) -> "ws://${trimmed.removePrefix("http://")}"
                 trimmed.startsWith("wss://", ignoreCase = true) || trimmed.startsWith("ws://", ignoreCase = true) -> trimmed
                 else -> "ws://$trimmed"
             }
-            if (relayEnabled && sessionCode.isNotBlank()) {
-                "$wsBase/api/relay/audio?session=${java.net.URLEncoder.encode(sessionCode.uppercase(), "UTF-8")}&serial=${java.net.URLEncoder.encode(serial, "UTF-8")}&role=uplink-sender"
-            } else {
-                "$wsBase/api/audio/stream?serial=$serial&mode=uplink-sender&format=pcm16"
-            }
+            "$wsBase/api/audio/stream?serial=$serial&mode=uplink-sender&format=pcm16"
         } catch (_: Exception) {
             ""
         }
     }
 
     override fun onDestroy() {
-        shouldRun.set(false)
-        cancelReconnect()
         stopStreaming()
         try {
             ioExecutor.shutdownNow()
-        } catch (_: Exception) {}
-        try {
-            reconnectExecutor.shutdownNow()
         } catch (_: Exception) {}
         super.onDestroy()
     }
