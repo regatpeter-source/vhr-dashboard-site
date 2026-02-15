@@ -610,6 +610,7 @@ function openRelayAudioReceiver(serial, sessionCode) {
 		relay: true,
 		relayBase,
 		useBackgroundApp: true,
+		noUiFallback: true,
 		talkback: true,
 		bidirectional: true,
 		uplink: true,
@@ -4097,6 +4098,7 @@ async function ensureCollaborativeAmbientAudio(serial, sessionCode) {
 				relay: true,
 				sessionCode: normalizedSession,
 				relayBase,
+				noUiFallback: true,
 				talkback: true,
 				bidirectional: true,
 				uplink: true,
@@ -4325,7 +4327,10 @@ window.showStreamViewer = function(serial) {
 					}
 
 					setTimeout(() => window.initStreamPlayer(serialFromModal), 350);
-					showToast('🔊 Audio: ' + (audioMode === 'headset' ? 'Casque' : audioMode === 'pc' ? 'PC' : 'Les deux'), 'success');
+					showToast('🔊 Audio: ' + (audioMode === 'headset' ? 'Casque' : audioMode === 'pc' ? 'PC (si support casque)' : 'Les deux'), 'success');
+					if (audioMode === 'pc') {
+						showToast('ℹ️ Si le son reste sur casque: le casque ne supporte pas capture audio système pour le stream', 'info', 5000);
+					}
 				})().catch(err => {
 					console.error('[stream audio] restart failed:', err);
 					showToast('❌ Erreur lors du changement audio', 'error');
