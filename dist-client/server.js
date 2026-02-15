@@ -8925,7 +8925,7 @@ app.post('/api/adb/command', async (req, res) => {
 
 // Open audio receiver in Quest - supports both browser and background app
 app.post('/api/device/open-audio-receiver', async (req, res) => {
-  const { serial, serverUrl, useBackgroundApp, relay, relayBase, name, talkback, bidirectional, uplink, uplinkFormat, noUiFallback } = req.body || {};
+  const { serial, serverUrl, useBackgroundApp, relay, relayBase, name, talkback, bidirectional, uplink, uplinkFormat, noUiFallback, noBrowserFallback } = req.body || {};
   let sessionCode = (req.body && req.body.sessionCode) ? String(req.body.sessionCode) : '';
   if (!serial) {
     return res.status(400).json({ ok: false, error: 'serial required' });
@@ -9096,6 +9096,17 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
           stderr: appResult.stderr 
         });
         return;
+      }
+
+      if (noBrowserFallback === true) {
+        console.warn('[open-audio-receiver] Browser fallback disabled; keeping stream-safe mode');
+        return res.status(409).json({
+          ok: false,
+          error: 'voice_receiver_browser_fallback_disabled',
+          message: 'Receiver navigateur désactivé pour éviter conflit avec le streaming vidéo',
+          stdout: appResult && appResult.stdout,
+          stderr: appResult && appResult.stderr
+        });
       }
       
       // App not installed, fall through to browser method

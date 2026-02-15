@@ -611,6 +611,7 @@ function openRelayAudioReceiver(serial, sessionCode) {
 		relayBase,
 		useBackgroundApp: true,
 		noUiFallback: true,
+		noBrowserFallback: true,
 		talkback: true,
 		bidirectional: true,
 		uplink: true,
@@ -625,6 +626,23 @@ function openRelayAudioReceiver(serial, sessionCode) {
 			showToast(`📱 Récepteur voix lancé sur ${deviceName}`, 'success');
 			return;
 		}
+
+		// Some headset builds fail in strict background-only mode.
+		// Retry once with UI fallback allowed so voice actually starts when user explicitly requested it.
+		if (res && res.error === 'voice_background_start_failed') {
+			console.warn('[relay audio] strict background start failed, retrying with UI fallback allowed');
+			const fallbackRes = await api('/api/device/open-audio-receiver', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ ...payload, noUiFallback: false, noBrowserFallback: true })
+			}).catch(err => ({ ok: false, error: err && err.message ? err.message : String(err) }));
+
+			if (fallbackRes && fallbackRes.ok) {
+				showToast(`📱 Voix lancée sur ${deviceName} (fallback UI activé)`, 'warning', 4500);
+				return;
+			}
+		}
+
 		const errMsg = (res && res.error) ? res.error : 'Ouverture automatique impossible';
 		console.warn('[relay audio] open-audio-receiver failed:', errMsg);
 		showToast(`⚠️ ${errMsg}. Demandez à l’hôte d’ouvrir le receiver sur le casque.`, 'warning');
