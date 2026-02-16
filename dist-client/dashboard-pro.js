@@ -8,6 +8,9 @@ const VHR_BROADCAST_CHANNEL = typeof BroadcastChannel !== 'undefined' ? new Broa
 
 // Track active audio session across tabs
 let isAudioSessionOwner = false;
+const VOICE_START_DEBOUNCE_MS = 2500;
+const voiceStartInFlightBySerial = new Map();
+const voiceLastStartBySerial = new Map();
 
 // Listen for messages from other tabs
 if (VHR_BROADCAST_CHANNEL) {
@@ -21,7 +24,7 @@ if (VHR_BROADCAST_CHANNEL) {
 				// Another tab started audio - close ours if active
 				if (activeAudioStream) {
 					console.log('[VHR Multi-Tab] Another tab started audio, closing local stream');
-					window.closeAudioStream(true); // true = silent close (no toast)
+						window.closeAudioStream(true, { stopHeadsetApp: false }); // silent soft close
 				}
 				break;
 				
@@ -1302,114 +1305,94 @@ window.toggleAudioPanelSize = function() {
 	return false; // always compact
 };
 
-window.sendVoiceToHeadset = async function(serial) {
+window.sendVoiceToHeadset = async function(serial, options = {}) {
 	console.log('[voice] sendVoiceToHeadset invoked for serial:', serial);
-	// Close any existing stream first (same or different device)
-	if (activeAudioStream) {
-		console.log('[sendVoiceToHeadset] Closing existing stream before starting new one');
-		await window.closeAudioStream(true); // true = silent close
+	const serialKey = String(serial || '');
+	const nowTs = Date.now();
+	const lastStartTs = voiceLastStartBySerial.get(serialKey) || 0;
+	if (voiceStartInFlightBySerial.get(serialKey)) {
+		showToast('⏳ Démarrage voix déjà en cours…', 'info', 2200);
+		return;
 	}
-
-	const device = devices.find(d => d.serial === serial);
-	const deviceName = device ? device.name : 'Casque';
-	
-	// Notify other tabs that we're starting audio
-	broadcastAudioState('audio-started', serial);
-	isAudioSessionOwner = true;
-	
-	// Create audio control panel
-	let panel = document.getElementById('audioStreamPanel');
-	if (panel) panel.remove();
-
-	panel = document.createElement('div');
-	panel.id = 'audioStreamPanel';
-	panel.dataset.minimized = 'true';
-	panel.style = 'position:fixed;bottom:12px;right:12px;z-index:120;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;gap:8px;pointer-events:auto;background:transparent;width:auto;height:auto;';
-	panel.onclick = null;
-	
-	panel.innerHTML = `
-		<div id='audioStreamContent' style='background:#1a1d24;border:3px solid #2ecc71;border-radius:12px;padding:0;max-width:420px;width:360px;max-height:80vh;overflow-y:auto;box-shadow:0 8px 20px #000;color:#fff;'>
-			<!-- Header -->
-			<div style='background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);padding:16px;border-radius:10px 10px 0 0;position:relative;display:flex;justify-content:space-between;align-items:center;'>
-				<h2 style='margin:0;font-size:24px;color:#fff;display:flex;align-items:center;gap:12px;'>
-					🎤 Streaming Audio WebRTC vers ${deviceName}
-				</h2>
-				<button onclick='window.closeAudioStream()' style='background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:16px;font-weight:bold;'>✕</button>
-			</div>
-			
-			<!-- Visualizer -->
-			<div id='audioVizContainer' style='padding:20px;display:flex;align-items:flex-end;justify-content:center;gap:3px;height:200px;background:#0d0f14;'>
-				${Array(32).fill(0).map((_, i) => `<div style='width:8px;background:linear-gradient(to top, #2ecc71, #27ae60);border-radius:2px;flex:1;min-height:4px;'></div>`).join('')}
-			</div>
-			
-			<!-- Audio Output Controls -->
-			<div style='padding:15px 20px;background:#1e2128;border-top:1px solid #333;'>
-				<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;'>
-					<label style='color:#fff;font-size:13px;display:flex;align-items:center;gap:8px;'>
-						🔊 Sortie audio:
-						<select id='voiceAudioOutputSelect' style='background:#1a1d24;color:#fff;border:1px solid #2ecc71;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:12px;'>
-							<option value='headset' selected>📱 Casque uniquement</option>
-							<option value='pc'>💻 PC uniquement</option>
-							<option value='both'>🔊 Casque + PC</option>
-						</select>
-					</label>
-					<button id='localMonitorBtn' onclick='window.toggleLocalVoiceMonitor()' style='background:linear-gradient(135deg, #7f8c8d 0%, #95a5a6 100%);color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>
-						🔇 Écouter localement: OFF
-					</button>
-				</div>
-			</div>
-			<!-- Controls -->
-			<div style='padding:20px;background:#2a2d34;border-top:1px solid #444;'>
-				<div style='display:grid;grid-template-columns:1fr 1fr;gap:12px;'>
-					<button id='pauseAudioBtn' onclick='window.toggleAudioStreamPause()' style='background:linear-gradient(135deg, #3498db 0%, #2980b9 100%);color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:13px;'>
-						�� Pause
-					</button>
-					<button onclick='window.closeAudioStream()' style='background:linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:13px;'>
-						🛑 Arrêter
-					</button>
-				</div>
-				<div style='margin-top:15px;padding:12px;background:rgba(46,204,113,0.1);border-left:4px solid #2ecc71;border-radius:4px;font-size:12px;color:#bdc3c7;'>
-					<strong>📊 Status:</strong> Streaming en direct depuis votre micro vers ${deviceName} (+ PC si activé)
-				</div>
-			</div>
-		</div>
-	`;
-	
-	document.body.appendChild(panel);
-
-	// Add a tiny pill button so the stream never covers the dashboard
-	const contentEl = document.getElementById('audioStreamContent');
-	if (contentEl) {
-		const pill = document.createElement('button');
-		pill.id = 'audioStreamPill';
-		pill.setAttribute('aria-label', 'Streaming audio actif');
-		pill.style = 'background:linear-gradient(135deg,#2ecc71 0%,#27ae60 100%);color:#0b0c10;border:none;padding:8px 10px;border-radius:12px;font-weight:bold;font-size:12px;display:inline-flex;align-items:center;justify-content:center;gap:4px;box-shadow:0 4px 12px rgba(0,0,0,0.35);cursor:pointer;min-width:52px;height:48px;';
-		pill.innerHTML = `🎤<span style="font-size:11px;">ON</span>`;
-		pill.onclick = () => {
-			const isHidden = contentEl.style.display === 'none';
-			if (isHidden) {
-				contentEl.style.display = 'block';
-				pill.innerHTML = `🎤<span style="font-size:11px;">ON ▾</span>`;
-			} else {
-				contentEl.style.display = 'none';
-				pill.innerHTML = `🎤<span style="font-size:11px;">ON</span>`;
-			}
-		};
-		panel.insertBefore(pill, contentEl);
+	if (nowTs - lastStartTs < VOICE_START_DEBOUNCE_MS) return;
+	if (activeAudioStream && activeAudioSerial === serial && options.forceRestart !== true) {
+		showToast('🎤 Voix déjà active sur ce casque', 'info', 2200);
+		return;
 	}
+	voiceStartInFlightBySerial.set(serialKey, true);
+	voiceLastStartBySerial.set(serialKey, nowTs);
 
-	setAudioPanelMinimized();
-	
-	// Start audio streaming
 	try {
-		// Build headset-accessible server URL (avoid localhost inside headset)
-		const resolvedServerUrl = await resolveAudioServerUrl();
-		const useBackgroundApp = true; // casque app prioritaire
-		// Ensure we have a token for signaling (LAN origin may not share localStorage)
-		let signalingToken = readAuthToken();
-		if (!signalingToken) {
-			signalingToken = await syncTokenFromCookie();
+		if (activeAudioStream) {
+			await window.closeAudioStream(true, { stopHeadsetApp: false });
 		}
+
+		const device = devices.find(d => d.serial === serial);
+		const deviceName = device ? device.name : 'Casque';
+		broadcastAudioState('audio-started', serial);
+		isAudioSessionOwner = true;
+
+		let panel = document.getElementById('audioStreamPanel');
+		if (panel) panel.remove();
+		panel = document.createElement('div');
+		panel.id = 'audioStreamPanel';
+		panel.dataset.minimized = 'true';
+		panel.style = 'position:fixed;bottom:12px;right:12px;z-index:120;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;gap:8px;pointer-events:auto;background:transparent;width:auto;height:auto;';
+		panel.innerHTML = `
+			<div id='audioStreamContent' style='background:#1a1d24;border:3px solid #2ecc71;border-radius:12px;padding:0;max-width:420px;width:360px;max-height:80vh;overflow-y:auto;box-shadow:0 8px 20px #000;color:#fff;'>
+				<div style='background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);padding:16px;border-radius:10px 10px 0 0;position:relative;display:flex;justify-content:space-between;align-items:center;'>
+					<h2 style='margin:0;font-size:24px;color:#fff;display:flex;align-items:center;gap:12px;'>🎤 Streaming Audio WebRTC vers ${deviceName}</h2>
+					<button onclick='window.closeAudioStream(false, { stopHeadsetApp: true })' style='background:rgba(0,0,0,0.3);color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:16px;font-weight:bold;'>✕</button>
+				</div>
+				<div id='audioVizContainer' style='padding:20px;display:flex;align-items:flex-end;justify-content:center;gap:3px;height:200px;background:#0d0f14;'>
+					${Array(32).fill(0).map(() => `<div style='width:8px;background:linear-gradient(to top, #2ecc71, #27ae60);border-radius:2px;flex:1;min-height:4px;'></div>`).join('')}
+				</div>
+				<div style='padding:15px 20px;background:#1e2128;border-top:1px solid #333;'>
+					<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;'>
+						<label style='color:#fff;font-size:13px;display:flex;align-items:center;gap:8px;'>
+							🔊 Sortie audio:
+							<select id='voiceAudioOutputSelect' style='background:#1a1d24;color:#fff;border:1px solid #2ecc71;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:12px;'>
+								<option value='headset' selected>📱 Casque uniquement</option>
+								<option value='pc'>💻 PC uniquement</option>
+								<option value='both'>🔊 Casque + PC</option>
+							</select>
+						</label>
+						<button id='localMonitorBtn' onclick='window.toggleLocalVoiceMonitor()' style='background:linear-gradient(135deg, #7f8c8d 0%, #95a5a6 100%);color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>🔇 Écouter localement: OFF</button>
+					</div>
+				</div>
+				<div style='padding:20px;background:#2a2d34;border-top:1px solid #444;'>
+					<div style='display:grid;grid-template-columns:1fr 1fr;gap:12px;'>
+						<button id='pauseAudioBtn' onclick='window.toggleAudioStreamPause()' style='background:linear-gradient(135deg, #3498db 0%, #2980b9 100%);color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:13px;'>�� Pause</button>
+						<button onclick='window.closeAudioStream(false, { stopHeadsetApp: true })' style='background:linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:13px;'>🛑 Arrêter</button>
+					</div>
+					<div style='margin-top:15px;padding:12px;background:rgba(46,204,113,0.1);border-left:4px solid #2ecc71;border-radius:4px;font-size:12px;color:#bdc3c7;'><strong>📊 Status:</strong> Streaming en direct depuis votre micro vers ${deviceName} (+ PC si activé)</div>
+				</div>
+			</div>
+		`;
+		document.body.appendChild(panel);
+
+		const contentEl = document.getElementById('audioStreamContent');
+		if (contentEl) {
+			const pill = document.createElement('button');
+			pill.id = 'audioStreamPill';
+			pill.setAttribute('aria-label', 'Streaming audio actif');
+			pill.style = 'background:linear-gradient(135deg,#2ecc71 0%,#27ae60 100%);color:#0b0c10;border:none;padding:8px 10px;border-radius:12px;font-weight:bold;font-size:12px;display:inline-flex;align-items:center;justify-content:center;gap:4px;box-shadow:0 4px 12px rgba(0,0,0,0.35);cursor:pointer;min-width:52px;height:48px;';
+			pill.innerHTML = `🎤<span style="font-size:11px;">ON</span>`;
+			pill.onclick = () => {
+				const isHidden = contentEl.style.display === 'none';
+				contentEl.style.display = isHidden ? 'block' : 'none';
+				pill.innerHTML = isHidden ? `🎤<span style="font-size:11px;">ON ▾</span>` : `🎤<span style="font-size:11px;">ON</span>`;
+			};
+			panel.insertBefore(pill, contentEl);
+		}
+
+		setAudioPanelMinimized();
+
+		const resolvedServerUrl = await resolveAudioServerUrl();
+		const useBackgroundApp = true;
+		let talkbackReceiverFormat = 'pcm16';
+		let signalingToken = readAuthToken();
+		if (!signalingToken) signalingToken = await syncTokenFromCookie();
 
 		activeAudioStream = new window.VHRAudioStream({
 			signalingServer: resolvedServerUrl,
@@ -1417,146 +1400,91 @@ window.sendVoiceToHeadset = async function(serial) {
 			relayBase: resolvedServerUrl,
 			authToken: signalingToken || ''
 		});
-		console.log('[voice] Starting VHRAudioStream (WebRTC+relay) for', serial);
-		let startOk = false;
+
 		try {
 			await activeAudioStream.start(serial);
-			startOk = true;
-			console.log('[voice] VHRAudioStream started for', serial);
 		} catch (startErr) {
-			console.error('[voice] Failed to start audio stream (mic/permissions?/WebRTC):', startErr);
-			showToast('⚠� WebRTC/connexion audio ko, on bascule en relais WS', 'warning');
+			console.error('[voice] Failed to start audio stream:', startErr);
+			showToast('⚠� WebRTC/connexion audio ko, bascule relais WS', 'warning');
 		}
-		
-		// Save serial for cleanup later
+
 		activeAudioSerial = serial;
-		
-		// Local monitoring is OFF by default (sound goes to headset only)
 		activeAudioStream.isLocalMonitoring = false;
 		activeAudioStream.setLocalMonitoring(false);
-		
-		// Start audio receiver on headset - browser only (pas d'ouverture forcée sur le Quest)
-		try {
-			const serverUrl = resolvedServerUrl || window.location.origin;
-			console.log('[voice] Receiver serverUrl:', serverUrl);
-			showToast('📱 Ouverture du récepteur voix (casque)...', 'info');
 
-			// Forcer toujours l'ouverture en localhost pour autoriser le micro sur le PC
+		let headsetReceiverReady = false;
+		try {
 			const displayName = deviceName || serial || 'casque';
-			const path = `/audio-receiver.html?serial=${encodeURIComponent(serial)}&name=${encodeURIComponent(displayName)}&autoconnect=true`;
-			const port = window.location.port || 3000;
-			let storedToken = readAuthToken() || await syncTokenFromCookie();
-			let receiverUrl = `${resolvedServerUrl}${path}`;
-			if (storedToken) receiverUrl += `&token=${encodeURIComponent(storedToken)}`;
-			console.log('[voice] receiverUrl (casque):', receiverUrl);
-			// Pas de bouton ni d'ouverture sur le PC : le récepteur reste uniquement dans le casque
-			window.lastAudioReceiverUrl = receiverUrl;
-			// Ne jamais ouvrir le récepteur web dans le casque (l'app native doit être utilisée)
-			console.log('[voice] Web receiver launch on headset disabled (native app enforced)');
-
-			// Lancer aussi l'app native VHR Voice sur le casque avec autostart
-			try {
-				const startRes = await api('/api/device/start-voice-app', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ serial, serverUrl: resolvedServerUrl })
-				});
-				if (startRes && startRes.ok) {
-					console.log('[voice] Voice app launch request sent');
-					showToast('📱 App VHR Voice lancée sur le casque', 'success');
-				} else {
-					console.warn('[voice] Voice app launch failed:', startRes?.error);
-					// Fallback: ouvrir le récepteur web via ADB pour garantir le lien émetteur/récepteur
-					try {
-						const openRes = await api('/api/device/open-audio-receiver', {
-							method: 'POST',
-							headers: { 'Content-Type': 'application/json' },
-							body: JSON.stringify({ serial, server: resolvedServerUrl })
-						});
-						if (openRes && openRes.ok) {
-							console.log('[voice] Fallback receiver lancé (web)');
-							showToast('🔊 Récepteur voix ouvert en fallback', 'info');
-						} else {
-							console.warn('[voice] Fallback receiver non lancé:', openRes?.error);
-						}
-					} catch (fallbackOpenErr) {
-						console.warn('[voice] Erreur ouverture fallback receiver:', fallbackOpenErr);
-					}
-				}
-			} catch (adbLaunchErr) {
-				console.warn('[voice] ADB launch voice app error:', adbLaunchErr);
-				// Second fallback if l'appel ADB échoue directement
-				try {
-					const openRes = await api('/api/device/open-audio-receiver', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ serial, server: resolvedServerUrl })
-					});
-					if (openRes && openRes.ok) {
-						console.log('[voice] Fallback receiver lancé (web) après échec ADB');
-						showToast('🔊 Récepteur voix ouvert (fallback)', 'info');
-					} else {
-						console.warn('[voice] Fallback receiver non lancé:', openRes?.error);
-					}
-				} catch (fallbackOpenErr) {
-					console.warn('[voice] Erreur ouverture fallback receiver (post-ADB):', fallbackOpenErr);
-				}
-			}
-
-			// Ne pas forcer l'ouverture via ADB pour éviter qu'une page prenne le focus dans le casque
-		} catch (openError) {
-			console.warn('[sendVoiceToHeadset] Could not open audio receiver:', openError);
-		}
-		
-		// Also start audio relay to headset via WebSocket for simple receivers
-		// Priorité app casque : tente OGG, sinon fallback WebM. Même si WebRTC a échoué, on pousse le relais.
-		try {
-			const relayFormat = useBackgroundApp ? 'ogg' : 'webm';
-			if (activeAudioStream && typeof activeAudioStream.startAudioRelay === 'function' && activeAudioStream.localStream) {
-				console.log('[voice] Starting audio relay WS sender for', serial, 'format=', relayFormat, 'startOk=', startOk);
-				await activeAudioStream.startAudioRelay(serial, { format: relayFormat });
-				console.log('[sendVoiceToHeadset] Audio relay started for headset receivers');
+			const startRes = await api('/api/device/open-audio-receiver', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					serial,
+					serverUrl: resolvedServerUrl,
+					useBackgroundApp: true,
+					noBrowserFallback: true,
+					talkback: true,
+					bidirectional: true,
+					uplink: true,
+					uplinkFormat: 'pcm16',
+					name: displayName
+				})
+			});
+			if (startRes && startRes.ok) {
+				headsetReceiverReady = await waitForAudioReceiverReady(serial, 12000);
+				showToast('📱 App VHR Voice lancée sur le casque', 'success');
 			} else {
-				console.warn('[sendVoiceToHeadset] Audio relay skipped: stream not ready or no mic stream');
+				showToast('⚠️ App VHR Voice indisponible sur le casque', 'warning');
+			}
+		} catch (openError) {
+			console.warn('[voice] Could not open native receiver:', openError);
+		}
+
+		if (activeAudioStream && typeof activeAudioStream.startTalkbackReceiver === 'function') {
+			try {
+				await activeAudioStream.startTalkbackReceiver(serial, { format: talkbackReceiverFormat });
+				showToast('🎙️ Micro casque→PC: écoute uplink active', 'info');
+				setTimeout(async () => {
+					try {
+						if (!activeAudioStream || activeAudioSerial !== serial) return;
+						if (activeAudioStream.talkbackLastState === 'active') return;
+						await activeAudioStream.startTalkbackReceiver(serial, { format: 'webm' });
+						showToast('🎙️ Fallback uplink: écoute casque→PC en webm', 'info', 4500);
+					} catch (e) {
+						console.warn('[voice] Talkback fallback failed:', e);
+					}
+				}, 6000);
+			} catch (talkbackErr) {
+				console.warn('[voice] Talkback receiver failed:', talkbackErr);
+			}
+		}
+
+		try {
+			if (!headsetReceiverReady) {
+				console.warn('[voice] Receiver not yet attached, starting sender anyway');
+			}
+			if (activeAudioStream && typeof activeAudioStream.startAudioRelay === 'function' && activeAudioStream.localStream) {
+				await activeAudioStream.startAudioRelay(serial, { format: useBackgroundApp ? 'pcm16' : 'webm' });
 			}
 		} catch (relayError) {
-			console.warn('[sendVoiceToHeadset] Audio relay failed (attempted', useBackgroundApp ? 'ogg' : 'webm', '):', relayError);
-			// Fallback: retry in webm if ogg failed
-			if (useBackgroundApp && activeAudioStream && typeof activeAudioStream.startAudioRelay === 'function') {
-				try {
-					console.log('[voice] Fallback relay in webm for', serial);
-					await activeAudioStream.startAudioRelay(serial, { format: 'webm' });
-					console.log('[sendVoiceToHeadset] Fallback WebM relay started');
-				} catch (fallbackErr) {
-					console.warn('[sendVoiceToHeadset] Fallback relay failed:', fallbackErr);
-				}
+			console.warn('[voice] Audio relay failed, trying webm fallback:', relayError);
+			try {
+				await activeAudioStream.startAudioRelay(serial, { format: 'webm' });
+			} catch (fallbackErr) {
+				console.warn('[voice] Fallback relay failed:', fallbackErr);
 			}
 		}
-		
-		// Setup voice audio output select handler
+
 		setTimeout(() => {
 			const voiceAudioSelect = document.getElementById('voiceAudioOutputSelect');
 			if (voiceAudioSelect) {
 				voiceAudioSelect.addEventListener('change', (e) => {
 					const mode = e.target.value;
-					console.log('[voice] Audio output changed to:', mode);
-					
-					// Adjust local monitoring based on selection
 					if (mode === 'headset') {
-						// Casque only - disable PC playback
 						if (activeAudioStream) activeAudioStream.setLocalMonitoring(false);
-						showToast('🔊 Son: Casque uniquement', 'info');
-					} else if (mode === 'pc') {
-						// PC only - enable PC playback, disable relay to headset
+					} else {
 						if (activeAudioStream) activeAudioStream.setLocalMonitoring(true);
-						showToast('🔊 Son: PC uniquement', 'info');
-					} else if (mode === 'both') {
-						// Both - enable PC playback + keep headset relay
-						if (activeAudioStream) activeAudioStream.setLocalMonitoring(true);
-						showToast('🔊 Son: Casque + PC', 'info');
 					}
-					
-					// Update UI
 					const monitorBtn = document.getElementById('localMonitorBtn');
 					if (monitorBtn && mode !== 'headset') {
 						monitorBtn.innerHTML = '🎧 Écouter localement: ON';
@@ -1568,13 +1496,15 @@ window.sendVoiceToHeadset = async function(serial) {
 				});
 			}
 		}, 100);
-		
+
 		window.animateAudioVisualizer();
 		showToast(`🎤 Streaming vers ${deviceName} (+ PC)`, 'success');
 	} catch (e) {
 		console.error('[sendVoiceToHeadset] Error:', e);
-		window.closeAudioStream();
+		window.closeAudioStream(false, { stopHeadsetApp: false });
 		showToast(`� Erreur: ${e.message}`, 'error');
+	} finally {
+		setTimeout(() => voiceStartInFlightBySerial.delete(serialKey), 1200);
 	}
 };
 
@@ -2155,7 +2085,7 @@ socket.on('disconnect', (reason) => {
 	// Clean up audio on disconnect to prevent orphaned sessions
 	if (activeAudioStream) {
 		console.log('[socket] Cleaning up audio stream due to disconnect');
-		window.closeAudioStream(true);
+		window.closeAudioStream(true, { stopHeadsetApp: false });
 	}
 });
 
@@ -2349,6 +2279,24 @@ async function resolveAudioServerUrl() {
 
 	// 3) Fallback: autoriser aussi depuis localhost en renvoyant l'origine (pour un usage PC local)
 	return window.location.origin;
+}
+
+async function waitForAudioReceiverReady(serial, timeoutMs = 5000) {
+	if (!serial) return false;
+	const start = Date.now();
+	while (Date.now() - start < timeoutMs) {
+		try {
+			const status = await api(`/api/audio/status?serial=${encodeURIComponent(serial)}`, { timeout: 2000 });
+			const receiverCount = Number(status?.downlink?.receiverCount || 0);
+			if (status?.ok && receiverCount > 0) {
+				return true;
+			}
+		} catch (e) {
+			// keep polling until timeout
+		}
+		await new Promise(resolve => setTimeout(resolve, 220));
+	}
+	return false;
 }
 
 async function syncRunningAppsFromServer() {
@@ -3293,7 +3241,8 @@ window.connectWifiAuto = async function(serial) {
 };
 
 // ========== VOICE TO HEADSET (TTS) ========== 
-window.closeAudioStream = async function(silent = false) {
+window.closeAudioStream = async function(silent = false, options = {}) {
+	const stopHeadsetApp = options.stopHeadsetApp === true;
 	// ALWAYS remove the panel first to ensure UI is responsive
 	const panel = document.getElementById('audioStreamPanel');
 	if (panel) {
@@ -3314,12 +3263,12 @@ window.closeAudioStream = async function(silent = false) {
 	
 	try {
 		// Stop background voice app on headset if running
-		if (serialToStop) {
+		if (serialToStop && stopHeadsetApp) {
 			try {
 				await api('/api/device/stop-audio-receiver', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ serial: serialToStop }),
+					body: JSON.stringify({ serial: serialToStop, hardStop: false }),
 					timeout: 35000 // allow adb broadcast to finish on slow links
 				});
 				console.log('[closeAudioStream] Stopped background voice app');
@@ -3333,6 +3282,9 @@ window.closeAudioStream = async function(silent = false) {
 			try {
 				if (typeof streamToClose.stopAudioRelay === 'function') {
 					streamToClose.stopAudioRelay();
+				}
+				if (typeof streamToClose.stopTalkbackReceiver === 'function') {
+					streamToClose.stopTalkbackReceiver();
 				}
 			} catch (e) {
 				console.warn('[closeAudioStream] Error stopping relay:', e);

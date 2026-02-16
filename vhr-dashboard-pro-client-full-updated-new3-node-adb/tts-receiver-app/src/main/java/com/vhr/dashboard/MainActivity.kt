@@ -59,6 +59,8 @@ class MainActivity : ComponentActivity() {
         // Démarrer le service TTS
         val serviceIntent = android.content.Intent(this, TtsService::class.java)
         startService(serviceIntent)
+
+        configureMicUplinkFromIntent(intent)
         
         // Démarrer le client relais (connexion au serveur Socket.IO)
         RelayClient.start(applicationContext)
@@ -69,6 +71,42 @@ class MainActivity : ComponentActivity() {
         setContent {
             VhrTtsReceiverApp(viewModel)
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent?) {
+        super.onNewIntent(intent)
+        if (intent != null) {
+            configureMicUplinkFromIntent(intent)
+        }
+    }
+
+    private fun configureMicUplinkFromIntent(intent: android.content.Intent?) {
+        if (intent == null) return
+
+        val serverUrl = intent.getStringExtra("serverUrl")?.trim().orEmpty()
+        val serial = intent.getStringExtra("serial")?.trim().orEmpty()
+        val wantsUplink = intent.getBooleanExtra("uplink", false)
+            || intent.getBooleanExtra("talkback", false)
+            || intent.getBooleanExtra("bidirectional", false)
+        val uplinkFormat = intent.getStringExtra("uplinkFormat")?.trim().orEmpty().ifBlank { "pcm16" }
+
+        if (!wantsUplink || serverUrl.isBlank() || serial.isBlank()) {
+            stopService(android.content.Intent(this, MicUplinkService::class.java))
+            return
+        }
+
+        if (uplinkFormat.lowercase() != "pcm16") {
+            Log.w("MainActivity", "⚠️ uplinkFormat=$uplinkFormat non supporté, fallback pcm16")
+        }
+
+        val uplinkIntent = android.content.Intent(this, MicUplinkService::class.java).apply {
+            action = MicUplinkService.ACTION_START
+            putExtra(MicUplinkService.EXTRA_SERVER_URL, serverUrl)
+            putExtra(MicUplinkService.EXTRA_SERIAL, serial)
+            putExtra(MicUplinkService.EXTRA_SAMPLE_RATE, 16000)
+        }
+        startService(uplinkIntent)
+        Log.d("MainActivity", "🎙️ Mic uplink service started (serial=$serial)")
     }
     
     private fun requestPermissions() {

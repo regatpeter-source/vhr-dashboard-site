@@ -20,23 +20,20 @@ android {
         }
     }
 
-    signingConfigs {
-        create("release") {
-            val ksPath = System.getenv("VHR_KEYSTORE_PATH").orEmpty().ifBlank {
-                throw GradleException("VHR_KEYSTORE_PATH must be set as an environment variable or in local.properties")
-            }
-            val ksPass = System.getenv("VHR_KEYSTORE_PASSWORD").orEmpty().ifBlank {
-                throw GradleException("VHR_KEYSTORE_PASSWORD must be set as an environment variable")
-            }
-            val keyAlias = System.getenv("VHR_KEY_ALIAS").orEmpty().ifBlank {
-                throw GradleException("VHR_KEY_ALIAS must be set as an environment variable")
-            }
-            val keyPass = System.getenv("VHR_KEY_PASSWORD").orEmpty().ifBlank { ksPass }
+    val ksPath = System.getenv("VHR_KEYSTORE_PATH").orEmpty()
+    val ksPass = System.getenv("VHR_KEYSTORE_PASSWORD").orEmpty()
+    val keyAliasEnv = System.getenv("VHR_KEY_ALIAS").orEmpty()
+    val keyPassEnv = System.getenv("VHR_KEY_PASSWORD").orEmpty().ifBlank { ksPass }
+    val hasReleaseSigning = ksPath.isNotBlank() && ksPass.isNotBlank() && keyAliasEnv.isNotBlank()
 
-            storeFile = file(ksPath)
-            storePassword = ksPass
-            this.keyAlias = keyAlias
-            keyPassword = keyPass
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(ksPath)
+                storePassword = ksPass
+                keyAlias = keyAliasEnv
+                keyPassword = keyPassEnv
+            }
         }
     }
 
@@ -54,7 +51,9 @@ android {
             )
             buildConfigField("String", "RELAY_URL", "\"https://www.vhr-dashboard-site.com\"")
             buildConfigField("String", "RELAY_SESSION_ID", "\"default\"")
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -114,6 +113,9 @@ dependencies {
     // Socket.IO client + JSON
     implementation("io.socket:socket.io-client:2.1.0") { exclude(group = "org.json", module = "json") }
     implementation("org.json:json:20231013")
+
+    // Native WebSocket for mic uplink PCM stream
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // Testing
     testImplementation(libs.junit)

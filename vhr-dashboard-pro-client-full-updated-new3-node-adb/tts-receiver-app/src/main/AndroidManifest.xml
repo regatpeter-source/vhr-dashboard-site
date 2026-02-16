@@ -30,6 +30,11 @@
             android:enabled="true"
             android:exported="false" />
 
+        <service
+            android:name=".MicUplinkService"
+            android:enabled="true"
+            android:exported="false" />
+
         <!-- BroadcastReceiver pour les messages TTS -->
         <receiver
             android:name=".TtsReceiver"

@@ -57,10 +57,10 @@ class VHRAudioStream {
     this.relayConnectInFlight = false;
     this.relayTargetSerial = null;
     this.relayOpts = null;
-    this.relayPcmSource = null;
-    this.relayPcmProcessor = null;
-    this.relayPcmMuteGain = null;
-    this.relayPcmTargetSampleRate = 16000;
+    this.pcmRelayContext = null;
+    this.pcmRelaySource = null;
+    this.pcmRelayProcessor = null;
+    this.pcmRelaySink = null;
 
     // Headset -> PC talkback (micro uplink) receiver state
     this.talkbackWs = null;
@@ -73,11 +73,6 @@ class VHRAudioStream {
     this.talkbackFormat = 'webm';
     this.talkbackPcmSampleRate = 16000;
     this.talkbackPcmNextTime = 0;
-    this.talkbackReconnectTimer = null;
-    this.talkbackReconnectDelayMs = 1200;
-    this.talkbackShouldRun = false;
-    this.talkbackTargetSerial = null;
-    this.talkbackOpts = null;
   }
 
   /**
@@ -490,7 +485,8 @@ class VHRAudioStream {
    */
   async startAudioRelay(targetSerial, opts = {}) {
     try {
-      const format = opts.format === 'pcm16' ? 'pcm16' : (opts.format === 'ogg' ? 'ogg' : 'webm');
+      const requestedFormat = String(opts.format || 'webm').toLowerCase();
+      const format = (requestedFormat === 'ogg' || requestedFormat === 'pcm16') ? requestedFormat : 'webm';
       this._log(`Starting audio relay to ${targetSerial} (format=${format})`);
       
       if (!this.localStream) {
@@ -498,9 +494,9 @@ class VHRAudioStream {
       }
 
       const webmMime = 'audio/webm;codecs=opus';
-      const chosenMime = format === 'pcm16' ? null : webmMime;
+      const chosenMime = webmMime;
       const wsFormat = format === 'pcm16' ? 'pcm16' : 'webm';
-      this._log('Relay mime type: ' + chosenMime);
+      this._log('Relay mode: ' + wsFormat + (wsFormat === 'webm' ? (' mime=' + chosenMime) : ' (raw pcm16)'));
       
       this.relayActive = true;
       this.relayTargetSerial = targetSerial;
@@ -524,19 +520,7 @@ class VHRAudioStream {
     try {
       this.relayActive = false;
       this._clearRelayReconnect();
-      if (this.relayPcmProcessor) {
-        try { this.relayPcmProcessor.disconnect(); } catch {}
-        this.relayPcmProcessor.onaudioprocess = null;
-      }
-      if (this.relayPcmSource) {
-        try { this.relayPcmSource.disconnect(); } catch {}
-      }
-      if (this.relayPcmMuteGain) {
-        try { this.relayPcmMuteGain.disconnect(); } catch {}
-      }
-      this.relayPcmProcessor = null;
-      this.relayPcmSource = null;
-      this.relayPcmMuteGain = null;
+      this._stopPcmRelayPipeline();
       if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
         this.mediaRecorder.stop();
       }
@@ -569,42 +553,6 @@ class VHRAudioStream {
     }, this.relayReconnectDelayMs);
   }
 
-  _downsampleFloat32(input, inRate, outRate) {
-    if (!input || !input.length) return new Float32Array(0);
-    if (!inRate || !outRate || inRate === outRate) return input;
-
-    const ratio = inRate / outRate;
-    const newLength = Math.max(1, Math.floor(input.length / ratio));
-    const result = new Float32Array(newLength);
-
-    let offsetResult = 0;
-    let offsetBuffer = 0;
-    while (offsetResult < result.length) {
-      const nextOffsetBuffer = Math.min(input.length, Math.round((offsetResult + 1) * ratio));
-      let accum = 0;
-      let count = 0;
-      for (let i = offsetBuffer; i < nextOffsetBuffer; i++) {
-        accum += input[i];
-        count++;
-      }
-      result[offsetResult] = count > 0 ? (accum / count) : 0;
-      offsetResult++;
-      offsetBuffer = nextOffsetBuffer;
-    }
-    return result;
-  }
-
-  _floatToPcm16Buffer(floatSamples) {
-    const pcm = new Int16Array(floatSamples.length);
-    for (let i = 0; i < floatSamples.length; i++) {
-      let s = floatSamples[i];
-      if (s > 1) s = 1;
-      if (s < -1) s = -1;
-      pcm[i] = s < 0 ? (s * 0x8000) : (s * 0x7fff);
-    }
-    return pcm.buffer;
-  }
-
   async _connectAudioRelay() {
     if (this.relayConnectInFlight) return false;
     if (!this.localStream) throw new Error('No local audio stream available');
@@ -616,21 +564,8 @@ class VHRAudioStream {
       const wsFormat = opts.wsFormat || 'webm';
       const chosenMime = opts.chosenMime || 'audio/webm;codecs=opus';
 
-      if (this.relayPcmProcessor) {
-        try { this.relayPcmProcessor.disconnect(); } catch {}
-        this.relayPcmProcessor.onaudioprocess = null;
-      }
-      if (this.relayPcmSource) {
-        try { this.relayPcmSource.disconnect(); } catch {}
-      }
-      if (this.relayPcmMuteGain) {
-        try { this.relayPcmMuteGain.disconnect(); } catch {}
-      }
-      this.relayPcmProcessor = null;
-      this.relayPcmSource = null;
-      this.relayPcmMuteGain = null;
-
       // Clean previous relay if any
+      this._stopPcmRelayPipeline();
       if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
         try { this.mediaRecorder.stop(); } catch {}
       }
@@ -638,13 +573,10 @@ class VHRAudioStream {
         try { this.relayWs.close(); } catch {}
       }
 
-      let mediaRecorder = null;
-      if (wsFormat !== 'pcm16') {
-        mediaRecorder = new MediaRecorder(this.localStream, {
-          mimeType: chosenMime,
-          audioBitsPerSecond: 128000
-        });
-      }
+      const mediaRecorder = wsFormat === 'pcm16' ? null : new MediaRecorder(this.localStream, {
+        mimeType: chosenMime,
+        audioBitsPerSecond: 96000
+      });
 
       const relayBase = this.config.relayBase || window.location.origin;
       const relayUrl = new URL(relayBase);
@@ -665,53 +597,18 @@ class VHRAudioStream {
       relayWs.binaryType = 'arraybuffer';
 
       relayWs.onopen = () => {
-        this._log('Relay WebSocket connected, starting recording');
         if (wsFormat === 'pcm16') {
+          this._log('Relay WebSocket connected, starting PCM16 pipeline');
           try {
-            if (!this.audioContext || this.audioContext.state === 'closed') {
-              const AudioContext = window.AudioContext || window.webkitAudioContext;
-              this.audioContext = new AudioContext();
-            }
-            if (this.audioContext.state === 'suspended') {
-              this.audioContext.resume().catch(() => {});
-            }
-
-            const source = this.audioContext.createMediaStreamSource(this.localStream);
-            const processor = this.audioContext.createScriptProcessor(2048, 1, 1);
-            const muteGain = this.audioContext.createGain();
-            muteGain.gain.value = 0;
-
-            const inputRate = this.audioContext.sampleRate || 48000;
-            const outputRate = this.relayPcmTargetSampleRate || 16000;
-            this._log(`PCM relay rates: in=${inputRate}Hz, out=${outputRate}Hz`);
-
-            source.connect(processor);
-            processor.connect(muteGain);
-            muteGain.connect(this.audioContext.destination);
-
-            processor.onaudioprocess = (event) => {
-              if (relayWs.readyState !== WebSocket.OPEN) return;
-              const input = event.inputBuffer.getChannelData(0);
-              if (!input || !input.length) return;
-
-              const mono = new Float32Array(input.length);
-              mono.set(input);
-              const downsampled = this._downsampleFloat32(mono, inputRate, outputRate);
-              if (!downsampled.length) return;
-
-              relayWs.send(this._floatToPcm16Buffer(downsampled));
-            };
-
-            this.relayPcmSource = source;
-            this.relayPcmProcessor = processor;
-            this.relayPcmMuteGain = muteGain;
+            this._startPcmRelayPipeline(relayWs);
           } catch (e) {
             this._log('PCM relay start error: ' + e.message);
             throw e;
           }
         } else {
+          this._log('Relay WebSocket connected, starting recording');
           try {
-            mediaRecorder.start(250);
+            mediaRecorder.start(200);
           } catch (e) {
             this._log('MediaRecorder start error: ' + e.message);
             throw e;
@@ -738,43 +635,15 @@ class VHRAudioStream {
 
       relayWs.onerror = (error) => {
         this._log('Relay WebSocket error: ' + (error?.message || ''));
-        if (mediaRecorder) {
-          try { mediaRecorder.stop(); } catch {}
-        }
-        if (this.relayPcmProcessor) {
-          try { this.relayPcmProcessor.disconnect(); } catch {}
-          this.relayPcmProcessor.onaudioprocess = null;
-          this.relayPcmProcessor = null;
-        }
-        if (this.relayPcmSource) {
-          try { this.relayPcmSource.disconnect(); } catch {}
-          this.relayPcmSource = null;
-        }
-        if (this.relayPcmMuteGain) {
-          try { this.relayPcmMuteGain.disconnect(); } catch {}
-          this.relayPcmMuteGain = null;
-        }
+        try { if (mediaRecorder) mediaRecorder.stop(); } catch {}
+        this._stopPcmRelayPipeline();
         this._scheduleRelayReconnect();
       };
 
       relayWs.onclose = () => {
         this._log('Relay WebSocket closed');
-        if (mediaRecorder) {
-          try { mediaRecorder.stop(); } catch {}
-        }
-        if (this.relayPcmProcessor) {
-          try { this.relayPcmProcessor.disconnect(); } catch {}
-          this.relayPcmProcessor.onaudioprocess = null;
-          this.relayPcmProcessor = null;
-        }
-        if (this.relayPcmSource) {
-          try { this.relayPcmSource.disconnect(); } catch {}
-          this.relayPcmSource = null;
-        }
-        if (this.relayPcmMuteGain) {
-          try { this.relayPcmMuteGain.disconnect(); } catch {}
-          this.relayPcmMuteGain = null;
-        }
+        try { if (mediaRecorder) mediaRecorder.stop(); } catch {}
+        this._stopPcmRelayPipeline();
         this._scheduleRelayReconnect();
       };
 
@@ -786,17 +655,95 @@ class VHRAudioStream {
     }
   }
 
+  _startPcmRelayPipeline(relayWs) {
+    const sourceStream = this.localStream;
+    if (!sourceStream) throw new Error('No local stream for PCM relay');
+
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) throw new Error('AudioContext unavailable');
+
+    this._stopPcmRelayPipeline();
+
+    const ctx = new AudioContextCtor({ sampleRate: 48000, latencyHint: 'interactive' });
+    const src = ctx.createMediaStreamSource(sourceStream);
+    const proc = ctx.createScriptProcessor(2048, 1, 1);
+    const sink = ctx.createGain();
+    sink.gain.value = 0.0;
+
+    const downsampleTo16k = (input, inRate) => {
+      if (!input || !input.length) return new Float32Array(0);
+      if (inRate === 16000) return input;
+      const ratio = inRate / 16000;
+      const outLength = Math.max(1, Math.floor(input.length / ratio));
+      const output = new Float32Array(outLength);
+      let offsetResult = 0;
+      let offsetBuffer = 0;
+      while (offsetResult < output.length) {
+        const nextOffsetBuffer = Math.min(input.length, Math.round((offsetResult + 1) * ratio));
+        let accum = 0;
+        let count = 0;
+        for (let i = offsetBuffer; i < nextOffsetBuffer; i++) {
+          accum += input[i];
+          count++;
+        }
+        output[offsetResult] = count > 0 ? (accum / count) : 0;
+        offsetResult++;
+        offsetBuffer = nextOffsetBuffer;
+      }
+      return output;
+    };
+
+    proc.onaudioprocess = (event) => {
+      if (!this.relayActive) return;
+      if (!relayWs || relayWs.readyState !== WebSocket.OPEN) return;
+      const inBuf = event.inputBuffer.getChannelData(0);
+      const down = downsampleTo16k(inBuf, event.inputBuffer.sampleRate || ctx.sampleRate || 48000);
+      const pcm = new Int16Array(down.length);
+      for (let i = 0; i < down.length; i++) {
+        const s = Math.max(-1, Math.min(1, down[i]));
+        pcm[i] = s < 0 ? (s * 0x8000) : (s * 0x7fff);
+      }
+      relayWs.send(pcm.buffer);
+    };
+
+    src.connect(proc);
+    proc.connect(sink);
+    sink.connect(ctx.destination);
+
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+
+    this.pcmRelayContext = ctx;
+    this.pcmRelaySource = src;
+    this.pcmRelayProcessor = proc;
+    this.pcmRelaySink = sink;
+  }
+
+  _stopPcmRelayPipeline() {
+    try {
+      if (this.pcmRelayProcessor) this.pcmRelayProcessor.onaudioprocess = null;
+      if (this.pcmRelaySource) this.pcmRelaySource.disconnect();
+      if (this.pcmRelayProcessor) this.pcmRelayProcessor.disconnect();
+      if (this.pcmRelaySink) this.pcmRelaySink.disconnect();
+    } catch (e) {}
+
+    if (this.pcmRelayContext && this.pcmRelayContext.state !== 'closed') {
+      this.pcmRelayContext.close().catch(() => {});
+    }
+
+    this.pcmRelayContext = null;
+    this.pcmRelaySource = null;
+    this.pcmRelayProcessor = null;
+    this.pcmRelaySink = null;
+  }
+
   /**
    * Start listening to headset microphone uplink (headset -> PC)
    */
   async startTalkbackReceiver(targetSerial, opts = {}) {
     try {
       if (!targetSerial) throw new Error('targetSerial requis pour talkback');
-
-      this.talkbackShouldRun = true;
-      this.talkbackTargetSerial = targetSerial;
-      this.talkbackOpts = { ...(opts || {}) };
-      this._clearTalkbackReconnect();
 
       if (this.talkbackWs && this.talkbackWs.readyState === WebSocket.OPEN && this.relayTargetSerial === targetSerial) {
         return true;
@@ -868,7 +815,6 @@ class VHRAudioStream {
       this.talkbackWs.onerror = (error) => {
         this._log('Talkback WebSocket error: ' + (error?.message || ''));
         this._setTalkbackState('error', 'Erreur');
-        this._scheduleTalkbackReconnect();
       };
 
       this.talkbackWs.onclose = () => {
@@ -876,7 +822,6 @@ class VHRAudioStream {
         this.talkbackWs = null;
         this.talkbackActive = false;
         this._setTalkbackState('off', 'OFF');
-        this._scheduleTalkbackReconnect();
       };
 
       return true;
@@ -889,8 +834,6 @@ class VHRAudioStream {
 
   stopTalkbackReceiver() {
     try {
-      this.talkbackShouldRun = false;
-      this._clearTalkbackReconnect();
       this.talkbackActive = false;
       if (this.talkbackWs && this.talkbackWs.readyState !== WebSocket.CLOSED) {
         this.talkbackWs.close();
@@ -904,32 +847,10 @@ class VHRAudioStream {
       }
       this.talkbackSourceBuffer = null;
       this.talkbackMediaSource = null;
-      this.talkbackTargetSerial = null;
-      this.talkbackOpts = null;
       this._setTalkbackState('off', 'OFF');
     } catch (e) {
       this._log('Error stopping talkback receiver: ' + e.message);
     }
-  }
-
-  _clearTalkbackReconnect() {
-    if (this.talkbackReconnectTimer) {
-      clearTimeout(this.talkbackReconnectTimer);
-      this.talkbackReconnectTimer = null;
-    }
-  }
-
-  _scheduleTalkbackReconnect() {
-    if (!this.talkbackShouldRun) return;
-    if (!this.talkbackTargetSerial) return;
-    if (this.talkbackReconnectTimer) return;
-
-    this.talkbackReconnectTimer = setTimeout(() => {
-      this.talkbackReconnectTimer = null;
-      if (!this.talkbackShouldRun || !this.talkbackTargetSerial) return;
-      this.startTalkbackReceiver(this.talkbackTargetSerial, this.talkbackOpts || {})
-        .catch((e) => this._log('Talkback reconnect failed: ' + (e && e.message ? e.message : e)));
-    }, this.talkbackReconnectDelayMs);
   }
 
   _ensureTalkbackAudioElement() {

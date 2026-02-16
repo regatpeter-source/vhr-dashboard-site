@@ -28,6 +28,7 @@
   // Sender always emits WebM/Opus; keep receiver aligned to avoid decode mismatch.
   const canUseWebmMse = (typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(webmMime));
   const preferredMseType = canUseWebmMse ? webmMime : null;
+  const useDecodeFallback = !canUseWebmMse;
   let preferredBlobType = webmMime;
   let chunksReceived = 0;
   let nextPlayTime = 0;
@@ -241,6 +242,14 @@
 
   function enqueueChunk(arrayBuffer) {
     if (!arrayBuffer || arrayBuffer.byteLength < 100) return;
+
+    // Low-latency path: when MSE is available, forward each chunk directly.
+    // Aggregating 3 chunks introduces ~0.6-1.0s bursty playback and crackling.
+    if (!useDecodeFallback && preferredMseType) {
+      enqueueMse(new Blob([arrayBuffer], { type: preferredBlobType }));
+      return;
+    }
+
     pendingChunks.push(arrayBuffer);
     pendingSize += arrayBuffer.byteLength;
 
@@ -249,10 +258,12 @@
       const blob = new Blob(pendingChunks, { type: preferredBlobType });
       pendingChunks = [];
       pendingSize = 0;
-      blob.arrayBuffer().then((buf) => {
-        decodeQueue.push(buf);
-        processDecodeQueue();
-      }).catch((e) => log('Blob assemble error: ' + e.message));
+      if (useDecodeFallback) {
+        blob.arrayBuffer().then((buf) => {
+          decodeQueue.push(buf);
+          processDecodeQueue();
+        }).catch((e) => log('Blob assemble error: ' + e.message));
+      }
       enqueueMse(blob);
     }
   }

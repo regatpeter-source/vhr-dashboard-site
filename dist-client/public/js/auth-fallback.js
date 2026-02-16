@@ -2,6 +2,11 @@
 (function() {
   const overlayId = 'authOverlay';
   const reloadId = 'authForceReload';
+  const MAX_WAIT_MS = 45000;
+  const RETRY_INTERVAL_MS = 1500;
+
+  let startedAt = Date.now();
+  let retryTimer = null;
 
   const overlayElement = () => document.getElementById(overlayId);
 
@@ -21,34 +26,70 @@
     if (reloadBtn) reloadBtn.onclick = () => window.location.reload();
   };
 
+  const canForceLogin = () => {
+    return typeof showAuthModal === 'function';
+  };
+
   const forceLogin = () => {
     try {
       if (typeof hideDashboardContent === 'function') hideDashboardContent();
-      if (typeof showAuthModal === 'function') {
+      if (canForceLogin()) {
         showAuthModal('login');
         return;
       }
     } catch (e) {
       console.warn('[auth] forceLogin encountered an error:', e);
     }
-    renderReloadPrompt();
+    return false;
+  };
+
+  const stopRetry = () => {
+    if (retryTimer) {
+      clearInterval(retryTimer);
+      retryTimer = null;
+    }
+  };
+
+  const tryForceLoginWithWait = () => {
+    const ov = overlayElement();
+    if (!ov || ov.style.display === 'none') {
+      stopRetry();
+      return;
+    }
+
+    const ok = forceLogin();
+    if (ok !== false) {
+      stopRetry();
+      return;
+    }
+
+    const elapsed = Date.now() - startedAt;
+    if (elapsed >= MAX_WAIT_MS) {
+      stopRetry();
+      console.warn('[auth] Super fallback timeout reached, showing reload prompt');
+      renderReloadPrompt();
+    }
   };
 
   const bindButton = () => {
     const btn = document.getElementById('forceLoginButton');
     if (btn) {
-      btn.addEventListener('click', forceLogin);
+      btn.addEventListener('click', () => {
+        startedAt = Date.now();
+        if (forceLogin() === false) {
+          if (!retryTimer) {
+            retryTimer = setInterval(tryForceLoginWithWait, RETRY_INTERVAL_MS);
+          }
+        }
+      });
     }
   };
 
   const scheduleFallback = () => {
-    setTimeout(() => {
-      const ov = overlayElement();
-      if (ov && ov.style.display !== 'none') {
-        console.warn('[auth] Super fallback: forcing login modal');
-        forceLogin();
-      }
-    }, 10000);
+    // Start retry loop quickly, but only show blocking reload prompt after MAX_WAIT_MS.
+    if (!retryTimer) {
+      retryTimer = setInterval(tryForceLoginWithWait, RETRY_INTERVAL_MS);
+    }
   };
 
   bindButton();
