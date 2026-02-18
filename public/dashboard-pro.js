@@ -4440,6 +4440,12 @@ window.stopGame = async function(serial, pkg) {
 			if (runningApps[serial].length === 0) {
 				delete runningApps[serial];
 			}
+			// Persister immédiatement la suppression pour éviter le retour après refresh
+			api('/api/apps/running/mark', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ serial, package: pkg, action: 'remove' })
+			}).catch(() => {});
 			// Re-render right away so "Jeu en cours" updates without page refresh
 			renderDevices();
 		}
@@ -4470,6 +4476,18 @@ window.stopGame = async function(serial, pkg) {
 					publishSessionDevices();
 				}
 				// Refresh the apps dialog
+				const device = { serial, name: 'Device' };
+				showAppsDialog(device);
+				return;
+			}
+
+			if (stopRes && stopRes.stateCleared) {
+				// Même si ADB n'a pas confirmé, l'état "jeu en cours" est purgé côté serveur.
+				showToast('✅ Jeu marqué comme arrêté', 'success');
+				renderDevices();
+				if (isSessionActive()) {
+					publishSessionDevices();
+				}
 				const device = { serial, name: 'Device' };
 				showAppsDialog(device);
 				return;

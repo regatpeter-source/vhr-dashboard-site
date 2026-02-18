@@ -2158,14 +2158,17 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 				// Ne jamais ouvrir le récepteur web dans le casque (l'app native doit être utilisée)
 				console.log('[voice] Web receiver launch on headset disabled (native app enforced)');
 
-				// Lancer aussi l'app native VHR Voice sur le casque avec autostart
+				// Lancer l'app native via le même endpoint que le mode session (plus fiable)
 				try {
-					const startRes = await api('/api/device/start-voice-app', {
+					const startRes = await api('/api/device/open-audio-receiver', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({
 							serial,
 							serverUrl: resolvedServerUrl,
+							useBackgroundApp: true,
+							noBrowserFallback: true,
+							noUiFallback: true,
 							talkback: ENABLE_NATIVE_APP_UPLINK,
 							bidirectional: ENABLE_NATIVE_APP_UPLINK,
 							uplink: ENABLE_NATIVE_APP_UPLINK,
@@ -2173,7 +2176,7 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 						})
 					});
 					if (startRes && startRes.ok) {
-						console.log('[voice] Voice app launch request sent');
+						console.log('[voice] Voice app launch request sent (open-audio-receiver)');
 						showToast('📱 App VHR Voice lancée sur le casque', 'success');
 					} else {
 						console.warn('[voice] Voice app launch failed:', startRes?.error);
@@ -2189,12 +2192,15 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 							if (installRes && installRes.ok) {
 								installed = true;
 								showToast('✅ VHR Voice installé. Lancement...', 'success');
-								const retryRes = await api('/api/device/start-voice-app', {
+								const retryRes = await api('/api/device/open-audio-receiver', {
 									method: 'POST',
 									headers: { 'Content-Type': 'application/json' },
 									body: JSON.stringify({
 										serial,
 										serverUrl: resolvedServerUrl,
+										useBackgroundApp: true,
+										noBrowserFallback: true,
+										noUiFallback: true,
 										talkback: ENABLE_NATIVE_APP_UPLINK,
 										bidirectional: ENABLE_NATIVE_APP_UPLINK,
 										uplink: ENABLE_NATIVE_APP_UPLINK,
@@ -5036,6 +5042,12 @@ window.stopGame = async function(serial, pkg) {
 			if (runningApps[serial].length === 0) {
 				delete runningApps[serial];
 			}
+			// Persister immédiatement la suppression pour éviter le retour après refresh/scrcpy
+			api('/api/apps/running/mark', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ serial, package: pkg, action: 'remove' })
+			}).catch(() => {});
 			// Re-render right away so "Jeu en cours" updates without page refresh
 			renderDevices();
 		}
@@ -5066,6 +5078,17 @@ window.stopGame = async function(serial, pkg) {
 					publishSessionDevices();
 				}
 				// Refresh the apps dialog
+				const device = { serial, name: 'Device' };
+				showAppsDialog(device);
+				return;
+			}
+
+			if (stopRes && stopRes.stateCleared) {
+				showToast('✅ Jeu marqué comme arrêté', 'success');
+				renderDevices();
+				if (isSessionActive()) {
+					publishSessionDevices();
+				}
 				const device = { serial, name: 'Device' };
 				showAppsDialog(device);
 				return;

@@ -3380,6 +3380,17 @@ function buildAuthCookieOptions(req, overrides = {}) {
 const runningAppState = {}; // { serial: [pkg1, pkg2, ...] }
 const FORCE_REMOTE_USER_STATUS = (process.env.FORCE_REMOTE_USER_STATUS || '1') === '1';
 
+function clearRunningAppState(serial, pkg) {
+  if (!serial || !pkg) return false;
+  if (!runningAppState[serial]) return false;
+  const before = runningAppState[serial].length;
+  runningAppState[serial] = runningAppState[serial].filter(p => p !== pkg);
+  if (runningAppState[serial].length === 0) {
+    delete runningAppState[serial];
+  }
+  return runningAppState[serial] ? runningAppState[serial].length !== before : before > 0;
+}
+
 // --- Middleware de vérification du token ---
 async function authMiddleware(req, res, next) {
   // Accept token from querystring, Authorization header (Bearer), or cookie 'vhr_token'
@@ -8410,6 +8421,9 @@ app.post('/api/apps/:serial/stop', async (req, res) => {
 
   try {
     console.log(`[stop] Arrêt de: ${pkg}`);
+    // IMPORTANT: un stop explicite doit toujours retirer l'app de l'état "en cours"
+    // pour éviter un retour en lecture après refresh.
+    const stateCleared = clearRunningAppState(serial, pkg);
     
     // Stop the app using am force-stop
     const stopResult = await runAdbCommand(serial, [
@@ -8420,21 +8434,19 @@ app.post('/api/apps/:serial/stop', async (req, res) => {
     
     if (success) {
       console.log(`[stop] ${pkg} arrêté avec succès`);
-      try { io.emit('app-stop', { serial, package: pkg, success: true, stoppedAt: Date.now() }); } catch (e) {}
-      try {
-        if (runningAppState[serial]) {
-          runningAppState[serial] = runningAppState[serial].filter(p => p !== pkg);
-          if (runningAppState[serial].length === 0) delete runningAppState[serial];
-        }
-      } catch (e) {}
+      try { io.emit('app-stop', { serial, package: pkg, success: true, stoppedAt: Date.now(), stateCleared: true }); } catch (e) {}
       res.json({ ok: true, msg: `Jeu arrêté: ${pkg}` });
     } else {
       console.log(`[stop] ${pkg} - Erreur lors de l'arrêt:\n${stopResult.stderr}`);
-      try { io.emit('app-stop', { serial, package: pkg, success: false, error: stopResult.stderr }); } catch(e) {}
-      res.json({ ok: false, msg: 'Échec de l\'arrêt', details: stopResult.stderr });
+      try { io.emit('app-stop', { serial, package: pkg, success: false, error: stopResult.stderr, stateCleared }); } catch(e) {}
+      res.json({ ok: false, msg: 'Échec de l\'arrêt', details: stopResult.stderr, stateCleared });
     }
   } catch (e) {
     console.error('[api] stop:', e);
+    const stateCleared = clearRunningAppState(serial, pkg);
+    if (stateCleared) {
+      return res.status(500).json({ ok: false, error: String(e), stateCleared: true });
+    }
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
