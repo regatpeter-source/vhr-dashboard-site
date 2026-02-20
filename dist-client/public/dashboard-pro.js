@@ -1787,12 +1787,8 @@ function getSettingsContent() {
 				<div style='margin-bottom:16px;'>
 					<label style='color:#95a5a6;font-size:13px;display:block;margin-bottom:8px;'>Profil streaming par défaut</label>
 					<select id='prefDefaultProfile' ${settingsLocked ? 'disabled' : ''} style='width:100%;background:#1a1d24;color:#fff;border:2px solid #34495e;padding:10px;border-radius:6px;font-size:14px;cursor:pointer;'>
-						<option value='ultra-low'>Ultra Low (320p)</option>
-						<option value='low'>Low (480p)</option>
-						<option value='wifi'>WiFi (640p)</option>
-						<option value='default' selected>Default (720p)</option>
-						<option value='high'>High (1280p)</option>
-						<option value='ultra'>Ultra (1920p)</option>
+						<option value='wifi' selected>WiFi (casque en réseau)</option>
+						<option value='usb'>USB (casque branché)</option>
 					</select>
 				</div>
 				<div>
@@ -1903,6 +1899,19 @@ window.updateTalkbackIndicator = function(state = 'off', label = 'OFF') {
 	}
 	badge.style.background = bg;
 	badge.textContent = `🎙️ Talkback: ${text}`;
+};
+
+window.toggleVoiceGuideForSerial = async function(serial) {
+	if (!serial) return;
+	if (activeAudioStream && activeAudioSerial === serial) {
+		await window.closeAudioStream();
+		showToast('🛑 Guide vocal arrêté', 'info');
+		setTimeout(loadDevices, 150);
+		return;
+	}
+	await window.sendVoiceToHeadset(serial);
+	showToast('🗣️ Guide vocal activé', 'success');
+	setTimeout(loadDevices, 150);
 };
 
 window.sendVoiceToHeadset = async function(serial, options = {}) {
@@ -3657,16 +3666,16 @@ function renderDevicesTable() {
 			? `<div style='color:#bdc3c7;font-size:12px;max-width:160px;margin:0 auto;'>Actions locales désactivées en mode cloud. Connectez l'agent PC pour le contrôle ADB.</div>`
 			: (d.status !== 'streaming' ? `
 				<select id='profile_${safeId}' style='background:#34495e;color:#fff;border:1px solid #2ecc71;padding:6px;border-radius:4px;margin-bottom:4px;width:140px;'>
-					<option value='ultra-low'>Ultra Low</option>
-					<option value='low'>Low</option>
-					<option value='wifi'>WiFi</option>
-					<option value='default' selected>Default</option>
-					<option value='high'>High</option>
-					<option value='ultra'>Ultra</option>
+					<option value='wifi' ${d.serial.includes(':') ? 'selected' : ''}>WiFi</option>
+					<option value='usb' ${!d.serial.includes(':') ? 'selected' : ''}>USB</option>
 				</select><br>
-				<button onclick='startStreamFromTable(${JSON.stringify(d.serial)})' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>▶️ Scrcpy</button>
+				<div style='display:flex;gap:6px;justify-content:center;flex-wrap:wrap;'>
+					<button onclick='startStreamFromTable(${JSON.stringify(d.serial)})' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>▶️ Stream</button>
+				</div>
 			` : `
-				<button onclick='stopStreamFromTable(${JSON.stringify(d.serial)})' style='background:#e74c3c;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>⏹️ Stop</button>
+				<div style='display:flex;gap:6px;justify-content:center;flex-wrap:wrap;'>
+					<button onclick='stopStreamFromTable(${JSON.stringify(d.serial)})' style='background:#e74c3c;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>⏹️ Stop</button>
+				</div>
 			`);
 
 		const wifiCell = relay
@@ -3795,14 +3804,10 @@ function renderDevicesCards() {
 			? `<div style='color:#bdc3c7;font-size:12px;margin-bottom:10px;'>Actions locales désactivées en mode cloud. Ouvrez l'agent PC pour contrôler le casque.</div>`
 			: (d.status !== 'streaming' ? `
 			<select id='profile_card_${safeId}' style='width:100%;background:#34495e;color:#fff;border:1px solid #2ecc71;padding:8px;border-radius:6px;margin-bottom:6px;'>
-				<option value='ultra-low'>Ultra Low</option>
-				<option value='low'>Low</option>
-				<option value='wifi'>WiFi</option>
-				<option value='default' selected>Default</option>
-				<option value='high'>High</option>
-				<option value='ultra'>Ultra</option>
+				<option value='wifi' ${d.serial.includes(':') ? 'selected' : ''}>WiFi</option>
+				<option value='usb' ${!d.serial.includes(':') ? 'selected' : ''}>USB</option>
 			</select>
-			<button onclick='startStreamFromCard(${JSON.stringify(d.serial)})' style='width:100%;background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>▶️ Scrcpy</button>
+			<button onclick='startStreamFromCard(${JSON.stringify(d.serial)})' style='width:100%;background:#3498db;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>▶️ Stream</button>
 		` : `
 			<button onclick='stopStreamFromTable(${JSON.stringify(d.serial)})' style='width:100%;background:#e74c3c;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>⏹️ Stop Stream</button>
 		`);
@@ -3966,7 +3971,7 @@ function openUsbConnectionTutorialGuide() {
 // ========== STREAMING FUNCTIONS ========== 
 
 // Show audio output selection dialog for stream
-window.showStreamAudioDialog = function(serial, callback) {
+window.showStreamAudioDialog = function(serial, selectedProfile = 'wifi') {
 	// Récupérer le nom du casque
 	const device = devices.find(d => d.serial === serial);
 	const deviceName = device ? device.name : serial;
@@ -3983,15 +3988,16 @@ window.showStreamAudioDialog = function(serial, callback) {
 		<div style='background:#1a1d24;border:2px solid #2ecc71;border-radius:12px;padding:24px;max-width:400px;width:90%;text-align:center;'>
 			<h3 style='color:#2ecc71;margin:0 0 8px 0;'>🎮 Scrcpy - ${deviceName}</h3>
 			<p style='color:#95a5a6;margin:0 0 20px 0;font-size:12px;'>${serial}</p>
-			<p style='color:#bdc3c7;margin-bottom:20px;font-size:14px;'>🔊 Où voulez-vous entendre le son ?</p>
+			<p style='color:#bdc3c7;margin-bottom:8px;font-size:14px;'>🔊 Où voulez-vous entendre le son ?</p>
+			<p style='color:#95a5a6;margin:0 0 20px 0;font-size:12px;'>Profil vidéo: <strong style='color:#2ecc71;'>${selectedProfile}</strong></p>
 			<div style='display:flex;flex-direction:column;gap:10px;'>
-				<button onclick='window.launchStreamWithAudio("${serial}", "headset")' style='background:linear-gradient(135deg, #3498db 0%, #2980b9 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
+				<button onclick='window.launchStreamWithAudio("${serial}", "headset", "${selectedProfile}")' style='background:linear-gradient(135deg, #3498db 0%, #2980b9 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
 					📱 Casque uniquement
 				</button>
-				<button onclick='window.launchStreamWithAudio("${serial}", "pc")' style='background:linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
+				<button onclick='window.launchStreamWithAudio("${serial}", "pc", "${selectedProfile}")' style='background:linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
 					💻 PC uniquement
 				</button>
-				<button onclick='window.launchStreamWithAudio("${serial}", "both")' style='background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
+				<button onclick='window.launchStreamWithAudio("${serial}", "both", "${selectedProfile}")' style='background:linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:14px;'>
 					🔊 Casque + PC (recommandé)
 				</button>
 			</div>
@@ -4006,77 +4012,111 @@ window.scrcpyLaunchRequests = window.scrcpyLaunchRequests || new Map();
 window.scrcpyLastLaunch = window.scrcpyLastLaunch || new Map();
 const SCRCPY_LAUNCH_DEBOUNCE_MS = 2000;
 
-window.launchStreamWithAudio = async function(serial, audioOutput) {
+window.launchStreamWithAudio = async function(serial, audioOutput, profile = 'wifi') {
 	if (isRemoteSessionSerial(serial)) {
 		if (shouldUseRelayForSession(serial)) {
 			showToast('🛰️ Casque distant: ouverture du viewer relais…', 'info');
-			await window.startStreamJSMpeg(serial);
-			return;
+			await window.startStreamJSMpeg(serial, profile);
+			return true;
 		}
 		showToast('🛰️ Casque distant: ouverture du viewer sur l’hôte…', 'info');
-		await window.startStreamJSMpeg(serial);
+		await window.startStreamJSMpeg(serial, profile);
 		openSessionHostViewer({ mode: 'stream', serial });
-		return;
+		return true;
 	}
-	const serialKey = String(serial || '');
-	const now = Date.now();
-	const last = window.scrcpyLastLaunch.get(serialKey) || 0;
-	if (window.scrcpyLaunchRequests.get(serialKey)) {
-		showToast('⏳ Scrcpy déjà en cours de lancement', 'info');
-		return;
-	}
-	if (now - last < SCRCPY_LAUNCH_DEBOUNCE_MS) {
-		showToast('⏳ Scrcpy déjà en cours de lancement', 'info');
-		return;
-	}
-	window.scrcpyLastLaunch.set(serialKey, now);
-	window.scrcpyLaunchRequests.set(serialKey, true);
 
-	// Close dialog
+	// Non-session mode: force JSMpeg streaming (no native Scrcpy launch)
 	const dialog = document.getElementById('streamAudioDialog');
 	if (dialog) dialog.remove();
-	
-	showToast('🎮 Lancement Scrcpy...', 'info');
-	
-	const res = await api('/api/scrcpy-gui', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ serial, audioOutput })
-	});
-	
-	if (res.ok) {
-		const audioMsg = audioOutput === 'headset' ? '(son sur casque)' : audioOutput === 'pc' ? '(son sur PC)' : '(son sur casque + PC)';
-		showToast(`🎮 Scrcpy lancé ! ${audioMsg}`, 'success');
+	showToast('📹 Démarrage du stream JSMpeg...', 'info');
+	const launched = await window.startStreamJSMpeg(serial, profile);
+	if (launched) {
 		incrementStat('totalSessions');
-	} else {
-		showToast('� Erreur: ' + (res.error || 'inconnue'), 'error');
+		setTimeout(loadDevices, 500);
 	}
-	setTimeout(() => window.scrcpyLaunchRequests.delete(serialKey), 2500);
-	setTimeout(loadDevices, 500);
+	return Boolean(launched);
+};
+
+window.launchScrcpyWithGuide = async function(serial, audioOutput = 'headset', profile = 'wifi') {
+	const launched = await window.launchStreamWithAudio(serial, audioOutput, profile);
+	if (!launched) return;
 };
 
 window.startStreamFromTable = async function(serial) {
-	// Show audio output selection dialog
-	window.showStreamAudioDialog(serial);
+	const safeId = String(serial || '').replace(/[^a-zA-Z0-9]/g, '_');
+	const profileEl = document.getElementById(`profile_${safeId}`);
+	const selectedProfile = (profileEl && profileEl.value) ? profileEl.value : (String(serial || '').includes(':') ? 'wifi' : 'usb');
+	await window.startStreamJSMpeg(serial, selectedProfile);
 };
 
 window.startStreamFromCard = async function(serial) {
-	// Show audio output selection dialog  
-	window.showStreamAudioDialog(serial);
+	const safeId = String(serial || '').replace(/[^a-zA-Z0-9]/g, '_');
+	const profileEl = document.getElementById(`profile_card_${safeId}`);
+	const selectedProfile = (profileEl && profileEl.value) ? profileEl.value : (String(serial || '').includes(':') ? 'wifi' : 'usb');
+	await window.startStreamJSMpeg(serial, selectedProfile);
 };
 
-window.startStreamJSMpeg = async function(serial) {
+window._voiceAutoStartState = window._voiceAutoStartState || { pendingSerial: null, lastBySerial: new Map() };
+
+window.autoStartVoiceForStream = async function(serial, options = {}) {
+	const serialKey = String(serial || '').trim();
+	if (!serialKey) return;
+	const isRemote = isRemoteSessionSerial(serialKey);
+	const isCollaborativeSession = isSessionActive();
+	// Important: in collaborative sessions, remote device on B must auto-start voice too.
+	if (isRemote && !isCollaborativeSession) return;
+
+	const state = window._voiceAutoStartState;
+	const now = Date.now();
+	const last = state.lastBySerial.get(serialKey) || 0;
+	if (state.pendingSerial === serialKey) return;
+	if ((now - last) < 2500) return; // anti double clic / double trigger
+
+	state.pendingSerial = serialKey;
+	state.lastBySerial.set(serialKey, now);
+
+	try {
+		if (activeAudioStream && activeAudioSerial === serialKey) {
+			window.updateStreamVoiceGuideButton();
+			return;
+		}
+		const sessionCode = options.sessionCode || getActiveSessionCode();
+		await window.sendVoiceToHeadset(serialKey, { viaSession: true, sessionCode });
+
+		// If relay opening was skipped by cooldown, do one delayed retry.
+		if (isRemote && isCollaborativeSession && (!activeAudioStream || activeAudioSerial !== serialKey)) {
+			await new Promise(resolve => setTimeout(resolve, RELAY_VOICE_OPEN_COOLDOWN_MS + 150));
+			if (!activeAudioStream || activeAudioSerial !== serialKey) {
+				await window.sendVoiceToHeadset(serialKey, { viaSession: true, sessionCode });
+			}
+		}
+	} catch (err) {
+		console.warn('[voice] auto-start stream guide failed:', err);
+	} finally {
+		if (state.pendingSerial === serialKey) state.pendingSerial = null;
+		window.updateStreamVoiceGuideButton();
+	}
+};
+
+window.startStreamJSMpeg = async function(serial, profile = 'default') {
 	const sessionCode = getActiveSessionCode();
 	const res = await api('/api/stream/start', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ serial, profile: 'default', sessionCode: sessionCode || undefined })
+		body: JSON.stringify({ serial, profile: profile || 'default', sessionCode: sessionCode || undefined })
 	});
 	if (res.ok) {
 		showToast('✅ Stream JSMpeg démarré !', 'success');
 		setTimeout(() => showStreamViewer(serial), 500);
+		setTimeout(() => {
+			window.autoStartVoiceForStream(serial, { sessionCode });
+		}, 900);
+		return true;
 	}
-	else showToast('� Erreur: ' + (res.error || 'inconnue'), 'error');
+	else {
+		showToast('� Erreur: ' + (res.error || 'inconnue'), 'error');
+		return false;
+	}
 };
 
 function waitForAuthReady(callback, label) {
@@ -4158,7 +4198,6 @@ window.showStreamViewer = function(serial) {
 					🟢 En direct - <span id='streamTime'>${new Date().toLocaleTimeString('fr-FR')}</span>
 				</div>
 				<div style='display:flex;gap:8px;font-size:12px;'>
-					<button id='streamVoiceGuideBtn' onclick='window.toggleStreamVoiceGuide()' style='background:#16a085;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>🗣️ Guide vocal</button>
 					<button onclick='toggleStreamFullscreen()' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>⛶ Plein écran</button>
 					<button onclick='captureStreamScreenshot()' style='background:#2ecc71;color:#000;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>📸 Capture</button>
 				</div>
@@ -4166,7 +4205,6 @@ window.showStreamViewer = function(serial) {
 		</div>
 	`;
 	modal.style.display = 'flex';
-	window.updateStreamVoiceGuideButton();
 	
 	// Attendre 1 seconde que le stream soit bien lancé côté serveur avant de connecter le player
 	console.log('[stream] Modal opened, waiting for stream to stabilize...');
@@ -4213,16 +4251,22 @@ window.showStreamViewer = function(serial) {
 window.updateStreamVoiceGuideButton = function() {
 	const modal = document.getElementById('streamModal');
 	const btn = document.getElementById('streamVoiceGuideBtn');
-	if (!modal || !btn) return;
+	const btnTop = document.getElementById('streamVoiceGuideBtnTop');
+	if (!modal || (!btn && !btnTop)) return;
 	const serial = modal.dataset.serial || '';
 	const activeOnSameSerial = !!(activeAudioStream && activeAudioSerial && serial && activeAudioSerial === serial);
-	if (activeOnSameSerial) {
-		btn.textContent = '🔇 Couper guide vocal';
-		btn.style.background = '#e74c3c';
-	} else {
-		btn.textContent = '🗣️ Guide vocal';
-		btn.style.background = '#16a085';
-	}
+	const applyState = (targetBtn) => {
+		if (!targetBtn) return;
+		if (activeOnSameSerial) {
+			targetBtn.textContent = '🔇 Couper guide vocal';
+			targetBtn.style.background = '#e74c3c';
+		} else {
+			targetBtn.textContent = '🗣️ Guide vocal';
+			targetBtn.style.background = '#16a085';
+		}
+	};
+	applyState(btn);
+	applyState(btnTop);
 };
 
 window.toggleStreamVoiceGuide = async function() {
@@ -4300,6 +4344,7 @@ window.initStreamPlayer = function(serial) {
 		console.log('[stream] JSMpeg not loaded, loading from CDN...');
 		// Charger JSMpeg dynamiquement (CDN fallback)
 		const sources = [
+			'/vendor/jsmpeg.min.js',
 			'https://cdn.jsdelivr.net/gh/phoboslab/jsmpeg@master/jsmpeg.min.js'
 		];
 		const tryLoad = (index) => {
@@ -4359,12 +4404,13 @@ window.connectStreamSocket = function(serial) {
 		const player = new JSMpeg.Player(wsUrl, {
 			canvas: canvas,
 			autoplay: true,
-			progressive: true,
+			audio: false,
+			progressive: false,
 			disableWebAssembly: true,
-			// Optimisations pour éviter le scintillement:
-			bufferSize: 512 * 1024,  // 512KB buffer client-side (accepte +100-200ms pour la stabilité)
-			chunkSize: 1024 * 10,    // Traiter les chunks par 10KB
-			throttled: true,         // Throttle rendering quand le navigateur est occupé
+			disableGl: true,
+			videoBufferSize: 1024 * 1024,
+			pauseWhenHidden: false,
+			preserveDrawingBuffer: false,
 			onPlay: () => {
 				console.log('[stream] JSMpeg onPlay callback fired');
 				showToast('🎬 Stream connecté ! (buffering pour stabilité)', 'success');

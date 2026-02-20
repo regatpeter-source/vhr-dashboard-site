@@ -7397,6 +7397,16 @@ async function ensureDeviceStreamingReady(serial) {
 
 // ---------- ADB screenrecord (H264 direct) ----------
 async function startStream(serial, opts = {}) {
+  const streamDebugDir = process.env.VHR_DATA_DIR || path.join(os.homedir(), '.vhr-dashboard');
+  const streamDebugLog = path.join(streamDebugDir, 'stream-debug.log');
+  const appendStreamDebug = (msg) => {
+    try {
+      fs.mkdirSync(streamDebugDir, { recursive: true });
+      fs.appendFileSync(streamDebugLog, `[${new Date().toISOString()}] [${serial}] ${msg}\n`, 'utf8');
+    } catch (_) {}
+  };
+  const STALE_STREAM_MS = Math.max(3000, Number.parseInt(process.env.STALE_STREAM_MS || '5000', 10) || 5000);
+
   // Compat: variable ffmpegProc définie même si non utilisée (pipeline MPEG1 désactivée)
   let ffmpegProc = null;
   if (!checkFfmpegAvailability()) {
@@ -7415,7 +7425,16 @@ async function startStream(serial, opts = {}) {
   if (streams.has(serial)) {
     const existing = streams.get(serial);
     const alive = existing && existing.adbProc && isProcessAlive(existing.adbProc.pid);
-    if (alive) {
+    const lastDataAt = Number(existing && existing.lastH264At) || 0;
+    const lastDataAge = lastDataAt > 0 ? (Date.now() - lastDataAt) : Number.POSITIVE_INFINITY;
+    const stale = alive && lastDataAge > STALE_STREAM_MS;
+    if (stale) {
+      console.warn(`[stream] stale stream detected on ${serial} (lastDataAge=${lastDataAge}ms), restarting`);
+      appendStreamDebug(`stale stream detected, restarting (lastDataAge=${lastDataAge}ms)`);
+      try { stopStream(serial); } catch (_) {}
+      streams.delete(serial);
+    }
+    if (alive && !stale) {
       console.log(`[stream] already streaming on ${serial}, reusing existing session`);
       existing.shouldRun = true;
       existing.autoReconnect = Boolean(opts.autoReconnect);
@@ -7432,25 +7451,57 @@ async function startStream(serial, opts = {}) {
     streams.delete(serial);
   }
 
-  // Profils stables : résolution et bitrate
-  let size = '854x480', bitrate = '2M';
+  // Profils stables : résolution et bitrate (dimensions alignées pour screenrecord)
+  // Objectif: garder la stabilité sans scintillement, avec une netteté améliorée.
+  let size = '960x540', bitrate = '3M';
+  let ffmpegScale = '960:540';
+  let ffmpegBitrate = '3000k';
+  let ffmpegFps = '25';
+  let ffmpegBufsize = '3M';
   if (opts.profile === 'ultra-low') {
-    size = '426x240'; bitrate = '800K';
+    size = '432x240'; bitrate = '800K';
   } else if (opts.profile === 'low') {
-    size = '480x270'; bitrate = '1M';
+    size = '480x272'; bitrate = '1M';
   } else if (opts.profile === 'wifi') {
-    size = '640x360'; bitrate = '1.5M';
+    size = '1280x720'; bitrate = '6M';
+    ffmpegScale = '1280:720';
+    ffmpegBitrate = '5800k';
+    ffmpegFps = '30';
+    ffmpegBufsize = '6M';
+  } else if (opts.profile === 'usb') {
+    size = '1280x720'; bitrate = '5M';
+    ffmpegScale = '1280:720';
+    ffmpegBitrate = '5000k';
+    ffmpegFps = '30';
+    ffmpegBufsize = '5M';
   } else if (opts.profile === 'default') {
-    size = '854x480'; bitrate = '2M';
+    size = '960x540'; bitrate = '3M';
+    ffmpegScale = '960:540';
+    ffmpegBitrate = '3000k';
+    ffmpegFps = '25';
+    ffmpegBufsize = '3M';
   } else if (opts.profile === 'high') {
     size = '1280x720'; bitrate = '3M';
   } else if (opts.profile === 'ultra') {
-    size = '1920x1080'; bitrate = '5M';
+    size = '1920x1088'; bitrate = '5M';
   }
 
-  const bitrateNum = bitrate.replace(/[KM]/g, m => m === 'K' ? '000' : '000000');
+  const parseAdbBitrate = (value) => {
+    const raw = String(value || '').trim().toUpperCase();
+    const m = raw.match(/^([0-9]+(?:\.[0-9]+)?)([KMG]?)$/);
+    if (!m) return '2000000';
+    const amount = Number.parseFloat(m[1]);
+    if (!Number.isFinite(amount) || amount <= 0) return '2000000';
+    const unit = m[2] || '';
+    if (unit === 'G') return String(Math.round(amount * 1000 * 1000 * 1000));
+    if (unit === 'M') return String(Math.round(amount * 1000 * 1000));
+    if (unit === 'K') return String(Math.round(amount * 1000));
+    return String(Math.round(amount));
+  };
+  const bitrateNum = parseAdbBitrate(bitrate);
   console.log(`[server] ­ƒÄ¼ ADB screenrecord stream: ${serial}`);
   console.log(`[server] ­ƒô║ ${size} @ ${bitrate}`);
+  appendStreamDebug(`start profile=${opts.profile || 'n/a'} size=${size} bitrate=${bitrate} bitrateNum=${bitrateNum} ffmpegScale=${ffmpegScale} ffmpegBitrate=${ffmpegBitrate} ffmpegFps=${ffmpegFps} ffmpegBufsize=${ffmpegBufsize}`);
   
   // Calculer la position de la fenêtre (empilement vertical)
   const streamCount = Array.from(streams.values()).filter(s => s.ffplayProc).length;
@@ -7473,12 +7524,13 @@ async function startStream(serial, opts = {}) {
     '--output-format=h264',
     `--bit-rate=${bitrateNum}`,
     `--size=${size}`,
-    '--time-limit=1800',
+    '--time-limit=180',
     '-'
   ];
   
 
   const adbProc = spawn(ADB_BIN, adbArgs);
+  appendStreamDebug(`adb spawn: ${ADB_BIN} ${JSON.stringify(adbArgs)}`);
   
   // Track the ADB process for cleanup
   trackProcess(adbProc, 'adb-screenrecord', serial);
@@ -7491,69 +7543,49 @@ async function startStream(serial, opts = {}) {
   const entry = streams.get(serial) || { clients: new Set(), mpeg1Clients: new Set(), h264Clients: new Set() };
   entry.adbProc = adbProc;
   entry.hasH264Data = false;
+  entry.lastH264At = 0;
+  entry.mpeg1InitChunks = [];
+  entry.mpeg1InitBytes = 0;
+  entry.mpeg1InitDone = false;
   entry.shouldRun = true;
   entry.autoReconnect = Boolean(opts.autoReconnect);
   entry.relaySessionCode = opts.sessionCode || entry.relaySessionCode || null;
   if (entry.relaySessionCode) {
     entry.relayWs = ensureRelayVideoSender(serial, entry.relaySessionCode);
   }
-  
-  // ---------- Video Stabilization Buffer ----------
-  // Prevent flickering by buffering and smoothly distributing frames
-  // This adds ~200-300ms latency but ensures smooth playback without visual glitches
-  entry.frameBuffer = [];
-  entry.maxBufferSize = 15; // Buffer up to 15 frames (at ~30fps = ~500ms buffer)
+
+  // Legacy H264 direct clients are no longer used.
+  // Keep the property for safety, but avoid buffering raw chunks server-side.
   entry.sendInterval = null;
-  entry.targetFPS = 30; // Target playback rate (33ms between frames)
-  entry.lastSendTime = Date.now();
   
   streams.set(serial, entry);
 
   adbProc.stderr && adbProc.stderr.on('data', d => {
-    console.error('[adb stderr]', d.toString());
+    const msg = d.toString();
+    console.error('[adb stderr]', msg);
+    appendStreamDebug(`adb stderr: ${msg.replace(/\s+/g, ' ').trim()}`);
   });
 
   const adbFirstDataTimer = setTimeout(() => {
     if (!entry.hasH264Data) {
       console.warn(`[adb] no H264 data received for ${serial} after 2s. Verify headset is awake/authorized.`);
+      appendStreamDebug('adb no H264 data after 2s');
     }
   }, 2000);
 
-  // ---------- Pipeline H264 with Frame Stabilization ----------
-  // Buffer incoming frames and send them at a steady rate to prevent flickering
+  // Mark source as alive and only forward to legacy H264 clients if any are connected.
   adbProc.stdout.on('data', chunk => {
     if (!entry.hasH264Data) {
       entry.hasH264Data = true;
       clearTimeout(adbFirstDataTimer);
     }
-    // Add chunk to buffer
-    if (entry.frameBuffer.length < entry.maxBufferSize) {
-      entry.frameBuffer.push(chunk);
-    } else {
-      // If buffer is full, drop oldest frame to make room (prevent memory overflow)
-      entry.frameBuffer.shift();
-      entry.frameBuffer.push(chunk);
-      if (Date.now() % 300 === 0) { // Log occasionally, not every frame
-        console.log(`[stream/${serial}] Buffer full, dropping frame (${entry.frameBuffer.length} frames buffered)`);
-      }
-    }
-
-    // Start steady transmission if not already running
-    if (!entry.sendInterval) {
-      entry.sendInterval = setInterval(() => {
-        if (entry.frameBuffer.length > 0) {
-          const chunk = entry.frameBuffer.shift();
-          
-          // Send to all H264 clients with stable timing
-          for (const ws of entry.h264Clients || []) {
-            if (ws.readyState === 1) {
-              try { ws.send(chunk) } catch {}
-            }
-          }
-
-          entry.lastSendTime = Date.now();
+    entry.lastH264At = Date.now();
+    if (entry.h264Clients && entry.h264Clients.size > 0) {
+      for (const ws of entry.h264Clients) {
+        if (ws.readyState === 1) {
+          try { ws.send(chunk); } catch {}
         }
-      }, entry.targetFPS); // Send at ~30 FPS (33ms intervals)
+      }
     }
   });
 
@@ -7567,12 +7599,17 @@ async function startStream(serial, opts = {}) {
     '-analyzeduration', '1000000',
     '-i', 'pipe:0',
     '-f', 'mpegts',
+    '-mpegts_flags', '+resend_headers',
+    '-flush_packets', '1',
     '-codec:v', 'mpeg1video',
-    '-b:v', '2000k',
-    '-r', '25',
-    '-vf', 'scale=640:368',
+    '-b:v', ffmpegBitrate,
+    '-maxrate', ffmpegBitrate,
+    '-bufsize', ffmpegBufsize,
+    '-r', ffmpegFps,
+    '-vf', `scale=${ffmpegScale}`,
     '-pix_fmt', 'yuv420p',
     '-bf', '0',
+    '-g', '12',
     '-muxdelay', '0.1',
     'pipe:1'
   ];
@@ -7585,7 +7622,9 @@ async function startStream(serial, opts = {}) {
       console.error('[ffmpeg] spawn error:', err && err.message ? err.message : err);
     });
     ffmpegProc.stderr && ffmpegProc.stderr.on('data', d => {
-      console.error('[ffmpeg stderr]', d.toString());
+      const msg = d.toString();
+      console.error('[ffmpeg stderr]', msg);
+      appendStreamDebug(`ffmpeg stderr: ${msg.replace(/\s+/g, ' ').trim()}`);
     });
     adbProc.stdout.pipe(ffmpegProc.stdin);
     ffmpegProc.stdin.on('error', err => {
@@ -7594,6 +7633,9 @@ async function startStream(serial, opts = {}) {
 
     let relayVideoBytes = 0;
     let relayVideoLastLogAt = 0;
+    let mpeg1Bytes = 0;
+    let mpeg1Chunks = 0;
+    let mpeg1LastLogAt = 0;
     let mpeg1FirstData = false;
     const mpeg1FirstDataTimer = setTimeout(() => {
       if (!mpeg1FirstData) {
@@ -7604,11 +7646,37 @@ async function startStream(serial, opts = {}) {
       if (!mpeg1FirstData) {
         mpeg1FirstData = true;
         clearTimeout(mpeg1FirstDataTimer);
+        appendStreamDebug(`mpeg1 first chunk len=${chunk.length || 0}`);
       }
+
+      // Keep an initialization cache so newly connected JSMpeg clients
+      // can decode even if they join mid-stream.
+      if (!entry.mpeg1InitDone) {
+        const INIT_LIMIT_BYTES = 256 * 1024;
+        if (entry.mpeg1InitBytes < INIT_LIMIT_BYTES) {
+          entry.mpeg1InitChunks.push(chunk);
+          entry.mpeg1InitBytes += chunk.length || 0;
+        } else {
+          entry.mpeg1InitDone = true;
+          appendStreamDebug(`mpeg1 init cache sealed bytes=${entry.mpeg1InitBytes} chunks=${entry.mpeg1InitChunks.length}`);
+        }
+      }
+
+      mpeg1Bytes += chunk.length || 0;
+      mpeg1Chunks += 1;
+
       for (const ws of entry.mpeg1Clients || []) {
         if (ws.readyState === 1) {
           try { ws.send(chunk); } catch {}
         }
+      }
+
+      const nowMpeg = Date.now();
+      if (!mpeg1LastLogAt || (nowMpeg - mpeg1LastLogAt) > 2000) {
+        mpeg1LastLogAt = nowMpeg;
+        appendStreamDebug(`mpeg1 out bytes=${mpeg1Bytes} chunks=${mpeg1Chunks} clients=${(entry.mpeg1Clients && entry.mpeg1Clients.size) || 0}`);
+        mpeg1Bytes = 0;
+        mpeg1Chunks = 0;
       }
 
       if (entry.relayWs && entry.relayWs.readyState === WebSocket.OPEN) {
@@ -7628,6 +7696,7 @@ async function startStream(serial, opts = {}) {
 
   adbProc.on('exit', code => {
     console.log(`[adb] EXIT code=${code}`);
+    appendStreamDebug(`adb exit code=${code}`);
     if (!entry.hasH264Data) {
       console.warn(`[adb] screenrecord ended before outputting data for ${serial}`);
     }
@@ -7650,6 +7719,7 @@ async function startStream(serial, opts = {}) {
   if (ffmpegProc) {
     ffmpegProc.on('exit', (code) => {
       console.log(`[ffmpeg] EXIT code=${code}`);
+      appendStreamDebug(`ffmpeg exit code=${code}`);
     });
   }
 
@@ -8026,6 +8096,19 @@ appServer.on('upgrade', (req, res, head) => {
       wssMpeg1.handleUpgrade(req, res, head, (ws) => {
         entry.mpeg1Clients.add(ws);
         console.log(`[WebSocket] MPEG1 Client connected to stream ${serial}, total clients: ${entry.mpeg1Clients.size}`);
+
+        // Replay initialization chunks so late joiners receive headers/GOP start
+        // and can decode immediately.
+        try {
+          if (entry.mpeg1InitChunks && entry.mpeg1InitChunks.length > 0 && ws.readyState === 1) {
+            for (const initChunk of entry.mpeg1InitChunks) {
+              ws.send(initChunk);
+            }
+            console.log(`[WebSocket] Replayed init chunks to ${serial}: ${entry.mpeg1InitChunks.length}`);
+          }
+        } catch (e) {
+          console.warn(`[WebSocket] Failed replay init chunks for ${serial}:`, e && e.message ? e.message : e);
+        }
         
         ws.on('close', () => {
           entry.mpeg1Clients.delete(ws);
@@ -10691,9 +10774,7 @@ function resolveScrcpyBinary() {
     if (fs.existsSync(localNoConsoleExe)) return localNoConsoleExe;
     const localNoConsole = ensureScrcpyNoConsole(path.join(__dirname, 'scrcpy'));
     if (localNoConsole) return localNoConsole;
-    if (fs.existsSync(localBundled)) {
-      return localBundled;
-    }
+    if (fs.existsSync(localBundled)) return localBundled;
   }
 
   const preferredCandidates = [
@@ -10798,6 +10879,7 @@ function resolveScrcpyLauncher(scrcpyBinaryPath) {
 
 app.post('/api/scrcpy-gui', async (req, res) => {
   const { serial, audioOutput } = req.body || {};
+  const requestedProfile = String((req.body && req.body.profile) || '').trim().toLowerCase();
   if (!serial) return res.status(400).json({ ok: false, error: 'serial requis' });
 
   const isPackaged = Boolean(process.resourcesPath && String(process.resourcesPath).toLowerCase().includes('resources'));
@@ -10830,9 +10912,31 @@ app.post('/api/scrcpy-gui', async (req, res) => {
 
   try {
     const localNoConsolePath = path.join(__dirname, 'scrcpy', 'scrcpy-noconsole.exe');
-    const scrcpyBinaryPath = (localNoConsolePath && fs.existsSync(localNoConsolePath))
+    let scrcpyBinaryPath = (localNoConsolePath && fs.existsSync(localNoConsolePath))
       ? localNoConsolePath
       : resolveScrcpyBinary();
+    if (!scrcpyBinaryPath) {
+      const exeDir = path.dirname(process.execPath || '');
+      const localAppData = process.env.LOCALAPPDATA || '';
+      const fallbackCandidates = [
+        path.join(__dirname, 'scrcpy', 'scrcpy.exe'),
+        path.join(__dirname, 'scrcpy', 'scrcpy-noconsole.exe'),
+        path.join(process.cwd(), 'scrcpy', 'scrcpy.exe'),
+        path.join(process.cwd(), 'scrcpy', 'scrcpy-noconsole.exe'),
+        exeDir ? path.join(exeDir, 'resources', 'app.asar.unpacked', 'scrcpy', 'scrcpy.exe') : null,
+        exeDir ? path.join(exeDir, 'resources', 'app.asar.unpacked', 'scrcpy', 'scrcpy-noconsole.exe') : null,
+        localAppData ? path.join(localAppData, 'Programs', 'VHR Dashboard', 'resources', 'app.asar.unpacked', 'scrcpy', 'scrcpy.exe') : null,
+        localAppData ? path.join(localAppData, 'Programs', 'VHR Dashboard', 'resources', 'app.asar.unpacked', 'scrcpy', 'scrcpy-noconsole.exe') : null
+      ].filter(Boolean);
+      for (const candidate of fallbackCandidates) {
+        try {
+          if (fs.existsSync(candidate)) {
+            scrcpyBinaryPath = candidate;
+            break;
+          }
+        } catch (_) {}
+      }
+    }
     const launcher = resolveScrcpyLauncher(scrcpyBinaryPath) || { type: 'exe', path: scrcpyBinaryPath };
     if (!launcher || !scrcpyBinaryPath) {
       scrcpyLaunchLocks.delete(serialKey);
@@ -10860,17 +10964,71 @@ app.post('/api/scrcpy-gui', async (req, res) => {
         return res.status(409).json({ ok: false, error: 'Casque offline/unauthorized. Débranchez/rebranchez et acceptez le débogage USB.' });
       }
     }
-    const renderDriver = (process.env.SCRCPY_RENDER_DRIVER || 'opengl').trim();
-    const maxSize = String(process.env.SCRCPY_MAX_SIZE || '1600');
-    const bitRate = String(process.env.SCRCPY_BITRATE || '4M');
-    const maxFps = String(process.env.SCRCPY_MAX_FPS || '30');
-    const videoBuffer = String(process.env.SCRCPY_VIDEO_BUFFER || '0');
+    const isWirelessSerial = String(serial || '').includes(':');
+    const profilePresets = {
+      'ultra-low': { maxSize: '960', bitRate: '2200K', maxFps: '16', videoBuffer: '90' },
+      'low': { maxSize: '1024', bitRate: '2600K', maxFps: '18', videoBuffer: '90' },
+      'wifi': { maxSize: '960', bitRate: '3200K', maxFps: '24', videoBuffer: '220' },
+      'usb': { maxSize: '1600', bitRate: '6500K', maxFps: '22', videoBuffer: '90' },
+      'default': { maxSize: '1024', bitRate: '2800K', maxFps: '18', videoBuffer: '90' },
+      'high': { maxSize: '1280', bitRate: '5200K', maxFps: '22', videoBuffer: '80' },
+      'ultra': { maxSize: '1600', bitRate: '7000K', maxFps: '24', videoBuffer: '70' }
+    };
+    const defaultProfile = isWirelessSerial ? 'wifi' : 'usb';
+    const requestedTransportProfile = (requestedProfile === 'wifi' || requestedProfile === 'usb')
+      ? requestedProfile
+      : defaultProfile;
+    const effectiveProfile = isWirelessSerial
+      ? (requestedTransportProfile === 'usb' ? 'wifi' : requestedTransportProfile)
+      : (requestedTransportProfile === 'wifi' ? 'usb' : requestedTransportProfile);
+    const selectedPreset = profilePresets[effectiveProfile] || profilePresets[defaultProfile] || profilePresets.wifi;
+
+    const forceEnvPreset = envIsTrue('SCRCPY_FORCE_ENV_PRESET');
+    const renderDriver = (process.env.SCRCPY_RENDER_DRIVER || (process.platform === 'win32' ? 'direct3d' : 'opengl')).trim();
+
+    const parseBitRateToKbps = (value) => {
+      const raw = String(value || '').trim().toUpperCase();
+      if (!raw) return 0;
+      const m = raw.match(/^([0-9]+(?:\.[0-9]+)?)([KMG]?)$/);
+      if (!m) return 0;
+      const n = Number.parseFloat(m[1]);
+      if (!Number.isFinite(n) || n <= 0) return 0;
+      const unit = m[2] || 'K';
+      if (unit === 'G') return Math.round(n * 1000 * 1000);
+      if (unit === 'M') return Math.round(n * 1000);
+      return Math.round(n);
+    };
+
+    let maxSizeNum = Number.parseInt(String(forceEnvPreset ? (process.env.SCRCPY_MAX_SIZE || selectedPreset.maxSize) : selectedPreset.maxSize), 10) || 1120;
+    let bitRateKbps = parseBitRateToKbps(forceEnvPreset ? (process.env.SCRCPY_BITRATE || selectedPreset.bitRate) : selectedPreset.bitRate);
+    let maxFpsNum = Number.parseInt(String(forceEnvPreset ? (process.env.SCRCPY_MAX_FPS || selectedPreset.maxFps) : selectedPreset.maxFps), 10) || 22;
+    let videoBufferNum = Number.parseInt(String(forceEnvPreset ? (process.env.SCRCPY_VIDEO_BUFFER || selectedPreset.videoBuffer || '0') : (selectedPreset.videoBuffer || '0')), 10) || 0;
+
+    const motionLockEnabled = !envIsSet('SCRCPY_MOTION_LOCK') || envIsTrue('SCRCPY_MOTION_LOCK');
+    if (motionLockEnabled) {
+      if (isWirelessSerial) {
+        bitRateKbps = Math.min(Math.max(bitRateKbps || 0, 2800), 3600);
+        videoBufferNum = Math.min(Math.max(videoBufferNum || 0, 180), 260);
+        maxFpsNum = Math.min(Math.max(maxFpsNum || 0, 22), 24);
+        maxSizeNum = Math.min(Math.max(maxSizeNum || 0, 960), 960);
+      } else {
+        bitRateKbps = Math.min(Math.max(bitRateKbps || 0, 5200), 7500);
+        videoBufferNum = Math.min(Math.max(videoBufferNum || 0, 70), 110);
+        maxFpsNum = Math.min(Math.max(maxFpsNum || 0, 20), 22);
+        maxSizeNum = Math.min(Math.max(maxSizeNum || 0, 1280), 1920);
+      }
+    }
+
+    const maxSize = String(maxSizeNum);
+    const bitRate = `${Math.max(1000, bitRateKbps)}K`;
+    const maxFps = String(maxFpsNum);
+    const videoBuffer = String(Math.max(0, videoBufferNum));
     const alwaysOnTop = envIsTrue('SCRCPY_ALWAYS_ON_TOP') || !envIsSet('SCRCPY_ALWAYS_ON_TOP');
     const windowTitle = (process.env.SCRCPY_WINDOW_TITLE || 'VHR SCRCPY').trim();
+    const forceLegacyWindowSize = envIsTrue('SCRCPY_LEGACY_WINDOW_SIZE');
     const scrcpyArgs = [
       '-s', serial,
-      '--window-width', '640',
-      '--window-height', '360',
+      ...(forceLegacyWindowSize ? ['--window-width', '640', '--window-height', '360'] : []),
       '--video-codec=h264',
       '--verbosity=error',
       '--max-size', maxSize,
@@ -10919,6 +11077,7 @@ app.post('/api/scrcpy-gui', async (req, res) => {
     logLine('launcher', `${launcher.type} ${launcher.path}`);
     logLine('binary', scrcpyBinaryPath || '(null)');
     logLine('launchBinary', scrcpyLaunchBinary || '(null)');
+    logLine('profile', effectiveProfile);
     logLine('args', JSON.stringify(scrcpyArgs));
     logLine('cwd', scrcpyDir || process.cwd());
 
@@ -10957,8 +11116,8 @@ app.post('/api/scrcpy-gui', async (req, res) => {
       const { command, launchArgs } = buildLaunch(args, forceExe);
       const isExe = forceExe || launcher.type === 'exe';
       const isCmd = launcher.type === 'cmd';
-      const isGuiScrcpy = (scrcpyLaunchBinary || '').toLowerCase().endsWith('scrcpy.exe');
-      const shouldHide = hideConsole && (isExe || isCmd);
+      const isDevDirectScrcpy = !isPackaged && (scrcpyLaunchBinary || '').toLowerCase().endsWith('scrcpy.exe');
+      const shouldHide = hideConsole && (isExe || isCmd) && !isDevDirectScrcpy;
       return spawn(command, launchArgs, {
         detached: true,
         stdio: (isExe || isCmd) ? 'ignore' : ['ignore', 'pipe', 'pipe'],
@@ -11016,34 +11175,6 @@ app.post('/api/scrcpy-gui', async (req, res) => {
       }
     });
 
-    // If scrcpy exits immediately, retry with minimal args (no render/buffer)
-    // Skip retry when using a wrapper exe (scrcpy-noconsole.exe) to avoid double windows.
-    const scrcpyBase = (scrcpyBinaryPath || '').toLowerCase();
-    const shouldRetry = scrcpyBase.endsWith('scrcpy.exe') && !isPackaged;
-    if (shouldRetry) {
-      setTimeout(() => {
-        try {
-          if (proc.exitCode !== null && proc.exitCode !== undefined) {
-            console.warn('[scrcpy] Early exit detected, retrying with minimal args');
-            const minimalArgs = [
-              '-s', serial,
-              '--window-width', '640',
-              '--window-height', '360',
-              '--video-codec=h264'
-            ];
-            if (audioOutput === 'pc' || audioOutput === 'both') {
-              minimalArgs.push('--audio-codec=opus');
-            } else {
-              minimalArgs.push('--no-audio');
-            }
-            // Force direct exe on retry to avoid hidden launchers swallowing the window
-            const retryProc = spawnScrcpy(minimalArgs, true);
-            retryProc.unref();
-          }
-        } catch (_) {}
-      }, 1200);
-    }
-
     proc.unref();
 
     const scrcpyPid = proc.pid;
@@ -11054,7 +11185,7 @@ app.post('/api/scrcpy-gui', async (req, res) => {
       }, 100);
     }
 
-    return res.json({ ok: true, audioOutput: audioOutput || 'headset', pid: scrcpyPid });
+    return res.json({ ok: true, audioOutput: audioOutput || 'headset', profile: effectiveProfile, pid: scrcpyPid });
   } catch (e) {
     scrcpyLaunchLocks.delete(serialKey);
     scrcpyGlobalLockUntil = Date.now();

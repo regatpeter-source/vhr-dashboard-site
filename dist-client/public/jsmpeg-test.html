@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JSMpeg Direct Test</title>
+  <style>
+    body { margin:0; font-family: Arial, sans-serif; background:#0d0f14; color:#e5e7eb; }
+    .wrap { max-width: 1100px; margin: 18px auto; padding: 0 14px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+    input, select, button { background:#1f2937; color:#fff; border:1px solid #374151; border-radius:8px; padding:10px; }
+    button { cursor:pointer; }
+    #screen { width: 100%; max-width: 960px; border:1px solid #2ecc71; border-radius:8px; background:#000; }
+    .log { margin-top:10px; background:#111827; border:1px solid #374151; border-radius:8px; padding:10px; max-height:220px; overflow:auto; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h2>JSMpeg Test (hors Electron)</h2>
+    <div class="row">
+      <input id="serial" style="min-width:260px" value="192.168.1.28:5555" />
+      <select id="profile">
+        <option value="wifi" selected>wifi</option>
+        <option value="usb">usb</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;padding:0 6px;">
+        <input id="disableGl" type="checkbox" checked /> disableGl (Canvas 2D)
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;padding:0 6px;">
+        <input id="enableMonitor" type="checkbox" /> WS monitor
+      </label>
+      <button id="start">Start stream</button>
+      <button id="stop">Stop stream</button>
+    </div>
+    <canvas id="screen" width="960" height="540"></canvas>
+    <div id="stats" style="margin-top:8px;color:#9ca3af;font-size:12px;">WS bytes: 0 | chunks: 0 | player: idle</div>
+    <div id="log" class="log"></div>
+  </div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    let player = null;
+    let monitorWs = null;
+    let monitorBytes = 0;
+    let monitorChunks = 0;
+    let decodedFrames = 0;
+
+    const setStats = (playerState = '') => {
+      $('stats').textContent = `WS bytes: ${monitorBytes} | chunks: ${monitorChunks} | decoded: ${decodedFrames} | player: ${playerState || 'idle'}`;
+    };
+    const log = (m) => {
+      const line = `[${new Date().toLocaleTimeString()}] ${m}`;
+      $('log').innerHTML += line + '<br>';
+      $('log').scrollTop = $('log').scrollHeight;
+      console.log('[jsmpeg-test]', m);
+    };
+
+    async function ensureJSMpegLoaded() {
+      if (typeof JSMpeg !== 'undefined') return true;
+      const sources = [
+        '/vendor/jsmpeg.min.js',
+        'https://cdn.jsdelivr.net/gh/phoboslab/jsmpeg@master/jsmpeg.min.js'
+      ];
+      for (const src of sources) {
+        try {
+          await new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = src;
+            s.async = true;
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+          });
+          if (typeof JSMpeg !== 'undefined') {
+            log('JSMpeg chargé: ' + src);
+            return true;
+          }
+        } catch (_) {
+          log('Échec chargement JSMpeg: ' + src);
+        }
+      }
+      log('JSMpeg indisponible (CDN bloqué).');
+      return false;
+    }
+
+    async function startStream() {
+      const serial = $('serial').value.trim();
+      const profile = $('profile').value;
+      const disableGl = $('disableGl').checked;
+      const enableMonitor = $('enableMonitor').checked;
+      if (!serial) { log('Serial requis'); return; }
+      const hasJSMpeg = await ensureJSMpegLoaded();
+      if (!hasJSMpeg) return;
+
+      try {
+        const res = await fetch('/api/stream/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ serial, profile })
+        });
+        const data = await res.json();
+        log('start: ' + JSON.stringify(data));
+        if (!data.ok) return;
+
+        const wsProto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+        const wsUrl = wsProto + location.host + '/api/stream/ws?serial=' + encodeURIComponent(serial);
+
+        if (player) {
+          try { player.destroy(); } catch {}
+          player = null;
+        }
+        if (monitorWs) {
+          try { monitorWs.close(); } catch {}
+          monitorWs = null;
+        }
+        monitorBytes = 0;
+        monitorChunks = 0;
+        decodedFrames = 0;
+        setStats('connecting');
+
+        if (enableMonitor) {
+          // WS monitor (independent of JSMpeg) to prove data arrives
+          monitorWs = new WebSocket(wsUrl);
+          monitorWs.binaryType = 'arraybuffer';
+          monitorWs.onopen = () => log('WS monitor: open');
+          monitorWs.onmessage = (ev) => {
+            const len = ev.data ? (ev.data.byteLength || ev.data.size || 0) : 0;
+            monitorBytes += len;
+            monitorChunks += 1;
+            if (monitorChunks % 20 === 0) setStats('receiving');
+          };
+          monitorWs.onerror = (e) => log('WS monitor error');
+          monitorWs.onclose = () => log('WS monitor: closed');
+        }
+
+        player = new JSMpeg.Player(wsUrl, {
+          canvas: $('screen'),
+          autoplay: true,
+          audio: false,
+          progressive: false,
+          disableWebAssembly: true,
+          disableGl,
+          videoBufferSize: 1024 * 1024,
+          pauseWhenHidden: false,
+          preserveDrawingBuffer: false,
+          onVideoDecode: () => {
+            decodedFrames += 1;
+            if (decodedFrames % 25 === 0) setStats('decoding');
+          },
+          onPlay: () => { log('JSMpeg: play'); setStats('play'); },
+          onStalled: () => log('JSMpeg: stalled'),
+          onPause: () => { log('JSMpeg: pause'); setStats('pause'); },
+          onSourceEstablished: () => { log('JSMpeg: source established'); setStats('source-established'); },
+          onSourceCompleted: () => { log('JSMpeg: source completed'); setStats('source-completed'); },
+          onError: (err) => { log('JSMpeg error: ' + (err && err.message ? err.message : err)); setStats('error'); }
+        });
+
+        log('ws: ' + wsUrl);
+        log('disableGl=' + disableGl);
+      } catch (e) {
+        log('Erreur start: ' + (e.message || e));
+      }
+    }
+
+    async function stopStream() {
+      const serial = $('serial').value.trim();
+      try {
+        const res = await fetch('/api/stream/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ serial })
+        });
+        const data = await res.json();
+        log('stop: ' + JSON.stringify(data));
+      } catch (e) {
+        log('Erreur stop: ' + (e.message || e));
+      }
+      if (player) {
+        try { player.destroy(); } catch {}
+        player = null;
+      }
+      if (monitorWs) {
+        try { monitorWs.close(); } catch {}
+        monitorWs = null;
+      }
+      setStats('stopped');
+    }
+
+    $('start').addEventListener('click', startStream);
+    $('stop').addEventListener('click', stopStream);
+    log('Page prête. Cliquez Start stream.');
+  </script>
+</body>
+</html>
