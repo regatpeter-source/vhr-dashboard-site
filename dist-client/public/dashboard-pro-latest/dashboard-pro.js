@@ -4182,6 +4182,7 @@ window.showStreamViewer = function(serial) {
 							<option value='both'>🔊 Les deux</option>
 						</select>
 					</label>
+					<button onclick='window.openAppsFromStreamViewer()' style='background:#f39c12;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>🎮 Jeux</button>
 					<button id='streamVoiceGuideBtnTop' onclick='window.toggleStreamVoiceGuide()' style='background:#16a085;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>🗣️ Guide vocal</button>
 					<button onclick='window.closeStreamViewer()' style='background:#e74c3c;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>✕ Fermer</button>
 				</div>
@@ -4201,6 +4202,7 @@ window.showStreamViewer = function(serial) {
 					🟢 En direct - <span id='streamTime'>${new Date().toLocaleTimeString('fr-FR')}</span>
 				</div>
 				<div style='display:flex;gap:8px;font-size:12px;'>
+					<button onclick='window.openAppsFromStreamViewer()' style='background:#f39c12;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>🎮 Jeux</button>
 					<button id='streamVoiceGuideBtn' onclick='window.toggleStreamVoiceGuide()' style='background:#16a085;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>🗣️ Guide vocal</button>
 					<button onclick='toggleStreamFullscreen()' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>⛶ Plein écran</button>
 					<button onclick='captureStreamScreenshot()' style='background:#2ecc71;color:#000;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>📸 Capture</button>
@@ -4294,6 +4296,18 @@ window.toggleStreamVoiceGuide = async function() {
 	const sessionCode = getActiveSessionCode();
 	await window.sendVoiceToHeadset(serial, { viaSession: true, sessionCode });
 	window.updateStreamVoiceGuideButton();
+};
+
+window.openAppsFromStreamViewer = function() {
+	const modal = document.getElementById('streamModal');
+	if (!modal) return;
+	const serial = modal.dataset.serial || '';
+	if (!serial) {
+		showToast('⚠️ Aucun casque sélectionné dans le stream', 'warning');
+		return;
+	}
+	const device = (devices || []).find(d => d && d.serial === serial) || { serial, name: serial };
+	showAppsDialog(device);
 };
 
 window.toggleStreamFullscreen = function() {
