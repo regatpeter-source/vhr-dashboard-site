@@ -1864,7 +1864,7 @@ function setAudioPanelMinimized() {
 	const content = document.getElementById('audioStreamContent');
 	const pill = document.getElementById('audioStreamPill');
 	if (!panel || !content) return;
-	panel.style = 'position:fixed;bottom:12px;right:12px;z-index:120;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;gap:8px;pointer-events:auto;background:transparent;width:auto;height:auto;';
+	panel.style = 'position:fixed;bottom:12px;right:12px;z-index:3600;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;gap:8px;pointer-events:auto;background:transparent;width:auto;height:auto;';
 	content.style.display = 'none';
 	content.style.maxWidth = '420px';
 	content.style.width = '360px';
@@ -1984,7 +1984,7 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 	panel = document.createElement('div');
 	panel.id = 'audioStreamPanel';
 	panel.dataset.minimized = 'true';
-	panel.style = 'position:fixed;bottom:12px;right:12px;z-index:120;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;gap:8px;pointer-events:auto;background:transparent;width:auto;height:auto;';
+	panel.style = 'position:fixed;bottom:12px;right:12px;z-index:3600;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;gap:8px;pointer-events:auto;background:transparent;width:auto;height:auto;';
 	panel.onclick = null;
 	
 	panel.innerHTML = `
@@ -4180,6 +4180,7 @@ window.showStreamViewer = function(serial) {
 							<option value='both'>🔊 Les deux</option>
 						</select>
 					</label>
+					<button id='streamVoiceGuideBtnTop' onclick='window.toggleStreamVoiceGuide()' style='background:#16a085;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>🗣️ Guide vocal</button>
 					<button onclick='window.closeStreamViewer()' style='background:#e74c3c;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>✕ Fermer</button>
 				</div>
 			</div>
@@ -4198,6 +4199,7 @@ window.showStreamViewer = function(serial) {
 					🟢 En direct - <span id='streamTime'>${new Date().toLocaleTimeString('fr-FR')}</span>
 				</div>
 				<div style='display:flex;gap:8px;font-size:12px;'>
+					<button id='streamVoiceGuideBtn' onclick='window.toggleStreamVoiceGuide()' style='background:#16a085;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>🗣️ Guide vocal</button>
 					<button onclick='toggleStreamFullscreen()' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>⛶ Plein écran</button>
 					<button onclick='captureStreamScreenshot()' style='background:#2ecc71;color:#000;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>📸 Capture</button>
 				</div>
@@ -4205,6 +4207,7 @@ window.showStreamViewer = function(serial) {
 		</div>
 	`;
 	modal.style.display = 'flex';
+	window.updateStreamVoiceGuideButton();
 	
 	// Attendre 1 seconde que le stream soit bien lancé côté serveur avant de connecter le player
 	console.log('[stream] Modal opened, waiting for stream to stabilize...');
@@ -5899,6 +5902,14 @@ function getAccessStatusBadge(detail = {}) {
 }
 
 window.showUnlockModal = function(status = licenseStatus) {
+	const hasAuthToken = Boolean(readAuthToken());
+	const authModalOpen = Boolean(document.getElementById('authModal'));
+	if (!hasAuthToken && !authModalOpen) {
+		showAuthModal('login');
+		showToast('🔐 Connexion requise avant affichage des offres d\'abonnement', 'warning');
+		return;
+	}
+
 	let modal = document.getElementById('unlockModal');
 	if (modal) modal.remove();
 	
@@ -5971,6 +5982,14 @@ window.showUnlockModal = function(status = licenseStatus) {
 					✅ Activer ma licence
 				</button>
 			</div>
+
+			<div style="background:#22303d;padding:16px;border-radius:12px;margin:16px 0;border:1px solid #3b5368;">
+				<h3 style="color:#f1c40f;margin:0 0 8px 0;">👤 Changer de compte</h3>
+				<p style="color:#c7d3df;margin:0 0 12px 0;font-size:13px;">Vous pouvez vous authentifier à tout moment avec un autre compte.</p>
+				<button onclick="openAuthFromUnlockModal()" style="width:100%;background:#f1c40f;color:#1f2d3a;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;">
+					🔐 Se connecter avec un autre compte
+				</button>
+			</div>
 			
 			${status.expired || status.accessBlocked ? '' : `<button onclick="closeUnlockModal()" style="width:100%;background:#7f8c8d;color:#fff;border:none;padding:12px;border-radius:8px;cursor:pointer;margin-top:12px;">❌ Fermer</button>`}
 		</div>
@@ -5982,6 +6001,11 @@ window.showUnlockModal = function(status = licenseStatus) {
 window.closeUnlockModal = function() {
 	const modal = document.getElementById('unlockModal');
 	if (modal) modal.remove();
+};
+
+window.openAuthFromUnlockModal = function() {
+	closeUnlockModal();
+	showAuthModal('login');
 };
 
 window.subscribePro = function() {
