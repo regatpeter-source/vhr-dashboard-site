@@ -1855,8 +1855,87 @@ let activeAudioStream = null;  // Global audio stream instance
 let activeAudioSerial = null;  // Serial of device receiving audio
 const ENABLE_HEADSET_TALKBACK = false; // mode stable: app native casque (PC -> casque)
 const ENABLE_NATIVE_APP_UPLINK = true; // écoute micro casque -> PC via app native
+let voiceSessionStartedAt = 0;
+let lastTalkbackState = 'off';
 
 console.log('[voice] dashboard-pro.js build stamp: 2026-02-03 23:45');
+
+window._voiceUplinkRepairState = window._voiceUplinkRepairState || {
+	inFlightBySerial: new Map(),
+	lastAttemptBySerial: new Map(),
+	pendingTimerBySerial: new Map()
+};
+
+window.scheduleNativeUplinkRepair = function(serial, reason = 'auto', delayMs = 1200) {
+	const serialKey = String(serial || '').trim();
+	if (!serialKey) return;
+	if (!ENABLE_NATIVE_APP_UPLINK || ENABLE_HEADSET_TALKBACK) return;
+	if (!activeAudioStream || activeAudioSerial !== serialKey) return;
+	const state = window._voiceUplinkRepairState;
+	const existing = state.pendingTimerBySerial.get(serialKey);
+	if (existing) clearTimeout(existing);
+	const timer = setTimeout(() => {
+		state.pendingTimerBySerial.delete(serialKey);
+		window.rearmNativeVoiceUplink(serialKey, reason).catch(err => {
+			console.warn('[voice] rearmNativeVoiceUplink failed:', err);
+		});
+	}, Math.max(0, Number(delayMs) || 0));
+	state.pendingTimerBySerial.set(serialKey, timer);
+};
+
+window.rearmNativeVoiceUplink = async function(serial, reason = 'auto') {
+	const serialKey = String(serial || '').trim();
+	if (!serialKey) return false;
+	if (!ENABLE_NATIVE_APP_UPLINK || ENABLE_HEADSET_TALKBACK) return false;
+	if (!activeAudioStream || activeAudioSerial !== serialKey) return false;
+
+	const state = window._voiceUplinkRepairState;
+	if (state.inFlightBySerial.get(serialKey)) return false;
+	const now = Date.now();
+	const lastAttempt = state.lastAttemptBySerial.get(serialKey) || 0;
+	if (now - lastAttempt < 7000) return false;
+
+	state.inFlightBySerial.set(serialKey, true);
+	state.lastAttemptBySerial.set(serialKey, now);
+
+	try {
+		console.log('[voice] Rearming native uplink for serial', serialKey, 'reason=', reason);
+		showToast('🎙️ Réactivation micro casque→PC…', 'info', 1400);
+		const resolvedServerUrl = await resolveAudioServerUrl();
+		await api('/api/device/open-audio-receiver', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				serial: serialKey,
+				serverUrl: resolvedServerUrl,
+				useBackgroundApp: true,
+				noBrowserFallback: true,
+				noUiFallback: true,
+				talkback: true,
+				bidirectional: true,
+				uplink: true,
+				uplinkFormat: 'pcm16'
+			}),
+			timeout: 35000
+		});
+
+		const sessionCode = getActiveSessionCode();
+		const useRelay = isRemoteSessionSerial(serialKey) && shouldUseRelayForSession(serialKey) && sessionCode;
+		if (activeAudioStream && typeof activeAudioStream.startTalkbackReceiver === 'function') {
+			await activeAudioStream.startTalkbackReceiver(serialKey, {
+				relay: Boolean(useRelay),
+				sessionCode: useRelay ? sessionCode : undefined,
+				format: 'pcm16'
+			});
+		}
+		return true;
+	} catch (err) {
+		console.warn('[voice] Native uplink rearm failed:', err);
+		return false;
+	} finally {
+		state.inFlightBySerial.set(serialKey, false);
+	}
+};
 
 // Keep panel always compact (no fullscreen overlay)
 function setAudioPanelMinimized() {
@@ -1916,6 +1995,8 @@ window.toggleVoiceGuideForSerial = async function(serial) {
 
 window.sendVoiceToHeadset = async function(serial, options = {}) {
 	console.log('[voice] sendVoiceToHeadset invoked for serial:', serial);
+	voiceSessionStartedAt = Date.now();
+	lastTalkbackState = 'off';
 	const isCollabMode = isSessionActive();
 	const forceNonSessionNativeProfile = !isCollabMode;
 	const isRemoteDevice = isRemoteSessionSerial(serial);
@@ -2091,6 +2172,16 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 		});
 		activeAudioStream.onTalkbackStateChange = ({ state, label }) => {
 			window.updateTalkbackIndicator(state, label);
+			const previous = lastTalkbackState;
+			lastTalkbackState = state || 'off';
+			const serialMatches = !!(activeAudioStream && activeAudioSerial === serial);
+			if (!serialMatches) return;
+			const elapsed = Date.now() - (voiceSessionStartedAt || 0);
+			const droppedAfterActive = previous === 'active' && ['ready', 'off', 'error'].includes(state);
+			const sustainedError = state === 'error' && elapsed > 4000;
+			if (ENABLE_NATIVE_APP_UPLINK && !ENABLE_HEADSET_TALKBACK && (droppedAfterActive || sustainedError)) {
+				window.scheduleNativeUplinkRepair(serial, `talkback:${previous}->${state}`, 1200);
+			}
 		};
 		window.updateTalkbackIndicator('off', 'OFF');
 		console.log('[voice] Starting VHRAudioStream (WebRTC+relay) for', serial);
@@ -5058,6 +5149,9 @@ window.launchAppMulti = async function(serials, pkg, refreshSerial) {
 	if (isSessionActive()) {
 		publishSessionDevices();
 	}
+	if (activeAudioStream && activeAudioSerial && uniqueSerials.includes(activeAudioSerial)) {
+		window.scheduleNativeUplinkRepair(activeAudioSerial, 'game-launched-multi', 1800);
+	}
 	const device = { serial: refreshSerial || uniqueSerials[0], name: 'Device' };
 	showAppsDialog(device);
 };
@@ -5174,6 +5268,9 @@ window.launchApp = async function(serial, pkg) {
 		// Refresh the apps dialog
 		const device = { serial, name: 'Device' };
 		showAppsDialog(device);
+		if (activeAudioStream && activeAudioSerial === serial) {
+			window.scheduleNativeUplinkRepair(serial, 'game-launched-single', 1800);
+		}
 	}
 	else showToast('❌ Erreur lancement', 'error');
 };
