@@ -4183,6 +4183,8 @@ window.showStreamViewer = function(serial) {
 						</select>
 					</label>
 					<button onclick='window.openAppsFromStreamViewer()' style='background:#f39c12;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>🎮 Jeux</button>
+					<button onclick='window.pauseCurrentStreamGame()' style='background:#3498db;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>⏸️ Pause jeu</button>
+					<button onclick='window.stopCurrentStreamGame()' style='background:#e67e22;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>⏹️ Stop jeu</button>
 					<button id='streamVoiceGuideBtnTop' onclick='window.toggleStreamVoiceGuide()' style='background:#16a085;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>🗣️ Guide vocal</button>
 					<button onclick='window.closeStreamViewer()' style='background:#e74c3c;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;'>✕ Fermer</button>
 				</div>
@@ -4203,6 +4205,8 @@ window.showStreamViewer = function(serial) {
 				</div>
 				<div style='display:flex;gap:8px;font-size:12px;'>
 					<button onclick='window.openAppsFromStreamViewer()' style='background:#f39c12;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>🎮 Jeux</button>
+					<button onclick='window.pauseCurrentStreamGame()' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>⏸️ Pause jeu</button>
+					<button onclick='window.stopCurrentStreamGame()' style='background:#e67e22;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>⏹️ Stop jeu</button>
 					<button id='streamVoiceGuideBtn' onclick='window.toggleStreamVoiceGuide()' style='background:#16a085;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>🗣️ Guide vocal</button>
 					<button onclick='toggleStreamFullscreen()' style='background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>⛶ Plein écran</button>
 					<button onclick='captureStreamScreenshot()' style='background:#2ecc71;color:#000;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;'>📸 Capture</button>
@@ -4318,6 +4322,76 @@ window.openAppsFromStreamViewer = async function() {
 		console.error('[stream] openAppsFromStreamViewer failed:', err);
 		showToast('❌ Impossible d’ouvrir les jeux depuis le stream', 'error');
 	}
+};
+
+window.getRunningPackagesForStreamSerial = function(serial) {
+	if (!serial) return [];
+	const serialKey = String(serial).trim();
+	if (!serialKey) return [];
+	const device = (devices || []).find(d => d && d.serial === serialKey);
+	if (device && typeof getRunningAppsForDevice === 'function') {
+		const list = getRunningAppsForDevice(device);
+		if (Array.isArray(list) && list.length) return list;
+	}
+	if (runningApps && Array.isArray(runningApps[serialKey]) && runningApps[serialKey].length) {
+		return runningApps[serialKey];
+	}
+	const remoteEntries = Object.values(sessionRunningAppsByUser || {});
+	for (const map of remoteEntries) {
+		if (map && Array.isArray(map[serialKey]) && map[serialKey].length) {
+			return map[serialKey];
+		}
+	}
+	return [];
+};
+
+window.pickRunningGameForStream = async function(serial) {
+	const serialKey = String(serial || '').trim();
+	if (!serialKey) return '';
+	const runningPkgs = window.getRunningPackagesForStreamSerial(serialKey);
+	if (!runningPkgs.length) {
+		showToast('ℹ️ Aucun jeu en cours détecté sur ce casque', 'info');
+		return '';
+	}
+	if (runningPkgs.length === 1) return runningPkgs[0];
+	const selected = await showModalInputPrompt({
+		title: 'Choisir le jeu en cours',
+		message: 'Plusieurs jeux semblent actifs. Choisissez celui à contrôler.',
+		type: 'select',
+		selectOptions: runningPkgs.map(pkg => {
+			const meta = typeof getGameMeta === 'function' ? getGameMeta(pkg) : { name: pkg };
+			return { value: pkg, label: `${meta.name || pkg} (${pkg})` };
+		}),
+		defaultValue: runningPkgs[0],
+		confirmText: 'Valider'
+	});
+	return selected ? String(selected).trim() : '';
+};
+
+window.pauseCurrentStreamGame = async function() {
+	const modal = document.getElementById('streamModal');
+	if (!modal) return;
+	const serial = modal.dataset.serial || '';
+	if (!serial) {
+		showToast('⚠️ Aucun casque sélectionné dans le stream', 'warning');
+		return;
+	}
+	const pkg = await window.pickRunningGameForStream(serial);
+	if (!pkg) return;
+	await pauseGame(serial, pkg);
+};
+
+window.stopCurrentStreamGame = async function() {
+	const modal = document.getElementById('streamModal');
+	if (!modal) return;
+	const serial = modal.dataset.serial || '';
+	if (!serial) {
+		showToast('⚠️ Aucun casque sélectionné dans le stream', 'warning');
+		return;
+	}
+	const pkg = await window.pickRunningGameForStream(serial);
+	if (!pkg) return;
+	await stopGame(serial, pkg);
 };
 
 window.toggleStreamFullscreen = function() {
