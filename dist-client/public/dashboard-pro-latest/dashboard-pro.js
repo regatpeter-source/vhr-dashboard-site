@@ -4298,7 +4298,7 @@ window.toggleStreamVoiceGuide = async function() {
 	window.updateStreamVoiceGuideButton();
 };
 
-window.openAppsFromStreamViewer = function() {
+window.openAppsFromStreamViewer = async function() {
 	const modal = document.getElementById('streamModal');
 	if (!modal) return;
 	const serial = modal.dataset.serial || '';
@@ -4306,8 +4306,18 @@ window.openAppsFromStreamViewer = function() {
 		showToast('⚠️ Aucun casque sélectionné dans le stream', 'warning');
 		return;
 	}
+	showToast('🎮 Ouverture des jeux…', 'info', 1200);
 	const device = (devices || []).find(d => d && d.serial === serial) || { serial, name: serial };
-	showAppsDialog(device);
+	try {
+		if (typeof window.showAppsDialog !== 'function') {
+			showToast('❌ Module jeux indisponible', 'error');
+			return;
+		}
+		await window.showAppsDialog(device);
+	} catch (err) {
+		console.error('[stream] openAppsFromStreamViewer failed:', err);
+		showToast('❌ Impossible d’ouvrir les jeux depuis le stream', 'error');
+	}
 };
 
 window.toggleStreamFullscreen = function() {
