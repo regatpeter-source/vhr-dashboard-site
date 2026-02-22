@@ -1853,6 +1853,7 @@ window.switchAccountTab = function(tab) {
 // ========== AUDIO STREAMING (WebRTC) ==========
 let activeAudioStream = null;  // Global audio stream instance
 let activeAudioSerial = null;  // Serial of device receiving audio
+let lastVoiceTargetSerial = null; // Last serial used by voice app/service
 const ENABLE_HEADSET_TALKBACK = false; // mode stable: app native casque (PC -> casque)
 const ENABLE_NATIVE_APP_UPLINK = true; // écoute micro casque -> PC via app native
 let voiceSessionStartedAt = 0;
@@ -1995,6 +1996,7 @@ window.toggleVoiceGuideForSerial = async function(serial) {
 
 window.sendVoiceToHeadset = async function(serial, options = {}) {
 	console.log('[voice] sendVoiceToHeadset invoked for serial:', serial);
+	lastVoiceTargetSerial = String(serial || '').trim() || lastVoiceTargetSerial;
 	voiceSessionStartedAt = Date.now();
 	lastTalkbackState = 'off';
 	const isCollabMode = isSessionActive();
@@ -4148,6 +4150,48 @@ window.startStreamFromCard = async function(serial) {
 };
 
 window._voiceAutoStartState = window._voiceAutoStartState || { pendingSerial: null, lastBySerial: new Map() };
+window._voicePreStreamStopState = window._voicePreStreamStopState || { inFlight: false, lastAtBySerial: new Map() };
+
+window.ensureVoiceDeactivatedForStream = async function(serial) {
+	const targetSerial = String(serial || '').trim();
+	const state = window._voicePreStreamStopState;
+	if (state.inFlight) return;
+	const now = Date.now();
+	const last = state.lastAtBySerial.get(targetSerial) || 0;
+	if (now - last < 1500) return;
+	state.inFlight = true;
+	state.lastAtBySerial.set(targetSerial, now);
+
+	try {
+		const serialsToStop = new Set();
+		if (targetSerial) serialsToStop.add(targetSerial);
+		if (activeAudioSerial) serialsToStop.add(String(activeAudioSerial).trim());
+		if (lastVoiceTargetSerial) serialsToStop.add(String(lastVoiceTargetSerial).trim());
+
+		if (activeAudioStream) {
+			console.log('[voice] Pre-stream deactivation: closing current voice stream');
+			await window.closeAudioStream(true);
+		}
+
+		for (const s of serialsToStop) {
+			if (!s) continue;
+			try {
+				await api('/api/device/stop-audio-receiver', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ serial: s }),
+					timeout: 12000
+				});
+			} catch (e) {
+				console.warn('[voice] Pre-stream stop-audio-receiver warning for', s, e && e.message ? e.message : e);
+			}
+		}
+
+		await new Promise(resolve => setTimeout(resolve, 180));
+	} finally {
+		state.inFlight = false;
+	}
+};
 
 window.autoStartVoiceForStream = async function(serial, options = {}) {
 	const serialKey = String(serial || '').trim();
@@ -4192,6 +4236,7 @@ window.autoStartVoiceForStream = async function(serial, options = {}) {
 };
 
 window.startStreamJSMpeg = async function(serial, profile = 'default') {
+	await window.ensureVoiceDeactivatedForStream(serial);
 	const sessionCode = getActiveSessionCode();
 	const res = await api('/api/stream/start', {
 		method: 'POST',
