@@ -5586,10 +5586,10 @@ function showModal(html) {
 	if (!modal) {
 		modal = document.createElement('div');
 		modal.id = 'modal';
-		modal.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.8);z-index:2500;display:flex;align-items:center;justify-content:center;';
 		modal.onclick = (e) => { if (e.target === modal) closeModal(); };
 		document.body.appendChild(modal);
 	}
+	modal.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.8);z-index:4200;display:flex;align-items:center;justify-content:center;';
 	modal.innerHTML = `<div style='background:#1a1d24;border:2px solid #2ecc71;border-radius:12px;padding:24px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px #000;color:#fff;'>
 		${html}
 		<br><button onclick="closeModal()" style='background:#e74c3c;color:#fff;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;font-weight:bold;margin-top:12px;'>❌ Fermer</button>
