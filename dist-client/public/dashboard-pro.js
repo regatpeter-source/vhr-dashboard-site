@@ -4076,9 +4076,11 @@ window.autoStartVoiceForStream = async function(serial, options = {}) {
 	state.lastBySerial.set(serialKey, now);
 
 	try {
-		if (activeAudioStream && activeAudioSerial === serialKey) {
-			window.updateStreamVoiceGuideButton();
-			return;
+		if (activeAudioStream) {
+			const previousSerial = activeAudioSerial;
+			console.log('[voice] Stream auto-start: closing existing voice stream before restart', { previousSerial, targetSerial: serialKey });
+			await window.closeAudioStream(true);
+			await new Promise(resolve => setTimeout(resolve, 120));
 		}
 		const sessionCode = options.sessionCode || getActiveSessionCode();
 		await window.sendVoiceToHeadset(serialKey, { viaSession: true, sessionCode });
