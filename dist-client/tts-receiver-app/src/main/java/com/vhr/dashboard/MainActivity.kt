@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
                 putExtra(AudioDownlinkService.EXTRA_SERIAL, serial)
                 putExtra(AudioDownlinkService.EXTRA_SAMPLE_RATE, 16000)
             }
-            startService(downlinkIntent)
+            ContextCompat.startForegroundService(this, downlinkIntent)
             Log.d("MainActivity", "🔈 Audio downlink service started (serial=$serial)")
         } else {
             stopService(android.content.Intent(this, AudioDownlinkService::class.java))
@@ -101,7 +101,7 @@ class MainActivity : ComponentActivity() {
             putExtra(MicUplinkService.EXTRA_SERIAL, serial)
             putExtra(MicUplinkService.EXTRA_SAMPLE_RATE, 16000)
         }
-        startService(uplinkIntent)
+        ContextCompat.startForegroundService(this, uplinkIntent)
         Log.d("MainActivity", "🎙️ Mic uplink service started (serial=$serial)")
     }
     

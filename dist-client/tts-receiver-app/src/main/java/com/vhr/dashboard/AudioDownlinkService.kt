@@ -1,13 +1,18 @@
 package com.vhr.voice
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -27,6 +32,9 @@ class AudioDownlinkService : Service() {
         const val EXTRA_SERVER_URL = "serverUrl"
         const val EXTRA_SERIAL = "serial"
         const val EXTRA_SAMPLE_RATE = "sampleRate"
+        private const val NOTIF_CHANNEL_ID = "vhr_voice_downlink"
+        private const val NOTIF_CHANNEL_NAME = "VHR Voice Playback"
+        private const val NOTIF_ID = 2201
     }
 
     private var ws: WebSocket? = null
@@ -52,8 +60,38 @@ class AudioDownlinkService : Service() {
             return START_NOT_STICKY
         }
 
+        ensureForeground(serial)
+
         startDownlink(serverUrl, serial, sampleRate)
         return START_STICKY
+    }
+
+    private fun ensureForeground(serial: String) {
+        try {
+            val nm = getSystemService(NotificationManager::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    NOTIF_CHANNEL_ID,
+                    NOTIF_CHANNEL_NAME,
+                    NotificationManager.IMPORTANCE_LOW
+                )
+                channel.description = "Lecture audio PC vers casque"
+                nm?.createNotificationChannel(channel)
+            }
+
+            val notification = NotificationCompat.Builder(this, NOTIF_CHANNEL_ID)
+                .setContentTitle("VHR Voice – Lecture active")
+                .setContentText("PC → Casque ($serial)")
+                .setSmallIcon(android.R.drawable.stat_sys_headset)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setCategory(Notification.CATEGORY_SERVICE)
+                .build()
+
+            startForeground(NOTIF_ID, notification)
+        } catch (e: Exception) {
+            Log.e(TAG, "ensureForeground error: ${e.message}")
+        }
     }
 
     private fun startDownlink(serverUrl: String, serial: String, sampleRate: Int) {
@@ -184,6 +222,9 @@ class AudioDownlinkService : Service() {
 
     override fun onDestroy() {
         stopDownlink()
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } catch (_: Exception) {}
         super.onDestroy()
     }
 

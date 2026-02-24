@@ -23,6 +23,7 @@ backups/
 dist-client/extracted-app/
 dist-client/dist2/
 dist-client/locked-release/
+dist-client/dist-new-lockcheck/
 
 # Logs / diagnostics
 *.log

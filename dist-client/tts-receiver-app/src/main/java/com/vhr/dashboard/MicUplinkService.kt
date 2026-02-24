@@ -1,12 +1,17 @@
 package com.vhr.voice
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -27,6 +32,9 @@ class MicUplinkService : Service() {
         const val EXTRA_SERVER_URL = "serverUrl"
         const val EXTRA_SERIAL = "serial"
         const val EXTRA_SAMPLE_RATE = "sampleRate"
+        private const val NOTIF_CHANNEL_ID = "vhr_voice_uplink"
+        private const val NOTIF_CHANNEL_NAME = "VHR Voice Microphone"
+        private const val NOTIF_ID = 2202
     }
 
     private var ws: WebSocket? = null
@@ -53,8 +61,38 @@ class MicUplinkService : Service() {
             return START_NOT_STICKY
         }
 
+        ensureForeground(serial)
+
         startStreaming(serverUrl, serial, sampleRate)
         return START_STICKY
+    }
+
+    private fun ensureForeground(serial: String) {
+        try {
+            val nm = getSystemService(NotificationManager::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    NOTIF_CHANNEL_ID,
+                    NOTIF_CHANNEL_NAME,
+                    NotificationManager.IMPORTANCE_LOW
+                )
+                channel.description = "Capture micro casque vers PC"
+                nm?.createNotificationChannel(channel)
+            }
+
+            val notification = NotificationCompat.Builder(this, NOTIF_CHANNEL_ID)
+                .setContentTitle("VHR Voice – Micro actif")
+                .setContentText("Casque → PC ($serial)")
+                .setSmallIcon(android.R.drawable.stat_notify_call_mute)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setCategory(Notification.CATEGORY_SERVICE)
+                .build()
+
+            startForeground(NOTIF_ID, notification)
+        } catch (e: Exception) {
+            Log.e(TAG, "ensureForeground error: ${e.message}")
+        }
     }
 
     private fun startStreaming(serverUrl: String, serial: String, sampleRate: Int) {
@@ -175,6 +213,9 @@ class MicUplinkService : Service() {
         stopStreaming()
         try {
             ioExecutor.shutdownNow()
+        } catch (_: Exception) {}
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE)
         } catch (_: Exception) {}
         super.onDestroy()
     }

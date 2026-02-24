@@ -8976,6 +8976,24 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
   }
 
   try {
+    const detectVoicePackage = async () => {
+      const candidates = ['com.vhr.voice', 'com.vhr.dashboard'];
+      try {
+        const listRes = await runAdbCommand(serial, ['shell', 'pm', 'list', 'packages', 'com.vhr']);
+        const out = `${listRes.stdout || ''}\n${listRes.stderr || ''}`;
+        for (const pkg of candidates) {
+          if (new RegExp(`package:${pkg.replace('.', '\\.')}\\b`, 'i').test(out)) return pkg;
+        }
+      } catch (_) {}
+      return 'com.vhr.voice';
+    };
+    const detectedVoicePackage = await detectVoicePackage();
+    const activityComponent = `${detectedVoicePackage}/.MainActivity`;
+    const downlinkComponent = `${detectedVoicePackage}/.AudioDownlinkService`;
+    const uplinkComponent = `${detectedVoicePackage}/.MicUplinkService`;
+
+    console.log(`[open-audio-receiver] Using voice package=${detectedVoicePackage}`);
+
     const wantsRelay = Boolean(relay || relayBase || sessionCode);
     if (wantsRelay && !sessionCode) {
       const fallbackSession = relayAudioSessions.get(serial);
@@ -9046,6 +9064,7 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
     const disableBrowserFallback = collaborativeVoiceLocked
       ? true
       : (noBrowserFallback === true || noUiFallback === true);
+    const strictBackgroundOnly = noUiFallback === true || collaborativeVoiceLocked;
     const forceBackgroundApp = collaborativeVoiceLocked ? true : useBackgroundApp;
 
     if (collaborativeVoiceLocked) {
@@ -9110,18 +9129,181 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
         || /result=0/i.test(String(broadcastResult.stdout || ''))
         || /Broadcast completed:\s*result=0/i.test(String(broadcastResult.stdout || ''));
       if (broadcastSuccess && !String(broadcastResult.stderr || '').includes('No broadcast receiver')) {
-        // IMPORTANT:
-        // ADB broadcast can return result=0 even when no component effectively handles the intent.
-        // Do not return success yet: enforce explicit activity launch below to guarantee startup.
-        console.log(`[open-audio-receiver] Broadcast acknowledged; verifying with explicit activity launch`);
+        console.log(`[open-audio-receiver] Broadcast acknowledged; validating background services startup`);
+      }
+
+      if (strictBackgroundOnly) {
+        // Strict headless mode: start services directly (no UI activity), then verify they are running.
+        const strictAttempts = [];
+        const runStrictAttempt = async (label, args) => {
+          try {
+            const r = await runAdbCommand(serial, args);
+            strictAttempts.push({ label, code: r.code, stdout: r.stdout || '', stderr: r.stderr || '' });
+            return r;
+          } catch (e) {
+            strictAttempts.push({ label, code: 1, stdout: '', stderr: e.message || String(e) });
+            return { code: 1, stdout: '', stderr: e.message || String(e) };
+          }
+        };
+
+        // 1) legacy broadcast action (some app builds handle it)
+        await runStrictAttempt('broadcast-start', [
+          'shell', 'am', 'broadcast',
+          '-a', 'com.vhr.voice.START',
+          '--es', 'serverUrl', server,
+          '--es', 'serial', serial,
+          '--ez', 'talkback', wantsTalkback ? 'true' : 'false',
+          '--ez', 'bidirectional', wantsTalkback ? 'true' : 'false',
+          '--ez', 'uplink', wantsUplink ? 'true' : 'false',
+          '--es', 'uplinkFormat', uplinkFmt
+        ]);
+
+        // 2) explicit downlink service
+        await runStrictAttempt('fg-downlink', [
+          'shell', 'am', 'start-foreground-service',
+          '-n', downlinkComponent,
+          '-a', 'com.vhr.voice.AUDIO_DOWNLINK_START',
+          '--es', 'serverUrl', server,
+          '--es', 'serial', serial,
+          '--ei', 'sampleRate', '16000'
+        ]);
+        await runStrictAttempt('start-downlink', [
+          'shell', 'am', 'startservice',
+          '-n', downlinkComponent,
+          '-a', 'com.vhr.voice.AUDIO_DOWNLINK_START',
+          '--es', 'serverUrl', server,
+          '--es', 'serial', serial,
+          '--ei', 'sampleRate', '16000'
+        ]);
+
+        // 3) explicit uplink service (talkback)
+        if (wantsUplink) {
+          await runStrictAttempt('fg-uplink', [
+            'shell', 'am', 'start-foreground-service',
+            '-n', uplinkComponent,
+            '-a', 'com.vhr.voice.MIC_UPLINK_START',
+            '--es', 'serverUrl', server,
+            '--es', 'serial', serial,
+            '--ei', 'sampleRate', '16000'
+          ]);
+          await runStrictAttempt('start-uplink', [
+            'shell', 'am', 'startservice',
+            '-n', uplinkComponent,
+            '-a', 'com.vhr.voice.MIC_UPLINK_START',
+            '--es', 'serverUrl', server,
+            '--es', 'serial', serial,
+            '--ei', 'sampleRate', '16000'
+          ]);
+        }
+
+        // 4) generic foreground service action (newer app builds)
+        await runStrictAttempt('fg-generic', [
+          'shell', 'am', 'start-foreground-service',
+          '-a', 'com.vhr.voice.START',
+          '--es', 'serverUrl', server,
+          '--es', 'serial', serial,
+          '--ez', 'talkback', wantsTalkback ? 'true' : 'false',
+          '--ez', 'bidirectional', wantsTalkback ? 'true' : 'false',
+          '--ez', 'uplink', wantsUplink ? 'true' : 'false',
+          '--es', 'uplinkFormat', uplinkFmt
+        ]);
+
+        // Validate services are actually running before claiming success.
+        let serviceProbe = { code: 1, stdout: '', stderr: '' };
+        try {
+          serviceProbe = await runAdbCommand(serial, ['shell', 'dumpsys', 'activity', 'services', 'com.vhr.voice']);
+        } catch (e) {
+          serviceProbe = { code: 1, stdout: '', stderr: e.message || String(e) };
+        }
+        const probeText = `${serviceProbe.stdout || ''}\n${serviceProbe.stderr || ''}`;
+        const hasDownlink = /AudioDownlinkService/i.test(probeText);
+        const hasUplink = wantsUplink ? /MicUplinkService/i.test(probeText) : true;
+        const backgroundReady = hasDownlink && hasUplink;
+
+        if (backgroundReady) {
+          console.log(`[open-audio-receiver] Strict background services active (downlink=${hasDownlink}, uplink=${hasUplink})`);
+          res.json({
+            ok: true,
+            method: 'background-service-headless',
+            stdout: JSON.stringify({ strictAttempts, serviceProbe: serviceProbe.stdout || '' }),
+            stderr: serviceProbe.stderr || ''
+          });
+          return;
+        }
+
+        // Ultimate fallback for current APK builds:
+        // bootstrap services through MainActivity, then immediately hide app (HOME)
+        // so audio runs without keeping the app visible in the headset.
+        let bootstrapResult = { code: 1, stdout: '', stderr: '' };
+        try {
+          bootstrapResult = await runAdbCommand(serial, [
+            'shell', 'am', 'start',
+            '-n', activityComponent,
+            '--ez', 'autostart', 'true',
+            '--es', 'serverUrl', server,
+            '--es', 'serial', serial,
+            '--ez', 'talkback', wantsTalkback ? 'true' : 'false',
+            '--ez', 'bidirectional', wantsTalkback ? 'true' : 'false',
+            '--ez', 'uplink', wantsUplink ? 'true' : 'false',
+            '--es', 'uplinkFormat', uplinkFmt
+          ]);
+        } catch (e) {
+          bootstrapResult = { code: 1, stdout: '', stderr: e.message || String(e) };
+        }
+
+        try { await new Promise(resolve => setTimeout(resolve, 280)); } catch (_) {}
+        try {
+          await runAdbCommand(serial, ['shell', 'input', 'keyevent', 'KEYCODE_HOME']);
+        } catch (_) {}
+        try { await new Promise(resolve => setTimeout(resolve, 240)); } catch (_) {}
+
+        let postBootstrapProbe = { code: 1, stdout: '', stderr: '' };
+        try {
+          postBootstrapProbe = await runAdbCommand(serial, ['shell', 'dumpsys', 'activity', 'services', 'com.vhr.voice']);
+        } catch (e) {
+          postBootstrapProbe = { code: 1, stdout: '', stderr: e.message || String(e) };
+        }
+        const postProbeText = `${postBootstrapProbe.stdout || ''}\n${postBootstrapProbe.stderr || ''}`;
+        const postHasDownlink = /AudioDownlinkService/i.test(postProbeText);
+        const postHasUplink = wantsUplink ? /MicUplinkService/i.test(postProbeText) : true;
+        const bootstrapReady = postHasDownlink && postHasUplink;
+
+        if (bootstrapReady) {
+          console.log('[open-audio-receiver] Hidden activity bootstrap succeeded (services running, app backgrounded)');
+          return res.json({
+            ok: true,
+            method: 'background-bootstrap-activity-hidden',
+            stdout: JSON.stringify({
+              strictAttempts,
+              bootstrapResult: { code: bootstrapResult.code, stdout: bootstrapResult.stdout || '', stderr: bootstrapResult.stderr || '' },
+              serviceProbe: postBootstrapProbe.stdout || ''
+            }),
+            stderr: postBootstrapProbe.stderr || ''
+          });
+        }
+
+        console.warn('[open-audio-receiver] Strict background startup failed: services not active', { hasDownlink, hasUplink });
+        return res.status(500).json({
+          ok: false,
+          error: 'Mode background strict: services audio non démarrés (downlink/uplink inactifs)',
+          method: 'background-service-headless',
+          diagnostics: {
+            hasDownlink,
+            hasUplink,
+            strictAttempts,
+            serviceProbe: probeText.slice(0, 4000),
+            bootstrapResult,
+            postBootstrapProbe: postProbeText.slice(0, 4000)
+          }
+        });
       }
       
-      // Fallback: try to launch the app directly
+      // Fallback: try to launch the app directly (UI)
       let appResult = null;
       try {
         appResult = await runAdbCommand(serial, [
           'shell', 'am', 'start',
-          '-n', 'com.vhr.voice/.MainActivity',
+          '-n', activityComponent,
           '--es', 'serverUrl', server,
           '--es', 'serial', serial,
           '--ez', 'autostart', 'true',
@@ -9192,6 +9374,21 @@ app.post('/api/device/start-voice-app', async (req, res) => {
   }
 
   try {
+    const detectVoicePackage = async () => {
+      const candidates = ['com.vhr.voice', 'com.vhr.dashboard'];
+      try {
+        const listRes = await runAdbCommand(serial, ['shell', 'pm', 'list', 'packages', 'com.vhr']);
+        const out = `${listRes.stdout || ''}\n${listRes.stderr || ''}`;
+        for (const pkg of candidates) {
+          if (new RegExp(`package:${pkg.replace('.', '\\.')}\\b`, 'i').test(out)) return pkg;
+        }
+      } catch (_) {}
+      return 'com.vhr.voice';
+    };
+    const detectedVoicePackage = await detectVoicePackage();
+    const mainActivityComponent = `${detectedVoicePackage}/.MainActivity`;
+    console.log(`[start-voice-app] Using voice package=${detectedVoicePackage}`);
+
     // Build server URL from request if not provided, always prefer LAN IP (never localhost)
     const port = PORT || 3000;
     let hostUrl = (serverUrl || '').trim();
@@ -9289,14 +9486,14 @@ app.post('/api/device/start-voice-app', async (req, res) => {
 
       result = await runAdbCommand(serial, [
         'shell', 'am', 'start',
-        '-n', 'com.vhr.voice/.MainActivity',
+        '-n', mainActivityComponent,
         ...baseExtras
       ]);
 
       if (!(result.code === 0 || String(result.stdout || '').includes('Starting'))) {
         result = await runAdbCommand(serial, [
           'shell', 'am', 'start',
-          '-n', 'com.vhr.dashboard/.MainActivity',
+          '-n', detectedVoicePackage === 'com.vhr.voice' ? 'com.vhr.dashboard/.MainActivity' : 'com.vhr.voice/.MainActivity',
           ...baseExtras
         ]);
       }
@@ -9316,7 +9513,7 @@ app.post('/api/device/start-voice-app', async (req, res) => {
       let fallbackResult = null;
       try {
         fallbackResult = await runAdbCommand(serial, [
-          'shell', 'monkey', '-p', 'com.vhr.voice', '-c', 'android.intent.category.LAUNCHER', '1'
+          'shell', 'monkey', '-p', detectedVoicePackage, '-c', 'android.intent.category.LAUNCHER', '1'
         ]);
       } catch (e) {
         fallbackResult = { code: 1, stdout: '', stderr: e.message || String(e) };
