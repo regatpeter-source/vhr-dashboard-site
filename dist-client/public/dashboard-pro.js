@@ -2262,6 +2262,10 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 
 				// Lancer l'app native via le même endpoint que le mode session (plus fiable)
 				try {
+					// Par défaut, on reste 100% headless (pas de réouverture visible dans le casque).
+					// Activer temporairement le mode compat via la console si nécessaire:
+					// window.VHR_VOICE_ALLOW_UI_FALLBACK = true
+					const allowUiFallback = window.VHR_VOICE_ALLOW_UI_FALLBACK === true;
 					const startRes = await api('/api/device/open-audio-receiver', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
@@ -2269,8 +2273,8 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 							serial,
 							serverUrl: resolvedServerUrl,
 							useBackgroundApp: true,
-							noBrowserFallback: true,
-							noUiFallback: true,
+							noBrowserFallback: !allowUiFallback,
+							noUiFallback: !allowUiFallback,
 							talkback: ENABLE_NATIVE_APP_UPLINK,
 							bidirectional: ENABLE_NATIVE_APP_UPLINK,
 							uplink: ENABLE_NATIVE_APP_UPLINK,
@@ -2301,8 +2305,8 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 										serial,
 										serverUrl: resolvedServerUrl,
 										useBackgroundApp: true,
-										noBrowserFallback: true,
-										noUiFallback: true,
+										noBrowserFallback: !allowUiFallback,
+										noUiFallback: !allowUiFallback,
 										talkback: ENABLE_NATIVE_APP_UPLINK,
 										bidirectional: ENABLE_NATIVE_APP_UPLINK,
 										uplink: ENABLE_NATIVE_APP_UPLINK,
@@ -3139,21 +3143,78 @@ async function getServerInfo() {
 	return null;
 }
 
+function normalizeManualLanBase(manualRaw, fallbackPort = 3000) {
+	const manual = String(manualRaw || '').trim();
+	if (!manual) return '';
+	try {
+		if (/^https?:\/\//i.test(manual)) {
+			const parsed = new URL(manual);
+			const port = parsed.port || String(fallbackPort || 3000);
+			return `http://${parsed.hostname}:${port}`;
+		}
+		const hostPort = manual.replace(/^\/+/, '');
+		if (hostPort.includes(':')) {
+			const [host, portRaw] = hostPort.split(':');
+			const port = Number.parseInt(portRaw, 10);
+			if (!host) return '';
+			if (!Number.isFinite(port) || port <= 0) return '';
+			return `http://${host}:${port}`;
+		}
+		return `http://${hostPort}:${fallbackPort || 3000}`;
+	} catch (e) {
+		return '';
+	}
+}
+
+async function isLanBaseReachable(baseOrigin, timeoutMs = 1800) {
+	if (!baseOrigin) return false;
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), timeoutMs);
+	try {
+		// no-cors: utile pour tester la joignabilité réseau même si CORS n'autorise pas la lecture.
+		await fetch(`${baseOrigin.replace(/\/+$/, '')}/ping?t=${Date.now()}`, {
+			method: 'GET',
+			mode: 'no-cors',
+			cache: 'no-store',
+			signal: controller.signal
+		});
+		return true;
+	} catch (e) {
+		return false;
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+async function resolveValidatedLanOverride(fallbackPort = 3000) {
+	const manualRaw = getLanOverride();
+	if (!manualRaw) return '';
+	const manualBase = normalizeManualLanBase(manualRaw, fallbackPort);
+	if (!manualBase) {
+		try { localStorage.removeItem(VOICE_LAN_OVERRIDE_KEY); } catch (e) {}
+		console.warn('[voice] Override LAN invalide supprimé:', manualRaw);
+		return '';
+	}
+	const reachable = await isLanBaseReachable(manualBase);
+	if (!reachable) {
+		try { localStorage.removeItem(VOICE_LAN_OVERRIDE_KEY); } catch (e) {}
+		console.warn('[voice] Override LAN non joignable, suppression automatique:', manualBase);
+		return '';
+	}
+	return manualBase;
+}
+
 async function buildLanUrlForPath(pathname = '/vhr-dashboard-pro.html') {
 	const info = await getServerInfo();
 	const port = (info && info.port) || window.location.port || 3000;
 	const proto = 'http:'; // Toujours HTTP pour éviter les erreurs SSL
 	const lanIp = info && info.lanIp ? info.lanIp : '';
-	const manual = getLanOverride(); // peut être un host ou une URL complète
+	const manualBase = await resolveValidatedLanOverride(port);
 	const fallbackHost = window.location.hostname || 'localhost';
 
 	let baseOrigin;
-	if (manual) {
-		if (manual.startsWith('http://') || manual.startsWith('https://')) {
-			baseOrigin = manual.replace(/^https:/, 'http:').replace(/\/$/, '');
-		} else {
-			baseOrigin = `${proto}//${manual}:${port}`;
-		}
+	if (manualBase) {
+		baseOrigin = manualBase;
 	} else if (lanIp) {
 		baseOrigin = `${proto}//${lanIp}:${port}`;
 	} else {
@@ -3169,7 +3230,7 @@ async function buildLanUrlForPath(pathname = '/vhr-dashboard-pro.html') {
 	if (storedToken) {
 		url += (pathname.includes('?') ? '&' : '?') + `token=${encodeURIComponent(storedToken)}`;
 	}
-	return { url, lanIp: lanIp || manual || fallbackHost };
+	return { url, lanIp: lanIp || manualBase || fallbackHost };
 }
 
 async function buildLanDashboardUrl() {
@@ -3225,9 +3286,9 @@ async function openVoiceReceiverForDevice(serial = '', name = '') {
 async function resolveAudioServerUrl() {
 	const proto = window.location.protocol;
 	const port = window.location.port || 3000;
-	// 1) Manual override wins
-	const manual = getLanOverride();
-	if (manual) return `${proto}//${manual}:${port}`;
+	// 1) Manual override wins only if valid/reachable (évite calibration machine A -> machine B)
+	const manualBase = await resolveValidatedLanOverride(port);
+	if (manualBase) return manualBase;
 
 	// 2) Toujours essayer de détecter l'IP LAN (jamais localhost)
 	const info = await getServerInfo();

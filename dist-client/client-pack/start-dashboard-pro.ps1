@@ -29,6 +29,35 @@ if (Test-Path (Join-Path $nodePortable "node.exe")) {
 	$env:PATH = "$nodePortable;$env:PATH"
 }
 
+# Ajouter ADB si les platform-tools sont présents (../platform-tools)
+$adbTools = Join-Path $root "platform-tools"
+if (Test-Path (Join-Path $adbTools "adb.exe")) {
+	$env:PATH = "$adbTools;$env:PATH"
+}
+
+# Vérifier que Node est disponible (portable ou installé)
+$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+if (-not $nodeCmd) {
+	Write-Host "[ERREUR] Node.js introuvable.`nInstallez Node.js (v18+ LTS) ou placez le dossier 'node-portable' à la racine du pack." -ForegroundColor Red
+	Read-Host "Appuyez sur Entrée pour fermer"
+	exit 1
+}
+
+# Initialiser ADB pour déclencher la popup d'autorisation sur le casque
+$adbCmd = Get-Command adb -ErrorAction SilentlyContinue
+if ($adbCmd) {
+	try {
+		& adb start-server | Out-Null
+		Start-Sleep -Milliseconds 400
+		& adb devices | Out-Null
+		Write-Host "[INFO] ADB initialisé. Si une popup apparait dans le casque, acceptez et cochez 'Toujours autoriser'." -ForegroundColor Green
+	} catch {
+		Write-Host "[WARN] ADB détecté mais initialisation incomplète: $($_.Exception.Message)" -ForegroundColor Yellow
+	}
+} else {
+	Write-Host "[WARN] adb introuvable dans le PATH. Placez 'platform-tools' à la racine du pack ou installez Android platform-tools." -ForegroundColor Yellow
+}
+
 # Assurer la présence du .env local (copie depuis l'exemple si absent)
 $envTarget = Join-Path $root ".env"
 $envExample = Join-Path $PSScriptRoot ".env.client-example"
@@ -47,4 +76,10 @@ try {
 	exit 1
 }
 
-node server.js
+try {
+	node server.js
+} catch {
+	Write-Host "[ERREUR] Impossible de démarrer le serveur Node.js.`n$($_.Exception.Message)" -ForegroundColor Red
+	Read-Host "Appuyez sur Entrée pour fermer"
+	exit 1
+}

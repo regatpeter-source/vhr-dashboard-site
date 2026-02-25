@@ -9013,19 +9013,41 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
     }
 
     if (!wantsRelay && (!server || server.includes('localhost') || server.includes('127.0.0.1'))) {
-      const lanIp = resolveLanIpForClient(req);
-      if (lanIp) {
-        server = `http://${lanIp}:3000`;
-        console.log(`[open-audio-receiver] Correction: IP LAN détectée pour receiver: ${server}`);
-      } else {
-        // Dernier recours : si le host header contient déjà une IP non-loopback, utiliser celle-ci
-        const hostHeader = (req.headers.host || '').split(':')[0];
-        if (hostHeader && hostHeader !== 'localhost' && hostHeader !== '127.0.0.1') {
-          server = `http://${hostHeader}:3000`;
+      const hostHeaderRaw = req.headers.host || '';
+      const hostHeader = hostHeaderRaw.split(':')[0];
+      const portMatch = hostHeaderRaw.match(/:(\d+)/);
+      const localPort = portMatch ? Number(portMatch[1]) : (Number(PORT) || 3000);
+
+      // 1) Tentative prioritaire: tunnel ADB reverse (robuste sur postes où le LAN est bloqué)
+      let reverseReady = false;
+      try {
+        const reverseRes = await runAdbCommandSafe(serial, ['reverse', `tcp:${localPort}`, `tcp:${localPort}`], 8000);
+        if (reverseRes && reverseRes.code === 0) {
+          server = `http://127.0.0.1:${localPort}`;
+          reverseReady = true;
+          console.log(`[open-audio-receiver] ADB reverse OK (${serial}) -> ${server}`);
+        } else {
+          console.warn('[open-audio-receiver] ADB reverse unavailable, trying LAN fallback', {
+            code: reverseRes && reverseRes.code,
+            stderr: reverseRes && reverseRes.stderr ? String(reverseRes.stderr).trim() : ''
+          });
+        }
+      } catch (e) {
+        console.warn('[open-audio-receiver] ADB reverse attempt error:', e && e.message ? e.message : e);
+      }
+
+      // 2) Fallback LAN classique
+      if (!reverseReady) {
+        const lanIp = resolveLanIpForClient(req);
+        if (lanIp) {
+          server = `http://${lanIp}:${localPort}`;
+          console.log(`[open-audio-receiver] Correction: IP LAN détectée pour receiver: ${server}`);
+        } else if (hostHeader && hostHeader !== 'localhost' && hostHeader !== '127.0.0.1') {
+          server = `http://${hostHeader}:${localPort}`;
           console.log(`[open-audio-receiver] Fallback sur host header pour receiver: ${server}`);
         } else {
-          server = 'http://localhost:3000';
-          console.warn('[open-audio-receiver] Aucune IP LAN détectée, fallback sur localhost!');
+          server = `http://localhost:${localPort}`;
+          console.warn('[open-audio-receiver] Aucune IP LAN détectée, fallback localhost (peut échouer sur certains postes).');
         }
       }
     }
