@@ -2282,7 +2282,11 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 						})
 					});
 					if (startRes && startRes.ok) {
-						console.log('[voice] Voice app launch request sent (open-audio-receiver)');
+						console.log('[voice] Voice app launch request sent (open-audio-receiver)', {
+							method: startRes.method,
+							routeStrategy: startRes.routeStrategy,
+							serverBase: startRes.serverBase
+						});
 						showToast('📱 App VHR Voice lancée sur le casque', 'success');
 					} else {
 						console.warn('[voice] Voice app launch failed:', startRes?.error);
@@ -2314,7 +2318,11 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 									})
 								});
 								if (retryRes && retryRes.ok) {
-									console.log('[voice] Voice app launched after install');
+									console.log('[voice] Voice app launched after install', {
+										method: retryRes.method,
+										routeStrategy: retryRes.routeStrategy,
+										serverBase: retryRes.serverBase
+									});
 									showToast('📱 App VHR Voice lancée sur le casque', 'success');
 									return;
 								}

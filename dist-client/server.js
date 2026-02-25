@@ -9004,27 +9004,31 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
     }
     // Correction : forcer l'utilisation de l'IP LAN si serverUrl est localhost ou absent
     let server = (serverUrl || '').trim();
+    let routeStrategy = 'provided';
     if (wantsRelay) {
       server = (relayBase || server || RELAY_STREAM_BASE_URL || '').trim();
+      routeStrategy = 'relay';
     }
     // Corrige une éventuelle faute de frappe (locahost)
     if (server.includes('locahost')) {
       server = server.replace(/locahost/gi, 'localhost');
     }
 
-    if (!wantsRelay && (!server || server.includes('localhost') || server.includes('127.0.0.1'))) {
-      const hostHeaderRaw = req.headers.host || '';
-      const hostHeader = hostHeaderRaw.split(':')[0];
-      const portMatch = hostHeaderRaw.match(/:(\d+)/);
-      const localPort = portMatch ? Number(portMatch[1]) : (Number(PORT) || 3000);
+    const hostHeaderRaw = req.headers.host || '';
+    const hostHeader = hostHeaderRaw.split(':')[0];
+    const portMatch = hostHeaderRaw.match(/:(\d+)/);
+    const localPort = portMatch ? Number(portMatch[1]) : (Number(PORT) || 3000);
 
-      // 1) Tentative prioritaire: tunnel ADB reverse (robuste sur postes où le LAN est bloqué)
-      let reverseReady = false;
+    // Non-session: privilégier systématiquement ADB reverse pour éviter les dépendances réseau machine/LAN.
+    // Important: même si le client envoie déjà une IP LAN, reverse est souvent plus fiable sur d'autres postes.
+    let reverseReady = false;
+    if (!wantsRelay) {
       try {
         const reverseRes = await runAdbCommandSafe(serial, ['reverse', `tcp:${localPort}`, `tcp:${localPort}`], 8000);
         if (reverseRes && reverseRes.code === 0) {
           server = `http://127.0.0.1:${localPort}`;
           reverseReady = true;
+          routeStrategy = 'adb-reverse';
           console.log(`[open-audio-receiver] ADB reverse OK (${serial}) -> ${server}`);
         } else {
           console.warn('[open-audio-receiver] ADB reverse unavailable, trying LAN fallback', {
@@ -9035,20 +9039,22 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
       } catch (e) {
         console.warn('[open-audio-receiver] ADB reverse attempt error:', e && e.message ? e.message : e);
       }
+    }
 
-      // 2) Fallback LAN classique
-      if (!reverseReady) {
-        const lanIp = resolveLanIpForClient(req);
-        if (lanIp) {
-          server = `http://${lanIp}:${localPort}`;
-          console.log(`[open-audio-receiver] Correction: IP LAN détectée pour receiver: ${server}`);
-        } else if (hostHeader && hostHeader !== 'localhost' && hostHeader !== '127.0.0.1') {
-          server = `http://${hostHeader}:${localPort}`;
-          console.log(`[open-audio-receiver] Fallback sur host header pour receiver: ${server}`);
-        } else {
-          server = `http://localhost:${localPort}`;
-          console.warn('[open-audio-receiver] Aucune IP LAN détectée, fallback localhost (peut échouer sur certains postes).');
-        }
+    if (!wantsRelay && !reverseReady && (!server || server.includes('localhost') || server.includes('127.0.0.1') || /^(http:\/\/)?192\.168\./i.test(server))) {
+      const lanIp = resolveLanIpForClient(req);
+      if (lanIp) {
+        server = `http://${lanIp}:${localPort}`;
+        routeStrategy = 'lan-ip';
+        console.log(`[open-audio-receiver] Correction: IP LAN détectée pour receiver: ${server}`);
+      } else if (hostHeader && hostHeader !== 'localhost' && hostHeader !== '127.0.0.1') {
+        server = `http://${hostHeader}:${localPort}`;
+        routeStrategy = 'host-header';
+        console.log(`[open-audio-receiver] Fallback sur host header pour receiver: ${server}`);
+      } else {
+        server = `http://localhost:${localPort}`;
+        routeStrategy = 'localhost-fallback';
+        console.warn('[open-audio-receiver] Aucune IP LAN détectée, fallback localhost (peut échouer sur certains postes).');
       }
     }
     const relayDefault = (RELAY_STREAM_BASE_URL || '').trim();
@@ -9057,6 +9063,7 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
       const looksLocal = serverLower.includes('localhost') || serverLower.includes('127.0.0.1') || serverLower.startsWith('http://') && serverLower.includes(':3000');
       if (!server || looksLocal) {
         server = relayDefault;
+        routeStrategy = 'relay-default';
       }
     }
     if (server && !/^https?:\/\//i.test(server)) {
@@ -9109,7 +9116,7 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
       receiverParams.set('relayBase', relayBaseResolved || '');
     }
     const receiverUrl = `${server}/audio-receiver.html?${receiverParams.toString()}`;
-    console.log(`[open-audio-receiver] URL envoyée au Quest: ${receiverUrl}`);
+    console.log(`[open-audio-receiver] URL envoyée au Quest: ${receiverUrl} (route=${routeStrategy})`);
 
     // In talkback web mode, ensure native app is not running (it can lock microphone)
     if (wantsTalkback && !useBackgroundApp) {
@@ -9247,6 +9254,8 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
           res.json({
             ok: true,
             method: 'background-service-headless',
+            routeStrategy,
+            serverBase: server,
             stdout: JSON.stringify({ strictAttempts, serviceProbe: serviceProbe.stdout || '' }),
             stderr: serviceProbe.stderr || ''
           });
@@ -9295,6 +9304,8 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
           return res.json({
             ok: true,
             method: 'background-bootstrap-activity-hidden',
+            routeStrategy,
+            serverBase: server,
             stdout: JSON.stringify({
               strictAttempts,
               bootstrapResult: { code: bootstrapResult.code, stdout: bootstrapResult.stdout || '', stderr: bootstrapResult.stderr || '' },
@@ -9309,6 +9320,8 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
           ok: false,
           error: 'Mode background strict: services audio non démarrés (downlink/uplink inactifs)',
           method: 'background-service-headless',
+          routeStrategy,
+          serverBase: server,
           diagnostics: {
             hasDownlink,
             hasUplink,
@@ -9347,6 +9360,8 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
         res.json({ 
           ok: true, 
           method: 'background-app-activity',
+          routeStrategy,
+          serverBase: server,
           stdout: appResult.stdout, 
           stderr: appResult.stderr 
         });
@@ -9359,6 +9374,8 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
           ok: false,
           error: 'Ouverture automatique impossible (app native indisponible et fallback navigateur désactivé)',
           method: 'background-app',
+          routeStrategy,
+          serverBase: server,
           stdout: `${broadcastResult?.stdout || ''}\n${appResult?.stdout || ''}`.trim(),
           stderr: `${broadcastResult?.stderr || ''}\n${appResult?.stderr || ''}`.trim()
         });
@@ -9378,6 +9395,8 @@ app.post('/api/device/open-audio-receiver', async (req, res) => {
     res.json({ 
       ok: result.code === 0, 
       method: 'browser',
+      routeStrategy,
+      serverBase: server,
       url: receiverUrl,
       stdout: result.stdout, 
       stderr: result.stderr 
