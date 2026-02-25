@@ -3534,11 +3534,36 @@ function stopDemoStatusPolling() {
 document.addEventListener('visibilitychange', () => {
 	if (!document.hidden) {
 		refreshDemoStatus('visibility', true).catch(() => {});
+		checkLicense().then(hasAccess => {
+			if (hasAccess) {
+				showDashboardContent();
+			} else {
+				hideDashboardContent();
+			}
+		});
 	}
 });
 
 window.addEventListener('focus', () => {
 	refreshDemoStatus('focus', true).catch(() => {});
+	checkLicense().then(hasAccess => {
+		if (hasAccess) {
+			showDashboardContent();
+		} else {
+			hideDashboardContent();
+		}
+	});
+});
+
+window.addEventListener('pageshow', () => {
+	refreshDemoStatus('pageshow', true).catch(() => {});
+	checkLicense().then(hasAccess => {
+		if (hasAccess) {
+			showDashboardContent();
+		} else {
+			hideDashboardContent();
+		}
+	});
 });
 
 async function refreshDevicesList() {
@@ -5935,8 +5960,6 @@ function goToOfficialBillingPage() {
 
 window.openOfficialBillingPage = function() {
 	goToOfficialBillingPage();
-	const modal = document.getElementById('unlockModal');
-	if (modal) modal.remove();
 };
 
 function applyDemoStatusSnapshot(demoStatus) {
@@ -6048,6 +6071,7 @@ async function checkLicense() {
 		if (demoStatus.accessBlocked && !hasActiveSubscription) {
 			// No valid subscription after demo expiration
 			console.warn('[license] Access blocked: demo expired + no subscription');
+			hideDashboardContent();
 			showUnlockModal({
 				expired: true,
 				accessBlocked: true,
@@ -6063,6 +6087,7 @@ async function checkLicense() {
 		}
 	} catch (e) {
 		console.error('[license] check failed:', e);
+		hideDashboardContent();
 		showUnlockModal({ expired: true, accessBlocked: true, subscriptionStatus: 'unknown' });
 		return false; // Fail closed to prevent accès sans licence
 	}
@@ -6538,6 +6563,9 @@ window.loginUser = async function() {
 				checkLicense().then(hasAccess => {
 					if (hasAccess) {
 						loadGamesCatalog().finally(() => loadDevices());
+					} else {
+						hideDashboardContent();
+						stopDemoStatusPolling();
 					}
 				});
 			}, 200);
@@ -6804,6 +6832,9 @@ async function initDashboardPro() {
 		checkLicense().then(hasAccess => {
 			if (hasAccess) {
 				loadGamesCatalog().finally(() => loadDevices());
+			} else {
+				hideDashboardContent();
+				stopDemoStatusPolling();
 			}
 		});
 	} else {

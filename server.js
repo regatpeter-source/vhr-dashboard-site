@@ -1849,7 +1849,7 @@ app.get('/download/vhr-voice-apk', (req, res) => {
 });
 
 // Install VHR Voice APK directly on connected Quest device
-app.post('/api/device/install-voice-app', async (req, res) => {
+app.post('/api/device/install-voice-app', authMiddleware, requireDashboardAccess, async (req, res) => {
   const { serial } = req.body || {};
   if (!serial) {
     return res.status(400).json({ ok: false, error: 'serial required' });
@@ -3434,6 +3434,36 @@ async function authMiddleware(req, res, next) {
   }
 }
 
+async function requireDashboardAccess(req, res, next) {
+  try {
+    const username = req && req.user && req.user.username ? String(req.user.username).trim() : '';
+    if (!username) {
+      return res.status(401).json({ ok: false, error: 'Token invalide (utilisateur manquant)' });
+    }
+
+    const user = await findUserByUsernameAsync(username);
+    if (!user) {
+      return res.status(401).json({ ok: false, error: 'Utilisateur introuvable' });
+    }
+
+    const demoStatus = await buildDemoStatusForUser(user);
+    if (demoStatus && demoStatus.accessBlocked) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Essai expiré - abonnement ou licence requis',
+        code: 'demo_expired',
+        demo: demoStatus
+      });
+    }
+
+    req.demoStatus = demoStatus;
+    return next();
+  } catch (e) {
+    console.error('[auth] requireDashboardAccess error:', e && e.message ? e.message : e);
+    return res.status(500).json({ ok: false, error: 'Erreur de vérification d\'accès' });
+  }
+}
+
 // Variante tolérante : renvoie l'utilisateur décodé ou null (ne renvoie pas de 401)
 function tryDecodeUser(req) {
   let token = null;
@@ -3865,12 +3895,7 @@ app.post('/api/login', async (req, res) => {
 
   const demoStatus = await buildDemoStatusForUser(user);
   if (demoStatus.accessBlocked) {
-    return res.status(403).json({
-      ok: false,
-      error: 'Essai expiré - abonnement ou licence requis',
-      code: 'demo_expired',
-      demo: demoStatus
-    });
+    console.log(`[api/login] accès dashboard bloqué pour ${user.username} (essai expiré), authentification vitrine autorisée`);
   }
   const emailVerifiedFlag = isEmailVerifiedOrBypassed(user);
   console.log('[api/login] login successful for:', username);
@@ -4770,7 +4795,7 @@ app.post('/api/auth/login', async (req, res) => {
 
   const demoStatus = await buildDemoStatusForUser(user);
   if (demoStatus.accessBlocked) {
-    return res.status(403).json({ ok: false, error: 'Essai expiré - abonnement ou licence requis', code: 'demo_expired', demo: demoStatus });
+    console.log(`[api/auth/login] accès dashboard bloqué pour ${user.username} (essai expiré), authentification vitrine autorisée`);
   }
   
   const emailVerifiedFlag = isEmailVerifiedOrBypassed(user);
@@ -4783,6 +4808,7 @@ app.post('/api/auth/login', async (req, res) => {
   res.json({ 
     ok: true, 
     token, 
+    demo: demoStatus,
     user: {
       name: user.username,
       email: user.email,
@@ -8233,7 +8259,30 @@ appServer.on('upgrade', (req, res, head) => {
 });
 
 // ---------- API Endpoints ----------
-app.get('/api/devices', (req, res) => res.json({ ok: true, devices }));
+const DASHBOARD_PROTECTED_API_PREFIXES = [
+  '/api/stream',
+  '/api/stream/*',
+  '/api/apps',
+  '/api/apps/*',
+  '/api/devices',
+  '/api/devices/*',
+  '/api/adb',
+  '/api/adb/*',
+  '/api/battery',
+  '/api/battery/*',
+  '/api/device',
+  '/api/device/*',
+  '/api/webrtc',
+  '/api/webrtc/*',
+  '/api/opentalkie',
+  '/api/opentalkie/*',
+  '/api/audio/signal',
+  '/api/audio/session',
+  '/api/audio/session/*'
+];
+app.use(DASHBOARD_PROTECTED_API_PREFIXES, authMiddleware, requireDashboardAccess);
+
+app.get('/api/devices', authMiddleware, requireDashboardAccess, (req, res) => res.json({ ok: true, devices }));
 
 // Diagnostic endpoint for health checks and deploy status
 app.get('/_status', async (req, res) => {
@@ -8281,11 +8330,11 @@ app.post('/api/stream/stop', (req, res) => {
 
 // État des jeux/applications en cours (persistant sur le serveur entre rafraîchissements UI)
 // Placé AVANT /api/apps/:serial pour éviter que "running" soit interprété comme un numéro de série ADB
-app.get('/api/apps/running', (req, res) => {
+app.get('/api/apps/running', authMiddleware, requireDashboardAccess, (req, res) => {
   res.json({ ok: true, running: runningAppState });
 });
 
-app.get('/api/apps/:serial', async (req, res) => {
+app.get('/api/apps/:serial', authMiddleware, requireDashboardAccess, async (req, res) => {
   const serial = req.params.serial;
   try {
     const out = await runAdbCommand(serial, ['shell', 'pm', 'list', 'packages', '-3']);
@@ -8300,7 +8349,7 @@ app.get('/api/apps/:serial', async (req, res) => {
   }
 });
 
-app.post('/api/apps/running/mark', (req, res) => {
+app.post('/api/apps/running/mark', authMiddleware, requireDashboardAccess, (req, res) => {
   const serial = req.body?.serial;
   const pkg = req.body?.package;
   const action = req.body?.action; // 'add' | 'remove'
@@ -8320,7 +8369,7 @@ app.post('/api/apps/running/mark', (req, res) => {
   res.json({ ok: true, running: runningAppState });
 });
 
-app.post('/api/apps/:serial/launch', async (req, res) => {
+app.post('/api/apps/:serial/launch', authMiddleware, requireDashboardAccess, async (req, res) => {
   const serial = req.params.serial;
   const pkg = req.body?.package;
   if (!serial || !pkg) {
@@ -8412,7 +8461,7 @@ app.post('/api/apps/:serial/launch', async (req, res) => {
 });
 
 // Stop app and return to Oculus home
-app.post('/api/apps/:serial/stop', async (req, res) => {
+app.post('/api/apps/:serial/stop', authMiddleware, requireDashboardAccess, async (req, res) => {
   const serial = req.params.serial;
   const pkg = req.body?.package;
   if (!serial || !pkg) {
@@ -8451,7 +8500,7 @@ app.post('/api/apps/:serial/stop', async (req, res) => {
   }
 });
 
-app.post('/api/devices/rename', (req, res) => {
+app.post('/api/devices/rename', authMiddleware, requireDashboardAccess, (req, res) => {
   const { serial, name } = req.body || {};
   if (!serial || !name) {
     return res.status(400).json({ ok: false, error: 'serial and name required' });
