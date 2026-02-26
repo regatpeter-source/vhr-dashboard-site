@@ -558,12 +558,16 @@ async function deleteUser(id) {
     await client.query('BEGIN');
 
     // Remove dependent subscriptions first (foreign key users(id) -> subscriptions(userid))
-    const userRes = await client.query('SELECT username FROM users WHERE id = $1 LIMIT 1', [id]);
+    const userRes = await client.query('SELECT username, email FROM users WHERE id = $1 LIMIT 1', [id]);
     const username = userRes.rows?.[0]?.username || null;
+    const email = userRes.rows?.[0]?.email || null;
     if (username) {
       await client.query('DELETE FROM subscriptions WHERE userid = $1 OR LOWER(username) = LOWER($2)', [id, username]);
     } else {
       await client.query('DELETE FROM subscriptions WHERE userid = $1', [id]);
+    }
+    if (email) {
+      await client.query('DELETE FROM subscriptions WHERE LOWER(email) = LOWER($1)', [email]);
     }
 
     const result = await client.query('DELETE FROM users WHERE id = $1 RETURNING id', [id]);
@@ -587,7 +591,7 @@ async function deleteUserByUsername(username) {
     client = await pool.connect();
     await client.query('BEGIN');
 
-    const userRes = await client.query('SELECT id, username FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1', [normalized]);
+    const userRes = await client.query('SELECT id, username, email FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1', [normalized]);
     if (!userRes.rows || userRes.rows.length === 0) {
       await client.query('COMMIT');
       return null;
@@ -595,8 +599,12 @@ async function deleteUserByUsername(username) {
 
     const userId = userRes.rows[0].id;
     const uname = userRes.rows[0].username;
+    const email = userRes.rows[0].email || null;
 
     await client.query('DELETE FROM subscriptions WHERE userid = $1 OR LOWER(username) = LOWER($2)', [userId, uname]);
+    if (email) {
+      await client.query('DELETE FROM subscriptions WHERE LOWER(email) = LOWER($1)', [email]);
+    }
     const deleted = await client.query('DELETE FROM users WHERE LOWER(username) = LOWER($1) RETURNING id', [normalized]);
 
     await client.query('COMMIT');

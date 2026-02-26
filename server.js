@@ -6735,9 +6735,15 @@ app.delete('/api/admin/users/:username', authMiddleware, async (req, res) => {
 
     if (!targetUser) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
 
+    const normalizedUsername = String(targetUser.username || usernameParam).trim();
+    const normalizedEmail = normalizeEmailValue(targetUser.email || null);
+
     if (targetUser.role === 'admin' && isAllowedAdminUser(targetUser.username)) {
       return res.status(403).json({ ok: false, error: 'Compte administrateur protégé' });
     }
+
+    // Keep a tombstone to prevent auto-recreation from remote sync/login races
+    markUserDeleted(normalizedUsername);
 
     if (USE_POSTGRES && db) {
       let deletedId = null;
@@ -6761,19 +6767,67 @@ app.delete('/api/admin/users/:username', authMiddleware, async (req, res) => {
       }
 
       if (!deletedId) throw new Error('Suppression PostgreSQL non confirmée');
+
+      // Extra cleanup in Postgres: remove possible orphan subscriptions by username/email
+      try {
+        if (db.pool) {
+          await db.pool.query('DELETE FROM subscriptions WHERE LOWER(username) = LOWER($1)', [normalizedUsername]);
+          if (normalizedEmail) {
+            await db.pool.query('DELETE FROM subscriptions WHERE LOWER(email) = LOWER($1)', [normalizedEmail]);
+          }
+        }
+      } catch (pgCleanupErr) {
+        console.warn('[api] admin/delete-user postgres cleanup warning:', pgCleanupErr && pgCleanupErr.message ? pgCleanupErr.message : pgCleanupErr);
+      }
     } else if (dbEnabled) {
       const adapter = require('./db');
-      adapter.deleteUserByUsername(targetUser.username);
+      adapter.deleteUserByUsername(normalizedUsername);
+      if (adapter.deleteSubscriptionsByUsername) {
+        adapter.deleteSubscriptionsByUsername(normalizedUsername, normalizedEmail);
+      }
       users = adapter.getAllUsers();
     } else {
-      removeUserByUsername(targetUser.username);
+      // Hard-delete in JSON mode for admin panel request
+      users = (users || []).filter(u => String(u.username || '').toLowerCase() !== normalizedUsername.toLowerCase());
+      saveUsers();
     }
 
-    // Clean up local subscriptions when using file/SQLite storage
-    if (!USE_POSTGRES && Array.isArray(subscriptions)) {
+    // Clean up in-memory subscriptions for all modes
+    if (Array.isArray(subscriptions)) {
       const before = subscriptions.length;
-      subscriptions = subscriptions.filter(s => String(s.username || '').toLowerCase() !== targetUser.username.toLowerCase());
+      subscriptions = subscriptions.filter(s => {
+        const byUsername = String(s.username || '').toLowerCase() === normalizedUsername.toLowerCase();
+        const byEmail = normalizedEmail && normalizeEmailValue(s.email || null) === normalizedEmail;
+        return !(byUsername || byEmail);
+      });
       if (before !== subscriptions.length) saveSubscriptions();
+    }
+
+    // Clean up license records linked to the deleted account
+    try {
+      const allLicenses = loadLicenses();
+      if (Array.isArray(allLicenses) && allLicenses.length > 0) {
+        const filteredLicenses = allLicenses.filter(l => {
+          const byUsername = String(l.username || '').toLowerCase() === normalizedUsername.toLowerCase();
+          const byEmail = normalizedEmail && normalizeEmailValue(l.email || null) === normalizedEmail;
+          return !(byUsername || byEmail);
+        });
+        if (filteredLicenses.length !== allLicenses.length) {
+          saveLicenses(filteredLicenses);
+        }
+      }
+    } catch (licenseErr) {
+      console.warn('[api] admin/delete-user license cleanup warning:', licenseErr && licenseErr.message ? licenseErr.message : licenseErr);
+    }
+
+    // Ensure in-memory users cache is purged immediately
+    users = (users || []).filter(u => String(u.username || '').toLowerCase() !== normalizedUsername.toLowerCase());
+
+    // Attempt sync propagation to downstream dashboard nodes (best effort)
+    try {
+      await triggerUserSync({ username: normalizedUsername, email: normalizedEmail, role: 'deleted', status: 'deleted', isDeleted: true });
+    } catch (syncErr) {
+      console.warn('[api] admin/delete-user sync warning:', syncErr && syncErr.message ? syncErr.message : syncErr);
     }
 
     return res.json({ ok: true, message: 'Utilisateur supprimé' });

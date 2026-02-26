@@ -217,7 +217,29 @@ function updateUserFields(username, fields) {
 
 function deleteUserByUsername(username) {
   if (!enabled) return false;
+  const row = db.prepare('SELECT id, username, email FROM users WHERE username = ?').get(username);
+  if (!row) return false;
+  db.prepare('DELETE FROM subscriptions WHERE userId = ? OR LOWER(username) = LOWER(?)').run(row.id, row.username);
+  if (row.email) {
+    db.prepare('DELETE FROM subscriptions WHERE LOWER(email) = LOWER(?)').run(row.email);
+  }
   db.prepare('DELETE FROM users WHERE username = ?').run(username);
+  return true;
+}
+
+function deleteSubscriptionsByUsername(username, email = null) {
+  if (!enabled) return false;
+  const normalizedUser = String(username || '').trim();
+  const normalizedEmail = String(email || '').trim();
+  if (!normalizedUser && !normalizedEmail) return false;
+
+  if (normalizedUser && normalizedEmail) {
+    db.prepare('DELETE FROM subscriptions WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)').run(normalizedUser, normalizedEmail);
+  } else if (normalizedUser) {
+    db.prepare('DELETE FROM subscriptions WHERE LOWER(username) = LOWER(?)').run(normalizedUser);
+  } else {
+    db.prepare('DELETE FROM subscriptions WHERE LOWER(email) = LOWER(?)').run(normalizedEmail);
+  }
   return true;
 }
 
@@ -352,4 +374,4 @@ function getInstallationRecord(installationId) {
   };
 }
 
-module.exports = { initSqlite, isEnabled, addOrUpdateUser, getAllUsers, findUserByUsername, updateUserFields, deleteUserByUsername, addMessage, getAllMessages, getUnreadMessages, updateMessage, deleteMessage, addSubscription, getAllSubscriptions, getActiveSubscriptions, updateSubscription, findSubscriptionByStripeId, findUserByStripeCustomerId, ensureInstallationRecord, getInstallationRecord };
+module.exports = { initSqlite, isEnabled, addOrUpdateUser, getAllUsers, findUserByUsername, updateUserFields, deleteUserByUsername, deleteSubscriptionsByUsername, addMessage, getAllMessages, getUnreadMessages, updateMessage, deleteMessage, addSubscription, getAllSubscriptions, getActiveSubscriptions, updateSubscription, findSubscriptionByStripeId, findUserByStripeCustomerId, ensureInstallationRecord, getInstallationRecord };
