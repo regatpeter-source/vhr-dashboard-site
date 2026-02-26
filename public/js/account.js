@@ -94,6 +94,18 @@
     }
   }
 
+  function toFriendlyError(input, fallback = 'Une erreur est survenue. Merci de réessayer.') {
+    const text = typeof input === 'string' ? input.trim() : '';
+    if (!text) return fallback;
+
+    const technicalPattern = /smtp|nodemailer|credential|transporter|eauth|econn|dns|socket|timeout|configuration/i;
+    if (technicalPattern.test(text)) {
+      return 'Impossible d\'envoyer l\'email pour le moment. Merci de réessayer dans quelques minutes.';
+    }
+
+    return text;
+  }
+
   const loginForm = document.getElementById('loginForm');
   const redirectParam = (() => {
     try {
@@ -182,9 +194,10 @@
     });
 
     const ok = res && res.ok;
+    const apiError = toFriendlyError((res && res.error) || '');
     const msg = ok
       ? `Email de vérification renvoyé à ${targetEmail}`
-      : `Erreur: ${(res && res.error) || 'Impossible d\'envoyer l\'email'}`;
+      : `Erreur: ${apiError || 'Impossible d\'envoyer l\'email'}`;
     if (messageTarget) messageTarget.textContent = msg;
     if (verificationBannerMessage) verificationBannerMessage.textContent = msg;
     loginMessage.textContent = msg;
@@ -307,14 +320,14 @@
         } else if (res && res.code === 'secondary_electron_only') {
           loginMessage.textContent = 'Compte secondaire non autorisé sur le site vitrine.';
         } else {
-          const errorMsg = res && res.error ? res.error : 'Erreur inconnue';
+          const errorMsg = toFriendlyError(res && res.error, 'Erreur inconnue');
           console.error('[LOGIN] Error:', errorMsg);
           loginMessage.textContent = 'Erreur: ' + errorMsg; 
         }
       }
     } catch (err) {
       console.error('[LOGIN] Exception:', err);
-      loginMessage.textContent = 'Erreur: ' + err.message;
+      loginMessage.textContent = 'Erreur: ' + toFriendlyError(err && err.message, 'Erreur réseau');
     }
   });
 
@@ -350,7 +363,7 @@
         }
       }, 1200);
     }
-    else { loginMessage.textContent = 'Erreur: ' + (res && res.error ? res.error : 'Erreur inconnue'); }
+    else { loginMessage.textContent = 'Erreur: ' + toFriendlyError(res && res.error, 'Erreur inconnue'); }
   });
 
   if (logoutBtn) logoutBtn.addEventListener('click', async () => { setToken(null); await api('/api/logout', { method: 'POST' }); showLoggedOut(); });

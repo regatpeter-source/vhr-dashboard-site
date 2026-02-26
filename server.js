@@ -4946,7 +4946,7 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     if (verificationEnforced && (!confirmationResult || confirmationResult.success === false)) {
-      return res.status(500).json({ ok: false, error: 'Impossible d\'envoyer l\'email de vérification. Vérifiez la configuration SMTP.' });
+      return res.status(500).json({ ok: false, error: 'Impossible d\'envoyer l\'email de confirmation pour le moment. Merci de réessayer dans quelques minutes.' });
     }
     
     const shouldAutoLogin = !verificationEnforced || AUTO_LOGIN_UNVERIFIED;
@@ -10187,7 +10187,7 @@ app.post('/api/register', async (req, res) => {
       console.error('[api/register] confirmation email error:', mailErr && mailErr.message ? mailErr.message : mailErr);
     }
     if (verificationEnforced && (!confirmationResult || confirmationResult.success === false)) {
-      return res.status(500).json({ ok: false, error: 'Impossible d\'envoyer l\'email de vérification. Vérifiez la configuration SMTP.' });
+      return res.status(500).json({ ok: false, error: 'Impossible d\'envoyer l\'email de confirmation pour le moment. Merci de réessayer dans quelques minutes.' });
     }
     const shouldAutoLogin = !verificationEnforced || AUTO_LOGIN_UNVERIFIED;
     const emailVerifiedFlag = isEmailVerifiedOrBypassed(newUser);
