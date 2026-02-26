@@ -2306,7 +2306,8 @@ app.post('/create-checkout-session', async (req, res) => {
 
     const username = String(requester.username || requesterUsername).trim();
     const userEmail = String(requester.email || '').trim().toLowerCase();
-    if (!userEmail) {
+    const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(userEmail || '');
+    if (!userEmail || !validEmail) {
       return res.status(400).json({ error: 'Veuillez renseigner un email valide dans votre compte avant de payer' });
     }
 
