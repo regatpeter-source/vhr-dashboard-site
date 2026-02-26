@@ -2078,12 +2078,30 @@ function maskKey(k) {
 }
 
 app.post('/create-checkout-session', async (req, res) => {
-  const { priceId, mode, username, userEmail, password, userId } = req.body || {};
+  const { priceId, mode } = req.body || {};
   const origin = req.headers.origin || `http://localhost:${process.env.PORT || 3000}`;
   if (!priceId || !mode) return res.status(400).json({ error: 'priceId et mode sont requis' });
   
   try {
-    console.log('[Stripe] create-checkout-session request:', { priceId, mode, username, userEmail, userId, origin });
+    const decodedUser = tryDecodeUser(req);
+    const requesterUsername = String(decodedUser && decodedUser.username ? decodedUser.username : '').trim();
+    if (!requesterUsername) {
+      return res.status(401).json({ error: 'Connexion requise pour effectuer un paiement' });
+    }
+
+    const requester = getUserByUsername(requesterUsername);
+    if (!requester) {
+      return res.status(401).json({ error: 'Compte utilisateur introuvable pour le paiement' });
+    }
+
+    const username = String(requester.username || requesterUsername).trim();
+    const userEmail = normalizeEmailValue(requester.email || '');
+    if (!userEmail) {
+      return res.status(400).json({ error: 'Veuillez renseigner un email valide dans votre compte avant de payer' });
+    }
+
+    const customerId = await ensureStripeCustomerForUser(requester);
+    console.log('[Stripe] create-checkout-session request:', { priceId, mode, username, userEmail, customerId, origin });
     
     // Validate price exists and is compatible with mode
     let priceInfo = null;
@@ -2105,12 +2123,12 @@ app.post('/create-checkout-session', async (req, res) => {
       return res.status(400).json({ error: `Price type mismatch: expected a recurring price for mode=subscription (got: ${priceInfo.type})` });
     }
     
-    // Build metadata with user info if provided
-    const metadata = {};
-    if (username) metadata.username = username;
-    if (userEmail) metadata.userEmail = userEmail;
-    if (userId) metadata.userId = userId;
-    if (password) metadata.passwordHash = password; // Will be hashed in webhook (legacy clients)
+    // Build metadata strictly from authenticated account (ignore client-provided identity fields)
+    const metadata = {
+      username,
+      userEmail,
+      userId: requester.id || username
+    };
     
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -2124,9 +2142,11 @@ app.post('/create-checkout-session', async (req, res) => {
       success_url: `${origin}/pricing.html?success=1`,
       cancel_url: `${origin}/pricing.html?canceled=1`,
       metadata: metadata, // Store user registration data in metadata
-      customer_email: userEmail || undefined, // Pre-fill customer email in Stripe
+      customer: customerId,
+      customer_email: undefined,
+      client_reference_id: requester.id || username,
     });
-    console.log('[Stripe] session created:', { id: session.id, url: session.url, hasUserData: !!username });
+    console.log('[Stripe] session created:', { id: session.id, url: session.url, username, customerId });
     res.json({ url: session.url });
   } catch (err) {
     console.error('[Stripe] create-checkout-session error:', err);
