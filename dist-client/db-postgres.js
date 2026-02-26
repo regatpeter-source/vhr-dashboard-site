@@ -418,6 +418,36 @@ async function deleteUser(id) {
   }
 }
 
+async function deleteUserByUsername(username) {
+  try {
+    if (!username) return null;
+    const result = await pool.query('DELETE FROM users WHERE LOWER(username) = LOWER($1) RETURNING id, username', [username]);
+    return result.rows?.[0]?.id || result.rows?.[0]?.username || null;
+  } catch (err) {
+    console.error('[DB] Error deleting user by username:', err && err.message ? err.message : err);
+    return null;
+  }
+}
+
+async function deleteSubscriptionsByUsername(username, email = null) {
+  try {
+    if (!username && !email) return 0;
+    let deleted = 0;
+    if (username) {
+      const byUser = await pool.query('DELETE FROM subscriptions WHERE LOWER(username) = LOWER($1)', [username]);
+      deleted += byUser.rowCount || 0;
+    }
+    if (email) {
+      const byEmail = await pool.query('DELETE FROM subscriptions WHERE LOWER(email) = LOWER($1)', [email]);
+      deleted += byEmail.rowCount || 0;
+    }
+    return deleted;
+  } catch (err) {
+    console.error('[DB] Error deleting subscriptions by username/email:', err && err.message ? err.message : err);
+    return 0;
+  }
+}
+
 // ===== Subscriptions =====
 async function addSubscription(subscriptionData) {
   try {
@@ -547,6 +577,8 @@ module.exports = {
   createUser,
   updateUser,
   deleteUser,
+  deleteUserByUsername,
+  deleteSubscriptionsByUsername,
   // subscriptions
   addSubscription,
   getAllSubscriptions,

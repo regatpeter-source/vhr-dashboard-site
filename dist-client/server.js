@@ -2353,6 +2353,7 @@ app.post('/create-checkout-session', async (req, res) => {
 
 // --- Utilisateurs (simple persistence JSON: replace with a proper DB in production) ---
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const DELETED_USERS_FILE = path.join(DATA_DIR, 'deleted-users.json');
 const DEMO_STATE_FILE = path.join(DATA_DIR, 'demo-state.json');
 const INSTALLATION_STATE_FILE = path.join(DATA_DIR, 'installation.json');
 const DEMO_TRIAL_DAYS = Math.max(1, Number.parseInt(process.env.DEMO_TRIAL_DAYS || '7', 10) || 7);
@@ -2361,6 +2362,59 @@ let cachedInstallationState = null;
 
 function ensureDataDir() {
   try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { }
+}
+
+function loadDeletedUsers() {
+  ensureDataDir();
+  try {
+    if (fs.existsSync(DELETED_USERS_FILE)) {
+      const raw = fs.readFileSync(DELETED_USERS_FILE, 'utf8');
+      const parsed = JSON.parse(raw || '[]');
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.warn('[users] failed to load deleted-users file:', e && e.message ? e.message : e);
+  }
+  return [];
+}
+
+function saveDeletedUsers(list) {
+  ensureDataDir();
+  try {
+    fs.writeFileSync(DELETED_USERS_FILE, JSON.stringify(list || [], null, 2), 'utf8');
+  } catch (e) {
+    console.warn('[users] failed to save deleted-users file:', e && e.message ? e.message : e);
+  }
+}
+
+function markUserDeleted(username, email = null) {
+  if (!username && !email) return;
+  const list = loadDeletedUsers();
+  const uname = String(username || '').toLowerCase();
+  const mail = String(email || '').toLowerCase();
+  const existingIdx = list.findIndex(e => {
+    const entryUser = String(e.username || '').toLowerCase();
+    const entryEmail = String(e.email || '').toLowerCase();
+    return (!!uname && entryUser === uname) || (!!mail && entryEmail === mail);
+  });
+  const entry = {
+    username: username || null,
+    email: email || null,
+    deletedAt: new Date().toISOString()
+  };
+  if (existingIdx >= 0) list[existingIdx] = entry; else list.push(entry);
+  saveDeletedUsers(list);
+}
+
+function isUserDeletedIdentifier(identifier) {
+  const normalized = String(identifier || '').trim().toLowerCase();
+  if (!normalized) return false;
+  const list = loadDeletedUsers();
+  return list.some(e => {
+    const uname = String(e.username || '').toLowerCase();
+    const mail = String(e.email || '').toLowerCase();
+    return uname === normalized || mail === normalized;
+  });
 }
 
 function canPersistJsonStore() {
@@ -3203,11 +3257,22 @@ function ensureUserSubscription(user, options = {}) {
 
 function removeUserByUsername(username) {
   if (dbEnabled) {
-      const user = getUserByUsername(username);
+    const user = getUserByUsername(username);
+    const adapter = require('./db');
+    if (adapter.deleteUserByUsername) {
+      adapter.deleteUserByUsername(username);
+    }
+    if (adapter.deleteSubscriptionsByUsername) {
+      adapter.deleteSubscriptionsByUsername(username, user && user.email ? user.email : null);
+    }
     users = require('./db').getAllUsers();
   } else {
-    const idx = users.findIndex(u => u.username === username);
-    if (idx >= 0) users.splice(idx, 1);
+    const normalized = String(username || '').toLowerCase();
+    users = (users || []).filter(u => String(u.username || '').toLowerCase() !== normalized);
+    if (Array.isArray(subscriptions)) {
+      subscriptions = subscriptions.filter(s => String(s.username || '').toLowerCase() !== normalized);
+      saveSubscriptions();
+    }
     saveUsers();
   }
 }
@@ -3297,6 +3362,11 @@ function authMiddleware(req, res, next) {
     if (!username) {
       return res.status(401).json({ ok: false, error: 'Token invalide (utilisateur manquant)' });
     }
+    const decodedEmail = String(decoded?.email || '').trim();
+    if (isUserDeletedIdentifier(username) || (decodedEmail && isUserDeletedIdentifier(decodedEmail))) {
+      res.clearCookie('vhr_token', getCookieSecurityOptions(req));
+      return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+    }
     if (!USE_POSTGRES && !dbEnabled) {
       reloadUsers();
     }
@@ -3313,6 +3383,10 @@ function authMiddleware(req, res, next) {
         email: decoded?.email || null
       });
       return next();
+    }
+    if (isUserDeletedIdentifier(storedUser.username) || (storedUser.email && isUserDeletedIdentifier(storedUser.email))) {
+      res.clearCookie('vhr_token', getCookieSecurityOptions(req));
+      return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
     }
     req.user = elevateAdminIfAllowlisted(storedUser);
     next();
@@ -3784,6 +3858,10 @@ async function handleApiLogin(req, res) {
     return res.status(400).json({ ok: false, error: 'Identifiant et mot de passe requis' });
   }
 
+  if (isUserDeletedIdentifier(identifier)) {
+    return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+  }
+
   console.log('[api/login] attempting login for identifier:', identifier);
   if (!USE_POSTGRES) {
     reloadUsers();
@@ -3815,6 +3893,16 @@ async function handleApiLogin(req, res) {
         const remoteAuth = await attemptRemoteAuthentication(identifier, password);
         if (!remoteAuth || !remoteAuth.remoteToken) {
           return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
+        }
+
+        const remoteUsername = remoteAuth.payload && remoteAuth.payload.user && remoteAuth.payload.user.username
+          ? String(remoteAuth.payload.user.username).trim()
+          : (remoteAuth.payload && remoteAuth.payload.username ? String(remoteAuth.payload.username).trim() : '');
+        const remoteEmail = remoteAuth.payload && remoteAuth.payload.user && remoteAuth.payload.user.email
+          ? String(remoteAuth.payload.user.email).trim()
+          : (remoteAuth.payload && remoteAuth.payload.email ? String(remoteAuth.payload.email).trim() : '');
+        if (isUserDeletedIdentifier(remoteUsername) || isUserDeletedIdentifier(remoteEmail)) {
+          return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
         }
 
         const localUser = await ensureLocalUserFromRemote(remoteAuth.payload, identifier, password);
@@ -6589,13 +6677,35 @@ app.delete('/api/users/self', authMiddleware, async (req, res) => {
     
     const passwordMatch = await bcrypt.compare(password, u.passwordHash);
     if (!passwordMatch) return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
+
+    const normalizedUsername = String(u.username || req.user.username || '').trim();
+    const normalizedEmail = String(u.email || '').trim().toLowerCase() || null;
+    markUserDeleted(normalizedUsername, normalizedEmail);
     
     // Delete from PostgreSQL if enabled
     if (USE_POSTGRES && db && db.deleteUser) {
       await db.deleteUser(u.id);
+      if (db.deleteUserByUsername) {
+        await db.deleteUserByUsername(normalizedUsername);
+      }
+      if (db.pool) {
+        await db.pool.query('DELETE FROM subscriptions WHERE LOWER(username) = LOWER($1)', [normalizedUsername]);
+        if (normalizedEmail) {
+          await db.pool.query('DELETE FROM subscriptions WHERE LOWER(email) = LOWER($1)', [normalizedEmail]);
+        }
+      }
     } else {
       // Delete from JSON storage
       removeUserByUsername(req.user.username);
+    }
+
+    if (Array.isArray(subscriptions)) {
+      subscriptions = subscriptions.filter(s => {
+        const byUsername = String(s.username || '').toLowerCase() === normalizedUsername.toLowerCase();
+        const byEmail = normalizedEmail && String(s.email || '').trim().toLowerCase() === normalizedEmail;
+        return !(byUsername || byEmail);
+      });
+      saveSubscriptions();
     }
     
     res.clearCookie('vhr_token', getCookieSecurityOptions(req));
@@ -6652,6 +6762,113 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
   } catch (e) {
     console.error('[api] admin/users:', e);
     res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Delete a user (admin only)
+app.delete('/api/admin/users/:username', authMiddleware, async (req, res) => {
+  if (!ensureAllowedAdmin(req, res)) return;
+
+  const usernameParam = String(req.params.username || '').trim();
+  if (!usernameParam) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur requis' });
+
+  if (req.user && req.user.username && req.user.username.toLowerCase() === usernameParam.toLowerCase()) {
+    return res.status(400).json({ ok: false, error: 'Vous ne pouvez pas supprimer votre propre compte depuis l\'admin' });
+  }
+
+  const normalizedAllowlist = new Set((EFFECTIVE_ADMIN_ALLOWLIST || []).map(v => String(v || '').trim().toLowerCase()).filter(Boolean));
+  if (normalizedAllowlist.has(usernameParam.toLowerCase())) {
+    return res.status(403).json({ ok: false, error: 'Compte administrateur protégé' });
+  }
+
+  try {
+    let targetUser = getUserByUsername(usernameParam);
+    if (!targetUser && USE_POSTGRES && db && db.getUserByUsername) {
+      targetUser = await db.getUserByUsername(usernameParam);
+    }
+    if (!targetUser) {
+      return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
+    }
+
+    const normalizedUsername = String(targetUser.username || usernameParam).trim();
+    const normalizedEmail = String(targetUser.email || '').trim().toLowerCase() || null;
+
+    if (normalizedAllowlist.has(normalizedUsername.toLowerCase())) {
+      return res.status(403).json({ ok: false, error: 'Compte administrateur protégé' });
+    }
+
+    markUserDeleted(normalizedUsername, normalizedEmail);
+
+    if (USE_POSTGRES && db) {
+      let deleted = null;
+      if (db.deleteUser && targetUser.id) {
+        deleted = await db.deleteUser(targetUser.id);
+      }
+      if (!deleted && db.deleteUserByUsername) {
+        deleted = await db.deleteUserByUsername(normalizedUsername);
+      }
+      if (!deleted && db.getUserByUsername) {
+        const stillThere = await db.getUserByUsername(normalizedUsername);
+        if (!stillThere) deleted = normalizedUsername;
+      }
+      if (!deleted) {
+        throw new Error('Suppression PostgreSQL non confirmée');
+      }
+
+      if (db.pool) {
+        await db.pool.query('DELETE FROM subscriptions WHERE LOWER(username) = LOWER($1)', [normalizedUsername]);
+        if (normalizedEmail) {
+          await db.pool.query('DELETE FROM subscriptions WHERE LOWER(email) = LOWER($1)', [normalizedEmail]);
+        }
+      }
+    } else if (dbEnabled) {
+      const adapter = require('./db');
+      adapter.deleteUserByUsername(normalizedUsername);
+      if (adapter.deleteSubscriptionsByUsername) {
+        adapter.deleteSubscriptionsByUsername(normalizedUsername, normalizedEmail);
+      }
+      users = adapter.getAllUsers();
+    } else {
+      removeUserByUsername(normalizedUsername);
+    }
+
+    if (Array.isArray(subscriptions)) {
+      subscriptions = subscriptions.filter(s => {
+        const byUsername = String(s.username || '').toLowerCase() === normalizedUsername.toLowerCase();
+        const byEmail = normalizedEmail && String(s.email || '').trim().toLowerCase() === normalizedEmail;
+        return !(byUsername || byEmail);
+      });
+      saveSubscriptions();
+    }
+
+    try {
+      const allLicenses = loadLicenses();
+      if (Array.isArray(allLicenses) && allLicenses.length) {
+        const filtered = allLicenses.filter(l => {
+          const byUsername = String(l.username || '').toLowerCase() === normalizedUsername.toLowerCase();
+          const byEmail = normalizedEmail && String(l.email || '').trim().toLowerCase() === normalizedEmail;
+          return !(byUsername || byEmail);
+        });
+        if (filtered.length !== allLicenses.length) {
+          saveLicenses(filtered);
+        }
+      }
+    } catch (licenseErr) {
+      console.warn('[api] admin/delete-user license cleanup warning:', licenseErr && licenseErr.message ? licenseErr.message : licenseErr);
+    }
+
+    users = (users || []).filter(u => String(u.username || '').toLowerCase() !== normalizedUsername.toLowerCase());
+
+    try {
+      syncUserToTargets({ username: normalizedUsername, email: normalizedEmail, role: 'deleted', status: 'deleted', isDeleted: true }, { reason: 'admin-delete-user' });
+    } catch (syncErr) {
+      console.warn('[api] admin/delete-user sync warning:', syncErr && syncErr.message ? syncErr.message : syncErr);
+    }
+
+    return res.json({ ok: true, message: 'Utilisateur supprimé' });
+  } catch (e) {
+    console.error('[api] admin/delete-user:', e);
+    return res.status(500).json({ ok: false, error: 'Erreur serveur lors de la suppression' });
   }
 });
 

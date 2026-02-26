@@ -161,6 +161,20 @@ function deleteUserByUsername(username) {
   return true;
 }
 
+function deleteSubscriptionsByUsername(username, email = null) {
+  if (!enabled) return 0;
+  let deleted = 0;
+  if (username) {
+    const resultByUsername = db.prepare('DELETE FROM subscriptions WHERE LOWER(username) = LOWER(?)').run(username);
+    deleted += resultByUsername.changes || 0;
+  }
+  if (email) {
+    const resultByEmail = db.prepare('DELETE FROM subscriptions WHERE LOWER(email) = LOWER(?)').run(email);
+    deleted += resultByEmail.changes || 0;
+  }
+  return deleted;
+}
+
 // ===== Messages =====
 function addMessage(messageData) {
   if (!enabled) return null;
@@ -235,4 +249,4 @@ function findSubscriptionByStripeId(stripeId) {
   return db.prepare('SELECT * FROM subscriptions WHERE stripeSubscriptionId = ?').get(stripeId);
 }
 
-module.exports = { initSqlite, isEnabled, addOrUpdateUser, getAllUsers, findUserByUsername, updateUserFields, deleteUserByUsername, addMessage, getAllMessages, getUnreadMessages, updateMessage, deleteMessage, addSubscription, getAllSubscriptions, getActiveSubscriptions, updateSubscription, findSubscriptionByStripeId, findUserByStripeCustomerId };
+module.exports = { initSqlite, isEnabled, addOrUpdateUser, getAllUsers, findUserByUsername, updateUserFields, deleteUserByUsername, deleteSubscriptionsByUsername, addMessage, getAllMessages, getUnreadMessages, updateMessage, deleteMessage, addSubscription, getAllSubscriptions, getActiveSubscriptions, updateSubscription, findSubscriptionByStripeId, findUserByStripeCustomerId };
