@@ -301,6 +301,8 @@
         }
       } else { 
         if (res && res.code === 'email_not_verified') {
+          clearAuthToken();
+          await api('/api/logout', { method: 'POST' });
           renderVerificationPrompt(res.email);
         } else if (res && res.code === 'secondary_electron_only') {
           loginMessage.textContent = 'Compte secondaire non autorisé sur le site vitrine.';
@@ -330,6 +332,8 @@
     if (res && res.ok) { 
       if (res.token) saveAuthToken(res.token);
       if (res.verificationRequired && !res.autoLogin) {
+        clearAuthToken();
+        await api('/api/logout', { method: 'POST' });
         pendingVerificationEmail = email;
         renderVerificationPrompt(email);
         return;

@@ -1593,8 +1593,41 @@ async function sendAccountConfirmationEmail(user, options = {}) {
     console.log('[email] ✓ Confirmation envoyée à', normalizedUser.email, 'messageId:', info && info.messageId);
     return { success: true, verificationLink };
   } catch (e) {
-    console.error('[email] ✗ Échec envoi confirmation:', e && e.message);
-    return { success: false, error: e && e.message, verificationLink };
+    const errorMessage = e && e.message ? e.message : 'send_failed';
+    const errorResponse = e && e.response ? String(e.response) : '';
+    const senderIssuePattern = /sender|from|not allowed|unauthorized|invalid\s+from|rejected/i;
+    const senderLooksInvalid = senderIssuePattern.test(`${errorMessage} ${errorResponse}`);
+    const fallbackFrom = (emailUser || '').toString().trim();
+    const currentFrom = (mailOptions.from || '').toString().trim().toLowerCase();
+    const canRetryWithCredentialSender = !!fallbackFrom && currentFrom !== fallbackFrom.toLowerCase();
+
+    if (senderLooksInvalid && canRetryWithCredentialSender) {
+      try {
+        const retryOptions = { ...mailOptions, from: fallbackFrom };
+        const retryInfo = await emailTransporter.sendMail(retryOptions);
+        console.warn('[email] ⚠️ Confirmation envoyée après fallback expéditeur:', fallbackFrom, 'messageId:', retryInfo && retryInfo.messageId);
+        return { success: true, verificationLink, fallbackFrom };
+      } catch (retryErr) {
+        console.error('[email] ✗ Échec fallback expéditeur:', retryErr && retryErr.message ? retryErr.message : retryErr);
+      }
+    }
+
+    // Important: if send failed, clear sentAt cooldown so user can resend immediately
+    if (needsVerification && normalizedUser.username) {
+      try {
+        const freshUser = await findUserByUsernameAsync(normalizedUser.username);
+        if (freshUser) {
+          freshUser.emailVerificationSentAt = null;
+          freshUser.updatedAt = new Date().toISOString();
+          persistUser(freshUser);
+        }
+      } catch (clearErr) {
+        console.warn('[email] Unable to clear emailVerificationSentAt after failure:', clearErr && clearErr.message ? clearErr.message : clearErr);
+      }
+    }
+
+    console.error('[email] ✗ Échec envoi confirmation:', errorMessage, '| code:', e && e.code ? e.code : 'n/a', '| response:', errorResponse || 'n/a');
+    return { success: false, error: errorMessage, verificationLink };
   }
 }
 
@@ -4922,6 +4955,9 @@ app.post('/api/auth/register', async (req, res) => {
     if (shouldAutoLogin) {
       token = jwt.sign({ username: newUser.username, role: newUser.role, emailVerified: emailVerifiedFlag }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
       res.cookie('vhr_token', token, buildAuthCookieOptions(req));
+    } else {
+      // Prevent stale authenticated cookie from a previous session
+      res.clearCookie('vhr_token', getCookieSecurityOptions(req));
     }
 
     res.json({ 
@@ -10159,6 +10195,9 @@ app.post('/api/register', async (req, res) => {
     if (shouldAutoLogin) {
       token = jwt.sign({ username: newUser.username, role: newUser.role, emailVerified: emailVerifiedFlag }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
       res.cookie('vhr_token', token, buildAuthCookieOptions(req));
+    } else {
+      // Prevent stale authenticated cookie from a previous session
+      res.clearCookie('vhr_token', getCookieSecurityOptions(req));
     }
     res.json({ 
       ok: true, 
