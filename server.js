@@ -2196,21 +2196,34 @@ function saveDeletedUsers(list) {
   }
 }
 
-function markUserDeleted(username) {
-  if (!username) return;
+function markUserDeleted(username, email = null) {
+  if (!username && !email) return;
   const list = loadDeletedUsers();
-  const uname = String(username).toLowerCase();
-  const existingIdx = list.findIndex(e => String(e.username || '').toLowerCase() === uname);
-  const entry = { username, deletedAt: new Date().toISOString() };
+  const uname = String(username || '').toLowerCase();
+  const mail = String(email || '').toLowerCase();
+  const existingIdx = list.findIndex(e => {
+    const entryUser = String(e.username || '').toLowerCase();
+    const entryEmail = String(e.email || '').toLowerCase();
+    return (!!uname && entryUser === uname) || (!!mail && entryEmail === mail);
+  });
+  const entry = { username: username || null, email: email || null, deletedAt: new Date().toISOString() };
   if (existingIdx >= 0) list[existingIdx] = entry; else list.push(entry);
   saveDeletedUsers(list);
 }
 
-function isUsernameDeleted(username) {
-  if (!username) return false;
-  const uname = String(username).toLowerCase();
+function isUserDeletedIdentifier(identifier) {
+  const normalized = String(identifier || '').trim().toLowerCase();
+  if (!normalized) return false;
   const list = loadDeletedUsers();
-  return list.some(e => String(e.username || '').toLowerCase() === uname);
+  return list.some(e => {
+    const uname = String(e.username || '').toLowerCase();
+    const mail = String(e.email || '').toLowerCase();
+    return uname === normalized || mail === normalized;
+  });
+}
+
+function isUsernameDeleted(username) {
+  return isUserDeletedIdentifier(username);
 }
 
 function normalizeEmailValue(rawEmail) {
@@ -2449,7 +2462,11 @@ function isUserDeletedOrDisabled(user) {
   if (!user) return false;
   const normalized = normalizeUserRecord(user);
   const status = (normalized.status || '').toLowerCase();
-  return normalized.isDeleted === true
+  const tombstonedByUsername = isUserDeletedIdentifier(normalized.username);
+  const tombstonedByEmail = normalized.email ? isUserDeletedIdentifier(normalized.email) : false;
+  return tombstonedByUsername
+    || tombstonedByEmail
+    || normalized.isDeleted === true
     || normalized.isDisabled === true
     || !!normalized.deletedAt
     || status === 'deleted'
@@ -3735,6 +3752,10 @@ async function proxyRemoteUserStatus(req, res, pathOverride) {
 
 async function syncLocalUserWithRemoteAccess(user, identifier, password) {
   if (!user || !password) return user;
+  if (isUserDeletedIdentifier(user.username) || (user.email && isUserDeletedIdentifier(user.email))) {
+    console.warn(`[remote-sync] skip refresh for deleted account ${user.username}`);
+    return user;
+  }
   const now = Date.now();
   const cooldownKey = (user.username || identifier || '').toLowerCase();
   const lastSync = remoteSyncCooldown.get(cooldownKey) || 0;
@@ -3789,6 +3810,11 @@ async function syncLocalUserWithRemoteAccess(user, identifier, password) {
 async function ensureLocalUserFromRemote(remoteUser = {}, password = '', fallbackUsername = '') {
   const username = (remoteUser.username || remoteUser.name || fallbackUsername || '').toString().trim();
   if (!username) return null;
+  const remoteEmail = normalizeEmailValue(remoteUser.email || null);
+  if (isUserDeletedIdentifier(username) || (remoteEmail && isUserDeletedIdentifier(remoteEmail))) {
+    console.warn(`[remote-sync] blocked local auto-provision for deleted identifier ${username}`);
+    return null;
+  }
   const passwordHash = await bcrypt.hash(password, 10);
   const now = new Date().toISOString();
   const baseUser = await findUserByUsernameAsync(username);
@@ -3850,6 +3876,9 @@ app.post('/api/login', async (req, res) => {
   const loginIdentifier = (username || '').toString().trim();
   const normalizedLoginIdentifier = loginIdentifier.toLowerCase();
   console.log('[api/login] attempting login for:', loginIdentifier);
+  if (isUserDeletedIdentifier(loginIdentifier)) {
+    return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+  }
   if (!USE_POSTGRES) {
     reloadUsers();
   }
@@ -3869,7 +3898,7 @@ app.post('/api/login', async (req, res) => {
   }
   
   if (!user) {
-    if (isUsernameDeleted(username)) {
+    if (isUserDeletedIdentifier(loginIdentifier)) {
       return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
     }
     const cooldownUntil = remoteAuthFailureCooldown.get(normalizedLoginIdentifier) || 0;
@@ -4419,12 +4448,11 @@ app.post('/api/admin/sync-user', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'username requis' });
   }
 
-  if (isUsernameDeleted(username)) {
-    return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
-  }
-
   const emailProvided = Object.prototype.hasOwnProperty.call(payload, 'email');
   const normalizedEmail = normalizeEmailValue(email);
+  if (isUserDeletedIdentifier(username) || (normalizedEmail && isUserDeletedIdentifier(normalizedEmail))) {
+    return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+  }
 
   try {
     let finalHash = passwordHash || null;
@@ -4794,6 +4822,9 @@ app.post('/api/auth/login', async (req, res) => {
   
   const loginIdentifier = String(email).trim();
   console.log('[api/auth/login] attempting login for identifier:', loginIdentifier);
+  if (isUserDeletedIdentifier(loginIdentifier)) {
+    return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+  }
   
   // Trouver l'utilisateur par email, sinon par username (le champ UI accepte les deux)
   let user = null;
@@ -6764,7 +6795,7 @@ app.delete('/api/admin/users/:username', authMiddleware, async (req, res) => {
     }
 
     // Keep a tombstone to prevent auto-recreation from remote sync/login races
-    markUserDeleted(normalizedUsername);
+    markUserDeleted(normalizedUsername, normalizedEmail);
 
     if (USE_POSTGRES && db) {
       let deletedId = null;
