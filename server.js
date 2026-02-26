@@ -1160,11 +1160,11 @@ function getDemoRemainingDays(user) {
 const LICENSES_FILE = path.join(__dirname, 'data', 'licenses.json');
 
 // ========== EMAIL CONFIGURATION ==========
-// Support both Brevo and Gmail configurations
-const emailUser = process.env.BREVO_SMTP_USER || process.env.EMAIL_USER;
-const emailPass = process.env.BREVO_SMTP_PASS || process.env.EMAIL_PASS;
-const emailHost = process.env.BREVO_SMTP_HOST || process.env.EMAIL_HOST || 'smtp-relay.brevo.com';
-const emailPort = parseInt(process.env.BREVO_SMTP_PORT || process.env.EMAIL_PORT || '587');
+// Support Brevo + legacy EMAIL_* + generic SMTP_* configurations
+const emailUser = process.env.BREVO_SMTP_USER || process.env.EMAIL_USER || process.env.SMTP_USER;
+const emailPass = process.env.BREVO_SMTP_PASS || process.env.EMAIL_PASS || process.env.SMTP_PASS;
+const emailHost = process.env.BREVO_SMTP_HOST || process.env.EMAIL_HOST || process.env.SMTP_HOST || 'smtp-relay.brevo.com';
+const emailPort = parseInt(process.env.BREVO_SMTP_PORT || process.env.EMAIL_PORT || process.env.SMTP_PORT || '587', 10);
 
 const emailTransporter = nodemailer.createTransport({
   host: emailHost,
@@ -6071,11 +6071,11 @@ app.get('/api/test/generate-license', async (req, res) => {
 // TEST ROUTE: Validate email configuration
 app.get('/api/test/email-config', async (req, res) => {
   try {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    if (!emailUser || !emailPass) {
       return res.json({ 
         ok: false, 
         configured: false,
-        message: 'Email not configured. Add EMAIL_USER and EMAIL_PASS to .env' 
+        message: 'Email not configured. Add BREVO_SMTP_USER/BREVO_SMTP_PASS, EMAIL_USER/EMAIL_PASS or SMTP_USER/SMTP_PASS to .env' 
       });
     }
     
@@ -6083,8 +6083,9 @@ app.get('/api/test/email-config', async (req, res) => {
     res.json({ 
       ok: true, 
       configured: true,
-      host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-      user: process.env.EMAIL_USER,
+      host: emailHost,
+      port: emailPort,
+      user: emailUser,
       message: 'Email configuration is valid' 
     });
   } catch (e) {
