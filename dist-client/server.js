@@ -2377,6 +2377,7 @@ const DELETED_USERS_FILE = path.join(DATA_DIR, 'deleted-users.json');
 const DEMO_STATE_FILE = path.join(DATA_DIR, 'demo-state.json');
 const INSTALLATION_STATE_FILE = path.join(DATA_DIR, 'installation.json');
 const DEMO_TRIAL_DAYS = Math.max(1, Number.parseInt(process.env.DEMO_TRIAL_DAYS || '7', 10) || 7);
+const REQUIRE_EMAIL_VERIFICATION = process.env.REQUIRE_EMAIL_VERIFICATION === '1';
 let cachedDemoState = null;
 let cachedInstallationState = null;
 
@@ -2435,6 +2436,47 @@ function isUserDeletedIdentifier(identifier) {
     const mail = String(e.email || '').toLowerCase();
     return uname === normalized || mail === normalized;
   });
+}
+
+function isEmailVerified(user) {
+  if (!user) return false;
+  if (user.emailVerified === undefined && user.emailverified === undefined) return true;
+  return !!(user.emailVerified ?? user.emailverified);
+}
+
+function shouldEnforceEmailVerification(user) {
+  if (!REQUIRE_EMAIL_VERIFICATION) return false;
+  if (!user) return REQUIRE_EMAIL_VERIFICATION;
+
+  const role = String(user.role || '').toLowerCase();
+  if (role === 'admin') return false;
+
+  try {
+    if (typeof isAllowedAdminUser === 'function') {
+      const username = String(user.username || '').trim().toLowerCase();
+      if (isAllowedAdminUser(username) || isAllowedAdminUser(user)) return false;
+    }
+  } catch (e) {
+    // fallback to strict behavior if allowlist check fails
+  }
+
+  return true;
+}
+
+function isUserDeletedOrDisabled(user) {
+  if (!user) return false;
+  const normalizedUsername = String(user.username || '').trim();
+  const normalizedEmail = String(user.email || '').trim();
+  const status = String(user.status || user.accountStatus || '').toLowerCase();
+
+  return (normalizedUsername && isUserDeletedIdentifier(normalizedUsername))
+    || (normalizedEmail && isUserDeletedIdentifier(normalizedEmail))
+    || user.isDeleted === true
+    || user.isDisabled === true
+    || !!user.deletedAt
+    || !!user.disabledAt
+    || status === 'deleted'
+    || status === 'disabled';
 }
 
 function canPersistJsonStore() {
@@ -3757,6 +3799,11 @@ async function ensureLocalUserFromRemote(remotePayload, identifier, password) {
     console.warn('[remote-login] remote payload did not provide a usable username or identifier', { identifier, remoteUser });
     return null;
   }
+  const remoteEmail = String(remoteUser.email || '').trim();
+  if (isUserDeletedIdentifier(username) || (normalizedIdentifier && isUserDeletedIdentifier(normalizedIdentifier)) || (remoteEmail && isUserDeletedIdentifier(remoteEmail))) {
+    console.warn(`[remote-login] blocked local auto-provision for deleted identifier ${username}`);
+    return null;
+  }
   const hashedPassword = await bcrypt.hash(password, 10);
   reloadUsers();
   let existing = getUserByUsername(username);
@@ -3941,6 +3988,21 @@ async function handleApiLogin(req, res) {
         return res.status(401).json({ ok: false, error: 'Utilisateur inconnu' });
       }
     }
+  }
+
+  if (isUserDeletedOrDisabled(user)) {
+    return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+  }
+
+  const verificationEnforced = shouldEnforceEmailVerification(user);
+  if (verificationEnforced && !isEmailVerified(user)) {
+    return res.status(403).json({
+      ok: false,
+      error: 'Adresse email non vérifiée. Consultez vos emails pour valider votre compte.',
+      code: 'email_not_verified',
+      verificationRequired: true,
+      email: user.email || null
+    });
   }
 
   if (!isPrimaryAccount(user) && !isElectronRequest(req)) {
@@ -4496,6 +4558,11 @@ app.post('/api/admin/sync-user', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'username requis' });
   }
 
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (isUserDeletedIdentifier(username) || (normalizedEmail && isUserDeletedIdentifier(normalizedEmail))) {
+    return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+  }
+
   try {
     let finalHash = passwordHash || null;
     if (!finalHash && password) {
@@ -4836,6 +4903,11 @@ app.post('/api/auth/login', async (req, res) => {
   if (!email || !password) {
     return res.status(400).json({ ok: false, error: 'Email et mot de passe requis' });
   }
+
+  const loginIdentifier = String(email).trim();
+  if (isUserDeletedIdentifier(loginIdentifier)) {
+    return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+  }
   
   console.log('[api/auth/login] attempting login for email:', email);
   
@@ -4885,6 +4957,21 @@ app.post('/api/auth/login', async (req, res) => {
       console.warn('[remote-sync] auth login autoprovision failed:', err && err.message ? err.message : err);
       return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
     }
+  }
+
+  if (isUserDeletedOrDisabled(user)) {
+    return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+  }
+
+  const verificationEnforced = shouldEnforceEmailVerification(user);
+  if (verificationEnforced && !isEmailVerified(user)) {
+    return res.status(403).json({
+      ok: false,
+      error: 'Adresse email non vérifiée. Consultez vos emails pour valider votre compte.',
+      code: 'email_not_verified',
+      verificationRequired: true,
+      email: user.email || null
+    });
   }
 
   if (!isPrimaryAccount(user) && !isElectronRequest(req)) {
