@@ -352,7 +352,9 @@ async function loadSubscriptions() {
       tbody.innerHTML = '';
       data.subscriptions.forEach(sub => {
         const row = tbody.insertRow();
-        const status = sub.status === 'active' ? 'badge-active' : 'badge-inactive';
+        const normalizedStatus = String(sub.status || '').toLowerCase();
+        const status = normalizedStatus === 'active' ? 'badge-active' : 'badge-inactive';
+        const canDelete = normalizedStatus !== 'active';
         row.innerHTML = `
           <td>${sub.username}</td>
           <td>${sub.email}</td>
@@ -360,7 +362,10 @@ async function loadSubscriptions() {
           <td><span class="badge ${status}">${sub.status}</span></td>
           <td>${new Date(sub.startDate).toLocaleDateString()}</td>
           <td>${sub.endDate ? new Date(sub.endDate).toLocaleDateString() : 'N/A'}</td>
-          <td><button class="action-btn action-btn-view" onclick="viewSubscription('${sub.id}')">View</button></td>
+          <td>
+            <button class="action-btn action-btn-view" onclick="viewSubscription('${sub.id}')">View</button>
+            ${canDelete ? `<button class="action-btn action-btn-delete" onclick="deleteInactiveSubscription('${sub.id}')">Delete inactive</button>` : ''}
+          </td>
         `;
       });
     } else {
@@ -369,6 +374,28 @@ async function loadSubscriptions() {
   } catch (e) {
     console.error('Error loading subscriptions:', e);
     document.getElementById('subscriptionsMessage').innerHTML = `<div class="error">Error loading subscriptions</div>`;
+  }
+}
+
+async function deleteInactiveSubscription(subscriptionId) {
+  const id = String(subscriptionId || '').trim();
+  if (!id) return alert('ID abonnement manquant');
+  if (!confirm(`Supprimer cet abonnement inactif (${id}) de la liste admin ?`)) return;
+
+  try {
+    const res = await authFetch(`${API_BASE}/admin/subscriptions/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      return alert('❌ ' + (data.error || 'Erreur serveur'));
+    }
+    alert('✅ Abonnement inactif supprimé');
+    await loadSubscriptions();
+    await loadStats();
+  } catch (e) {
+    console.error('[subscriptions] delete inactive error:', e);
+    alert('❌ Erreur lors de la suppression: ' + e.message);
   }
 }
 

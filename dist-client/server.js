@@ -2748,11 +2748,40 @@ if (USE_POSTGRES && db && db.getUsers) {
 // --- Messages & Subscriptions (in-memory storage with JSON persistence) ---
 const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
 const SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'subscriptions.json');
+const HIDDEN_SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'hidden-subscriptions.json');
 
 let messages = [];
 let subscriptions = [];
+let hiddenSubscriptionIds = new Set();
 let messageIdCounter = 1;
 let subscriptionIdCounter = 1;
+
+function loadHiddenSubscriptionIds() {
+  try {
+    ensureDataDir();
+    if (!fs.existsSync(HIDDEN_SUBSCRIPTIONS_FILE)) return new Set();
+    const raw = fs.readFileSync(HIDDEN_SUBSCRIPTIONS_FILE, 'utf8').replace(/^\uFEFF/, '').trim();
+    const parsed = JSON.parse(raw || '[]');
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.map(v => String(v || '').trim()).filter(Boolean));
+  } catch (e) {
+    console.warn('[subscriptions] hidden ids load error:', e && e.message ? e.message : e);
+    return new Set();
+  }
+}
+
+function saveHiddenSubscriptionIds() {
+  try {
+    ensureDataDir();
+    fs.writeFileSync(HIDDEN_SUBSCRIPTIONS_FILE, JSON.stringify(Array.from(hiddenSubscriptionIds), null, 2), 'utf8');
+    return true;
+  } catch (e) {
+    console.warn('[subscriptions] hidden ids save error:', e && e.message ? e.message : e);
+    return false;
+  }
+}
+
+hiddenSubscriptionIds = loadHiddenSubscriptionIds();
 
 const relayVideoSenders = new Map(); // serial -> ws
 const relayAudioSenders = new Map(); // serial -> ws
@@ -7154,7 +7183,12 @@ app.get('/api/admin/subscriptions', authMiddleware, async (req, res) => {
         }));
     }
 
-    res.json({ ok: true, subscriptions: subs });
+    const visibleSubs = (subs || []).filter(s => {
+      const id = String(s?.id || s?.stripeSubscriptionId || '').trim();
+      return id ? !hiddenSubscriptionIds.has(id) : true;
+    });
+
+    res.json({ ok: true, subscriptions: visibleSubs });
   } catch (e) {
     console.error('[api] admin/subscriptions:', e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -7208,11 +7242,103 @@ app.get('/api/admin/subscriptions/active', authMiddleware, async (req, res) => {
       subs = subscriptions.filter(s => s.status === 'active');
     }
 
-    const activeSubs = (subs || []).filter(s => String(s.status || '').toLowerCase() === 'active');
+    const activeSubs = (subs || []).filter(s => {
+      const statusActive = String(s.status || '').toLowerCase() === 'active';
+      if (!statusActive) return false;
+      const id = String(s?.id || s?.stripeSubscriptionId || '').trim();
+      return id ? !hiddenSubscriptionIds.has(id) : true;
+    });
     res.json({ ok: true, subscriptions: activeSubs });
   } catch (e) {
     console.error('[api] admin/subscriptions/active:', e);
     res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Delete an inactive subscription from admin list
+app.delete('/api/admin/subscriptions/:id', authMiddleware, async (req, res) => {
+  if (!ensureAllowedAdmin(req, res)) return;
+  try {
+    const id = String(req.params.id || '').trim();
+    if (!id) {
+      return res.status(400).json({ ok: false, error: 'ID abonnement manquant' });
+    }
+
+    const isPlaceholder = id.startsWith('sub_user_');
+    let status = '';
+
+    if (stripe && id.startsWith('sub_') && !isPlaceholder) {
+      try {
+        const stripeSub = await stripe.subscriptions.retrieve(id);
+        status = String(stripeSub?.status || '').toLowerCase();
+      } catch (e) {
+        status = '';
+      }
+    }
+
+    if (!status) {
+      if (USE_POSTGRES && db && db.pool) {
+        const byStripeId = await db.pool.query('SELECT status FROM subscriptions WHERE stripesubscriptionid = $1 LIMIT 1', [id]);
+        const byTextId = await db.pool.query('SELECT status FROM subscriptions WHERE CAST(id AS TEXT) = $1 LIMIT 1', [id]);
+        status = String(byStripeId.rows?.[0]?.status || byTextId.rows?.[0]?.status || '').toLowerCase();
+      } else if (dbEnabled) {
+        const localSubs = require('./db').getAllSubscriptions?.() || [];
+        const found = localSubs.find(s => String(s?.id || '') === id || String(s?.stripeSubscriptionId || '') === id);
+        status = String(found?.status || '').toLowerCase();
+      } else {
+        const found = (subscriptions || []).find(s => String(s?.id || '') === id || String(s?.stripeSubscriptionId || '') === id);
+        status = String(found?.status || '').toLowerCase();
+      }
+    }
+
+    if (status === 'active') {
+      return res.status(400).json({ ok: false, error: 'Suppression refusée: abonnement actif' });
+    }
+
+    let removed = 0;
+
+    if (USE_POSTGRES && db && db.pool) {
+      const deleteRes = await db.pool.query('DELETE FROM subscriptions WHERE CAST(id AS TEXT) = $1 OR stripesubscriptionid = $1', [id]);
+      removed += deleteRes.rowCount || 0;
+      await db.pool.query("UPDATE users SET subscriptionstatus = NULL, subscriptionid = NULL, updatedat = NOW() WHERE subscriptionid = $1 AND LOWER(COALESCE(subscriptionstatus,'')) <> 'active'", [id]);
+    } else if (dbEnabled) {
+      const adapter = require('./db');
+      if (adapter.deleteSubscriptionByIdentifier) {
+        removed += Number(adapter.deleteSubscriptionByIdentifier(id) || 0);
+      }
+    }
+
+    if (Array.isArray(subscriptions)) {
+      const before = subscriptions.length;
+      subscriptions = subscriptions.filter(s => {
+        const entryId = String(s?.id || '').trim();
+        const stripeId = String(s?.stripeSubscriptionId || '').trim();
+        return entryId !== id && stripeId !== id;
+      });
+      const diff = before - subscriptions.length;
+      if (diff > 0) {
+        removed += diff;
+        saveSubscriptions();
+      }
+    }
+
+    for (const user of users || []) {
+      if (!user) continue;
+      if (String(user.subscriptionId || '') === id && String(user.subscriptionStatus || '').toLowerCase() !== 'active') {
+        user.subscriptionId = null;
+        user.subscriptionStatus = null;
+        user.updatedAt = new Date().toISOString();
+        persistUser(user);
+      }
+    }
+
+    hiddenSubscriptionIds.add(id);
+    saveHiddenSubscriptionIds();
+
+    return res.json({ ok: true, removed, hidden: true });
+  } catch (e) {
+    console.error('[api] admin/delete-subscription:', e);
+    return res.status(500).json({ ok: false, error: 'Erreur suppression abonnement' });
   }
 });
 

@@ -249,4 +249,20 @@ function findSubscriptionByStripeId(stripeId) {
   return db.prepare('SELECT * FROM subscriptions WHERE stripeSubscriptionId = ?').get(stripeId);
 }
 
-module.exports = { initSqlite, isEnabled, addOrUpdateUser, getAllUsers, findUserByUsername, updateUserFields, deleteUserByUsername, deleteSubscriptionsByUsername, addMessage, getAllMessages, getUnreadMessages, updateMessage, deleteMessage, addSubscription, getAllSubscriptions, getActiveSubscriptions, updateSubscription, findSubscriptionByStripeId, findUserByStripeCustomerId };
+function deleteSubscriptionByIdentifier(identifier) {
+  if (!enabled || !identifier) return 0;
+  const key = String(identifier).trim();
+  if (!key) return 0;
+
+  const deleteByTextId = db.prepare('DELETE FROM subscriptions WHERE CAST(id AS TEXT) = ?');
+  const deleteByStripeId = db.prepare('DELETE FROM subscriptions WHERE stripeSubscriptionId = ?');
+  const tx = db.transaction((value) => {
+    const r1 = deleteByTextId.run(value);
+    const r2 = deleteByStripeId.run(value);
+    return (r1.changes || 0) + (r2.changes || 0);
+  });
+
+  return tx(key);
+}
+
+module.exports = { initSqlite, isEnabled, addOrUpdateUser, getAllUsers, findUserByUsername, updateUserFields, deleteUserByUsername, deleteSubscriptionsByUsername, addMessage, getAllMessages, getUnreadMessages, updateMessage, deleteMessage, addSubscription, getAllSubscriptions, getActiveSubscriptions, updateSubscription, findSubscriptionByStripeId, deleteSubscriptionByIdentifier, findUserByStripeCustomerId };
