@@ -1276,17 +1276,18 @@ function buildUserAccessSummary(user, options = {}) {
 
   const hasPerpetualLicense = activeLicenses.some(l => l.type === 'perpetual');
   const hasSubscriptionLicense = activeLicenses.some(l => l.type === 'subscription');
-  const hasDemo = Boolean(user.demoStartDate);
+  const subscriptionStatusRaw = String(user.subscriptionStatus || user.subscriptionstatus || 'none').toLowerCase();
+  const hasDemo = Boolean(user.demoStartDate || user.demostartdate);
   const demoExtensionDays = getDemoExtensionDays(user);
   const demoRemainingDays = getDemoRemainingDays(user);
   const demoExpired = isDemoExpired(user);
   const demoExpiresAt = user.demoStartDate
     ? new Date(new Date(user.demoStartDate).getTime() + demoConfig.DEMO_DURATION_MS + (demoExtensionDays * 24 * 60 * 60 * 1000)).toISOString()
     : null;
-  const hasActiveSubscription = (user.subscriptionStatus === 'active') || hasSubscriptionLicense;
+  const hasActiveSubscription = (subscriptionStatusRaw === 'active') || hasSubscriptionLicense;
 
   return {
-    demoStartDate: user.demoStartDate || null,
+    demoStartDate: user.demoStartDate || user.demostartdate || null,
     demoExpiresAt,
     demoRemainingDays,
     demoExtensionDays,
@@ -1294,7 +1295,7 @@ function buildUserAccessSummary(user, options = {}) {
     demoExpired,
     hasDemo,
     hasActiveSubscription,
-    subscriptionStatus: hasActiveSubscription ? 'active' : (user.subscriptionStatus || 'none'),
+    subscriptionStatus: hasActiveSubscription ? 'active' : subscriptionStatusRaw,
     hasPerpetualLicense,
     hasSubscriptionLicense,
     licenseCount: activeLicenses.length,
@@ -7392,6 +7393,68 @@ app.delete('/api/admin/subscriptions/:id', authMiddleware, async (req, res) => {
   } catch (e) {
     console.error('[api] admin/delete-subscription:', e);
     return res.status(500).json({ ok: false, error: 'Erreur suppression abonnement' });
+  }
+});
+
+// Bulk purge/hide inactive subscriptions from admin list
+app.post('/api/admin/subscriptions/purge-inactive', authMiddleware, async (req, res) => {
+  if (!ensureAllowedAdmin(req, res)) return;
+  try {
+    const inactiveIds = new Set();
+
+    if (stripe) {
+      try {
+        const list = await stripe.subscriptions.list({ status: 'all', limit: 100 });
+        for (const row of list?.data || []) {
+          const status = String(row?.status || '').toLowerCase();
+          const id = String(row?.id || '').trim();
+          if (id && status && status !== 'active') inactiveIds.add(id);
+        }
+      } catch (e) {
+        console.warn('[admin/subscriptions] purge stripe scan failed:', e && e.message ? e.message : e);
+      }
+    }
+
+    if (USE_POSTGRES && db && db.pool) {
+      const pgRows = await db.pool.query("SELECT id, stripesubscriptionid, status FROM subscriptions WHERE LOWER(COALESCE(status,'')) <> 'active'");
+      for (const row of pgRows.rows || []) {
+        const id = String(row?.stripesubscriptionid || row?.id || '').trim();
+        if (id) inactiveIds.add(id);
+      }
+      await db.pool.query("DELETE FROM subscriptions WHERE LOWER(COALESCE(status,'')) <> 'active'");
+    } else if (dbEnabled) {
+      const adapter = require('./db');
+      const localSubs = adapter.getAllSubscriptions?.() || [];
+      for (const sub of localSubs) {
+        const status = String(sub?.status || '').toLowerCase();
+        const id = String(sub?.stripeSubscriptionId || sub?.id || '').trim();
+        if (status !== 'active' && id) {
+          inactiveIds.add(id);
+          if (adapter.deleteSubscriptionByIdentifier) {
+            adapter.deleteSubscriptionByIdentifier(id);
+          }
+        }
+      }
+    }
+
+    if (Array.isArray(subscriptions)) {
+      subscriptions = subscriptions.filter(s => {
+        const status = String(s?.status || '').toLowerCase();
+        if (status === 'active') return true;
+        const id = String(s?.stripeSubscriptionId || s?.id || '').trim();
+        if (id) inactiveIds.add(id);
+        return false;
+      });
+      saveSubscriptions();
+    }
+
+    inactiveIds.forEach(id => hiddenSubscriptionIds.add(id));
+    saveHiddenSubscriptionIds();
+
+    return res.json({ ok: true, purged: inactiveIds.size, hidden: inactiveIds.size });
+  } catch (e) {
+    console.error('[api] admin/purge-inactive-subscriptions:', e);
+    return res.status(500).json({ ok: false, error: 'Erreur purge abonnements inactifs' });
   }
 });
 

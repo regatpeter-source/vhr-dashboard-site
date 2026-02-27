@@ -2265,6 +2265,11 @@ function normalizeUserRecord(user) {
   normalized.updatedAt = normalized.updatedAt || normalized.updatedat || null;
   normalized.lastLogin = normalized.lastLogin || normalized.lastlogin || null;
   normalized.lastActivity = normalized.lastActivity || normalized.lastactivity || null;
+  normalized.stripeCustomerId = normalized.stripeCustomerId || normalized.stripecustomerid || null;
+  normalized.subscriptionStatus = normalized.subscriptionStatus || normalized.subscriptionstatus || null;
+  normalized.subscriptionId = normalized.subscriptionId || normalized.subscriptionid || null;
+  normalized.lastInvoicePaidAt = normalized.lastInvoicePaidAt || normalized.lastinvoicepaidat || null;
+  normalized.latestInvoiceId = normalized.latestInvoiceId || normalized.latestinvoiceid || null;
   normalized.demoStartDate = normalized.demoStartDate || normalized.demostartdate || null;
   normalized.demoEndDate = normalized.demoEndDate || normalized.demoenddate || null;
   normalized.demoStartSource = normalized.demoStartSource || normalized.demostartsource || null;
@@ -7307,6 +7312,68 @@ app.delete('/api/admin/subscriptions/:id', authMiddleware, async (req, res) => {
   } catch (e) {
     console.error('[api] admin/delete-subscription:', e);
     return res.status(500).json({ ok: false, error: 'Erreur suppression abonnement' });
+  }
+});
+
+// Bulk purge/hide inactive subscriptions from admin list
+app.post('/api/admin/subscriptions/purge-inactive', authMiddleware, async (req, res) => {
+  if (!ensureAllowedAdmin(req, res)) return;
+  try {
+    const inactiveIds = new Set();
+
+    if (stripe) {
+      try {
+        const list = await stripe.subscriptions.list({ status: 'all', limit: 100 });
+        for (const row of list?.data || []) {
+          const status = String(row?.status || '').toLowerCase();
+          const id = String(row?.id || '').trim();
+          if (id && status && status !== 'active') inactiveIds.add(id);
+        }
+      } catch (e) {
+        console.warn('[admin/subscriptions] purge stripe scan failed:', e && e.message ? e.message : e);
+      }
+    }
+
+    if (USE_POSTGRES && db && db.pool) {
+      const pgRows = await db.pool.query("SELECT id, stripesubscriptionid, status FROM subscriptions WHERE LOWER(COALESCE(status,'')) <> 'active'");
+      for (const row of pgRows.rows || []) {
+        const id = String(row?.stripesubscriptionid || row?.id || '').trim();
+        if (id) inactiveIds.add(id);
+      }
+      await db.pool.query("DELETE FROM subscriptions WHERE LOWER(COALESCE(status,'')) <> 'active'");
+    } else if (dbEnabled) {
+      const adapter = require('./db');
+      const localSubs = adapter.getAllSubscriptions?.() || [];
+      for (const sub of localSubs) {
+        const status = String(sub?.status || '').toLowerCase();
+        const id = String(sub?.stripeSubscriptionId || sub?.id || '').trim();
+        if (status !== 'active' && id) {
+          inactiveIds.add(id);
+          if (adapter.deleteSubscriptionByIdentifier) {
+            adapter.deleteSubscriptionByIdentifier(id);
+          }
+        }
+      }
+    }
+
+    if (Array.isArray(subscriptions)) {
+      subscriptions = subscriptions.filter(s => {
+        const status = String(s?.status || '').toLowerCase();
+        if (status === 'active') return true;
+        const id = String(s?.stripeSubscriptionId || s?.id || '').trim();
+        if (id) inactiveIds.add(id);
+        return false;
+      });
+      saveSubscriptions();
+    }
+
+    inactiveIds.forEach(id => hiddenSubscriptionIds.add(id));
+    saveHiddenSubscriptionIds();
+
+    return res.json({ ok: true, purged: inactiveIds.size, hidden: inactiveIds.size });
+  } catch (e) {
+    console.error('[api] admin/purge-inactive-subscriptions:', e);
+    return res.status(500).json({ ok: false, error: 'Erreur purge abonnements inactifs' });
   }
 });
 

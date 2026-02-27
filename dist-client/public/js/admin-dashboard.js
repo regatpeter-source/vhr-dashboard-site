@@ -345,6 +345,14 @@ function renderUsersTable(list) {
 // Load subscriptions
 async function loadSubscriptions() {
   try {
+    const subscriptionMessageBox = document.getElementById('subscriptionsMessage');
+    if (subscriptionMessageBox) {
+      subscriptionMessageBox.innerHTML = `
+        <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+          <button class="action-btn action-btn-delete" onclick="purgeInactiveSubscriptions()">Supprimer les abonnements inactifs</button>
+        </div>
+      `;
+    }
     const res = await authFetch(`${API_BASE}/admin/subscriptions`);
     const data = await res.json();
     if (data.ok && data.subscriptions.length > 0) {
@@ -369,11 +377,32 @@ async function loadSubscriptions() {
         `;
       });
     } else {
-      document.getElementById('subscriptionsMessage').innerHTML = '<div class="empty-state"><p>No subscriptions found</p></div>';
+      if (subscriptionMessageBox) {
+        subscriptionMessageBox.innerHTML += '<div class="empty-state"><p>No subscriptions found</p></div>';
+      }
     }
   } catch (e) {
     console.error('Error loading subscriptions:', e);
     document.getElementById('subscriptionsMessage').innerHTML = `<div class="error">Error loading subscriptions</div>`;
+  }
+}
+
+async function purgeInactiveSubscriptions() {
+  if (!confirm('Supprimer/masquer tous les abonnements inactifs de la liste admin ?')) return;
+  try {
+    const res = await authFetch(`${API_BASE}/admin/subscriptions/purge-inactive`, {
+      method: 'POST'
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      return alert('❌ ' + (data.error || 'Erreur serveur'));
+    }
+    alert(`✅ ${data.purged || 0} abonnement(s) inactif(s) supprimé(s)`);
+    await loadSubscriptions();
+    await loadStats();
+  } catch (e) {
+    console.error('[subscriptions] purge inactive error:', e);
+    alert('❌ Erreur lors de la purge: ' + e.message);
   }
 }
 
