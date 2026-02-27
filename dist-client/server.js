@@ -3203,24 +3203,42 @@ function reloadUsers() {
 }
 
 function getUserByUsername(username) {
+  const normalizedUsername = String(username || '').trim();
+  if (!normalizedUsername) return null;
+  if (USE_POSTGRES) {
+    const fromCache = users.find(u => String(u.username || '').toLowerCase() === normalizedUsername.toLowerCase());
+    if (fromCache) return fromCache;
+  }
   if (dbEnabled) {
-    const u = require('./db').findUserByUsername(username);
+    const u = require('./db').findUserByUsername(normalizedUsername);
     return u || null;
   }
-  return users.find(u => u.username === username);
+  return users.find(u => String(u.username || '').toLowerCase() === normalizedUsername.toLowerCase()) || null;
 }
 
 function getUserByStripeCustomerId(customerId) {
-  if (dbEnabled) return require('./db').findUserByStripeCustomerId(customerId);
-  return users.find(u => u.stripeCustomerId === customerId);
+  const normalizedCustomerId = String(customerId || '').trim();
+  if (!normalizedCustomerId) return null;
+  if (USE_POSTGRES) {
+    const fromCache = users.find(u => String(u.stripeCustomerId || '').trim() === normalizedCustomerId);
+    if (fromCache) return fromCache;
+  }
+  if (dbEnabled) return require('./db').findUserByStripeCustomerId(normalizedCustomerId) || null;
+  return users.find(u => String(u.stripeCustomerId || '').trim() === normalizedCustomerId) || null;
 }
 
 function getUserByEmail(email) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!normalizedEmail) return null;
+  if (USE_POSTGRES) {
+    const fromCache = users.find(u => String(u.email || '').trim().toLowerCase() === normalizedEmail);
+    if (fromCache) return fromCache;
+  }
   if (dbEnabled) {
-    const u = require('./db').findUserByEmail?.(email);
+    const u = require('./db').findUserByEmail?.(normalizedEmail);
     return u || null;
   }
-  return users.find(u => u.email === email);
+  return users.find(u => String(u.email || '').trim().toLowerCase() === normalizedEmail) || null;
 }
 
 function persistUser(user) {

@@ -2958,26 +2958,46 @@ function reloadUsers() {
 }
 
 function getUserByUsername(username) {
+  const normalizedUsername = String(username || '').trim();
+  if (!normalizedUsername) return null;
+  if (USE_POSTGRES) {
+    const fromCache = users.find(u => String(u.username || '').toLowerCase() === normalizedUsername.toLowerCase());
+    if (fromCache) return normalizeUserRecord(fromCache) || null;
+  }
   if (dbEnabled) {
-    const u = require('./db').findUserByUsername(username);
+    const u = require('./db').findUserByUsername(normalizedUsername);
     return normalizeUserRecord(u) || null;
   }
-  const found = users.find(u => u.username === username);
+  const found = users.find(u => String(u.username || '').toLowerCase() === normalizedUsername.toLowerCase());
   return normalizeUserRecord(found) || null;
 }
 
 function getUserByStripeCustomerId(customerId) {
-  if (dbEnabled) return require('./db').findUserByStripeCustomerId(customerId);
-  return users.find(u => u.stripeCustomerId === customerId);
+  const normalizedCustomerId = String(customerId || '').trim();
+  if (!normalizedCustomerId) return null;
+  if (USE_POSTGRES) {
+    const fromCache = users.find(u => String(u.stripeCustomerId || '').trim() === normalizedCustomerId);
+    if (fromCache) return normalizeUserRecord(fromCache) || null;
+  }
+  if (dbEnabled) {
+    const u = require('./db').findUserByStripeCustomerId(normalizedCustomerId);
+    return normalizeUserRecord(u) || null;
+  }
+  const found = users.find(u => String(u.stripeCustomerId || '').trim() === normalizedCustomerId);
+  return normalizeUserRecord(found) || null;
 }
 
 function getUserByEmail(email) {
-  if (dbEnabled) {
-    const u = require('./db').findUserByEmail?.(email);
-    return normalizeUserRecord(u) || null;
-  }
   const normalizedEmail = normalizeEmailValue(email);
   if (!normalizedEmail) return null;
+  if (USE_POSTGRES) {
+    const fromCache = users.find(u => normalizeEmailValue(u.email) === normalizedEmail);
+    if (fromCache) return normalizeUserRecord(fromCache) || null;
+  }
+  if (dbEnabled) {
+    const u = require('./db').findUserByEmail?.(normalizedEmail);
+    return normalizeUserRecord(u) || null;
+  }
   const found = users.find(u => normalizeEmailValue(u.email) === normalizedEmail);
   return normalizeUserRecord(found) || null;
 }
