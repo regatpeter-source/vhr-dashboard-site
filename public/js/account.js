@@ -510,11 +510,17 @@
       
       const planName = sub.currentPlan ? sub.currentPlan.name : 'Abonnement actif';
       const startDate = sub.startDate ? new Date(sub.startDate).toLocaleDateString('fr-FR') : '—';
-      const endDate = sub.endDate ? new Date(sub.endDate).toLocaleDateString('fr-FR') : '—';
-      const daysLeftValue = Number.isFinite(Number(sub.daysUntilRenewal)) ? Number(sub.daysUntilRenewal) : null;
+      const renewalDateSource = sub.nextBillingDate || sub.endDate || null;
+      const endDate = renewalDateSource ? new Date(renewalDateSource).toLocaleDateString('fr-FR') : '—';
+      const rawDaysUntilRenewal = sub.daysUntilRenewal;
+      const hasNumericDaysUntilRenewal = rawDaysUntilRenewal !== null
+        && rawDaysUntilRenewal !== undefined
+        && rawDaysUntilRenewal !== ''
+        && Number.isFinite(Number(rawDaysUntilRenewal));
+      const daysLeftValue = hasNumericDaysUntilRenewal ? Number(rawDaysUntilRenewal) : null;
       const statusColor = daysLeftValue == null
         ? '#4CAF50'
-        : (daysLeftValue > 14 ? '#4CAF50' : daysLeftValue > 0 ? '#ff9800' : '#4CAF50');
+        : (daysLeftValue > 14 ? '#4CAF50' : daysLeftValue > 0 ? '#ff9800' : '#dc2626');
       const daysLeftLine = daysLeftValue == null
         ? ''
         : `<p><strong>Jours restants:</strong> <span style="color: ${statusColor}; font-weight: bold;">${daysLeftValue} jours</span></p>`;

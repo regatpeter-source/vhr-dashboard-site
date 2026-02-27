@@ -5930,6 +5930,59 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
       }
     }
 
+    // Fallback Stripe check by subscriptionId (covers stale/missing customerId links)
+    if (subscriptionId && process.env.STRIPE_SECRET_KEY && String(subscriptionId).startsWith('sub_') && !isPlaceholderSubscriptionId(subscriptionId)) {
+      try {
+        const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
+        const activeLikeStatuses = new Set(['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired']);
+        const stripeStatus = String(stripeSub?.status || '').toLowerCase();
+
+        if (activeLikeStatuses.has(stripeStatus)) {
+          const item = stripeSub.items?.data?.[0];
+          const priceId = item?.price?.id;
+          for (const [key, plan] of Object.entries(subscriptionConfig.PLANS)) {
+            if (plan.stripePriceId === priceId) {
+              currentPlan = { ...plan, id: key };
+              break;
+            }
+          }
+
+          user.subscriptionStatus = stripeSub.status;
+          user.subscriptionId = stripeSub.id;
+          if (stripeSub.customer && typeof stripeSub.customer === 'string' && !user.stripeCustomerId) {
+            user.stripeCustomerId = stripeSub.customer;
+          }
+          persistUser(user);
+
+          ensureUserSubscription(user, {
+            stripeSubscriptionId: stripeSub.id,
+            stripePriceId: priceId || null,
+            status: stripeSub.status,
+            planName: currentPlan?.name || null,
+            startDate: stripeSub.current_period_start ? new Date(stripeSub.current_period_start * 1000).toISOString() : undefined,
+            endDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000).toISOString() : undefined
+          });
+
+          return res.json({
+            ok: true,
+            subscription: {
+              isActive: true,
+              status: stripeSub.status,
+              currentPlan,
+              subscriptionId: stripeSub.id,
+              startDate: stripeSub.current_period_start ? new Date(stripeSub.current_period_start * 1000) : null,
+              endDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000) : null,
+              nextBillingDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000) : null,
+              cancelledAt: stripeSub.canceled_at ? new Date(stripeSub.canceled_at * 1000) : null,
+              daysUntilRenewal: stripeSub.current_period_end ? Math.ceil((new Date(stripeSub.current_period_end * 1000) - new Date()) / (24 * 60 * 60 * 1000)) : null
+            }
+          });
+        }
+      } catch (stripeByIdErr) {
+        console.error('[subscriptions] error checking Stripe by subscriptionId:', stripeByIdErr && stripeByIdErr.message ? stripeByIdErr.message : stripeByIdErr);
+      }
+    }
+
     // Fallback: si aucun abonnement réel n'est trouvé, ne pas activer artificiellement l'utilisateur
     if (!subscriptionId && !isActive) {
       return res.json({
