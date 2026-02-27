@@ -9913,7 +9913,20 @@ app.get('/stripe-check', async (req, res) => {
 async function ensureStripeCustomerForUser(user) {
   if (!stripe) throw new Error('Stripe not configured');
   if (!user) throw new Error('User is required');
-  if (user.stripeCustomerId) return user.stripeCustomerId;
+  if (user.stripeCustomerId) {
+    try {
+      await stripe.customers.retrieve(user.stripeCustomerId);
+      return user.stripeCustomerId;
+    } catch (existingErr) {
+      const code = String(existingErr && (existingErr.code || (existingErr.raw && existingErr.raw.code) || '') || '').toLowerCase();
+      const msg = String(existingErr && existingErr.message || '').toLowerCase();
+      const missing = code === 'resource_missing' || msg.includes('no such customer');
+      if (!missing) throw existingErr;
+      console.warn('[Stripe] Stored customer missing, recreating link:', { username: user.username, oldCustomerId: user.stripeCustomerId });
+      user.stripeCustomerId = null;
+      try { persistUser(user); } catch (e) { console.warn('[users] persist after stale customer reset failed:', e && e.message ? e.message : e); }
+    }
+  }
 
   const username = (user.username || '').trim();
   const email = (user.email || '').trim();

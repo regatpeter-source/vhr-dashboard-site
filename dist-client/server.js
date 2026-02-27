@@ -10510,12 +10510,49 @@ app.get('/stripe-check', async (req, res) => {
 // ---------- Stripe Customer helpers ----------
 async function ensureStripeCustomerForUser(user) {
   if (!stripe) throw new Error('Stripe not configured');
-  if (user.stripeCustomerId) return user.stripeCustomerId;
-  // Create a new Stripe customer for this user
+  if (!user) throw new Error('User is required');
+
+  const username = String(user.username || '').trim();
+  const email = String(user.email || '').trim().toLowerCase();
+
+  if (user.stripeCustomerId) {
+    try {
+      await stripe.customers.retrieve(user.stripeCustomerId);
+      return user.stripeCustomerId;
+    } catch (existingErr) {
+      const code = String(existingErr && (existingErr.code || (existingErr.raw && existingErr.raw.code) || '') || '').toLowerCase();
+      const msg = String(existingErr && existingErr.message || '').toLowerCase();
+      const missing = code === 'resource_missing' || msg.includes('no such customer');
+      if (!missing) throw existingErr;
+      console.warn('[Stripe] Stored customer missing, recreating link:', { username, oldCustomerId: user.stripeCustomerId });
+      user.stripeCustomerId = null;
+      try { persistUser(user); } catch (e) { console.warn('[users] persist after stale customer reset failed:', e && e.message ? e.message : e); }
+    }
+  }
+
+  // Try to re-link existing Stripe customer by exact email first
+  if (email) {
+    try {
+      const found = await stripe.customers.list({ email, limit: 10 });
+      const existing = (found.data || []).find(c => String(c.email || '').trim().toLowerCase() === email);
+      if (existing) {
+        user.stripeCustomerId = existing.id;
+        try { persistUser(user); } catch (e) { console.warn('[users] save after stripe re-link failed:', e && e.message ? e.message : e); }
+        return existing.id;
+      }
+    } catch (listErr) {
+      console.warn('[Stripe] customer list by email failed:', listErr && listErr.message ? listErr.message : listErr);
+    }
+  }
+
+  // Create a new Stripe customer as last resort
   try {
-    const cust = await stripe.customers.create({ name: user.username || undefined, email: user.email || undefined, metadata: { username: user.username } });
+    const cust = await stripe.customers.create({
+      name: username || undefined,
+      email: email || undefined,
+      metadata: { username: username || undefined }
+    });
     user.stripeCustomerId = cust.id;
-    // Persist Stripe customer ID via DB adapter if present
     try { persistUser(user); } catch (e) { console.error('[users] save after stripe create failed:', e && e.message); }
     return cust.id;
   } catch (e) {
