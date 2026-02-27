@@ -1337,10 +1337,10 @@ const LICENSES_FILE = path.join(DATA_DIR, 'licenses.json');
 
 // ========== EMAIL CONFIGURATION ==========
 // Support both Brevo and Gmail configurations
-const emailUser = process.env.BREVO_SMTP_USER || process.env.EMAIL_USER;
-const emailPass = process.env.BREVO_SMTP_PASS || process.env.EMAIL_PASS;
-const emailHost = process.env.BREVO_SMTP_HOST || process.env.EMAIL_HOST || 'smtp-relay.brevo.com';
-const emailPort = parseInt(process.env.BREVO_SMTP_PORT || process.env.EMAIL_PORT || '587');
+const emailUser = process.env.BREVO_SMTP_USER || process.env.EMAIL_USER || process.env.SMTP_USER;
+const emailPass = process.env.BREVO_SMTP_PASS || process.env.EMAIL_PASS || process.env.SMTP_PASS;
+const emailHost = process.env.BREVO_SMTP_HOST || process.env.EMAIL_HOST || process.env.SMTP_HOST || 'smtp-relay.brevo.com';
+const emailPort = parseInt(process.env.BREVO_SMTP_PORT || process.env.EMAIL_PORT || process.env.SMTP_PORT || '587', 10);
 
 const emailTransporter = nodemailer.createTransport({
   host: emailHost,
