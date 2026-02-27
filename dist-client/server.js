@@ -3939,7 +3939,7 @@ async function handleApiLogin(req, res) {
   console.log('[api/login] request received:', req.body);
   const identifier = String(req.body?.username || req.body?.email || '').trim();
   const password = req.body?.password;
-  if (!identifier || !password) {
+  if (!identifier || typeof password !== 'string' || password.length === 0) {
     return res.status(400).json({ ok: false, error: 'Identifiant et mot de passe requis' });
   }
 
@@ -4036,7 +4036,13 @@ async function handleApiLogin(req, res) {
     console.warn('[api/login] missing password hash for', user.username);
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
   }
-  const valid = await bcrypt.compare(password, storedHash);
+  let valid = false;
+  try {
+    valid = await bcrypt.compare(password, storedHash);
+  } catch (e) {
+    console.error('[api/login] bcrypt.compare failed:', e && e.message ? e.message : e);
+    return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
+  }
   if (!valid) {
     console.log('[api/login] password mismatch');
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
@@ -4918,7 +4924,7 @@ app.post('/api/auth/login', async (req, res) => {
   reloadUsers(); // Reload users from file in case they were modified externally
   const { email, password } = req.body;
   
-  if (!email || !password) {
+  if (!email || typeof password !== 'string' || password.length === 0) {
     return res.status(400).json({ ok: false, error: 'Email et mot de passe requis' });
   }
 
@@ -5005,7 +5011,13 @@ app.post('/api/auth/login', async (req, res) => {
     console.warn('[api/auth/login] missing password hash for', user.username);
     return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
   }
-  const valid = await bcrypt.compare(password, storedHash);
+  let valid = false;
+  try {
+    valid = await bcrypt.compare(password, storedHash);
+  } catch (e) {
+    console.error('[api/auth/login] bcrypt.compare failed:', e && e.message ? e.message : e);
+    return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
+  }
   if (!valid) {
     console.log('[api/auth/login] password mismatch for:', user.username);
     return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
