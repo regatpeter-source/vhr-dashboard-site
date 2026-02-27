@@ -6159,10 +6159,26 @@ app.get('/api/test/generate-license', async (req, res) => {
 // TEST ROUTE: Validate email configuration
 app.get('/api/test/email-config', async (req, res) => {
   try {
+    const resolveEmailSource = () => {
+      if (process.env.BREVO_SMTP_USER || process.env.BREVO_SMTP_PASS) return 'BREVO_SMTP_*';
+      if (process.env.EMAIL_USER || process.env.EMAIL_PASS) return 'EMAIL_*';
+      if (process.env.SMTP_USER || process.env.SMTP_PASS) return 'SMTP_*';
+      return 'none';
+    };
+    const maskEmailUser = (value) => {
+      const raw = String(value || '').trim();
+      if (!raw) return null;
+      const at = raw.indexOf('@');
+      if (at <= 1) return `***${raw.slice(at >= 0 ? at : raw.length)}`;
+      return `${raw.slice(0, 2)}***${raw.slice(at)}`;
+    };
+
     if (!emailUser || !emailPass) {
       return res.json({ 
         ok: false, 
         configured: false,
+        source: resolveEmailSource(),
+        resolvedUser: maskEmailUser(emailUser),
         message: 'Email not configured. Add BREVO_SMTP_USER/BREVO_SMTP_PASS, EMAIL_USER/EMAIL_PASS or SMTP_USER/SMTP_PASS to .env' 
       });
     }
@@ -6171,9 +6187,10 @@ app.get('/api/test/email-config', async (req, res) => {
     res.json({ 
       ok: true, 
       configured: true,
+      source: resolveEmailSource(),
       host: emailHost,
       port: emailPort,
-      user: emailUser,
+      user: maskEmailUser(emailUser),
       message: 'Email configuration is valid' 
     });
   } catch (e) {
@@ -6181,6 +6198,14 @@ app.get('/api/test/email-config', async (req, res) => {
     res.status(500).json({ 
       ok: false, 
       configured: true,
+      source: (process.env.BREVO_SMTP_USER || process.env.BREVO_SMTP_PASS) ? 'BREVO_SMTP_*' : ((process.env.EMAIL_USER || process.env.EMAIL_PASS) ? 'EMAIL_*' : ((process.env.SMTP_USER || process.env.SMTP_PASS) ? 'SMTP_*' : 'none')),
+      user: (() => {
+        const raw = String(emailUser || '').trim();
+        if (!raw) return null;
+        const at = raw.indexOf('@');
+        if (at <= 1) return `***${raw.slice(at >= 0 ? at : raw.length)}`;
+        return `${raw.slice(0, 2)}***${raw.slice(at)}`;
+      })(),
       error: e.message,
       message: 'Email configured but connection failed. Check credentials.' 
     });
