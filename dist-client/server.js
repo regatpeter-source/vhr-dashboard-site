@@ -10878,26 +10878,32 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 app.post('/api/register', async (req, res) => {
   const { username, password, email } = req.body || {};
   if (!username || !password) return res.status(400).json({ ok: false, error: 'username and password required' });
+  const normalizedUsername = String(username || '').trim();
+  if (!normalizedUsername) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur invalide' });
+  const normalizedEmail = email ? String(email).trim().toLowerCase() : null;
+  if (isUserDeletedIdentifier(normalizedUsername) || (normalizedEmail && isUserDeletedIdentifier(normalizedEmail))) {
+    return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+  }
   try {
     // unique username/email (PostgreSQL vs fallback storage)
     if (USE_POSTGRES && db) {
-      const existingUser = await db.getUserByUsername(username);
+      const existingUser = await db.getUserByUsername(normalizedUsername);
       if (existingUser) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
-      if (email) {
-        const emailCheck = await db.pool.query('SELECT 1 FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [email]);
+      if (normalizedEmail) {
+        const emailCheck = await db.pool.query('SELECT 1 FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [normalizedEmail]);
         if (emailCheck.rowCount > 0) return res.status(400).json({ ok: false, error: 'Cet email est déjà utilisé' });
       }
     } else {
-      if (getUserByUsername(username)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
-      if (email && getUserByEmail(email)) return res.status(400).json({ ok: false, error: 'Cet email est déjà utilisé' });
+      if (getUserByUsername(normalizedUsername)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
+      if (normalizedEmail && getUserByEmail(normalizedEmail)) return res.status(400).json({ ok: false, error: 'Cet email est déjà utilisé' });
     }
     const passwordHash = await bcrypt.hash(password, 10);
     const newUser = { 
       id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      username, 
+      username: normalizedUsername,
       passwordHash, 
       role: 'user', 
-      email: email || null, 
+      email: normalizedEmail || null,
       stripeCustomerId: null,
       demoStartDate: null,
       demoStartSource: 'pending'
