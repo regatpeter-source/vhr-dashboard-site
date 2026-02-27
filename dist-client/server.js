@@ -6676,8 +6676,23 @@ app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) 
     const { planId } = req.body || {};
     if (!planId) return res.status(400).json({ ok: false, error: 'planId required' });
 
-    const plan = subscriptionConfig.PLANS[planId];
+    const normalizedPlanId = String(planId || '').trim();
+    const planEntries = Object.entries(subscriptionConfig.PLANS || {});
+    const plan =
+      subscriptionConfig.PLANS[normalizedPlanId] ||
+      subscriptionConfig.PLANS[normalizedPlanId.toUpperCase()] ||
+      planEntries.find(([, candidate]) => String(candidate?.id || '').toLowerCase() === normalizedPlanId.toLowerCase())?.[1];
     if (!plan) return res.status(400).json({ ok: false, error: 'Plan not found' });
+
+    const resolvedSubscriptionPriceId = cleanEnvValue(
+      process.env.STRIPE_PRICE_ID_STANDARD ||
+      process.env.STRIPE_SUBSCRIPTION_PRICE_ID ||
+      plan.stripePriceId ||
+      ''
+    );
+    if (!resolvedSubscriptionPriceId) {
+      return res.status(500).json({ ok: false, error: 'Subscription price ID not configured on server' });
+    }
 
     const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
@@ -6688,7 +6703,7 @@ app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) 
       payment_method_types: ['card'],
       line_items: [
         {
-          price: plan.stripePriceId,
+          price: resolvedSubscriptionPriceId,
           quantity: 1,
         },
       ],
@@ -6700,12 +6715,12 @@ app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) 
       metadata: {
         userId: user.id || user.username,
         username: user.username,
-        planId: planId,
+        planId: plan.id || normalizedPlanId,
         planName: plan.name
       }
     });
 
-    console.log('[subscriptions] checkout session created:', { id: session.id, user: user.username, plan: planId });
+    console.log('[subscriptions] checkout session created:', { id: session.id, user: user.username, plan: plan.id || normalizedPlanId, priceId: resolvedSubscriptionPriceId });
     res.json({ ok: true, sessionId: session.id, url: session.url });
   } catch (e) {
     console.error('[subscriptions] create-checkout error:', e);
@@ -6719,8 +6734,22 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
     const { purchaseId } = req.body || {};
     if (!purchaseId) return res.status(400).json({ ok: false, error: 'purchaseId required' });
 
-    const purchase = purchaseConfig.PURCHASE_OPTIONS[purchaseId];
+    const normalizedPurchaseId = String(purchaseId || '').trim();
+    const purchaseEntries = Object.entries(purchaseConfig.PURCHASE_OPTIONS || {});
+    const purchase =
+      purchaseConfig.PURCHASE_OPTIONS[normalizedPurchaseId] ||
+      purchaseConfig.PURCHASE_OPTIONS[normalizedPurchaseId.toUpperCase()] ||
+      purchaseEntries.find(([, candidate]) => String(candidate?.id || '').toLowerCase() === normalizedPurchaseId.toLowerCase())?.[1];
     if (!purchase) return res.status(400).json({ ok: false, error: 'Purchase option not found' });
+
+    const resolvedPerpetualPriceId = cleanEnvValue(
+      process.env.STRIPE_PRICE_ID_PERPETUAL ||
+      purchase.stripePriceId ||
+      ''
+    );
+    if (!resolvedPerpetualPriceId) {
+      return res.status(500).json({ ok: false, error: 'Perpetual price ID not configured on server' });
+    }
 
     const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
@@ -6731,7 +6760,7 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
       payment_method_types: ['card'],
       line_items: [
         {
-          price: purchase.stripePriceId,
+          price: resolvedPerpetualPriceId,
           quantity: 1,
         },
       ],
@@ -6743,12 +6772,12 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
       metadata: {
         userId: user.id || user.username,
         username: user.username,
-        purchaseId: purchaseId,
+        purchaseId: purchase.id || normalizedPurchaseId,
         purchaseName: purchase.name
       }
     });
 
-    console.log('[purchases] checkout session created:', { id: session.id, user: user.username, purchase: purchaseId });
+    console.log('[purchases] checkout session created:', { id: session.id, user: user.username, purchase: purchase.id || normalizedPurchaseId, priceId: resolvedPerpetualPriceId });
     res.json({ ok: true, sessionId: session.id, url: session.url });
   } catch (e) {
     console.error('[purchases] create-checkout error:', e);
