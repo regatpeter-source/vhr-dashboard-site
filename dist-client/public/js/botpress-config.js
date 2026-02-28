@@ -33,28 +33,39 @@ window.botpressWebChat.enableReset = true;
 
 	function answerFor(text) {
 		const q = String(text || '').toLowerCase();
+		const hasAny = (arr) => arr.some(word => q.includes(word));
+
 		if (!q) {
-			return 'Bonjour 👋 Bienvenue chez VHR Dashboard Pro !\nJe peux vous expliquer directement :\n• les tarifs et la différence abonnement/licence\n• la compatibilité des casques VR\n• l’installation (USB, ADB, WiFi)\n• le support et les délais de réponse\n\nExemple : « comment fonctionne l’abonnement ? »';
+			return 'Bonjour 👋 Bienvenue chez VHR Dashboard Pro !\n\nJe peux vous aider de façon détaillée sur :\n• les tarifs (abonnement vs licence définitive)\n• la compatibilité des casques (Quest, Pico, HTC…)\n• l’installation pas à pas (USB, ADB, WiFi)\n• le support et les bonnes infos à fournir\n• les cas d’usage (formation, événementiel, support IT)\n\nExemples de questions :\n« Quelle formule est la plus adaptée pour 20 casques ? »\n« Comment démarrer rapidement sur Quest ? »\n« Que faire si ADB ne détecte pas le casque ? »';
 		}
-		if (q.includes('bonjour') || q.includes('salut') || q.includes('hello') || q.includes('coucou')) {
-			return 'Bonjour 👋 Ravi de vous aider. Dites-moi ce que vous voulez savoir et je vous réponds clairement ici, sans vous renvoyer partout.\n\nJe peux commencer par : tarifs, compatibilité, installation, ou support.';
+		if (hasAny(['bonjour', 'salut', 'hello', 'coucou', 'bonsoir'])) {
+			return 'Bonjour 👋 Ravi de vous aider !\n\nMon rôle : vous donner des réponses concrètes, ici directement, pour avancer vite.\n\nJe peux commencer par :\n1) vous conseiller une formule (abonnement/licence),\n2) vous guider sur l’installation,\n3) vérifier la compatibilité de vos casques,\n4) vous proposer un mini plan de déploiement.';
 		}
-		if (q.includes('tarif') || q.includes('prix') || q.includes('coût') || q.includes('abonnement')) {
-			return 'Voici l’essentiel 👇\n• Abonnement mensuel : 29€/mois, sans engagement, résiliable à tout moment, mises à jour + support inclus.\n• Licence définitive : 499€ HT en paiement unique, avec 1 an de mises à jour et support prioritaire 1 an.\n\nEn résumé : abonnement = flexible, licence = investissement long terme.';
+		if (hasAny(['tarif', 'prix', 'coût', 'cout', 'abonnement', 'licence', 'budget'])) {
+			return 'Voici un comparatif clair 👇\n\n• Abonnement mensuel (29€/mois)\n  - idéal pour démarrer vite et rester flexible\n  - résiliable à tout moment\n  - mises à jour + support inclus\n\n• Licence définitive (499€ HT, paiement unique)\n  - idéale pour un usage long terme\n  - 1 an de mises à jour inclus\n  - support prioritaire pendant 1 an\n\nConseil pratique :\n- besoin évolutif / pilote / POC → abonnement\n- parc stable avec visibilité long terme → licence';
 		}
-		if (q.includes('demo') || q.includes('démo') || q.includes('essai')) {
-			return 'Oui ✅ Vous pouvez tester la solution.\nLa démo sert à valider rapidement :\n• détection des casques\n• streaming en direct\n• commandes à distance\n• flux de support opérateur\n\nSi vous voulez, je peux vous guider sur les étapes de démarrage selon votre parc (Quest/Pico/HTC).';
+		if (hasAny(['demo', 'démo', 'essai', 'test', 'trial'])) {
+			return 'Oui ✅ Vous pouvez tester la solution, et c\'est même recommandé avant un déploiement large.\n\nPendant la démo, vérifiez surtout :\n• découverte et gestion des casques\n• stabilité du streaming\n• commandes à distance / supervision\n• fluidité du support opérateur\n\nBon process en 3 étapes :\n1) test sur 1–2 casques,\n2) test en conditions réelles (réseau, usage),\n3) extension au reste de la flotte.';
 		}
-		if (q.includes('support') || q.includes('contact') || q.includes('email')) {
-			return 'Le support VHR est orienté réponse rapide par email.\n📧 Adresse : support@vhr-dashboard-site.com\n\nQuand vous contactez le support, indiquez idéalement :\n• modèle du casque\n• type de connexion (USB/WiFi)\n• message d’erreur\n• objectif (streaming, installation, accès...)\n\nComme ça, la résolution est beaucoup plus rapide.';
+		if (hasAny(['support', 'contact', 'email', 'mail', 'assistance', 'aide', 'incident', 'bug'])) {
+			return 'Support VHR Dashboard Pro :\n📧 support@vhr-dashboard-site.com\n\nPour une réponse ultra rapide, envoyez :\n• modèle(s) de casque et version système\n• type de connexion (USB/WiFi)\n• capture du message d’erreur\n• action en cours (streaming, installation, login, etc.)\n• niveau d’urgence\n\nAstuce : plus le contexte est précis, plus la résolution est directe.';
 		}
-		if (q.includes('quest') || q.includes('pico') || q.includes('htc') || q.includes('casque') || q.includes('compatible')) {
-			return 'Compatibilité actuelle :\n• Meta Quest (1/2/3/Pro)\n• Pico (Neo/4/Pro selon versions)\n• HTC Vive Focus/Pro\n• plus largement les casques Android compatibles ADB\n\nLe principe : première connexion USB pour initialiser, puis passage en WiFi pour l’exploitation à distance.';
+		if (hasAny(['quest', 'pico', 'htc', 'casque', 'compatible', 'compatibilité', 'compatibilite'])) {
+			return 'Compatibilité actuelle (selon versions firmware) :\n• Meta Quest 1/2/3/Pro\n• Pico Neo / Pico 4 / Pro\n• HTC Vive Focus / Pro\n• et autres casques Android compatibles ADB\n\nMéthode recommandée :\n1) première connexion USB (initialisation),\n2) vérification ADB,\n3) bascule WiFi pour exploitation à distance.\n\nSi vous me donnez votre modèle exact, je peux vous indiquer la procédure la plus adaptée.';
 		}
-		if (q.includes('installation') || q.includes('adb') || q.includes('wifi') || q.includes('guide')) {
-			return 'Installation type (simple) :\n1) installer ADB (platform-tools) sur le PC\n2) activer le mode développeur du casque\n3) brancher en USB et accepter le débogage\n4) vérifier avec « adb devices »\n5) activer ensuite le mode WiFi depuis le Dashboard\n\nJe peux aussi vous aider à diagnostiquer si un casque n’apparaît pas.';
+		if (hasAny(['installation', 'installer', 'adb', 'wifi', 'wi-fi', 'guide', 'setup', 'config'])) {
+			return 'Installation rapide (recommandée) :\n1) installer Android Platform Tools (ADB) sur le PC\n2) activer le mode développeur sur le casque\n3) connecter en USB et accepter le débogage\n4) vérifier avec « adb devices »\n5) ouvrir VHR Dashboard puis activer le mode WiFi\n\nSi le casque n\'apparaît pas :\n• changer câble/port USB\n• vérifier autorisation debug dans le casque\n• relancer ADB serveur';
 		}
-		return 'Bonne question 👍\nJe peux vous répondre en direct sur :\n• tarifs et choix de formule\n• installation pas à pas\n• compatibilité des casques\n• support et dépannage\n\nSi vous voulez, décrivez votre contexte (nombre de casques + modèles) et je vous fais une recommandation claire.';
+		if (hasAny(['sécurité', 'securite', 'rgpd', 'permission', 'permissions', 'rôle', 'role', 'audit'])) {
+			return 'Sécurité & gouvernance :\n• gestion des rôles et des accès\n• journalisation des actions (audit)\n• bonnes pratiques de segmentation des comptes\n• orientation conformité RGPD\n\nBon réflexe : créer un compte admin principal + comptes opérateurs séparés pour tracer les actions proprement.';
+		}
+		if (hasAny(['stream', 'streaming', 'latence', 'qualité', 'qualite', 'performance', 'fluidité', 'fluidite'])) {
+			return 'Pour un streaming fluide :\n• privilégier un réseau WiFi stable (ou Ethernet côté poste admin)\n• réduire la résolution si la latence monte\n• fermer les apps lourdes sur le casque\n• tester un profil qualité adapté au contexte (démo, support, formation)\n\nObjectif : équilibre entre lisibilité et réactivité.';
+		}
+		if (hasAny(['entreprise', 'équipe', 'equipe', 'formation', 'deploiement', 'déploiement', 'parc', 'flotte'])) {
+			return 'Approche déploiement entreprise (simple et efficace) :\n1) pilote sur 2 à 5 casques\n2) standardisation des profils et procédures\n3) montée progressive sur la flotte\n4) suivi des incidents + amélioration continue\n\nJe peux vous proposer un plan selon la taille de votre parc (ex: 10, 50, 100+ casques).';
+		}
+		return 'Excellente question 👍\n\nJe peux vous faire une réponse personnalisée si vous me donnez :\n• votre objectif (support, formation, événement, production)\n• le nombre de casques\n• les modèles utilisés\n• votre priorité (coût, rapidité, stabilité, sécurité)\n\nEnsuite, je vous propose une recommandation concrète étape par étape.';
 	}
 
 	function createMessage(text, isUser) {
