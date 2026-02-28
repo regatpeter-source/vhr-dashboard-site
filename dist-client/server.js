@@ -2381,9 +2381,45 @@ const DEMO_TRIAL_DAYS = Math.max(1, Number.parseInt(process.env.DEMO_TRIAL_DAYS 
 const REQUIRE_EMAIL_VERIFICATION = process.env.REQUIRE_EMAIL_VERIFICATION === '1';
 let cachedDemoState = null;
 let cachedInstallationState = null;
+const deletedUsersRuntimeCache = new Set();
+let deletedUsersTableReady = false;
 
 function ensureDataDir() {
   try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { }
+}
+
+function normalizeDeletedIdentifier(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function addDeletedIdentifierToCache(value) {
+  const normalized = normalizeDeletedIdentifier(value);
+  if (normalized) deletedUsersRuntimeCache.add(normalized);
+}
+
+function addDeletedEntryToList(list, username, email = null) {
+  const uname = normalizeDeletedIdentifier(username);
+  const mail = normalizeDeletedIdentifier(email);
+  if (!uname && !mail) return false;
+
+  const existingIdx = list.findIndex(e => {
+    const entryUser = normalizeDeletedIdentifier(e && e.username);
+    const entryEmail = normalizeDeletedIdentifier(e && e.email);
+    return (!!uname && entryUser === uname) || (!!mail && entryEmail === mail);
+  });
+
+  const entry = {
+    username: uname || null,
+    email: mail || null,
+    deletedAt: new Date().toISOString()
+  };
+
+  if (existingIdx >= 0) list[existingIdx] = entry;
+  else list.push(entry);
+
+  addDeletedIdentifierToCache(uname);
+  addDeletedIdentifierToCache(mail);
+  return true;
 }
 
 function loadDeletedUsers() {
@@ -2392,7 +2428,13 @@ function loadDeletedUsers() {
     if (fs.existsSync(DELETED_USERS_FILE)) {
       const raw = fs.readFileSync(DELETED_USERS_FILE, 'utf8');
       const parsed = JSON.parse(raw || '[]');
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        const sanitized = [];
+        for (const entry of parsed) {
+          addDeletedEntryToList(sanitized, entry && entry.username, entry && entry.email);
+        }
+        return sanitized;
+      }
     }
   } catch (e) {
     console.warn('[users] failed to load deleted-users file:', e && e.message ? e.message : e);
@@ -2403,40 +2445,145 @@ function loadDeletedUsers() {
 function saveDeletedUsers(list) {
   ensureDataDir();
   try {
-    fs.writeFileSync(DELETED_USERS_FILE, JSON.stringify(list || [], null, 2), 'utf8');
+    const sanitized = [];
+    for (const entry of Array.isArray(list) ? list : []) {
+      addDeletedEntryToList(sanitized, entry && entry.username, entry && entry.email);
+    }
+    fs.writeFileSync(DELETED_USERS_FILE, JSON.stringify(sanitized, null, 2), 'utf8');
   } catch (e) {
     console.warn('[users] failed to save deleted-users file:', e && e.message ? e.message : e);
+  }
+}
+
+async function ensureDeletedUsersTable() {
+  if (deletedUsersTableReady) return true;
+  if (!USE_POSTGRES || !db || !db.pool) return false;
+  try {
+    await db.pool.query(`
+      CREATE TABLE IF NOT EXISTS deleted_users (
+        id SERIAL PRIMARY KEY,
+        username TEXT,
+        email TEXT,
+        deletedat TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await db.pool.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_deleted_users_username ON deleted_users ((LOWER(username))) WHERE username IS NOT NULL');
+    await db.pool.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_deleted_users_email ON deleted_users ((LOWER(email))) WHERE email IS NOT NULL');
+    deletedUsersTableReady = true;
+    return true;
+  } catch (e) {
+    console.warn('[users] failed to ensure deleted_users table:', e && e.message ? e.message : e);
+    return false;
+  }
+}
+
+async function persistDeletedMarkerToPostgres(username, email = null) {
+  const uname = normalizeDeletedIdentifier(username);
+  const mail = normalizeDeletedIdentifier(email);
+  if (!uname && !mail) return;
+  const ready = await ensureDeletedUsersTable();
+  if (!ready) return;
+
+  try {
+    if (uname) {
+      const updated = await db.pool.query(
+        'UPDATE deleted_users SET username = $1, deletedat = CURRENT_TIMESTAMP WHERE LOWER(username) = LOWER($1)',
+        [uname]
+      );
+      if (!updated.rowCount) {
+        await db.pool.query('INSERT INTO deleted_users (username, email, deletedat) VALUES ($1, $2, CURRENT_TIMESTAMP)', [uname, mail || null]);
+      }
+    }
+    if (mail) {
+      const updatedMail = await db.pool.query(
+        'UPDATE deleted_users SET email = $1, deletedat = CURRENT_TIMESTAMP WHERE LOWER(email) = LOWER($1)',
+        [mail]
+      );
+      if (!updatedMail.rowCount) {
+        await db.pool.query('INSERT INTO deleted_users (username, email, deletedat) VALUES ($1, $2, CURRENT_TIMESTAMP)', [uname || null, mail]);
+      }
+    }
+  } catch (e) {
+    console.warn('[users] failed to persist deleted marker in postgres:', e && e.message ? e.message : e);
+  }
+}
+
+async function reconcileDeletedUsersPersistence({ reason = 'startup' } = {}) {
+  if (!USE_POSTGRES || !db || !db.pool) return;
+  const ready = await ensureDeletedUsersTable();
+  if (!ready) return;
+
+  try {
+    const fileDeletedUsers = loadDeletedUsers();
+    for (const entry of fileDeletedUsers) {
+      await persistDeletedMarkerToPostgres(entry && entry.username, entry && entry.email);
+    }
+
+    const legacyDeletedRows = await db.pool.query(
+      `SELECT username, email
+       FROM users
+       WHERE LOWER(COALESCE(role, '')) = 'deleted'`
+    );
+    for (const row of legacyDeletedRows.rows || []) {
+      markUserDeleted(row.username, row.email);
+      await persistDeletedMarkerToPostgres(row.username, row.email);
+    }
+
+    const tombstones = await db.pool.query('SELECT username, email FROM deleted_users');
+    let purgeCount = 0;
+    for (const row of tombstones.rows || []) {
+      const uname = normalizeDeletedIdentifier(row.username);
+      const mail = normalizeDeletedIdentifier(row.email);
+      if (!uname && !mail) continue;
+
+      if (uname) addDeletedIdentifierToCache(uname);
+      if (mail) addDeletedIdentifierToCache(mail);
+
+      const deletedSubs = await db.pool.query(
+        `DELETE FROM subscriptions
+         WHERE ($1::text IS NOT NULL AND LOWER(COALESCE(username, '')) = $1)
+            OR ($2::text IS NOT NULL AND LOWER(COALESCE(email, '')) = $2)`,
+        [uname || null, mail || null]
+      );
+      const deletedUsers = await db.pool.query(
+        `DELETE FROM users
+         WHERE ($1::text IS NOT NULL AND LOWER(COALESCE(username, '')) = $1)
+            OR ($2::text IS NOT NULL AND LOWER(COALESCE(email, '')) = $2)`,
+        [uname || null, mail || null]
+      );
+      purgeCount += (deletedSubs.rowCount || 0) + (deletedUsers.rowCount || 0);
+    }
+
+    if (purgeCount > 0) {
+      console.log(`[users] deleted-user reconciliation (${reason}): purged ${purgeCount} row(s) from PostgreSQL`);
+      reloadUsers();
+    }
+  } catch (e) {
+    console.warn('[users] reconcile deleted users failed:', e && e.message ? e.message : e);
   }
 }
 
 function markUserDeleted(username, email = null) {
   if (!username && !email) return;
   const list = loadDeletedUsers();
-  const uname = String(username || '').toLowerCase();
-  const mail = String(email || '').toLowerCase();
-  const existingIdx = list.findIndex(e => {
-    const entryUser = String(e.username || '').toLowerCase();
-    const entryEmail = String(e.email || '').toLowerCase();
-    return (!!uname && entryUser === uname) || (!!mail && entryEmail === mail);
-  });
-  const entry = {
-    username: username || null,
-    email: email || null,
-    deletedAt: new Date().toISOString()
-  };
-  if (existingIdx >= 0) list[existingIdx] = entry; else list.push(entry);
+  addDeletedEntryToList(list, username, email);
   saveDeletedUsers(list);
+  persistDeletedMarkerToPostgres(username, email).catch(() => {});
 }
 
 function isUserDeletedIdentifier(identifier) {
-  const normalized = String(identifier || '').trim().toLowerCase();
+  const normalized = normalizeDeletedIdentifier(identifier);
   if (!normalized) return false;
+  if (deletedUsersRuntimeCache.has(normalized)) return true;
   const list = loadDeletedUsers();
-  return list.some(e => {
-    const uname = String(e.username || '').toLowerCase();
-    const mail = String(e.email || '').toLowerCase();
-    return uname === normalized || mail === normalized;
-  });
+  for (const e of list) {
+    const uname = normalizeDeletedIdentifier(e && e.username);
+    const mail = normalizeDeletedIdentifier(e && e.email);
+    if (uname) addDeletedIdentifierToCache(uname);
+    if (mail) addDeletedIdentifierToCache(mail);
+    if (uname === normalized || mail === normalized) return true;
+  }
+  return false;
 }
 
 function isEmailVerified(user) {
@@ -2716,6 +2863,12 @@ function loadUsers() {
 }
 
 let users = loadUsers();
+
+// Warm cache from local tombstones immediately
+for (const entry of loadDeletedUsers()) {
+  addDeletedIdentifierToCache(entry && entry.username);
+  addDeletedIdentifierToCache(entry && entry.email);
+}
 
 // In PostgreSQL mode, hydrate in-memory cache from DB for quick lookups
 if (USE_POSTGRES && db && db.getUsers) {
@@ -3117,6 +3270,8 @@ async function initializeApp() {
   }
 
   await backfillSubscriptionConfirmationSentAt({ reason: 'startup' });
+
+  await reconcileDeletedUsersPersistence({ reason: 'startup' });
 
   await recordInstallationAccess().catch(err => console.error('[installation] startup record failed:', err && err.message ? err.message : err));
 
