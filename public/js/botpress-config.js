@@ -34,24 +34,27 @@ window.botpressWebChat.enableReset = true;
 	function answerFor(text) {
 		const q = String(text || '').toLowerCase();
 		if (!q) {
-			return 'Bonjour 👋 Je suis l’assistant VHR. Posez-moi une question sur les tarifs, la démo, le Dashboard Pro ou le support.';
+			return 'Bonjour 👋 Bienvenue chez VHR Dashboard Pro !\nJe peux vous expliquer directement :\n• les tarifs et la différence abonnement/licence\n• la compatibilité des casques VR\n• l’installation (USB, ADB, WiFi)\n• le support et les délais de réponse\n\nExemple : « comment fonctionne l’abonnement ? »';
+		}
+		if (q.includes('bonjour') || q.includes('salut') || q.includes('hello') || q.includes('coucou')) {
+			return 'Bonjour 👋 Ravi de vous aider. Dites-moi ce que vous voulez savoir et je vous réponds clairement ici, sans vous renvoyer partout.\n\nJe peux commencer par : tarifs, compatibilité, installation, ou support.';
 		}
 		if (q.includes('tarif') || q.includes('prix') || q.includes('coût') || q.includes('abonnement')) {
-			return 'Nos offres commencent à 29€/mois. Vous pouvez voir les détails sur la page Tarifs : /site-vitrine/pricing.html';
+			return 'Voici l’essentiel 👇\n• Abonnement mensuel : 29€/mois, sans engagement, résiliable à tout moment, mises à jour + support inclus.\n• Licence définitive : 499€ HT en paiement unique, avec 1 an de mises à jour et support prioritaire 1 an.\n\nEn résumé : abonnement = flexible, licence = investissement long terme.';
 		}
 		if (q.includes('demo') || q.includes('démo') || q.includes('essai')) {
-			return 'Oui, vous pouvez tester la solution. Rendez-vous sur /site-vitrine/pricing.html ou contactez-nous via /site-vitrine/contact.html.';
+			return 'Oui ✅ Vous pouvez tester la solution.\nLa démo sert à valider rapidement :\n• détection des casques\n• streaming en direct\n• commandes à distance\n• flux de support opérateur\n\nSi vous voulez, je peux vous guider sur les étapes de démarrage selon votre parc (Quest/Pico/HTC).';
 		}
 		if (q.includes('support') || q.includes('contact') || q.includes('email')) {
-			return 'Vous pouvez écrire à support@vhr-dashboard-site.com ou utiliser le formulaire sur /site-vitrine/contact.html. Réponse rapide par email.';
+			return 'Le support VHR est orienté réponse rapide par email.\n📧 Adresse : support@vhr-dashboard-site.com\n\nQuand vous contactez le support, indiquez idéalement :\n• modèle du casque\n• type de connexion (USB/WiFi)\n• message d’erreur\n• objectif (streaming, installation, accès...)\n\nComme ça, la résolution est beaucoup plus rapide.';
 		}
 		if (q.includes('quest') || q.includes('pico') || q.includes('htc') || q.includes('casque') || q.includes('compatible')) {
-			return 'Le Dashboard prend en charge Meta Quest, Pico, HTC Vive Focus/Pro, et plus largement les casques Android compatibles ADB.';
+			return 'Compatibilité actuelle :\n• Meta Quest (1/2/3/Pro)\n• Pico (Neo/4/Pro selon versions)\n• HTC Vive Focus/Pro\n• plus largement les casques Android compatibles ADB\n\nLe principe : première connexion USB pour initialiser, puis passage en WiFi pour l’exploitation à distance.';
 		}
 		if (q.includes('installation') || q.includes('adb') || q.includes('wifi') || q.includes('guide')) {
-			return 'Le guide développeur explique la connexion USB/WiFi et ADB : /site-vitrine/developer-setup.html';
+			return 'Installation type (simple) :\n1) installer ADB (platform-tools) sur le PC\n2) activer le mode développeur du casque\n3) brancher en USB et accepter le débogage\n4) vérifier avec « adb devices »\n5) activer ensuite le mode WiFi depuis le Dashboard\n\nJe peux aussi vous aider à diagnostiquer si un casque n’apparaît pas.';
 		}
-		return 'Je peux vous aider sur les tarifs, la démo, la compatibilité casque, l’installation, et le support. Si besoin : support@vhr-dashboard-site.com';
+		return 'Bonne question 👍\nJe peux vous répondre en direct sur :\n• tarifs et choix de formule\n• installation pas à pas\n• compatibilité des casques\n• support et dépannage\n\nSi vous voulez, décrivez votre contexte (nombre de casques + modèles) et je vous fais une recommandation claire.';
 	}
 
 	function createMessage(text, isUser) {
