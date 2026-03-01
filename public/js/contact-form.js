@@ -29,7 +29,18 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name, email, subject, message })
         });
-        const data = await response.json();
+        const raw = await response.text();
+        let data = null;
+        try {
+          data = raw ? JSON.parse(raw) : null;
+        } catch (parseErr) {
+          console.error('[contact-form] Invalid JSON response from /api/contact:', parseErr);
+          data = null;
+        }
+
+        if (!data || typeof data !== 'object') {
+          throw new Error('Réponse invalide du serveur');
+        }
 
         if (data.ok) {
           formStatus.innerHTML = '<p style="color: #1b5e20; font-weight:700;">✅ Message bien reçu. Nous vous répondons rapidement par email.</p>';

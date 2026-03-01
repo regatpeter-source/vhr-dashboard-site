@@ -34,8 +34,19 @@ if (form) {
         },
         body: JSON.stringify({ name, email, subject, message })
       });
-      
-      const data = await response.json();
+
+      const raw = await response.text();
+      let data = null;
+      try {
+        data = raw ? JSON.parse(raw) : null;
+      } catch (parseErr) {
+        console.error('[contact-form] Invalid JSON response from /api/contact:', parseErr);
+        data = null;
+      }
+
+      if (!data || typeof data !== 'object') {
+        throw new Error('Réponse invalide du serveur');
+      }
       
       if (data.ok) {
         status.innerHTML = '<p style="color: green; font-weight: bold;">Message reçu! Nous vous répondrons très bientôt.</p>';

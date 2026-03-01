@@ -8015,7 +8015,7 @@ app.post('/api/contact', async (req, res) => {
     res.json({ ok: true, message: 'Message reçu. Nous vous répondrons bientôt.', emailSent: !!emailSent });
   } catch (e) {
     console.error('[api] contact error:', e);
-    res.status(500).json({ ok: false, error: String(e) });
+    res.status(500).json({ ok: false, error: 'Erreur serveur lors de l\'envoi du message', code: 'CONTACT_SAVE_FAILED' });
   }
 });
 
