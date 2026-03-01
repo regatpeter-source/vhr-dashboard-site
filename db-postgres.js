@@ -143,6 +143,8 @@ async function initDatabase() {
         }
       }
 
+      await ensureMessagesColumns(client);
+
       // Legacy accounts: mark as verified if status is NULL (avoids bloquer les anciens comptes)
       try {
         await client.query(`UPDATE users SET emailverified = TRUE WHERE emailverified IS NULL`);
@@ -248,6 +250,30 @@ async function importMessagesIfNeeded(client) {
     console.log(`[DB] Imported ${parsed.length} messages from messages.json`);
   } catch (e) {
     console.error('[DB] Failed to import messages from JSON:', e && e.message ? e.message : e);
+  }
+}
+
+async function ensureMessagesColumns(client) {
+  const messageColumnChecks = [
+    { name: 'status', type: "TEXT DEFAULT 'unread'" },
+    { name: 'createdat', type: 'TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP' },
+    { name: 'updatedat', type: 'TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP' },
+    { name: 'readat', type: 'TIMESTAMPTZ' },
+    { name: 'respondedat', type: 'TIMESTAMPTZ' },
+    { name: 'response', type: 'TEXT' },
+    { name: 'respondedby', type: 'TEXT' }
+  ];
+
+  for (const col of messageColumnChecks) {
+    try {
+      await client.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`);
+      console.log(`[DB] Messages column ${col.name} ensured`);
+    } catch (msgColErr) {
+      if (msgColErr.message && msgColErr.message.includes('already exists')) {
+        continue;
+      }
+      console.log(`[DB] Note: Could not add messages column ${col.name}:`, msgColErr && msgColErr.message);
+    }
   }
 }
 
