@@ -1393,6 +1393,18 @@ async function sendContactMessageToAdmin(msg) {
 // Send reply email to contact sender
 async function sendReplyToContact(originalMessage, replyText, repliedBy) {
   const recipientEmail = originalMessage.email;
+  const originalMessageCreatedRaw =
+    originalMessage?.createdAt
+    || originalMessage?.createdat
+    || originalMessage?.created
+    || originalMessage?.updatedAt
+    || originalMessage?.updatedat
+    || null;
+  const originalMessageCreatedDate = originalMessageCreatedRaw ? new Date(originalMessageCreatedRaw) : null;
+  const originalMessageCreatedLabel =
+    originalMessageCreatedDate && !Number.isNaN(originalMessageCreatedDate.getTime())
+      ? originalMessageCreatedDate.toLocaleString('fr-FR')
+      : 'Date indisponible';
   
   console.log('[email] sendReplyToContact() called');
   console.log('[email] Recipient email:', recipientEmail);
@@ -1430,7 +1442,7 @@ async function sendReplyToContact(originalMessage, replyText, repliedBy) {
         <div style="background: #1a1d24; padding: 20px; border-radius: 8px; margin: 20px 0;">
           <p style="margin: 8px 0;"><strong style="color: #2ecc71;">👤 Répondu par:</strong> ${repliedBy}</p>
           <p style="margin: 8px 0;"><strong style="color: #2ecc71;">📅 Date de réponse:</strong> ${new Date().toLocaleString('fr-FR')}</p>
-          <p style="margin: 8px 0;"><strong style="color: #2ecc71;">📅 Votre message envoyé le:</strong> ${new Date(originalMessage.createdAt).toLocaleString('fr-FR')}</p>
+          <p style="margin: 8px 0;"><strong style="color: #2ecc71;">📅 Votre message envoyé le:</strong> ${originalMessageCreatedLabel}</p>
         </div>
         
         <div style="background: #2c3e50; padding: 20px; border-radius: 8px; margin: 20px 0;">
