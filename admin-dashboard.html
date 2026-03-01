@@ -347,6 +347,61 @@
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
     }
 
+    .action-modal-content {
+      max-width: 520px;
+      width: min(92vw, 520px);
+      padding: 22px;
+    }
+
+    .action-modal-body {
+      color: #2d3748;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      margin-bottom: 14px;
+      max-height: 45vh;
+      overflow: auto;
+    }
+
+    .action-modal-input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #cbd5e0;
+      border-radius: 6px;
+      font-size: 14px;
+      margin-bottom: 14px;
+    }
+
+    .action-modal-input:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    .action-modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .btn-cancel {
+      background: #e2e8f0;
+      color: #2d3748;
+      border: 1px solid #cbd5e0;
+    }
+
+    .btn-cancel:hover {
+      background: #cbd5e0;
+    }
+
+    .btn-confirm {
+      background: #667eea;
+      color: #fff;
+    }
+
+    .btn-confirm:hover {
+      background: #5568d3;
+    }
+
     .modal-header {
       display: flex;
       justify-content: space-between;
@@ -518,7 +573,9 @@
           <input id="filterUserDateTo" type="date" style="padding:8px;border:1px solid #cbd5e0;border-radius:6px;">
         </div>
         <button class="btn" id="filterUserReset" style="background:#e2e8f0;color:#2d3748;">Réinitialiser</button>
+        <button class="btn" id="demoBackfillBtn" onclick="runDemoStartBackfill()" style="background:#edf2f7;color:#2d3748;border:1px solid #cbd5e0;">Corriger essais legacy</button>
       </div>
+      <div id="usersBackfillNotice" style="display:none;margin:8px 0 12px 0;"></div>
       <div class="users-month-section">
         <h3>Utilisateurs par mois</h3>
         <div id="usersByMonth" class="month-grid"></div>
@@ -547,6 +604,7 @@
     <div class="tab-content" id="subscriptions-tab">
       <h2>Subscriptions</h2>
       <div id="subscriptionsMessage"></div>
+      <div id="subscriptionsActionNotice" style="display:none;margin:8px 0 12px 0;"></div>
       <div class="table-wrapper">
         <table id="subscriptionsTable">
           <thead>
@@ -569,6 +627,7 @@
     <div class="tab-content" id="messages-tab">
       <h2>Contact Messages</h2>
       <div id="messagesMessage"></div>
+      <div id="messagesActionNotice" style="display:none;margin:8px 0 12px 0;"></div>
       <div class="table-wrapper">
         <table id="messagesTable">
           <thead>
@@ -596,6 +655,22 @@
         <span class="close" id="closeMessageModal">&times;</span>
       </div>
       <div id="messageModalBody"></div>
+    </div>
+  </div>
+
+  <!-- Generic Confirm/Prompt Modal -->
+  <div id="actionDialogModal" class="modal" aria-hidden="true">
+    <div class="modal-content action-modal-content" role="dialog" aria-modal="true" aria-labelledby="actionDialogTitle">
+      <div class="modal-header">
+        <h2 id="actionDialogTitle">Confirmation</h2>
+        <span class="close" id="closeActionDialogModal">&times;</span>
+      </div>
+      <div id="actionDialogBody" class="action-modal-body"></div>
+      <input id="actionDialogInput" class="action-modal-input" type="text" style="display:none;" />
+      <div class="action-modal-actions">
+        <button class="btn btn-cancel" id="actionDialogCancelBtn" type="button">Annuler</button>
+        <button class="btn btn-confirm" id="actionDialogConfirmBtn" type="button">Confirmer</button>
+      </div>
     </div>
   </div>
 

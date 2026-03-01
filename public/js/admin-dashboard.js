@@ -45,6 +45,15 @@ function normalizeAccessSummary(user) {
   };
 }
 
+function formatAdminDate(rawValue, { withTime = false, fallback = 'N/A' } = {}) {
+  if (!rawValue) return fallback;
+  const parsed = new Date(rawValue);
+  if (Number.isNaN(parsed.getTime())) return fallback;
+  return withTime
+    ? parsed.toLocaleString('fr-FR')
+    : parsed.toLocaleDateString('fr-FR');
+}
+
 // Helper to make authenticated fetch requests with cookies
 async function authFetch(url, options = {}) {
   return fetch(url, {
@@ -56,6 +65,107 @@ async function authFetch(url, options = {}) {
       ...options.headers
     }
   });
+}
+
+let actionDialogResolve = null;
+
+function closeActionDialog(result = { confirmed: false, value: null }) {
+  const modal = document.getElementById('actionDialogModal');
+  if (modal) {
+    modal.classList.remove('active');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+  if (typeof actionDialogResolve === 'function') {
+    const resolver = actionDialogResolve;
+    actionDialogResolve = null;
+    resolver(result);
+  }
+}
+
+function openActionDialog({ title = 'Confirmation', message = '', input = false, defaultValue = '', confirmLabel = 'Confirmer', cancelLabel = 'Annuler', inputPlaceholder = '' } = {}) {
+  const modal = document.getElementById('actionDialogModal');
+  const titleEl = document.getElementById('actionDialogTitle');
+  const bodyEl = document.getElementById('actionDialogBody');
+  const inputEl = document.getElementById('actionDialogInput');
+  const confirmBtn = document.getElementById('actionDialogConfirmBtn');
+  const cancelBtn = document.getElementById('actionDialogCancelBtn');
+
+  if (!modal || !titleEl || !bodyEl || !inputEl || !confirmBtn || !cancelBtn) {
+    return Promise.resolve({ confirmed: false, value: null });
+  }
+
+  titleEl.textContent = title;
+  bodyEl.textContent = message;
+  confirmBtn.textContent = confirmLabel;
+  cancelBtn.textContent = cancelLabel;
+
+  inputEl.style.display = input ? 'block' : 'none';
+  inputEl.value = input ? String(defaultValue || '') : '';
+  inputEl.placeholder = input ? String(inputPlaceholder || '') : '';
+
+  modal.classList.add('active');
+  modal.setAttribute('aria-hidden', 'false');
+
+  if (input) {
+    setTimeout(() => {
+      inputEl.focus();
+      inputEl.select();
+    }, 0);
+  } else {
+    setTimeout(() => confirmBtn.focus(), 0);
+  }
+
+  return new Promise((resolve) => {
+    actionDialogResolve = resolve;
+
+    const onCancel = () => {
+      modal.removeEventListener('click', onBackdrop);
+      document.removeEventListener('keydown', onKeydown);
+      closeActionDialog({ confirmed: false, value: null });
+    };
+    const onConfirm = () => {
+      modal.removeEventListener('click', onBackdrop);
+      document.removeEventListener('keydown', onKeydown);
+      closeActionDialog({ confirmed: true, value: input ? inputEl.value : null });
+    };
+    const onBackdrop = (event) => {
+      if (event.target === modal) onCancel();
+    };
+    const onKeydown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCancel();
+      }
+      if (input && event.key === 'Enter') {
+        event.preventDefault();
+        onConfirm();
+      }
+    };
+
+    confirmBtn.onclick = onConfirm;
+    cancelBtn.onclick = onCancel;
+    modal.addEventListener('click', onBackdrop);
+    document.addEventListener('keydown', onKeydown);
+  });
+}
+
+async function showConfirmDialog(message, title = 'Confirmation', confirmLabel = 'Confirmer', cancelLabel = 'Annuler') {
+  const result = await openActionDialog({ title, message, confirmLabel, cancelLabel, input: false });
+  return !!(result && result.confirmed);
+}
+
+async function showPromptDialog(message, { title = 'Saisie requise', defaultValue = '', placeholder = '', confirmLabel = 'Valider', cancelLabel = 'Annuler' } = {}) {
+  const result = await openActionDialog({
+    title,
+    message,
+    input: true,
+    defaultValue,
+    inputPlaceholder: placeholder,
+    confirmLabel,
+    cancelLabel
+  });
+  if (!result || !result.confirmed) return null;
+  return String(result.value || '');
 }
 
 function buildUserModalContent(user) {
@@ -234,8 +344,10 @@ async function checkAuth() {
     document.getElementById('userDisplay').textContent = `${data.user.username} (Admin)`;
   } catch (e) {
     console.error('Auth error:', e);
-    alert('Not authenticated or not an admin. Redirecting to login.');
-    window.location.href = '/account.html';
+    setScopedNotice('users', 'error', '❌ Non authentifié ou non admin. Redirection vers la connexion...');
+    setTimeout(() => {
+      window.location.href = '/account.html';
+    }, 900);
   }
 }
 
@@ -426,28 +538,42 @@ async function loadSubscriptions() {
 }
 
 async function purgeInactiveSubscriptions() {
-  if (!confirm('Supprimer/masquer tous les abonnements inactifs de la liste admin ?')) return;
+  const confirmed = await showConfirmDialog(
+    'Supprimer/masquer tous les abonnements inactifs de la liste admin ?',
+    'Purge abonnements',
+    'Lancer la purge'
+  );
+  if (!confirmed) return;
   try {
     const res = await authFetch(`${API_BASE}/admin/subscriptions/purge-inactive`, {
       method: 'POST'
     });
     const data = await res.json();
     if (!res.ok || !data.ok) {
-      return alert('❌ ' + (data.error || 'Erreur serveur'));
+      setScopedNotice('subscriptions', 'error', '❌ ' + (data.error || 'Erreur serveur'));
+      return;
     }
-    alert(`✅ ${data.purged || 0} abonnement(s) inactif(s) supprimé(s)`);
+    setScopedNotice('subscriptions', 'success', `✅ ${data.purged || 0} abonnement(s) inactif(s) supprimé(s)`);
     await loadSubscriptions();
     await loadStats();
   } catch (e) {
     console.error('[subscriptions] purge inactive error:', e);
-    alert('❌ Erreur lors de la purge: ' + e.message);
+    setScopedNotice('subscriptions', 'error', '❌ Erreur lors de la purge: ' + e.message);
   }
 }
 
 async function deleteInactiveSubscription(subscriptionId) {
   const id = String(subscriptionId || '').trim();
-  if (!id) return alert('ID abonnement manquant');
-  if (!confirm(`Supprimer cet abonnement inactif (${id}) de la liste admin ?`)) return;
+  if (!id) {
+    setScopedNotice('subscriptions', 'error', '❌ ID abonnement manquant');
+    return;
+  }
+  const confirmed = await showConfirmDialog(
+    `Supprimer cet abonnement inactif (${id}) de la liste admin ?`,
+    'Supprimer abonnement',
+    'Supprimer'
+  );
+  if (!confirmed) return;
 
   try {
     const res = await authFetch(`${API_BASE}/admin/subscriptions/${encodeURIComponent(id)}`, {
@@ -455,14 +581,15 @@ async function deleteInactiveSubscription(subscriptionId) {
     });
     const data = await res.json();
     if (!res.ok || !data.ok) {
-      return alert('❌ ' + (data.error || 'Erreur serveur'));
+      setScopedNotice('subscriptions', 'error', '❌ ' + (data.error || 'Erreur serveur'));
+      return;
     }
-    alert('✅ Abonnement inactif supprimé');
+    setScopedNotice('subscriptions', 'success', `✅ Abonnement inactif '${id}' supprimé`);
     await loadSubscriptions();
     await loadStats();
   } catch (e) {
     console.error('[subscriptions] delete inactive error:', e);
-    alert('❌ Erreur lors de la suppression: ' + e.message);
+    setScopedNotice('subscriptions', 'error', '❌ Erreur lors de la suppression: ' + e.message);
   }
 }
 
@@ -511,7 +638,7 @@ async function loadMessages() {
           <td>${msg.email}</td>
           <td>${msg.subject}</td>
           <td><span class="badge ${statusBadge}">${statusIcon} ${msg.status}</span></td>
-          <td>${new Date(msg.createdAt).toLocaleDateString()}</td>
+          <td>${formatAdminDate(msg.createdAt || msg.createdat, { withTime: false })}</td>
           <td>
             <button class="action-btn action-btn-view" onclick="viewMessage('${msg.id}')">View</button>
             <button class="action-btn action-btn-delete" onclick="deleteMessage('${msg.id}')">Delete</button>
@@ -554,7 +681,7 @@ async function viewSubscription(subscriptionId) {
     }
   } catch (e) {
     console.error('Error viewing subscription:', e);
-    alert('Error loading subscription details');
+    setScopedNotice('subscriptions', 'error', '❌ Error loading subscription details');
   }
 }
 
@@ -614,7 +741,7 @@ async function viewUser(username) {
     }
   } catch (e) {
     console.error('Error viewing user:', e);
-    alert('Error loading user details');
+    setScopedNotice('users', 'error', '❌ Error loading user details');
   }
 }
 
@@ -623,16 +750,20 @@ async function deleteUserAccount(username) {
   const normalized = String(username || '').trim();
 
   if (!normalized) {
-    alert('Nom d\'utilisateur manquant');
+    setScopedNotice('users', 'error', '❌ Nom d\'utilisateur manquant');
     return;
   }
 
   if (currentUser && currentUser.username && currentUser.username.toLowerCase() === normalized.toLowerCase()) {
-    alert('Vous ne pouvez pas supprimer votre propre compte depuis cette page.');
+    setScopedNotice('users', 'error', '❌ Vous ne pouvez pas supprimer votre propre compte depuis cette page.');
     return;
   }
 
-  const confirmed = confirm(`Supprimer l'utilisateur "${normalized}" ? Cette action est définitive.`);
+  const confirmed = await showConfirmDialog(
+    `Supprimer l'utilisateur "${normalized}" ? Cette action est définitive.`,
+    'Supprimer utilisateur',
+    'Supprimer'
+  );
   if (!confirmed) return;
 
   try {
@@ -641,16 +772,16 @@ async function deleteUserAccount(username) {
 
     if (!res.ok || !data.ok) {
       const message = (data && data.error) ? data.error : 'Erreur serveur';
-      alert('❌ ' + message);
+      setScopedNotice('users', 'error', '❌ ' + message);
       return;
     }
 
-    alert('✅ Utilisateur supprimé avec succès');
+    setScopedNotice('users', 'success', `✅ Utilisateur '${normalized}' supprimé avec succès`);
     await loadUsers();
     await loadStats();
   } catch (e) {
     console.error('[users] delete error:', e);
-    alert('❌ Erreur lors de la suppression: ' + e.message);
+    setScopedNotice('users', 'error', '❌ Erreur lors de la suppression: ' + e.message);
   }
 }
 
@@ -663,9 +794,17 @@ async function manageSubscription(username, action, days) {
     extend_trial: "ajouter des jours d'essai"
   }[action] || action;
 
-  if (!normalized || !action) return alert('Paramètres manquants');
+  if (!normalized || !action) {
+    setScopedNotice('users', 'error', '❌ Paramètres manquants');
+    return;
+  }
 
-  if (!confirm(`Confirmer: ${actionLabel} pour ${normalized} ?`)) return;
+  const confirmed = await showConfirmDialog(
+    `Confirmer: ${actionLabel} pour ${normalized} ?`,
+    'Confirmer action',
+    'Appliquer'
+  );
+  if (!confirmed) return;
 
   try {
     const res = await authFetch(`${API_BASE}/admin/subscription/manage`, {
@@ -676,26 +815,178 @@ async function manageSubscription(username, action, days) {
     const data = await res.json();
     if (!res.ok || !data.ok) {
       const message = data && data.error ? data.error : 'Erreur serveur';
-      alert('❌ ' + message);
+      setScopedNotice('users', 'error', '❌ ' + message);
       return;
     }
 
-    alert('✅ Action effectuée');
+    setScopedNotice('users', 'success', `✅ Action '${actionLabel}' appliquée pour ${normalized}`);
     updateCachedUserAccessFromResponse(normalized, data);
     await loadUsers();
     await loadStats();
     refreshUserModalIfNeeded(normalized);
   } catch (e) {
     console.error('[subs] manage error:', e);
-    alert('❌ Erreur: ' + e.message);
+    setScopedNotice('users', 'error', '❌ Erreur: ' + e.message);
   }
 }
 
-function promptExtendTrial(username) {
-  const extra = prompt("Combien de jours d'essai supplémentaires ?", '7');
+async function promptExtendTrial(username) {
+  const extra = await showPromptDialog(
+    "Combien de jours d'essai supplémentaires ?",
+    {
+      title: 'Étendre l\'essai',
+      defaultValue: '7',
+      placeholder: 'Ex: 7',
+      confirmLabel: 'Ajouter les jours'
+    }
+  );
+  if (extra === null) return;
   const days = Number(extra || 0);
-  if (Number.isNaN(days) || days <= 0) return alert('Nombre de jours invalide');
+  if (Number.isNaN(days) || days <= 0) {
+    setScopedNotice('users', 'error', '❌ Nombre de jours invalide');
+    return;
+  }
   manageSubscription(username, 'extend_trial', days);
+}
+
+function formatBackfillSummary(report, dryRun = true) {
+  if (!report) return dryRun ? 'Simulation terminée.' : 'Exécution terminée.';
+  const header = dryRun ? 'Simulation backfill' : 'Backfill exécuté';
+  const lines = [
+    `${header}:`,
+    `- Comptes analysés: ${report.scanned || 0}`,
+    `- Candidats: ${report.candidates || 0}`,
+    dryRun
+      ? `- Seront mis à jour: ${(report.details || []).filter(d => d.status === 'would_update').length}`
+      : `- Mis à jour: ${report.updated || 0}`,
+    `- Déjà corrects: ${report.skippedAlreadySet || 0}`,
+    `- Sans createdAt valide: ${report.skippedNoCreatedAt || 0}`,
+    `- Échecs: ${report.failed || 0}`
+  ];
+
+  const impacted = (report.details || [])
+    .filter(d => d.status === 'would_update' || d.status === 'updated')
+    .map(d => d.username)
+    .filter(Boolean)
+    .slice(0, 8);
+
+  if (impacted.length > 0) {
+    lines.push('');
+    lines.push(`Utilisateurs impactés (${impacted.length}${(report.candidates || 0) > impacted.length ? '+' : ''}):`);
+    impacted.forEach(name => lines.push(`• ${name}`));
+  }
+
+  return lines.join('\n');
+}
+
+function getNoticeTarget(scope = 'users') {
+  const map = {
+    users: 'usersBackfillNotice',
+    subscriptions: 'subscriptionsActionNotice',
+    messages: 'messagesActionNotice'
+  };
+  return document.getElementById(map[scope] || map.users);
+}
+
+function clearScopedNotice(scope = 'users') {
+  const box = getNoticeTarget(scope);
+  if (!box) return;
+  box.style.display = 'none';
+  box.className = '';
+  box.textContent = '';
+}
+
+function setScopedNotice(scope = 'users', kind = 'info', message = '') {
+  const box = getNoticeTarget(scope);
+  if (!box) return;
+  box.style.display = 'block';
+  box.className = kind === 'error' ? 'error' : (kind === 'success' ? 'success' : 'loading');
+  box.textContent = message;
+}
+
+async function runDemoStartBackfill() {
+  const triggerBtn = document.getElementById('demoBackfillBtn');
+  const originalLabel = triggerBtn ? triggerBtn.textContent : null;
+
+  const promptValue = await showPromptDialog(
+    'Backfill essai: saisir un username précis (laisser vide = tous les utilisateurs)',
+    {
+      title: 'Backfill essais legacy',
+      defaultValue: '',
+      placeholder: 'Laisser vide pour tous les utilisateurs',
+      confirmLabel: 'Lancer la simulation'
+    }
+  );
+  if (promptValue === null) return;
+  const targetInput = String(promptValue || '').trim();
+  const targetUsername = targetInput || null;
+
+  try {
+    clearScopedNotice('users');
+    if (triggerBtn) {
+      triggerBtn.disabled = true;
+      triggerBtn.textContent = 'Simulation...';
+    }
+    setScopedNotice('users', 'info', 'Simulation du backfill en cours...');
+
+    const dryRunResponse = await authFetch(`${API_BASE}/admin/demo/backfill-start`, {
+      method: 'POST',
+      body: JSON.stringify({ dryRun: true, targetUsername })
+    });
+    const dryRunData = await dryRunResponse.json();
+    if (!dryRunResponse.ok || !dryRunData.ok) {
+      setScopedNotice('users', 'error', '❌ ' + (dryRunData.error || 'Erreur serveur pendant la simulation'));
+      return;
+    }
+
+    const dryRunReport = dryRunData.report || {};
+    const preview = formatBackfillSummary(dryRunReport, true);
+    setScopedNotice('users', 'info', preview.replace(/\n/g, ' | '));
+
+    if (!dryRunReport.candidates) {
+      setScopedNotice('users', 'success', `✅ Aucun correctif nécessaire. ${preview.replace(/\n/g, ' | ')}`);
+      return;
+    }
+
+    const confirmApply = await showConfirmDialog(
+      `${preview}\n\nAppliquer ces corrections maintenant ?`,
+      'Confirmer le backfill',
+      'Appliquer les corrections'
+    );
+    if (!confirmApply) {
+      setScopedNotice('users', 'info', '👌 Aucun changement appliqué (simulation uniquement).');
+      return;
+    }
+
+    if (triggerBtn) {
+      triggerBtn.textContent = 'Application...';
+    }
+    setScopedNotice('users', 'info', 'Application du backfill en cours...');
+
+    const applyResponse = await authFetch(`${API_BASE}/admin/demo/backfill-start`, {
+      method: 'POST',
+      body: JSON.stringify({ dryRun: false, targetUsername })
+    });
+    const applyData = await applyResponse.json();
+    if (!applyResponse.ok || !applyData.ok) {
+      setScopedNotice('users', 'error', '❌ ' + (applyData.error || 'Erreur serveur pendant le backfill'));
+      return;
+    }
+
+    const appliedReport = applyData.report || {};
+    setScopedNotice('users', 'success', `✅ Backfill terminé. ${formatBackfillSummary(appliedReport, false).replace(/\n/g, ' | ')}`);
+
+    await loadUsers();
+    await loadStats();
+  } catch (e) {
+    console.error('[admin] runDemoStartBackfill error:', e);
+    setScopedNotice('users', 'error', '❌ Erreur lors du backfill: ' + e.message);
+  } finally {
+    if (triggerBtn) {
+      triggerBtn.disabled = false;
+      triggerBtn.textContent = originalLabel || 'Corriger essais legacy';
+    }
+  }
 }
 
 // View message detail
@@ -707,14 +998,14 @@ async function viewMessage(messageId) {
     
     if (!data.ok || !data.messages) {
       console.error('[viewMessage] Error loading messages:', data.error);
-      alert('❌ Error loading messages: ' + (data.error || 'Unknown error'));
+      setScopedNotice('messages', 'error', '❌ Error loading messages: ' + (data.error || 'Unknown error'));
       return;
     }
     
     const msg = data.messages.find(m => m.id == messageId);
     if (!msg) {
       console.error('[viewMessage] Message not found with id:', messageId);
-      alert('❌ Message not found');
+      setScopedNotice('messages', 'error', '❌ Message not found');
       return;
     }
     
@@ -734,7 +1025,7 @@ async function viewMessage(messageId) {
     const statusLabel = msg.status === 'unread' ? '📧 Unread' : (msg.status === 'responded' ? '✓ Responded' : 'Read');
     
     const userAvatar = msg.name.charAt(0).toUpperCase();
-    const respondedAt = msg.respondedAt ? new Date(msg.respondedAt).toLocaleString() : null;
+    const respondedAt = formatAdminDate(msg.respondedAt || msg.respondedat, { withTime: true, fallback: 'N/A' });
     
     modalBody.innerHTML = `
       <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
@@ -743,7 +1034,7 @@ async function viewMessage(messageId) {
           <div style="flex: 1;">
             <p style="margin: 0; font-weight: 600; color: #333;">${msg.name}</p>
             <p style="margin: 5px 0 0 0; color: #666; font-size: 14px;">${msg.email}</p>
-            <p style="margin: 8px 0 0 0; color: #999; font-size: 12px;">${new Date(msg.createdAt).toLocaleString()}</p>
+            <p style="margin: 8px 0 0 0; color: #999; font-size: 12px;">${formatAdminDate(msg.createdAt || msg.createdat, { withTime: true })}</p>
           </div>
           <span class="badge ${statusBadgeClass}" style="white-space: nowrap;">${statusLabel}</span>
         </div>
@@ -770,7 +1061,7 @@ async function viewMessage(messageId) {
     document.getElementById('messageModal').classList.add('active');
   } catch (e) {
     console.error('[viewMessage] Exception:', e);
-    alert('❌ Error viewing message:\n' + e.message);
+    setScopedNotice('messages', 'error', '❌ Error viewing message: ' + e.message);
   }
 }
 
@@ -779,13 +1070,13 @@ async function respondToMessage(messageId) {
   const responseText = document.getElementById('responseText');
   if (!responseText) {
     console.error('[respond] responseText textarea not found');
-    alert('❌ Error: Response field not found. Try refreshing the page.');
+    setScopedNotice('messages', 'error', '❌ Error: Response field not found. Try refreshing the page.');
     return;
   }
   
   const response = responseText.value;
   if (!response || response.trim() === '') {
-    alert('❌ Please write a response');
+    setScopedNotice('messages', 'error', '❌ Please write a response');
     return;
   }
   
@@ -815,36 +1106,44 @@ async function respondToMessage(messageId) {
     console.log('[respond] Response data:', data);
     
     if (data.ok) {
-      alert('✅ Response sent successfully!\n\n📧 Reply email sent to: ' + (data.emailSent ? 'Yes' : 'No (check email config)'));
+      setScopedNotice('messages', 'success', '✅ Response sent successfully. 📧 Reply email sent: ' + (data.emailSent ? 'Yes' : 'No (check email config)'));
       document.getElementById('messageModal').classList.remove('active');
       await loadMessages();
       await loadStats();
     } else {
       console.error('[respond] Error:', data.error);
-      alert('❌ Error: ' + (data.error || 'Unknown error'));
+      setScopedNotice('messages', 'error', '❌ Error: ' + (data.error || 'Unknown error'));
     }
   } catch (e) {
     console.error('[respond] Exception:', e);
     console.error('[respond] Stack:', e.stack);
-    alert('❌ Error sending response:\n' + e.message);
+    setScopedNotice('messages', 'error', '❌ Error sending response: ' + e.message);
   }
 }
 
 // Delete message
 async function deleteMessage(messageId) {
-  if (!confirm('Are you sure you want to delete this message?')) return;
+  const confirmed = await showConfirmDialog(
+    'Supprimer ce message ?',
+    'Supprimer message',
+    'Supprimer'
+  );
+  if (!confirmed) return;
   try {
     const res = await authFetch(`${API_BASE}/admin/messages/${messageId}`, {
       method: 'DELETE'
     });
     const data = await res.json();
     if (data.ok) {
+      setScopedNotice('messages', 'success', '✅ Message supprimé');
       loadMessages();
       loadStats();
+    } else {
+      setScopedNotice('messages', 'error', '❌ ' + (data.error || 'Erreur suppression message'));
     }
   } catch (e) {
     console.error('Error deleting message:', e);
-    alert('Error deleting message');
+    setScopedNotice('messages', 'error', '❌ Error deleting message: ' + e.message);
   }
 }
 
@@ -877,6 +1176,11 @@ document.addEventListener('DOMContentLoaded', () => {
         delete modal.dataset.currentUser;
       }
     });
+  }
+
+  const closeActionBtn = document.getElementById('closeActionDialogModal');
+  if (closeActionBtn) {
+    closeActionBtn.addEventListener('click', () => closeActionDialog({ confirmed: false, value: null }));
   }
 
   // Logout

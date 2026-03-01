@@ -307,7 +307,23 @@ async function ensureDefaultUsers(client) {
 // ===== Messages =====
 async function getMessages() {
   try {
-    const result = await pool.query('SELECT * FROM messages ORDER BY createdat DESC');
+    const result = await pool.query(`
+      SELECT
+        id,
+        name,
+        email,
+        subject,
+        message,
+        status,
+        createdat AS "createdAt",
+        readat AS "readAt",
+        respondedat AS "respondedAt",
+        response,
+        respondedby AS "respondedBy",
+        updatedat AS "updatedAt"
+      FROM messages
+      ORDER BY createdat DESC
+    `);
     return result.rows || [];
   } catch (err) {
     console.error('[DB] Error getting messages:', err && err.message ? err.message : err);
@@ -318,7 +334,21 @@ async function getMessages() {
 async function createMessage(name, email, subject, message) {
   try {
     const result = await pool.query(
-      'INSERT INTO messages (name, email, subject, message, status) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      `INSERT INTO messages (name, email, subject, message, status)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING
+         id,
+         name,
+         email,
+         subject,
+         message,
+         status,
+         createdat AS "createdAt",
+         readat AS "readAt",
+         respondedat AS "respondedAt",
+         response,
+         respondedby AS "respondedBy",
+         updatedat AS "updatedAt"`,
       [name, email, subject, message, 'unread']
     );
     return result.rows?.[0] || null;
@@ -346,7 +376,24 @@ async function updateMessage(id, updates) {
     if (fields.length === 0) return null;
     values.push(id);
 
-    const query = `UPDATE messages SET ${fields.join(', ')}, updatedat = CURRENT_TIMESTAMP WHERE id = $${i} RETURNING *`;
+    const query = `
+      UPDATE messages
+      SET ${fields.join(', ')}, updatedat = CURRENT_TIMESTAMP
+      WHERE id = $${i}
+      RETURNING
+        id,
+        name,
+        email,
+        subject,
+        message,
+        status,
+        createdat AS "createdAt",
+        readat AS "readAt",
+        respondedat AS "respondedAt",
+        response,
+        respondedby AS "respondedBy",
+        updatedat AS "updatedAt"
+    `;
     const result = await pool.query(query, values);
     return result.rows?.[0] || null;
   } catch (err) {

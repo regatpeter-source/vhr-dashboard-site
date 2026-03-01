@@ -1024,10 +1024,11 @@ function getDemoExpirationDate(user) {
   if (parsedEnd && !Number.isNaN(parsedEnd.getTime())) {
     return parsedEnd;
   }
-  if (!user.demoStartDate) {
+  const fallbackStart = user.demoStartDate || user.createdAt || user.createdat || null;
+  if (!fallbackStart) {
     return null;
   }
-  const startDate = new Date(user.demoStartDate);
+  const startDate = new Date(fallbackStart);
   if (Number.isNaN(startDate.getTime())) {
     return null;
   }
@@ -4194,12 +4195,14 @@ app.post('/api/login', async (req, res) => {
   }
 
   if (demoConfig.MODE === 'database' && !user.demoStartDate) {
-    const nowIso = new Date().toISOString();
-    user.demoStartDate = nowIso;
-    user.demoStartSource = user.demoStartSource || 'app-login';
-    user.demoStartReason = user.demoStartReason || 'first_login_app';
-    user.demoStartAt = user.demoStartAt || nowIso;
-    user.updatedAt = nowIso;
+    const parsedCreatedAt = user.createdAt || user.createdat ? new Date(user.createdAt || user.createdat) : null;
+    const hasValidCreatedAt = parsedCreatedAt && !Number.isNaN(parsedCreatedAt.getTime());
+    const demoStartIso = hasValidCreatedAt ? parsedCreatedAt.toISOString() : new Date().toISOString();
+    user.demoStartDate = demoStartIso;
+    user.demoStartSource = user.demoStartSource || (hasValidCreatedAt ? 'backfill-created-at' : 'app-login');
+    user.demoStartReason = user.demoStartReason || (hasValidCreatedAt ? 'backfilled_from_createdAt' : 'first_login_app');
+    user.demoStartAt = user.demoStartAt || demoStartIso;
+    user.updatedAt = new Date().toISOString();
     persistUser(user);
   }
 
@@ -7109,6 +7112,132 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
   }
 });
 
+// Backfill demo start date for legacy users with missing demoStartDate
+// Usage:
+// POST /api/admin/demo/backfill-start
+// Body: { dryRun?: boolean, targetUsername?: string }
+app.post('/api/admin/demo/backfill-start', authMiddleware, async (req, res) => {
+  if (!ensureAllowedAdmin(req, res)) return;
+
+  const body = req.body || {};
+  const targetUsername = String(body.targetUsername || '').trim();
+  const dryRun = body.dryRun !== undefined ? Boolean(body.dryRun) : true;
+
+  const toIsoFromCreated = (user) => {
+    const raw = user?.createdAt || user?.createdat || null;
+    if (!raw) return null;
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toISOString();
+  };
+
+  try {
+    let sourceUsers = [];
+    if (USE_POSTGRES && db && db.getUsers) {
+      const dbUsers = await db.getUsers();
+      sourceUsers = Array.isArray(dbUsers) ? dbUsers : [];
+    } else {
+      reloadUsers();
+      sourceUsers = Array.isArray(users) ? users : [];
+    }
+
+    const normalizedUsers = sourceUsers
+      .map(u => normalizeUserRecord(u))
+      .filter(Boolean)
+      .filter(u => !isUserDeletedOrDisabled(u));
+
+    const scopedUsers = targetUsername
+      ? normalizedUsers.filter(u => String(u.username || '').toLowerCase() === targetUsername.toLowerCase())
+      : normalizedUsers;
+
+    if (targetUsername && scopedUsers.length === 0) {
+      return res.status(404).json({ ok: false, error: `Utilisateur '${targetUsername}' introuvable` });
+    }
+
+    const report = {
+      scanned: scopedUsers.length,
+      candidates: 0,
+      updated: 0,
+      skippedAlreadySet: 0,
+      skippedNoCreatedAt: 0,
+      skippedProtectedAdmin: 0,
+      failed: 0,
+      details: []
+    };
+
+    for (const u of scopedUsers) {
+      const username = String(u.username || '').trim();
+      if (!username) continue;
+
+      // Never mutate protected allowlisted admins with this bulk tool
+      if (u.role === 'admin' && isAllowedAdminUser(username)) {
+        report.skippedProtectedAdmin += 1;
+        report.details.push({ username, status: 'skipped', reason: 'protected_admin' });
+        continue;
+      }
+
+      if (u.demoStartDate) {
+        report.skippedAlreadySet += 1;
+        report.details.push({ username, status: 'skipped', reason: 'already_set', demoStartDate: u.demoStartDate });
+        continue;
+      }
+
+      const derivedDemoStart = toIsoFromCreated(u);
+      if (!derivedDemoStart) {
+        report.skippedNoCreatedAt += 1;
+        report.details.push({ username, status: 'skipped', reason: 'missing_or_invalid_createdAt' });
+        continue;
+      }
+
+      report.candidates += 1;
+
+      if (dryRun) {
+        report.details.push({ username, status: 'would_update', demoStartDate: derivedDemoStart });
+        continue;
+      }
+
+      try {
+        if (USE_POSTGRES && db && db.updateUser && u.id) {
+          await db.updateUser(u.id, { demostartdate: derivedDemoStart });
+          const localUser = getUserByUsername(username);
+          if (localUser) {
+            localUser.demoStartDate = derivedDemoStart;
+            localUser.updatedAt = new Date().toISOString();
+            persistUser(localUser);
+          }
+        } else {
+          u.demoStartDate = derivedDemoStart;
+          u.demoStartAt = u.demoStartAt || derivedDemoStart;
+          u.demoStartSource = u.demoStartSource || 'backfill-created-at';
+          u.demoStartReason = u.demoStartReason || 'bulk_backfill_from_createdAt';
+          u.updatedAt = new Date().toISOString();
+          persistUser(u);
+        }
+
+        report.updated += 1;
+        report.details.push({ username, status: 'updated', demoStartDate: derivedDemoStart });
+      } catch (updateErr) {
+        report.failed += 1;
+        report.details.push({
+          username,
+          status: 'failed',
+          reason: updateErr && updateErr.message ? updateErr.message : String(updateErr)
+        });
+      }
+    }
+
+    return res.json({
+      ok: true,
+      dryRun,
+      targetUsername: targetUsername || null,
+      report
+    });
+  } catch (e) {
+    console.error('[api] admin/demo/backfill-start:', e);
+    return res.status(500).json({ ok: false, error: 'Erreur serveur' });
+  }
+});
+
 // Delete a user (admin only)
 app.delete('/api/admin/users/:username', authMiddleware, async (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;
@@ -7563,6 +7692,43 @@ app.get('/api/test/messages', (req, res) => {
   }
 });
 
+function normalizeMessageRecord(record) {
+  if (!record || typeof record !== 'object') return null;
+
+  const toIsoOrNull = (value) => {
+    if (!value) return null;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toISOString();
+  };
+
+  const createdCandidate = record.createdAt || record.createdat || record.created_at || record.created || null;
+  const updatedCandidate = record.updatedAt || record.updatedat || null;
+  const createdIso = toIsoOrNull(createdCandidate) || toIsoOrNull(updatedCandidate) || new Date().toISOString();
+
+  const readCandidate = record.readAt || record.readat || null;
+  const respondedCandidate = record.respondedAt || record.respondedat || null;
+
+  const readIso = toIsoOrNull(readCandidate);
+  let respondedIso = toIsoOrNull(respondedCandidate);
+  const statusValue = String(record.status || '').toLowerCase();
+  if (!respondedIso && statusValue === 'responded') {
+    respondedIso = toIsoOrNull(updatedCandidate) || createdIso;
+  }
+
+  return {
+    ...record,
+    createdAt: createdIso,
+    readAt: readIso,
+    respondedAt: respondedIso,
+    respondedBy: record.respondedBy || record.respondedby || null,
+    createdat: createdIso,
+    readat: readIso,
+    respondedat: respondedIso,
+    respondedby: record.respondedBy || record.respondedby || null
+  };
+}
+
 // Get all messages (AUTHENTICATED)
 app.get('/api/admin/messages', authMiddleware, async (req, res) => {
   console.log('[api/admin/messages] Called');
@@ -7576,6 +7742,10 @@ app.get('/api/admin/messages', authMiddleware, async (req, res) => {
     } else {
       messageList = messages || [];
     }
+
+    messageList = (Array.isArray(messageList) ? messageList : [])
+      .map(normalizeMessageRecord)
+      .filter(Boolean);
     
     res.json({ ok: true, messages: messageList });
   } catch (e) {
@@ -7810,6 +7980,7 @@ app.post('/api/contact', async (req, res) => {
       // Save to PostgreSQL
       msg = await db.createMessage(name, email, subject, message);
       if (msg) {
+        msg = normalizeMessageRecord(msg);
         console.log('[contact] Message saved to PostgreSQL');
       } else {
         console.error('[contact] Failed to save message to PostgreSQL');
@@ -7830,6 +8001,8 @@ app.post('/api/contact', async (req, res) => {
       saveMessages();
       console.log('[contact] Message saved to messages.json');
     }
+
+    msg = normalizeMessageRecord(msg);
     
     // Send email notification to admin
     const emailSent = await sendContactMessageToAdmin(msg);
@@ -10780,6 +10953,7 @@ app.post('/api/register', async (req, res) => {
       if (getUserByEmail(normalizedEmail)) return res.status(400).json({ ok: false, error: 'Cet email est déjà utilisé' });
     }
     const passwordHash = await bcrypt.hash(password, 10);
+    const signupNow = new Date().toISOString();
     const newUser = { 
       id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       username: normalizedUsername,
@@ -10792,13 +10966,19 @@ app.post('/api/register', async (req, res) => {
       emailVerificationExpiresAt: null,
       emailVerificationSentAt: null,
       stripeCustomerId: null,
-      demoStartDate: null,
-      demoStartSource: 'pending'
+      demoStartDate: signupNow,
+      demoStartAt: signupNow,
+      demoStartSource: 'site-register',
+      demoStartReason: 'signup_vitrine',
+      createdAt: signupNow,
+      updatedAt: signupNow
     };
     initializeDemoForUser(newUser);
     // persist to database
     if (USE_POSTGRES) {
-      await db.createUser(newUser.id, newUser.username, newUser.passwordHash, newUser.email, newUser.role);
+      await db.createUser(newUser.id, newUser.username, newUser.passwordHash, newUser.email, newUser.role, {
+        demoStartDate: newUser.demoStartDate
+      });
       const idx = users.findIndex(u => u.username === newUser.username);
       if (idx >= 0) users[idx] = newUser; else users.push(newUser);
     } else {
