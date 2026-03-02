@@ -1,4 +1,14 @@
 /* Professional Neutral Palette */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 .centered {
   text-align: center;
   margin-left: auto;
