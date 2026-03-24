@@ -151,6 +151,47 @@
       line-height: 1.4;
     }
 
+    .vitrine-pages-panel {
+      background: white;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      margin: -8px 0 24px 0;
+    }
+
+    .vitrine-pages-title {
+      margin-bottom: 10px;
+      color: #2d3748;
+      font-size: 16px;
+    }
+
+    .vitrine-pages-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 10px;
+    }
+
+    .vitrine-page-item {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #f8fafc;
+    }
+
+    .vitrine-page-path {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px;
+      color: #4a5568;
+      margin-bottom: 6px;
+      word-break: break-all;
+    }
+
+    .vitrine-page-metrics {
+      font-size: 12px;
+      color: #2d3748;
+      line-height: 1.45;
+    }
+
     .tabs {
       display: flex;
       gap: 10px;
@@ -549,6 +590,11 @@
         <div class="stat-subtext" id="vitrineVisitorsWindows">24h: 0 • 7j: 0 • 30j: 0</div>
       </div>
     </div>
+
+    <section class="vitrine-pages-panel" aria-live="polite">
+      <h3 class="vitrine-pages-title">Top pages vitrine (24h / 7j / 30j)</h3>
+      <div id="vitrineTopPages" class="vitrine-pages-list"></div>
+    </section>
 
     <div class="tabs">
       <button class="tab-btn active" data-tab="users">Users</button>

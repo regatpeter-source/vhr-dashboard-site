@@ -2340,6 +2340,79 @@ function countUniqueSince(recentVisits, windowMs) {
   return uniq.size;
 }
 
+function normalizeVitrinePagePath(rawPath) {
+  let pathname = String(rawPath || '').trim();
+  if (!pathname) return '/index.html';
+  pathname = pathname.split('?')[0].split('#')[0];
+  if (pathname === '/') return '/index.html';
+  if (pathname === '/site-vitrine' || pathname === '/site-vitrine/') return '/index.html';
+  if (pathname.startsWith('/site-vitrine/')) {
+    pathname = pathname.replace('/site-vitrine', '');
+    if (!pathname.startsWith('/')) pathname = `/${pathname}`;
+  }
+  if (!pathname.endsWith('.html')) return '/index.html';
+  return pathname;
+}
+
+function buildTopPagesByWindows(recentVisits, limit = 6) {
+  const entries = Array.isArray(recentVisits) ? recentVisits : [];
+  const now = Date.now();
+  const cutoff24h = now - (24 * 60 * 60 * 1000);
+  const cutoff7d = now - (7 * DAY_MS);
+  const cutoff30d = now - (30 * DAY_MS);
+  const perPage = new Map();
+
+  for (const entry of entries) {
+    const ts = new Date(entry?.at).getTime();
+    if (!Number.isFinite(ts) || ts < cutoff30d) continue;
+    const path = normalizeVitrinePagePath(entry?.path || '/index.html');
+    const key = String(entry?.key || '').trim();
+    if (!path || !key) continue;
+
+    let item = perPage.get(path);
+    if (!item) {
+      item = {
+        path,
+        visits24h: 0,
+        visits7d: 0,
+        visits30d: 0,
+        unique24hSet: new Set(),
+        unique7dSet: new Set(),
+        unique30dSet: new Set()
+      };
+      perPage.set(path, item);
+    }
+
+    item.visits30d += 1;
+    item.unique30dSet.add(key);
+    if (ts >= cutoff7d) {
+      item.visits7d += 1;
+      item.unique7dSet.add(key);
+    }
+    if (ts >= cutoff24h) {
+      item.visits24h += 1;
+      item.unique24hSet.add(key);
+    }
+  }
+
+  return Array.from(perPage.values())
+    .map(item => ({
+      path: item.path,
+      visits24h: item.visits24h,
+      visits7d: item.visits7d,
+      visits30d: item.visits30d,
+      unique24h: item.unique24hSet.size,
+      unique7d: item.unique7dSet.size,
+      unique30d: item.unique30dSet.size
+    }))
+    .sort((a, b) => {
+      if (b.visits30d !== a.visits30d) return b.visits30d - a.visits30d;
+      if (b.visits7d !== a.visits7d) return b.visits7d - a.visits7d;
+      return b.visits24h - a.visits24h;
+    })
+    .slice(0, Math.max(1, Number(limit) || 6));
+}
+
 function buildVitrineVisitorKey(req) {
   const ip = getRequestAddress(req) || 'unknown';
   const ua = String(req.headers?.['user-agent'] || '').slice(0, 300);
@@ -2350,11 +2423,12 @@ function registerVitrineVisit(req) {
   const stats = loadVitrineVisitStats();
   const nowIso = new Date().toISOString();
   const key = buildVitrineVisitorKey(req);
+  const pagePath = normalizeVitrinePagePath(req.path || req.originalUrl || '/index.html');
 
   stats.totalVisits = Number.isFinite(Number(stats.totalVisits)) ? Number(stats.totalVisits) + 1 : 1;
   stats.uniqueVisitors = stats.uniqueVisitors || {};
   stats.recentVisits = Array.isArray(stats.recentVisits) ? stats.recentVisits : [];
-  stats.recentVisits.push({ at: nowIso, key });
+  stats.recentVisits.push({ at: nowIso, key, path: pagePath });
   stats.uniqueVisitors[key] = nowIso;
   stats.lastVisitAt = nowIso;
 
@@ -2368,6 +2442,7 @@ function getVitrineVisitStatsSnapshot() {
   const H24 = 24 * 60 * 60 * 1000;
   const D7 = 7 * DAY_MS;
   const D30 = 30 * DAY_MS;
+  const topPages = buildTopPagesByWindows(recentVisits, 8);
   return {
     totalVisits: Number(stats.totalVisits || 0),
     uniqueVisitorsCount: Number(stats.uniqueVisitorsCount || 0),
@@ -2377,7 +2452,8 @@ function getVitrineVisitStatsSnapshot() {
     visits30d: countVisitsSince(recentVisits, D30),
     unique24h: countUniqueSince(recentVisits, H24),
     unique7d: countUniqueSince(recentVisits, D7),
-    unique30d: countUniqueSince(recentVisits, D30)
+    unique30d: countUniqueSince(recentVisits, D30),
+    topPages
   };
 }
 
@@ -8177,7 +8253,8 @@ app.get('/api/admin/stats', authMiddleware, async (req, res) => {
         vitrineVisits30d: vitrineStats.visits30d,
         vitrineUnique24h: vitrineStats.unique24h,
         vitrineUnique7d: vitrineStats.unique7d,
-        vitrineUnique30d: vitrineStats.unique30d
+        vitrineUnique30d: vitrineStats.unique30d,
+        vitrineTopPages: vitrineStats.topPages
       }
     });
   } catch (e) {

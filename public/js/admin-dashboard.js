@@ -54,6 +54,46 @@ function formatAdminDate(rawValue, { withTime = false, fallback = 'N/A' } = {}) 
     : parsed.toLocaleDateString('fr-FR');
 }
 
+function renderVitrineTopPages(items) {
+  const container = document.getElementById('vitrineTopPages');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const rows = Array.isArray(items) ? items : [];
+  if (!rows.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'Aucune donnée page pour le moment.';
+    container.appendChild(empty);
+    return;
+  }
+
+  rows.forEach((row) => {
+    const path = String(row?.path || '/index.html');
+    const visits24h = Number(row?.visits24h || 0);
+    const visits7d = Number(row?.visits7d || 0);
+    const visits30d = Number(row?.visits30d || 0);
+    const unique24h = Number(row?.unique24h || 0);
+    const unique7d = Number(row?.unique7d || 0);
+    const unique30d = Number(row?.unique30d || 0);
+
+    const item = document.createElement('article');
+    item.className = 'vitrine-page-item';
+
+    const pathEl = document.createElement('div');
+    pathEl.className = 'vitrine-page-path';
+    pathEl.textContent = path;
+
+    const metricsEl = document.createElement('div');
+    metricsEl.className = 'vitrine-page-metrics';
+    metricsEl.textContent = `Visites — 24h: ${visits24h} • 7j: ${visits7d} • 30j: ${visits30d} | Uniques — 24h: ${unique24h} • 7j: ${unique7d} • 30j: ${unique30d}`;
+
+    item.appendChild(pathEl);
+    item.appendChild(metricsEl);
+    container.appendChild(item);
+  });
+}
+
 // Helper to make authenticated fetch requests with cookies
 async function authFetch(url, options = {}) {
   return fetch(url, {
@@ -381,6 +421,7 @@ async function loadStats() {
           : 'N/A';
         vitrineCounter.title = `Visites totales: ${totalVisits} • Visites 24h: ${visits24h} • 7j: ${visits7d} • 30j: ${visits30d} • Dernière visite: ${lastVisit}`;
       }
+      renderVitrineTopPages(data.stats.vitrineTopPages || []);
       setRealtimeBadge('on');
     }
   } catch (e) {
