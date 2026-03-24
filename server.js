@@ -1020,7 +1020,9 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
   try {
     if (shouldTrackVitrineVisit(req)) {
-      registerVitrineVisit(req);
+      Promise.resolve(registerVitrineVisit(req)).catch((e) => {
+        console.warn('[vitrine-stats] tracking error:', e && e.message ? e.message : e);
+      });
     }
   } catch (e) {
     console.warn('[vitrine-stats] tracking error:', e && e.message ? e.message : e);
@@ -2235,6 +2237,8 @@ function ensureDataDir() {
 let vitrineVisitStatsCache = null;
 const VITRINE_VISITOR_RETENTION_DAYS = 180;
 const VITRINE_RECENT_VISITS_RETENTION_DAYS = 35;
+const VITRINE_STATS_STORE_ID = 'global';
+let vitrinePgStoreReadyPromise = null;
 
 function createDefaultVitrineStats() {
   return {
@@ -2247,7 +2251,20 @@ function createDefaultVitrineStats() {
   };
 }
 
-function loadVitrineVisitStats() {
+function normalizeVitrineStatsShape(value) {
+  const base = createDefaultVitrineStats();
+  const parsed = value && typeof value === 'object' ? value : {};
+  const normalized = {
+    ...base,
+    ...parsed,
+    uniqueVisitors: parsed.uniqueVisitors && typeof parsed.uniqueVisitors === 'object' ? parsed.uniqueVisitors : {},
+    recentVisits: Array.isArray(parsed.recentVisits) ? parsed.recentVisits : []
+  };
+  normalized.uniqueVisitorsCount = Object.keys(normalized.uniqueVisitors || {}).length;
+  return normalized;
+}
+
+function loadVitrineVisitStatsFromFile() {
   if (vitrineVisitStatsCache) return vitrineVisitStatsCache;
   ensureDataDir();
   let stats = createDefaultVitrineStats();
@@ -2255,30 +2272,20 @@ function loadVitrineVisitStats() {
     if (fs.existsSync(VITRINE_VISITS_FILE)) {
       const raw = fs.readFileSync(VITRINE_VISITS_FILE, 'utf8').replace(/^\uFEFF/, '').trim();
       if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') {
-          stats = {
-            ...stats,
-            ...parsed,
-            uniqueVisitors: parsed.uniqueVisitors && typeof parsed.uniqueVisitors === 'object' ? parsed.uniqueVisitors : {},
-            recentVisits: Array.isArray(parsed.recentVisits) ? parsed.recentVisits : []
-          };
-        }
+        stats = normalizeVitrineStatsShape(JSON.parse(raw));
       }
     }
   } catch (e) {
     console.warn('[vitrine-stats] load error:', e && e.message ? e.message : e);
   }
-  if (!Array.isArray(stats.recentVisits)) stats.recentVisits = [];
-  stats.uniqueVisitorsCount = Object.keys(stats.uniqueVisitors || {}).length;
-  vitrineVisitStatsCache = stats;
+  vitrineVisitStatsCache = normalizeVitrineStatsShape(stats);
   return vitrineVisitStatsCache;
 }
 
-function saveVitrineVisitStats() {
+function saveVitrineVisitStatsToFile(statsArg = null) {
   try {
     ensureDataDir();
-    const stats = loadVitrineVisitStats();
+    const stats = statsArg || vitrineVisitStatsCache || loadVitrineVisitStatsFromFile();
     stats.updatedAt = new Date().toISOString();
     fs.writeFileSync(VITRINE_VISITS_FILE, JSON.stringify(stats, null, 2), 'utf8');
     return true;
@@ -2288,8 +2295,72 @@ function saveVitrineVisitStats() {
   }
 }
 
+async function ensureVitrinePgStoreReady() {
+  if (!USE_POSTGRES || !db || !db.pool) return false;
+  if (vitrinePgStoreReadyPromise) return vitrinePgStoreReadyPromise;
+  vitrinePgStoreReadyPromise = (async () => {
+    await db.pool.query(`
+      CREATE TABLE IF NOT EXISTS vitrine_analytics (
+        id TEXT PRIMARY KEY,
+        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+        updatedat TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    return true;
+  })().catch((err) => {
+    vitrinePgStoreReadyPromise = null;
+    throw err;
+  });
+  return vitrinePgStoreReadyPromise;
+}
+
+async function loadVitrineVisitStats() {
+  if (vitrineVisitStatsCache) return vitrineVisitStatsCache;
+
+  if (USE_POSTGRES && db && db.pool) {
+    try {
+      await ensureVitrinePgStoreReady();
+      const result = await db.pool.query(
+        'SELECT payload FROM vitrine_analytics WHERE id = $1 LIMIT 1',
+        [VITRINE_STATS_STORE_ID]
+      );
+      const payload = result.rows?.[0]?.payload || {};
+      vitrineVisitStatsCache = normalizeVitrineStatsShape(payload);
+      return vitrineVisitStatsCache;
+    } catch (e) {
+      console.warn('[vitrine-stats] postgres load error, fallback file:', e && e.message ? e.message : e);
+    }
+  }
+
+  return loadVitrineVisitStatsFromFile();
+}
+
+async function saveVitrineVisitStats(statsArg = null) {
+  const stats = normalizeVitrineStatsShape(statsArg || vitrineVisitStatsCache || createDefaultVitrineStats());
+  stats.updatedAt = new Date().toISOString();
+  vitrineVisitStatsCache = stats;
+
+  if (USE_POSTGRES && db && db.pool) {
+    try {
+      await ensureVitrinePgStoreReady();
+      await db.pool.query(
+        `INSERT INTO vitrine_analytics (id, payload, updatedat)
+         VALUES ($1, $2::jsonb, CURRENT_TIMESTAMP)
+         ON CONFLICT (id)
+         DO UPDATE SET payload = EXCLUDED.payload, updatedat = CURRENT_TIMESTAMP`,
+        [VITRINE_STATS_STORE_ID, JSON.stringify(stats)]
+      );
+      return true;
+    } catch (e) {
+      console.warn('[vitrine-stats] postgres save error, fallback file:', e && e.message ? e.message : e);
+    }
+  }
+
+  return saveVitrineVisitStatsToFile(stats);
+}
+
 function pruneVitrineVisitors(stats) {
-  const safeStats = stats || loadVitrineVisitStats();
+  const safeStats = stats || vitrineVisitStatsCache || createDefaultVitrineStats();
   const now = Date.now();
   const cutoff = now - (VITRINE_VISITOR_RETENTION_DAYS * DAY_MS);
   const recentCutoff = now - (VITRINE_RECENT_VISITS_RETENTION_DAYS * DAY_MS);
@@ -2419,8 +2490,8 @@ function buildVitrineVisitorKey(req) {
   return crypto.createHash('sha256').update(`${ip}|${ua}`).digest('hex').slice(0, 24);
 }
 
-function registerVitrineVisit(req) {
-  const stats = loadVitrineVisitStats();
+async function registerVitrineVisit(req) {
+  const stats = pruneVitrineVisitors(await loadVitrineVisitStats());
   const nowIso = new Date().toISOString();
   const key = buildVitrineVisitorKey(req);
   const pagePath = normalizeVitrinePagePath(req.path || req.originalUrl || '/index.html');
@@ -2433,11 +2504,11 @@ function registerVitrineVisit(req) {
   stats.lastVisitAt = nowIso;
 
   pruneVitrineVisitors(stats);
-  saveVitrineVisitStats();
+  await saveVitrineVisitStats(stats);
 }
 
-function getVitrineVisitStatsSnapshot() {
-  const stats = pruneVitrineVisitors(loadVitrineVisitStats());
+async function getVitrineVisitStatsSnapshot() {
+  const stats = pruneVitrineVisitors(await loadVitrineVisitStats());
   const recentVisits = Array.isArray(stats.recentVisits) ? stats.recentVisits : [];
   const H24 = 24 * 60 * 60 * 1000;
   const D7 = 7 * DAY_MS;
@@ -8230,7 +8301,7 @@ app.get('/api/admin/stats', authMiddleware, async (req, res) => {
     }
 
     let activeSubscriptions = (subs || []).filter(s => String(s.status || '').toLowerCase() === 'active').length;
-    const vitrineStats = getVitrineVisitStatsSnapshot();
+    const vitrineStats = await getVitrineVisitStatsSnapshot();
 
     if (stripeActive !== null && stripeActive !== undefined) {
       activeSubscriptions = stripeActive;
