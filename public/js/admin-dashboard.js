@@ -360,6 +360,27 @@ async function loadStats() {
       document.getElementById('totalUsers').textContent = data.stats.totalUsers;
       document.getElementById('activeSubscriptions').textContent = data.stats.activeSubscriptions;
       document.getElementById('unreadMessages').textContent = data.stats.unreadMessages;
+      const vitrineCounter = document.getElementById('vitrineVisitors');
+      const vitrineWindows = document.getElementById('vitrineVisitorsWindows');
+      if (vitrineCounter) {
+        const uniqueVisitors = Number(data.stats.vitrineUniqueVisitors || 0);
+        const totalVisits = Number(data.stats.vitrineVisits || 0);
+        const unique24h = Number(data.stats.vitrineUnique24h || 0);
+        const unique7d = Number(data.stats.vitrineUnique7d || 0);
+        const unique30d = Number(data.stats.vitrineUnique30d || 0);
+        const visits24h = Number(data.stats.vitrineVisits24h || 0);
+        const visits7d = Number(data.stats.vitrineVisits7d || 0);
+        const visits30d = Number(data.stats.vitrineVisits30d || 0);
+        vitrineCounter.textContent = uniqueVisitors;
+        if (vitrineWindows) {
+          vitrineWindows.textContent = `24h: ${unique24h} • 7j: ${unique7d} • 30j: ${unique30d}`;
+          vitrineWindows.title = `Visites: 24h ${visits24h} • 7j ${visits7d} • 30j ${visits30d}`;
+        }
+        const lastVisit = data.stats.vitrineLastVisitAt
+          ? new Date(data.stats.vitrineLastVisitAt).toLocaleString('fr-FR')
+          : 'N/A';
+        vitrineCounter.title = `Visites totales: ${totalVisits} • Visites 24h: ${visits24h} • 7j: ${visits7d} • 30j: ${visits30d} • Dernière visite: ${lastVisit}`;
+      }
       setRealtimeBadge('on');
     }
   } catch (e) {

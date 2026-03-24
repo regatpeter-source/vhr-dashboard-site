@@ -928,8 +928,23 @@ const GUEST_VITRINE_PATHS = new Set([
   '/account.html',
   '/START-HERE.html',
   '/developer-setup.html',
+  '/conditions.html',
+  '/guide-gestion-casques-vr.html',
   '/mentions.html',
   '/launch-dashboard.html'
+]);
+
+const VITRINE_ROOT_PAGE_PATHS = new Set([
+  '/',
+  '/index.html',
+  '/pricing.html',
+  '/features.html',
+  '/contact.html',
+  '/account.html',
+  '/developer-setup.html',
+  '/mentions.html',
+  '/conditions.html',
+  '/guide-gestion-casques-vr.html'
 ]);
 
 function getGuestTokenFromRequest(req) {
@@ -972,6 +987,22 @@ function isDashboardHtmlPath(pathname) {
   return pathname === '/vhr-dashboard-pro.html' || pathname === '/dashboard-pro.html' || pathname === '/dashboard-pro';
 }
 
+function isVitrinePagePath(pathname) {
+  if (!pathname) return false;
+  if (VITRINE_ROOT_PAGE_PATHS.has(pathname)) return true;
+  if (pathname === '/site-vitrine' || pathname === '/site-vitrine/') return true;
+  if (pathname.startsWith('/site-vitrine/') && pathname.endsWith('.html')) return true;
+  return false;
+}
+
+function shouldTrackVitrineVisit(req) {
+  if (!req || String(req.method || '').toUpperCase() !== 'GET') return false;
+  const pathname = req.path || '';
+  if (!isVitrinePagePath(pathname)) return false;
+  const accept = String(req.headers?.accept || '').toLowerCase();
+  return accept.includes('text/html') || pathname.endsWith('.html') || pathname === '/' || pathname === '/site-vitrine' || pathname === '/site-vitrine/';
+}
+
 app.use((req, res, next) => {
   const decoded = decodeGuestToken(req);
   if (!isGuestUser(decoded)) return next();
@@ -983,6 +1014,18 @@ app.use((req, res, next) => {
     return res.status(403).send('Accès réservé à l’app Electron');
   }
   return next();
+});
+
+// Track site vitrine consultations (page views + unique visitors) for admin dashboard
+app.use((req, res, next) => {
+  try {
+    if (shouldTrackVitrineVisit(req)) {
+      registerVitrineVisit(req);
+    }
+  } catch (e) {
+    console.warn('[vitrine-stats] tracking error:', e && e.message ? e.message : e);
+  }
+  next();
 });
 
 // For local packs: prevent browser from forcing HTTPS (disable HSTS) and OAC warning
@@ -2178,6 +2221,7 @@ app.post('/create-checkout-session', async (req, res) => {
 const USERS_FILE = path.join(__dirname, 'data', 'users.json');
 const DELETED_USERS_FILE = path.join(__dirname, 'data', 'deleted-users.json');
 const DEMO_STATE_FILE = path.join(__dirname, 'data', 'demo-state.json');
+const VITRINE_VISITS_FILE = path.join(__dirname, 'data', 'vitrine-visits.json');
 let cachedDemoState = null;
 const INSTALLATION_STATE_FILE = path.join(__dirname, 'data', 'installation.json');
 let cachedInstallationState = null;
@@ -2186,6 +2230,155 @@ let deletedUsersTableReady = false;
 
 function ensureDataDir() {
   try { fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true }); } catch (e) { }
+}
+
+let vitrineVisitStatsCache = null;
+const VITRINE_VISITOR_RETENTION_DAYS = 180;
+const VITRINE_RECENT_VISITS_RETENTION_DAYS = 35;
+
+function createDefaultVitrineStats() {
+  return {
+    totalVisits: 0,
+    uniqueVisitors: {},
+    recentVisits: [],
+    uniqueVisitorsCount: 0,
+    lastVisitAt: null,
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function loadVitrineVisitStats() {
+  if (vitrineVisitStatsCache) return vitrineVisitStatsCache;
+  ensureDataDir();
+  let stats = createDefaultVitrineStats();
+  try {
+    if (fs.existsSync(VITRINE_VISITS_FILE)) {
+      const raw = fs.readFileSync(VITRINE_VISITS_FILE, 'utf8').replace(/^\uFEFF/, '').trim();
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          stats = {
+            ...stats,
+            ...parsed,
+            uniqueVisitors: parsed.uniqueVisitors && typeof parsed.uniqueVisitors === 'object' ? parsed.uniqueVisitors : {},
+            recentVisits: Array.isArray(parsed.recentVisits) ? parsed.recentVisits : []
+          };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[vitrine-stats] load error:', e && e.message ? e.message : e);
+  }
+  if (!Array.isArray(stats.recentVisits)) stats.recentVisits = [];
+  stats.uniqueVisitorsCount = Object.keys(stats.uniqueVisitors || {}).length;
+  vitrineVisitStatsCache = stats;
+  return vitrineVisitStatsCache;
+}
+
+function saveVitrineVisitStats() {
+  try {
+    ensureDataDir();
+    const stats = loadVitrineVisitStats();
+    stats.updatedAt = new Date().toISOString();
+    fs.writeFileSync(VITRINE_VISITS_FILE, JSON.stringify(stats, null, 2), 'utf8');
+    return true;
+  } catch (e) {
+    console.warn('[vitrine-stats] save error:', e && e.message ? e.message : e);
+    return false;
+  }
+}
+
+function pruneVitrineVisitors(stats) {
+  const safeStats = stats || loadVitrineVisitStats();
+  const now = Date.now();
+  const cutoff = now - (VITRINE_VISITOR_RETENTION_DAYS * DAY_MS);
+  const recentCutoff = now - (VITRINE_RECENT_VISITS_RETENTION_DAYS * DAY_MS);
+  const visitors = safeStats.uniqueVisitors || {};
+  for (const [key, seenAt] of Object.entries(visitors)) {
+    const ts = new Date(seenAt).getTime();
+    if (!Number.isFinite(ts) || ts < cutoff) {
+      delete visitors[key];
+    }
+  }
+
+  const rawRecent = Array.isArray(safeStats.recentVisits) ? safeStats.recentVisits : [];
+  safeStats.recentVisits = rawRecent
+    .filter(entry => {
+      if (!entry || typeof entry !== 'object') return false;
+      const key = String(entry.key || '').trim();
+      const at = String(entry.at || '').trim();
+      if (!key || !at) return false;
+      const ts = new Date(at).getTime();
+      return Number.isFinite(ts) && ts >= recentCutoff;
+    })
+    .slice(-50000);
+
+  safeStats.uniqueVisitorsCount = Object.keys(visitors).length;
+  return safeStats;
+}
+
+function countVisitsSince(recentVisits, windowMs) {
+  const entries = Array.isArray(recentVisits) ? recentVisits : [];
+  const cutoff = Date.now() - windowMs;
+  let total = 0;
+  for (const entry of entries) {
+    const ts = new Date(entry.at).getTime();
+    if (Number.isFinite(ts) && ts >= cutoff) total += 1;
+  }
+  return total;
+}
+
+function countUniqueSince(recentVisits, windowMs) {
+  const entries = Array.isArray(recentVisits) ? recentVisits : [];
+  const cutoff = Date.now() - windowMs;
+  const uniq = new Set();
+  for (const entry of entries) {
+    const ts = new Date(entry.at).getTime();
+    const key = String(entry.key || '').trim();
+    if (key && Number.isFinite(ts) && ts >= cutoff) uniq.add(key);
+  }
+  return uniq.size;
+}
+
+function buildVitrineVisitorKey(req) {
+  const ip = getRequestAddress(req) || 'unknown';
+  const ua = String(req.headers?.['user-agent'] || '').slice(0, 300);
+  return crypto.createHash('sha256').update(`${ip}|${ua}`).digest('hex').slice(0, 24);
+}
+
+function registerVitrineVisit(req) {
+  const stats = loadVitrineVisitStats();
+  const nowIso = new Date().toISOString();
+  const key = buildVitrineVisitorKey(req);
+
+  stats.totalVisits = Number.isFinite(Number(stats.totalVisits)) ? Number(stats.totalVisits) + 1 : 1;
+  stats.uniqueVisitors = stats.uniqueVisitors || {};
+  stats.recentVisits = Array.isArray(stats.recentVisits) ? stats.recentVisits : [];
+  stats.recentVisits.push({ at: nowIso, key });
+  stats.uniqueVisitors[key] = nowIso;
+  stats.lastVisitAt = nowIso;
+
+  pruneVitrineVisitors(stats);
+  saveVitrineVisitStats();
+}
+
+function getVitrineVisitStatsSnapshot() {
+  const stats = pruneVitrineVisitors(loadVitrineVisitStats());
+  const recentVisits = Array.isArray(stats.recentVisits) ? stats.recentVisits : [];
+  const H24 = 24 * 60 * 60 * 1000;
+  const D7 = 7 * DAY_MS;
+  const D30 = 30 * DAY_MS;
+  return {
+    totalVisits: Number(stats.totalVisits || 0),
+    uniqueVisitorsCount: Number(stats.uniqueVisitorsCount || 0),
+    lastVisitAt: stats.lastVisitAt || null,
+    visits24h: countVisitsSince(recentVisits, H24),
+    visits7d: countVisitsSince(recentVisits, D7),
+    visits30d: countVisitsSince(recentVisits, D30),
+    unique24h: countUniqueSince(recentVisits, H24),
+    unique7d: countUniqueSince(recentVisits, D7),
+    unique30d: countUniqueSince(recentVisits, D30)
+  };
 }
 
 function normalizeDeletedIdentifier(value) {
@@ -7961,6 +8154,7 @@ app.get('/api/admin/stats', authMiddleware, async (req, res) => {
     }
 
     let activeSubscriptions = (subs || []).filter(s => String(s.status || '').toLowerCase() === 'active').length;
+    const vitrineStats = getVitrineVisitStatsSnapshot();
 
     if (stripeActive !== null && stripeActive !== undefined) {
       activeSubscriptions = stripeActive;
@@ -7969,7 +8163,23 @@ app.get('/api/admin/stats', authMiddleware, async (req, res) => {
       if (activeFromUsers > 0) activeSubscriptions = activeFromUsers;
     }
 
-    res.json({ ok: true, stats: { totalUsers, activeSubscriptions, unreadMessages } });
+    res.json({
+      ok: true,
+      stats: {
+        totalUsers,
+        activeSubscriptions,
+        unreadMessages,
+        vitrineVisits: vitrineStats.totalVisits,
+        vitrineUniqueVisitors: vitrineStats.uniqueVisitorsCount,
+        vitrineLastVisitAt: vitrineStats.lastVisitAt,
+        vitrineVisits24h: vitrineStats.visits24h,
+        vitrineVisits7d: vitrineStats.visits7d,
+        vitrineVisits30d: vitrineStats.visits30d,
+        vitrineUnique24h: vitrineStats.unique24h,
+        vitrineUnique7d: vitrineStats.unique7d,
+        vitrineUnique30d: vitrineStats.unique30d
+      }
+    });
   } catch (e) {
     console.error('[api] admin/stats:', e);
     res.status(500).json({ ok: false, error: String(e) });
