@@ -221,6 +221,9 @@ function buildUserModalContent(user) {
       ? 'Expiré'
       : `${Number.isFinite(access.demoRemainingDays) ? access.demoRemainingDays : 0} jour(s) restant(s)`;
   const subscriptionDetailLabel = access.subscriptionStatus || subStatusLabel || 'aucun';
+  const subscriptionExpiresLabel = access.subscriptionExpiresAt
+    ? `Expire le ${formatAdminDate(access.subscriptionExpiresAt, { withTime: false })}`
+    : null;
   const licenseDetailLabel = access.hasPerpetualLicense
     ? `Oui${access.licenseCount > 1 ? ` (${access.licenseCount})` : ''}`
     : 'Non';
@@ -243,7 +246,7 @@ function buildUserModalContent(user) {
     <div style="margin-top:16px; padding: 14px; background: #f1f5f9; border-radius: 8px; border: 1px dashed #cbd5e0;">
       <h4 style="margin-top: 0;">Statut d'accès</h4>
       <p style="margin: 4px 0;"><strong>Essai :</strong> ${demoStatusLabel}</p>
-      <p style="margin: 4px 0;"><strong>Abonnement :</strong> ${subscriptionDetailLabel}</p>
+      <p style="margin: 4px 0;"><strong>Abonnement :</strong> ${subscriptionDetailLabel}${subscriptionExpiresLabel ? ` — ${subscriptionExpiresLabel}` : ''}</p>
       <p style="margin: 4px 0;"><strong>Licence à vie :</strong> ${licenseDetailLabel}</p>
     </div>
     <div style="margin-top:16px; padding: 14px; background: #f9fafb; border: 1px dashed #cbd5e0; border-radius: 8px; display:flex; gap:8px; flex-wrap:wrap;">
@@ -532,7 +535,10 @@ function renderUsersTable(list) {
       : subscriptionState === 'cancelled'
         ? 'badge-unread'
         : 'badge-inactive';
-    const subscriptionLabel = subscriptionState === 'none' ? 'aucun' : subscriptionState;
+    const subscriptionExpiresLabel = access.subscriptionExpiresAt
+      ? ` (${formatAdminDate(access.subscriptionExpiresAt, { withTime: false })})`
+      : '';
+    const subscriptionLabel = subscriptionState === 'none' ? 'aucun' : `${subscriptionState}${subscriptionExpiresLabel}`;
     const licenseLabel = access.hasPerpetualLicense
       ? `Oui${access.licenseCount > 1 ? ` (${access.licenseCount})` : ''}`
       : 'Non';
@@ -767,6 +773,9 @@ async function viewUser(username) {
           ? 'Expiré'
           : `${Number.isFinite(access.demoRemainingDays) ? access.demoRemainingDays : 0} jour(s) restant(s)`;
       const subscriptionDetailLabel = access.subscriptionStatus || subStatusLabel || 'aucun';
+      const subscriptionExpiresLabel = access.subscriptionExpiresAt
+        ? `Expire le ${formatAdminDate(access.subscriptionExpiresAt, { withTime: false })}`
+        : null;
       const licenseDetailLabel = access.hasPerpetualLicense
         ? `Oui${access.licenseCount > 1 ? ` (${access.licenseCount})` : ''}`
         : 'Non';
@@ -789,7 +798,7 @@ async function viewUser(username) {
           <div style="margin-top:16px; padding: 14px; background: #f1f5f9; border-radius: 8px; border: 1px dashed #cbd5e0;">
             <h4 style="margin-top: 0;">Statut d'accès</h4>
             <p style="margin: 4px 0;"><strong>Essai :</strong> ${demoStatusLabel}</p>
-            <p style="margin: 4px 0;"><strong>Abonnement :</strong> ${subscriptionDetailLabel}</p>
+            <p style="margin: 4px 0;"><strong>Abonnement :</strong> ${subscriptionDetailLabel}${subscriptionExpiresLabel ? ` — ${subscriptionExpiresLabel}` : ''}</p>
             <p style="margin: 4px 0;"><strong>Licence à vie :</strong> ${licenseDetailLabel}</p>
           </div>
         <div style="margin-top:16px; padding: 14px; background: #f9fafb; border: 1px dashed #cbd5e0; border-radius: 8px; display:flex; gap:8px; flex-wrap:wrap;">

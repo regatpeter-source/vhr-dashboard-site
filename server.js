@@ -1080,10 +1080,122 @@ function getDemoExpirationDate(user) {
   return new Date(startDate.getTime() + demoConfig.DEMO_DURATION_MS);
 }
 
-function isDemoExpired(user) {
-  if (!user || user.subscriptionStatus === 'active') {
-    return false; // Pas de limite si abonnement actif
+function getSubscriptionEndDate(subscription) {
+  if (!subscription) return null;
+  const raw = subscription.endDate
+    || subscription.enddate
+    || subscription.expiresAt
+    || subscription.expiresat
+    || subscription.currentPeriodEnd
+    || subscription.current_period_end
+    || null;
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function normalizeSubscriptionStatus(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isActiveLikeSubscriptionStatus(value) {
+  return ['active', 'trialing', 'past_due', 'unpaid'].includes(normalizeSubscriptionStatus(value));
+}
+
+function isAdminGrantedSubscription(user, subscription = null) {
+  const subscriptionId = String(user?.subscriptionId || user?.subscriptionid || subscription?.stripeSubscriptionId || subscription?.stripesubscriptionid || '').trim();
+  const planName = String(subscription?.planName || subscription?.planname || '').trim().toLowerCase();
+  return isPlaceholderSubscriptionId(subscriptionId)
+    || subscriptionId.startsWith('sub_admin_free_')
+    || planName.startsWith('admin-free')
+    || planName.includes('free-month');
+}
+
+function subscriptionMatchesUser(subscription, user) {
+  if (!subscription || !user) return false;
+  const userName = String(user.username || '').trim().toLowerCase();
+  const userEmail = normalizeEmailValue(user.email || '') || '';
+  const userSubId = String(user.subscriptionId || user.subscriptionid || '').trim();
+  const subUserName = String(subscription.username || '').trim().toLowerCase();
+  const subEmail = normalizeEmailValue(subscription.email || '') || '';
+  const subId = String(subscription.id || '').trim();
+  const stripeSubId = String(subscription.stripeSubscriptionId || subscription.stripesubscriptionid || '').trim();
+  return (!!userName && !!subUserName && userName === subUserName)
+    || (!!userEmail && !!subEmail && userEmail === subEmail)
+    || (!!userSubId && (userSubId === stripeSubId || userSubId === subId));
+}
+
+async function getSubscriptionRecordsForUser(user) {
+  if (!user) return [];
+  try {
+    let list = [];
+    if (USE_POSTGRES && db && typeof db.getAllSubscriptions === 'function') {
+      list = await db.getAllSubscriptions();
+    } else if (dbEnabled) {
+      list = require('./db').getAllSubscriptions();
+    } else if (Array.isArray(subscriptions)) {
+      list = subscriptions;
+    }
+    return (Array.isArray(list) ? list : []).filter(subscription => subscriptionMatchesUser(subscription, user));
+  } catch (e) {
+    console.warn('[subscription] unable to load local subscription records:', e && e.message ? e.message : e);
+    return [];
   }
+}
+
+async function resolveLocalSubscriptionAccess(user) {
+  const normalized = normalizeUserRecord(user);
+  const currentStatus = normalizeSubscriptionStatus(normalized?.subscriptionStatus || normalized?.subscriptionstatus || 'none');
+  const records = await getSubscriptionRecordsForUser(normalized);
+  const now = Date.now();
+  const activeRecord = records
+    .filter(subscription => isActiveLikeSubscriptionStatus(subscription.status))
+    .sort((a, b) => {
+      const aEnd = getSubscriptionEndDate(a)?.getTime() || Number.MAX_SAFE_INTEGER;
+      const bEnd = getSubscriptionEndDate(b)?.getTime() || Number.MAX_SAFE_INTEGER;
+      return bEnd - aEnd;
+    })[0] || null;
+  const activeRecordEnd = getSubscriptionEndDate(activeRecord);
+  const activeRecordExpired = !!(activeRecordEnd && activeRecordEnd.getTime() <= now);
+  const adminGranted = isAdminGrantedSubscription(normalized, activeRecord);
+
+  if (activeRecord) {
+    return {
+      hasValidSubscription: !activeRecordExpired,
+      subscriptionStatus: activeRecordExpired ? 'expired' : (activeRecord.status || currentStatus || 'active'),
+      subscriptionExpiresAt: activeRecordEnd ? activeRecordEnd.toISOString() : null,
+      subscriptionRecord: activeRecord,
+      isAdminGrantedSubscription: adminGranted,
+      expired: activeRecordExpired
+    };
+  }
+
+  if (!isActiveLikeSubscriptionStatus(currentStatus)) {
+    return {
+      hasValidSubscription: false,
+      subscriptionStatus: currentStatus || 'none',
+      subscriptionExpiresAt: null,
+      subscriptionRecord: null,
+      isAdminGrantedSubscription: false,
+      expired: false
+    };
+  }
+
+  // Real Stripe subscriptions can remain valid without a local end date; admin placeholders must not.
+  const userSubId = String(normalized?.subscriptionId || normalized?.subscriptionid || '').trim();
+  const looksLikeRealStripeSubscription = userSubId.startsWith('sub_') && !isPlaceholderSubscriptionId(userSubId) && !userSubId.startsWith('sub_admin_free_');
+  return {
+    hasValidSubscription: looksLikeRealStripeSubscription,
+    subscriptionStatus: looksLikeRealStripeSubscription ? currentStatus : 'expired',
+    subscriptionExpiresAt: null,
+    subscriptionRecord: null,
+    isAdminGrantedSubscription: !looksLikeRealStripeSubscription,
+    expired: !looksLikeRealStripeSubscription
+  };
+}
+
+function isDemoExpired(user) {
+  if (!user) return false;
   const expirationDate = getDemoExpirationDate(user);
   if (!expirationDate) return false;
   return Date.now() > expirationDate.getTime();
@@ -1145,9 +1257,12 @@ function getDemoRemainingDays(user) {
 
     // Aucun bypass pour les démos expirées en dehors des admins
 
-    // Subscription status from local record
-    let hasValidSubscription = (normalized.subscriptionStatus || '').toLowerCase() === 'active';
-    let subscriptionStatus = normalized.subscriptionStatus || 'none';
+    // Subscription status from local records. Admin-granted subscriptions are time-limited
+    // and must stop granting access after their persisted endDate.
+    const localSubscriptionAccess = await resolveLocalSubscriptionAccess(normalized);
+    let hasValidSubscription = !!localSubscriptionAccess.hasValidSubscription;
+    let subscriptionStatus = localSubscriptionAccess.subscriptionStatus || normalized.subscriptionStatus || 'none';
+    let subscriptionExpiresAt = localSubscriptionAccess.subscriptionExpiresAt || null;
     let stripeError = null;
 
     // Double-check Stripe when local status is missing/inactive, even if demo is still active
@@ -1168,6 +1283,9 @@ function getDemoRemainingDays(user) {
           if (stripeSub) {
             hasValidSubscription = true;
             subscriptionStatus = stripeSub.status || 'active';
+            subscriptionExpiresAt = stripeSub.current_period_end
+              ? new Date(stripeSub.current_period_end * 1000).toISOString()
+              : subscriptionExpiresAt;
           } else {
             subscriptionStatus = subscriptionStatus || 'none';
           }
@@ -1190,6 +1308,7 @@ function getDemoRemainingDays(user) {
       expirationDate,
       hasValidSubscription,
       subscriptionStatus,
+      subscriptionExpiresAt,
       stripeError,
       hasActiveLicense: hasLicense,
       accessBlocked,
@@ -5220,7 +5339,18 @@ app.get('/api/me', authMiddleware, async (req, res) => {
   const dbUser = await findUserByUsernameAsync(req.user.username);
   const normalizedUser = normalizeUserRecord(dbUser || req.user);
   const licenses = loadLicenses();
-  const accessSummary = buildUserAccessSummary(normalizedUser, { licenses });
+  const demoStatus = await buildDemoStatusForUser(normalizedUser);
+  const accessSummary = {
+    ...buildUserAccessSummary(normalizedUser, { licenses }),
+    demoExpired: !!demoStatus.demoExpired,
+    demoRemainingDays: Number.isFinite(demoStatus.remainingDays) ? Math.max(0, demoStatus.remainingDays) : 0,
+    subscriptionStatus: demoStatus.subscriptionStatus || normalizedUser.subscriptionStatus || 'none',
+    subscriptionExpiresAt: demoStatus.subscriptionExpiresAt || null,
+    hasActiveSubscription: !!demoStatus.hasValidSubscription,
+    hasPerpetualLicense: !!demoStatus.hasActiveLicense,
+    accessBlocked: !!demoStatus.accessBlocked,
+    demoMessage: demoStatus.message || null
+  };
   const user = {
     username: normalizedUser.username,
     role: normalizedUser.role,
@@ -5228,8 +5358,9 @@ app.get('/api/me', authMiddleware, async (req, res) => {
     emailVerified: normalizedUser.emailVerified ?? false,
     isPrimary: isPrimaryAccount(normalizedUser),
     demoStartDate: normalizedUser.demoStartDate || null,
-    subscriptionStatus: normalizedUser.subscriptionStatus || 'none',
+    subscriptionStatus: accessSummary.subscriptionStatus || 'none',
     subscriptionId: normalizedUser.subscriptionId || null,
+    subscriptionExpiresAt: accessSummary.subscriptionExpiresAt || null,
     accessSummary
   };
   res.json({ ok: true, user });
@@ -5306,16 +5437,17 @@ app.get('/api/installation/status', async (req, res) => {
  * - Licence d'achat perpétuel OU
  * - En période de démo (7 jours)
  */
-function checkFeatureAccess(user) {
+async function checkFeatureAccess(user) {
   if (!user) return false;
   
   // Récupérer les données utilisateur complètes
   reloadUsers();
-  const fullUser = getUserByUsername(user.username);
+  const fullUser = await findUserByUsernameAsync(user.username);
   if (!fullUser) return false;
   
   // 1. Vérifier abonnement actif
-  if (fullUser.subscriptionStatus === 'active') {
+  const demoStatus = await buildDemoStatusForUser(fullUser);
+  if (demoStatus.hasValidSubscription) {
     return true;
   }
   
@@ -5331,13 +5463,8 @@ function checkFeatureAccess(user) {
   }
   
   // 3. Vérifier démo (7 jours)
-  if (fullUser.demoStartDate && demoConfig.MODE === 'database') {
-    const startDate = new Date(fullUser.demoStartDate);
-    const expirationDate = new Date(startDate.getTime() + demoConfig.DEMO_DURATION_MS);
-    const now = new Date();
-    if (now <= expirationDate) {
-      return true;
-    }
+  if (!demoStatus.demoExpired) {
+    return true;
   }
   
   return false;
@@ -5346,12 +5473,12 @@ function checkFeatureAccess(user) {
 /**
  * Middleware pour vérifier l'accès aux fonctionnalités payantes
  */
-function requireLicense(req, res, next) {
+async function requireLicense(req, res, next) {
   if (!req.user) {
     return res.status(401).json({ ok: false, error: 'Authentication required' });
   }
   
-  if (!checkFeatureAccess(req.user)) {
+  if (!(await checkFeatureAccess(req.user))) {
     return res.status(403).json({ 
       ok: false, 
       error: 'License required',
@@ -5371,8 +5498,8 @@ function requireLicense(req, res, next) {
 /**
  * GET /api/feature/android-tts/access - Vérifier l'accès à la fonctionnalité TTS
  */
-app.get('/api/feature/android-tts/access', authMiddleware, (req, res) => {
-  const hasAccess = checkFeatureAccess(req.user);
+app.get('/api/feature/android-tts/access', authMiddleware, async (req, res) => {
+  const hasAccess = await checkFeatureAccess(req.user);
   
   res.json({
     ok: true,
@@ -6263,31 +6390,15 @@ app.post('/api/download/compiled-apk', authMiddleware, async (req, res) => {
 // Check download eligibility without downloading
 app.get('/api/download/check-eligibility', authMiddleware, async (req, res) => {
   try {
-    const user = getUserByUsername(req.user.username);
+    const user = await findUserByUsernameAsync(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
     
-    const demoExpired = isDemoExpired(user);
-    const remainingDays = getDemoRemainingDays(user);
-    let hasValidSubscription = false;
-    let subscriptionStatus = 'none';
-    
-    if (demoExpired && user.stripeCustomerId) {
-      try {
-        const stripeSubs = await stripe.subscriptions.list({
-          customer: user.stripeCustomerId,
-          status: 'active',
-          limit: 1
-        });
-        hasValidSubscription = stripeSubs.data && stripeSubs.data.length > 0;
-        if (stripeSubs.data && stripeSubs.data.length > 0) {
-          subscriptionStatus = stripeSubs.data[0].status;
-        }
-      } catch (e) {
-        console.error('[check-eligibility] Stripe error:', e.message);
-      }
-    }
-    
-    const canDownload = !demoExpired || hasValidSubscription;
+    const demoStatus = await buildDemoStatusForUser(user);
+    const demoExpired = !!demoStatus.demoExpired;
+    const remainingDays = Number.isFinite(demoStatus.remainingDays) ? Math.max(0, demoStatus.remainingDays) : 0;
+    const hasValidSubscription = !!demoStatus.hasValidSubscription;
+    const subscriptionStatus = demoStatus.subscriptionStatus || 'none';
+    const canDownload = !demoStatus.accessBlocked;
     
     res.json({
       ok: true,
@@ -6296,6 +6407,7 @@ app.get('/api/download/check-eligibility', authMiddleware, async (req, res) => {
       remainingDays,
       hasValidSubscription,
       subscriptionStatus,
+      subscriptionExpiresAt: demoStatus.subscriptionExpiresAt || null,
       reason: canDownload 
         ? (demoExpired ? 'Valid subscription' : `Demo valid - ${remainingDays} days remaining`)
         : 'Demo expired and no valid subscription'
@@ -7141,6 +7253,9 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
             demoRemainingDays,
             demoMessage: demoStatus.message || null,
             subscriptionStatus: demoStatus.subscriptionStatus || (normalizedUser.subscriptionStatus || 'none'),
+            subscriptionExpiresAt: demoStatus.subscriptionExpiresAt || null,
+            hasActiveSubscription: !!demoStatus.hasValidSubscription,
+            accessBlocked: !!demoStatus.accessBlocked,
             hasPerpetualLicense: !!demoStatus.hasActiveLicense,
             licenseCount: typeof demoStatus.licenseCount === 'number'
               ? demoStatus.licenseCount
@@ -7415,6 +7530,9 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
         demoRemainingDays,
         demoMessage: demoStatus.message || null,
         subscriptionStatus: demoStatus.subscriptionStatus || (targetUser.subscriptionStatus || 'none'),
+        subscriptionExpiresAt: demoStatus.subscriptionExpiresAt || null,
+        hasActiveSubscription: !!demoStatus.hasValidSubscription,
+        accessBlocked: !!demoStatus.accessBlocked,
         hasPerpetualLicense: !!demoStatus.hasActiveLicense,
         licenseCount: typeof demoStatus.licenseCount === 'number'
           ? demoStatus.licenseCount
@@ -7436,6 +7554,7 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
           username: targetUser.username,
           subscriptionStatus: targetUser.subscriptionStatus || null,
           subscriptionId: targetUser.subscriptionId || null,
+          subscriptionExpiresAt: accessSummary?.subscriptionExpiresAt || null,
           demoStartDate: targetUser.demoStartDate || null,
           demoEndDate: targetUser.demoEndDate || null,
           accessSummary
@@ -7452,6 +7571,7 @@ app.post('/api/admin/subscription/manage', authMiddleware, async (req, res) => {
         username: targetUser.username,
         subscriptionStatus: targetUser.subscriptionStatus,
         subscriptionId: targetUser.subscriptionId || null,
+        subscriptionExpiresAt: accessSummary?.subscriptionExpiresAt || null,
         demoStartDate: targetUser.demoStartDate || null,
         demoEndDate: targetUser.demoEndDate || null
       },
@@ -11561,8 +11681,8 @@ app.post('/api/installer/check-permission', async (req, res) => {
 
   try {
     // Charger les données utilisateur
-    const users = loadUsers();
-    const user = users.find(u => u.id === userId);
+    const loadedUsers = USE_POSTGRES && db && db.getUsers ? await db.getUsers() : loadUsers();
+    const user = (loadedUsers || []).map(normalizeUserRecord).find(u => u.id === userId);
 
     if (!user) {
       return res.status(401).json({ ok: false, error: 'User not found' });
@@ -11572,8 +11692,9 @@ app.post('/api/installer/check-permission', async (req, res) => {
     const licenses = loadLicenses();
 
     // Vérifier les types d'accès:
-    // 1. Abonnement actif
-    const hasActiveSubscription = user.subscriptionStatus === 'active';
+    // 1. Abonnement actif non expiré
+    const demoStatus = await buildDemoStatusForUser(user);
+    const hasActiveSubscription = !!demoStatus.hasValidSubscription;
 
     // 2. Licence d'achat perpétuel
     const hasPerpetualLicense = licenses.some(l => 
@@ -11598,6 +11719,7 @@ app.post('/api/installer/check-permission', async (req, res) => {
         ok: true, 
         canInstall: true,
         installationType,
+        subscriptionExpiresAt: demoStatus.subscriptionExpiresAt || null,
         message: `Accès ${installationType === 'perpetual' ? 'à vie' : 'abonnement'} actif`
       });
     } else {
