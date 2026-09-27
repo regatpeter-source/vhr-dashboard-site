@@ -19,6 +19,7 @@ if (preferHttps) {
 }
 
 let serverProcess = null;
+let serverExitError = null;
 let relayClient = null;
 let mainWindow = null;
 let creatingWindow = false;
@@ -86,6 +87,7 @@ function sleep(ms = 200) {
 
 function startServer() {
   if (serverProcess) return;
+  serverExitError = null;
   // Allow ADB by default; users can still force relay-only mode by setting NO_ADB=1 externally.
   const defaultRelayUrl = process.env.RELAY_URL || 'https://www.vhr-dashboard-site.com';
   // Propagate defaults to child server AND current Electron process (for relay-client)
@@ -102,7 +104,14 @@ function startServer() {
   serverProcess = fork(serverPath, { env, stdio: 'inherit' });
   serverProcess.on('exit', (code, signal) => {
     console.log(`[electron] server.js exited code=${code} signal=${signal}`);
+    if (code !== 0 || signal) {
+      serverExitError = new Error(`Le serveur local s'est arrêté (code=${code}, signal=${signal || 'aucun'})`);
+    }
     serverProcess = null;
+  });
+  serverProcess.on('error', (err) => {
+    serverExitError = err;
+    console.error('[electron] impossible de démarrer server.js:', err && err.message ? err.message : err);
   });
 }
 
@@ -121,6 +130,7 @@ function waitForServerOnProtocol(protocol = 'http', maxAttempts = 60, delayMs = 
     const requestOptions = protocol === 'https' ? { rejectUnauthorized: false } : undefined;
 
     const tryOnce = () => {
+      if (serverExitError) return reject(serverExitError);
       attempts += 1;
       client
         .get(url, requestOptions, (res) => {
@@ -142,7 +152,7 @@ function waitForServerOnProtocol(protocol = 'http', maxAttempts = 60, delayMs = 
 }
 
 async function waitForServer(maxAttemptsPerProtocol, delayMs) {
-  const attempts = Number(maxAttemptsPerProtocol ?? process.env.WAIT_FOR_SERVER_ATTEMPTS ?? 80);
+  const attempts = Number(maxAttemptsPerProtocol ?? process.env.WAIT_FOR_SERVER_ATTEMPTS ?? 30);
   const delay = Number(delayMs ?? process.env.WAIT_FOR_SERVER_DELAY_MS ?? 500);
   const protocols = preferHttps ? ['https', 'http'] : ['http', 'https'];
   let lastError = null;
@@ -276,11 +286,17 @@ if (!gotTheLock) {
   app.whenReady().then(() => {
     configurePermissions();
     startServer();
-    relayClient = startRelayClient({
-      app: 'vhr-dashboard-electron',
-      version: app.getVersion && app.getVersion(),
-      sessionId: process.env.RELAY_SESSION_ID || undefined,
-    });
+    if (process.env.RELAY_ENABLED !== '0') {
+      try {
+        relayClient = startRelayClient({
+          app: 'vhr-dashboard-electron',
+          version: app.getVersion && app.getVersion(),
+          sessionId: process.env.RELAY_SESSION_ID || undefined,
+        });
+      } catch (err) {
+        console.warn('[electron] relais distant indisponible, mode local maintenu:', err && err.message ? err.message : err);
+      }
+    }
     createWindow();
 
     app.on('activate', () => {

@@ -2,7 +2,11 @@
   "name": "vhr-dashboard-site",
   "version": "1.0.1",
   "description": "VHR Dashboard - Server and site-vitrine",
-  "main": "electron-main.js",
+  "main": "dist-client/electron-main.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:local": "npm --prefix dist-client run start:local"
+  },
   "dependencies": {
     "archiver": "^7.0.1",
     "bcrypt": "^5.1.1",

@@ -150,6 +150,8 @@ const FORCE_HTTP = process.env.FORCE_HTTP === '1';
 const NO_BROWSER_FALLBACK = process.env.NO_BROWSER_FALLBACK === '1';
 const QUIET_MODE = process.env.QUIET_MODE === '1';
 const SUPPRESS_WARNINGS = process.env.SUPPRESS_WARNINGS === '1';
+const IS_LOCAL_RUNTIME = process.env.RENDER !== 'true'
+  && (process.env.ELECTRON_APP === '1' || process.env.LOCAL_APP === '1' || FORCE_HTTP);
 
 let useHttps = false;
 
@@ -10873,8 +10875,8 @@ io.on('connection', socket => {
   try {
     await verifyStripeKeyAtStartup();
   } catch (e) {
-    if (process.env.NODE_ENV === 'development' || process.env.NO_ADB === '1') {
-      console.warn('[server] Stripe key validation failed, continuing in development mode. Fix STRIPE_SECRET_KEY for production.');
+    if (IS_LOCAL_RUNTIME || process.env.NODE_ENV === 'development' || process.env.NO_ADB === '1') {
+      console.warn('[server] Stripe indisponible; démarrage local maintenu. Les fonctions de paiement seront désactivées.');
     } else {
       console.error('[server] Stripe verification failed, aborting startup.');
       process.exit(1);

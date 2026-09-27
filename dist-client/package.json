@@ -5,7 +5,8 @@
   "main": "electron-main.js",
   "scripts": {
     "start": "node server.js",
-    "start:dev": "NO_ADB=1 node server.js",
+    "start:dev": "cross-env NO_ADB=1 LOCAL_APP=1 FORCE_HTTP=1 node server.js",
+    "start:local": "dotenv -e .env cross-env LOCAL_APP=1 FORCE_HTTP=1 electron .",
     "dev:electron": "dotenv -e .env cross-env electron .",
     "build:electron": "set ELECTRON_BUILDER_SKIP_NODE_GYP_REBUILD=1&&dotenv -e .env cross-env electron-builder -w",
     "launch": "node launcher.js",
