@@ -4593,6 +4593,10 @@ app.post('/api/login', async (req, res) => {
   }
   
   if (!user) {
+    if (IS_LOCAL_RUNTIME) {
+      console.log('[api/login] user not found in local store; remote auth disabled for local app');
+      return res.status(401).json({ ok: false, error: 'Utilisateur inconnu sur cette installation' });
+    }
     if (isUserDeletedIdentifier(loginIdentifier)) {
       return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
     }
@@ -4661,7 +4665,7 @@ app.post('/api/login', async (req, res) => {
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
   }
 
-  if (!isGuestAccount(user)) {
+  if (!isGuestAccount(user) && !IS_LOCAL_RUNTIME) {
     user = await syncLocalUserWithRemoteAccess(user, loginIdentifier, password) || user;
   } else {
     console.log('[api/login] local guest login: skipping remote sync');
@@ -4692,7 +4696,25 @@ app.post('/api/login', async (req, res) => {
   const cookieOptions = buildAuthCookieOptions(req);
   res.cookie('vhr_token', token, cookieOptions);
   console.log('[api/login] cookie set with secure=' + cookieOptions.secure + ', sameSite=' + cookieOptions.sameSite + ', maxAge=' + cookieOptions.maxAge);
-  res.json({ ok: true, token, userId: elevatedUser.id, username: elevatedUser.username, role: elevatedUser.role, email: elevatedUser.email || null, emailVerified: emailVerifiedFlag, isPrimary: isPrimaryAccount(elevatedUser), demo: demoStatus });
+  res.json({
+    ok: true,
+    token,
+    user: {
+      id: elevatedUser.id,
+      username: elevatedUser.username,
+      role: elevatedUser.role,
+      email: elevatedUser.email || null,
+      emailVerified: emailVerifiedFlag,
+      isPrimary: isPrimaryAccount(elevatedUser)
+    },
+    userId: elevatedUser.id,
+    username: elevatedUser.username,
+    role: elevatedUser.role,
+    email: elevatedUser.email || null,
+    emailVerified: emailVerifiedFlag,
+    isPrimary: isPrimaryAccount(elevatedUser),
+    demo: demoStatus
+  });
 });
 
 // --- Route de logout (optionnelle, côté client il suffit de supprimer le token) ---

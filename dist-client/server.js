@@ -23,7 +23,7 @@ var ffmpegProc = globalThis.ffmpegProc;
 const helmet = require('helmet');
 const cors = require('cors');
 const net = require('net');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
@@ -4155,6 +4155,10 @@ async function handleApiLogin(req, res) {
   }
 
   if (!user) {
+    if (IS_LOCAL_RUNTIME) {
+      console.log('[api/login] user not found in local store; remote auth disabled for local app');
+      return res.status(401).json({ ok: false, error: 'Utilisateur inconnu sur cette installation' });
+    }
     const localGuest = isElectronRequest(req) ? findLocalGuestUser(identifier) : null;
     if (localGuest) {
       user = localGuest;
@@ -4236,7 +4240,7 @@ async function handleApiLogin(req, res) {
   }
 
   console.log('[api/login] login successful for:', user.username);
-  if (!isGuestAccount(user)) {
+  if (!isGuestAccount(user) && !IS_LOCAL_RUNTIME) {
     // Best-effort remote sync to keep demo/subscription aligned with site vitrine
     try {
       const remoteAuth = await attemptRemoteAuthentication(identifier, password);
@@ -4264,6 +4268,13 @@ async function handleApiLogin(req, res) {
   res.json({
     ok: true,
     token,
+    user: {
+      id: elevatedUser.id,
+      username: elevatedUser.username,
+      role: elevatedUser.role,
+      email: elevatedUser.email || null,
+      isPrimary: isPrimaryAccount(elevatedUser)
+    },
     userId: elevatedUser.id,
     username: elevatedUser.username,
     role: elevatedUser.role,

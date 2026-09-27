@@ -1035,16 +1035,18 @@ window.loginUser = async function() {
 		const data = await res.json();
 		
 		if (data.ok) {
-			if (!userList.includes(username)) {
-				userList.push(username);
+			const resolvedUsername = data.user?.username || data.username || username;
+			const resolvedRole = data.user?.role || data.role || 'user';
+			if (!userList.includes(resolvedUsername)) {
+				userList.push(resolvedUsername);
 			}
-			userRoles[username] = data.user.role;
-			authenticatedUsers[username] = { token: data.token, role: data.user.role };
+			userRoles[resolvedUsername] = resolvedRole;
+			authenticatedUsers[resolvedUsername] = { token: data.token, role: resolvedRole };
 			saveUserList();
 			saveAuthUsers();
-			setUser(username);
+			setUser(resolvedUsername);
 			document.getElementById('loginDialog').remove();
-			showToast(`✅ Bienvenue ${username}!`, 'success');
+			showToast(`✅ Bienvenue ${resolvedUsername}!`, 'success');
 		} else {
 			showToast(`❌ ${data.error || 'Identifiants incorrects'}`, 'error');
 		}
@@ -6329,9 +6331,10 @@ window.showAuthModal = function(mode = 'login') {
 					<button type="button" onclick="toggleDashboardPassword('loginPassword')" style="background:none;border:none;cursor:pointer;font-size:18px;padding:8px;color:#fff;" title="Afficher/masquer">👁️</button>
 				</div>
 			</div>
-			<button onclick="loginUser()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
+			<button id="loginSubmitButton" onclick="loginUser()" style="width:100%;background:#2ecc71;color:#000;border:none;padding:12px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">
 				🔓 Se connecter
 			</button>
+			<p id="loginStatusMessage" role="status" aria-live="polite" style="min-height:20px;margin:12px 0 0;text-align:center;color:#95a5a6;font-size:13px;"></p>
 			<p style="margin-top:16px;text-align:center;color:#95a5a6;font-size:12px;line-height:1.6;">
 				Les comptes sont fournis via le <a href="https://www.vhr-dashboard-site.com/account.html" target="_blank" rel="noreferrer" style="color:#2ecc71;font-weight:bold;">site central</a>.
 				Si vous n'avez pas encore reçu d'accès, contactez votre administrateur ou visitez la page du compte.
@@ -6352,12 +6355,20 @@ window.loginUser = async function() {
 	const identifier = identifierInput.value.trim();
 	const password = passwordInput.value;
 	const electronAuthHeader = isElectronUserAgent ? { 'x-vhr-electron': 'electron' } : {};
+	const submitButton = document.getElementById('loginSubmitButton');
+	const statusMessage = document.getElementById('loginStatusMessage');
 	
 	if (!identifier || !password) {
 		showToast('❌ Identifiant et mot de passe requis', 'error');
 		return;
 	}
 	
+	if (submitButton) {
+		submitButton.disabled = true;
+		submitButton.textContent = '⏳ Connexion…';
+		submitButton.style.opacity = '0.7';
+	}
+	if (statusMessage) statusMessage.textContent = 'Vérification locale en cours…';
 	showToast('🔄 Connexion en cours...', 'info');
 	
 	try {
@@ -6403,7 +6414,7 @@ window.loginUser = async function() {
 		};
 
 		const blockRemoteForGuest = isKnownGuestIdentifier(identifier);
-		const canTryRemoteFirst = !FORCE_LOCAL_AUTH && !blockRemoteForGuest;
+		const canTryRemoteFirst = !isLocalAuthContext && !FORCE_LOCAL_AUTH && !blockRemoteForGuest;
 
 		// 1) En contexte Electron/local, prioriser l'auth distante pour garder la synchro vitrine.
 		if (canTryRemoteFirst) {
@@ -6477,7 +6488,7 @@ window.loginUser = async function() {
 		}
 
 		// 4) Fallback distant via le serveur local si tout échoue (optionnel)
-		if (!(res && res.ok && data && data.ok) && !FORCE_LOCAL_AUTH && !blockRemoteForGuest) {
+		if (!(res && res.ok && data && data.ok) && !isLocalAuthContext && !FORCE_LOCAL_AUTH && !blockRemoteForGuest) {
 			try {
 				const remoteRes = await fetch('/api/remote-login', {
 					method: 'POST',
@@ -6497,7 +6508,7 @@ window.loginUser = async function() {
 			}
 		}
 		
-		if (res.ok && data.ok) {
+		if (res && res.ok && data && data.ok) {
 			if (data.token) {
 				saveAuthToken(data.token);
 			}
@@ -6560,13 +6571,21 @@ window.loginUser = async function() {
 			const status = res ? res.status : 0;
 			const fallbackMsg = data?.error || 'Connexion échouée';
 			const authMsg = status === 401
-				? 'Identifiants invalides ou compte inexistant sur le site central.'
+				? 'Identifiant ou mot de passe incorrect.'
 				: fallbackMsg;
+			if (statusMessage) statusMessage.textContent = authMsg;
 			showToast('❌ ' + authMsg, 'error');
 		}
 	} catch (e) {
 		console.error('[auth] login error:', e);
+		if (statusMessage) statusMessage.textContent = 'Le serveur local ne répond pas. Relancez l’application.';
 		showToast('❌ Erreur de connexion', 'error');
+	} finally {
+		if (submitButton && document.body.contains(submitButton)) {
+			submitButton.disabled = false;
+			submitButton.textContent = '🔓 Se connecter';
+			submitButton.style.opacity = '1';
+		}
 	}
 };
 

@@ -28,7 +28,6 @@
     "generate:cert": "node scripts/create-local-cert.js"
   },
   "dependencies": {
-    "bcrypt": "^5.1.1",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.6.2",
     "cookie-parser": "^1.4.7",
