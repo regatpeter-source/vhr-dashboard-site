@@ -8,6 +8,17 @@ const http = require('http');
 const https = require('https');
 const { startRelayClient } = require('./services/relay-client');
 
+// The desktop application is local-first. Do not inherit stale Render/Postgres/HTTPS
+// variables from the Windows user environment; they take precedence over .env values.
+const desktopHttpsEnabled = process.env.DESKTOP_HTTPS_ENABLED === '1';
+process.env.LOCAL_APP = '1';
+process.env.FORCE_HTTP = desktopHttpsEnabled ? '0' : '1';
+process.env.HTTPS_ENABLED = desktopHttpsEnabled ? '1' : '0';
+process.env.SKIP_PG = '1';
+process.env.DATABASE_URL = '';
+process.env.EMAIL_ENABLED = process.env.DESKTOP_EMAIL_ENABLED === '1' ? '1' : '0';
+process.env.RELAY_ENABLED = process.env.DESKTOP_RELAY_ENABLED === '1' ? '1' : '0';
+
 const PORT = process.env.PORT || 3000;
 const FORCE_HTTP = process.env.FORCE_HTTP === '1';
 const HTTPS_ENABLED = process.env.HTTPS_ENABLED === '1';
