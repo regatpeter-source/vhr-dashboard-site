@@ -4141,10 +4141,57 @@ function buildAuthCookieOptions(req, overrides = {}) {
 
 // Suivi des jeux lancés (persistance en mémoire côté serveur)
 const runningAppState = {}; // { serial: [pkg1, pkg2, ...] }
+const gameSessionState = {}; // { serial: { package: { status, startedAt, activeSince, elapsedMs } } }
 const FORCE_REMOTE_USER_STATUS = (process.env.FORCE_REMOTE_USER_STATUS || '1') === '1';
+
+function markGameSessionRunning(serial, pkg) {
+  if (!gameSessionState[serial]) gameSessionState[serial] = {};
+  const now = Date.now();
+  const existing = gameSessionState[serial][pkg];
+  if (!existing) {
+    gameSessionState[serial][pkg] = { status: 'running', startedAt: now, activeSince: now, elapsedMs: 0 };
+  } else if (existing.status !== 'running') {
+    existing.status = 'running';
+    existing.activeSince = now;
+    delete existing.pausedAt;
+  }
+  return gameSessionState[serial][pkg];
+}
+
+function markGameSessionPaused(serial, pkg) {
+  const session = gameSessionState[serial]?.[pkg];
+  if (!session) return null;
+  const now = Date.now();
+  if (session.status === 'running' && session.activeSince) {
+    session.elapsedMs += Math.max(0, now - session.activeSince);
+  }
+  session.status = 'paused';
+  session.activeSince = null;
+  session.pausedAt = now;
+  return session;
+}
+
+function getGameSessionsSnapshot() {
+  const now = Date.now();
+  const snapshot = {};
+  for (const [serial, sessions] of Object.entries(gameSessionState)) {
+    snapshot[serial] = {};
+    for (const [pkg, session] of Object.entries(sessions)) {
+      const liveElapsed = session.status === 'running' && session.activeSince
+        ? Math.max(0, now - session.activeSince)
+        : 0;
+      snapshot[serial][pkg] = { ...session, elapsedMs: session.elapsedMs + liveElapsed, serverNow: now };
+    }
+  }
+  return snapshot;
+}
 
 function clearRunningAppState(serial, pkg) {
   if (!serial || !pkg) return false;
+  if (gameSessionState[serial]) {
+    delete gameSessionState[serial][pkg];
+    if (Object.keys(gameSessionState[serial]).length === 0) delete gameSessionState[serial];
+  }
   if (!runningAppState[serial]) return false;
   const before = runningAppState[serial].length;
   runningAppState[serial] = runningAppState[serial].filter(p => p !== pkg);
@@ -9672,7 +9719,7 @@ app.post('/api/stream/stop', (req, res) => {
 // État des jeux/applications en cours (persistant sur le serveur entre rafraîchissements UI)
 // Placé AVANT /api/apps/:serial pour éviter que "running" soit interprété comme un numéro de série ADB
 app.get('/api/apps/running', authMiddleware, requireDashboardAccess, (req, res) => {
-  res.json({ ok: true, running: runningAppState });
+  res.json({ ok: true, running: runningAppState, sessions: getGameSessionsSnapshot() });
 });
 
 app.get('/api/apps/:serial', authMiddleware, requireDashboardAccess, async (req, res) => {
@@ -9702,12 +9749,12 @@ app.post('/api/apps/running/mark', authMiddleware, requireDashboardAccess, (req,
   if (!runningAppState[serial]) runningAppState[serial] = [];
   if (action === 'add') {
     if (!runningAppState[serial].includes(pkg)) runningAppState[serial].push(pkg);
+    markGameSessionRunning(serial, pkg);
   } else {
-    runningAppState[serial] = runningAppState[serial].filter(p => p !== pkg);
-    if (runningAppState[serial].length === 0) delete runningAppState[serial];
+    clearRunningAppState(serial, pkg);
   }
 
-  res.json({ ok: true, running: runningAppState });
+  res.json({ ok: true, running: runningAppState, sessions: getGameSessionsSnapshot() });
 });
 
 app.post('/api/apps/:serial/launch', authMiddleware, requireDashboardAccess, async (req, res) => {
@@ -9750,6 +9797,7 @@ app.post('/api/apps/:serial/launch', authMiddleware, requireDashboardAccess, asy
         try {
           if (!runningAppState[serial]) runningAppState[serial] = [];
           if (!runningAppState[serial].includes(pkg)) runningAppState[serial].push(pkg);
+          markGameSessionRunning(serial, pkg);
         } catch (e) {}
         res.json({ ok: true, msg: `Jeu lancé: ${pkg}` });
         return;
@@ -9768,6 +9816,7 @@ app.post('/api/apps/:serial/launch', authMiddleware, requireDashboardAccess, asy
       try {
         if (!runningAppState[serial]) runningAppState[serial] = [];
         if (!runningAppState[serial].includes(pkg)) runningAppState[serial].push(pkg);
+        markGameSessionRunning(serial, pkg);
       } catch (e) {}
       res.json({ ok: true, msg: `Jeu lancé: ${pkg}` });
       return;
@@ -9788,6 +9837,7 @@ app.post('/api/apps/:serial/launch', authMiddleware, requireDashboardAccess, asy
       try {
         if (!runningAppState[serial]) runningAppState[serial] = [];
         if (!runningAppState[serial].includes(pkg)) runningAppState[serial].push(pkg);
+        markGameSessionRunning(serial, pkg);
       } catch (e) {}
       res.json({ ok: true, msg: `Jeu lancé: ${pkg}` });
     } else {
@@ -9797,6 +9847,45 @@ app.post('/api/apps/:serial/launch', authMiddleware, requireDashboardAccess, asy
     }
   } catch (e) {
     console.error('[api] launch:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+app.post('/api/apps/:serial/pause', authMiddleware, requireDashboardAccess, async (req, res) => {
+  const serial = req.params.serial;
+  const pkg = req.body?.package;
+  if (!serial || !pkg) return res.status(400).json({ ok: false, error: 'serial and package required' });
+  if (!runningAppState[serial]?.includes(pkg)) {
+    return res.status(409).json({ ok: false, error: 'Ce jeu n’est pas marqué comme lancé' });
+  }
+  try {
+    const homeResult = await runAdbCommand(serial, ['shell', 'input', 'keyevent', 'KEYCODE_HOME']);
+    if (homeResult.code !== 0) throw new Error(homeResult.stderr || 'KEYCODE_HOME failed');
+    const session = markGameSessionPaused(serial, pkg);
+    try { io.emit('app-pause', { serial, package: pkg, success: true, pausedAt: Date.now() }); } catch (e) {}
+    res.json({ ok: true, paused: true, session: getGameSessionsSnapshot()[serial]?.[pkg] || session });
+  } catch (e) {
+    console.error('[api] pause:', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+app.post('/api/apps/:serial/resume', authMiddleware, requireDashboardAccess, async (req, res) => {
+  const serial = req.params.serial;
+  const pkg = req.body?.package;
+  if (!serial || !pkg) return res.status(400).json({ ok: false, error: 'serial and package required' });
+  try {
+    await runAdbCommand(serial, ['shell', 'input', 'keyevent', 'KEYCODE_WAKEUP']);
+    const result = await runAdbCommand(serial, ['shell', 'monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1']);
+    const success = result.code === 0 || String(result.stdout || '').includes('Events injected');
+    if (!success) return res.status(500).json({ ok: false, error: result.stderr || 'Impossible de reprendre le jeu' });
+    if (!runningAppState[serial]) runningAppState[serial] = [];
+    if (!runningAppState[serial].includes(pkg)) runningAppState[serial].push(pkg);
+    const session = markGameSessionRunning(serial, pkg);
+    try { io.emit('app-resume', { serial, package: pkg, success: true, resumedAt: Date.now() }); } catch (e) {}
+    res.json({ ok: true, resumed: true, session: getGameSessionsSnapshot()[serial]?.[pkg] || session });
+  } catch (e) {
+    console.error('[api] resume:', e);
     res.status(500).json({ ok: false, error: String(e) });
   }
 });

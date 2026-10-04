@@ -3063,6 +3063,7 @@ let devices = [];
 let games = [];
 let favorites = [];
 let runningApps = {}; // Track running apps: { serial: [pkg1, pkg2, ...] }
+let gameSessions = {}; // { serial: { package: { status, elapsedMs, clientSyncedAt } } }
 let gameMetaMap = {}; // Map packageId -> { name, icon }
 const DEFAULT_GAME_ICON = '/assets/logo-vd.svg';
 let serverInfoCache = null; // { lanIp, port, host }
@@ -3100,6 +3101,73 @@ function getRunningAppsForDevice(device) {
 		return remoteRunning[device.serial] || [];
 	}
 	return runningApps[device.serial] || [];
+}
+
+function getGameSession(serial, pkg) {
+	return gameSessions?.[serial]?.[pkg] || null;
+}
+
+function syncGameSession(serial, pkg, session) {
+	if (!serial || !pkg || !session) return;
+	if (!gameSessions[serial]) gameSessions[serial] = {};
+	gameSessions[serial][pkg] = { ...session, clientSyncedAt: Date.now() };
+}
+
+function ensureLocalGameSessionRunning(serial, pkg) {
+	const existing = getGameSession(serial, pkg);
+	if (existing?.status === 'running') return;
+	if (existing) {
+		syncGameSession(serial, pkg, { ...existing, status: 'running', activeSince: Date.now() });
+	} else {
+		syncGameSession(serial, pkg, { status: 'running', startedAt: Date.now(), activeSince: Date.now(), elapsedMs: 0 });
+	}
+}
+
+function getGameElapsedMs(serial, pkg) {
+	const session = getGameSession(serial, pkg);
+	if (!session) return 0;
+	const base = Math.max(0, Number(session.elapsedMs) || 0);
+	return session.status === 'running' ? base + Math.max(0, Date.now() - (session.clientSyncedAt || Date.now())) : base;
+}
+
+function formatGameDuration(milliseconds) {
+	const totalSeconds = Math.floor(Math.max(0, milliseconds) / 1000);
+	const hours = Math.floor(totalSeconds / 3600);
+	const minutes = Math.floor((totalSeconds % 3600) / 60);
+	const seconds = totalSeconds % 60;
+	return [hours, minutes, seconds].map(value => String(value).padStart(2, '0')).join(':');
+}
+
+function buildGameSessionControls(serial, pkg) {
+	const session = getGameSession(serial, pkg);
+	const paused = session?.status === 'paused';
+	const encodedSerial = encodeURIComponent(serial);
+	const encodedPackage = encodeURIComponent(pkg);
+	const serialJson = JSON.stringify(serial);
+	const packageJson = JSON.stringify(pkg);
+	return `
+		<div style='display:flex;align-items:center;gap:6px;color:${paused ? '#f1c40f' : '#2ecc71'};font:700 13px monospace;'>
+			<span>${paused ? '⏸️ En pause' : '⏱️ Temps joué'}</span>
+			<span class='game-session-timer' data-serial='${encodedSerial}' data-package='${encodedPackage}'>${formatGameDuration(getGameElapsedMs(serial, pkg))}</span>
+		</div>
+		<div style='display:flex;gap:6px;flex-wrap:wrap;'>
+			${paused
+				? `<button class='btn btn-accent btn-compact' onclick='resumeGame(${serialJson}, ${packageJson})'>▶️ Reprendre</button>`
+				: `<button class='btn btn-ghost btn-compact' onclick='pauseGame(${serialJson}, ${packageJson})'>⏸️ Pause</button>`}
+			<button class='btn btn-danger btn-compact' onclick='stopGame(${serialJson}, ${packageJson})'>⏹️ Stop</button>
+		</div>`;
+}
+
+function updateGameSessionTimers() {
+	document.querySelectorAll('.game-session-timer').forEach(element => {
+		const serial = decodeURIComponent(element.dataset.serial || '');
+		const pkg = decodeURIComponent(element.dataset.package || '');
+		element.textContent = formatGameDuration(getGameElapsedMs(serial, pkg));
+	});
+}
+
+if (!window.gameSessionTimerInterval) {
+	window.gameSessionTimerInterval = setInterval(updateGameSessionTimers, 1000);
 }
 
 async function loadGamesCatalog() {
@@ -3246,6 +3314,10 @@ async function syncRunningAppsFromServer() {
 		const res = await api('/api/apps/running', { timeout: 8000 });
 		if (res.ok && res.running) {
 			runningApps = res.running || {};
+			gameSessions = {};
+			Object.entries(res.sessions || {}).forEach(([serial, sessions]) => {
+				Object.entries(sessions || {}).forEach(([pkg, session]) => syncGameSession(serial, pkg, session));
+			});
 			return true;
 		}
 	} catch (e) {
@@ -3737,11 +3809,7 @@ function renderDevicesTable() {
 				<img src="${meta.icon}" alt="${safeName}" style='width:42px;height:42px;border-radius:8px;object-fit:cover;border:1px solid #2ecc71;' onerror="this.onerror=null;this.src='${DEFAULT_GAME_ICON}'" />
 				<div style='display:flex;flex-direction:column;gap:6px;align-items:flex-start;'>
 					<span class='pill pill-muted'>🎮 ${safeName}</span>
-					<div style='display:flex;gap:6px;flex-wrap:wrap;'>
-						<button class='btn btn-ghost btn-compact' onclick='pauseGame(${serialJson}, "${pkg}")'>⏸️ Pause</button>
-						<button class='btn btn-accent btn-compact' onclick='resumeGame(${serialJson}, "${pkg}")'>▶️ Reprendre</button>
-						<button class='btn btn-danger btn-compact' onclick='stopGame(${serialJson}, "${pkg}")'>⏹️ Stop</button>
-					</div>
+					${buildGameSessionControls(d.serial, pkg)}
 				</div>
 			</div>
 			`;
@@ -3875,11 +3943,7 @@ function renderDevicesCards() {
 				<img src="${meta.icon}" alt="${safeName}" style='width:46px;height:46px;border-radius:10px;object-fit:cover;border:1px solid #2ecc71;' onerror="this.onerror=null;this.src='${DEFAULT_GAME_ICON}'" />
 				<div style='display:flex;flex-direction:column;gap:6px;align-items:flex-start;'>
 					<span class="pill pill-muted">🎮 ${safeName}</span>
-					<div style='display:flex;gap:6px;flex-wrap:wrap;'>
-						<button class='btn btn-ghost btn-compact' onclick='pauseGame(${serialJson}, "${pkg}")'>⏸️ Pause</button>
-						<button class='btn btn-accent btn-compact' onclick='resumeGame(${serialJson}, "${pkg}")'>▶️ Reprendre</button>
-						<button class='btn btn-danger btn-compact' onclick='stopGame(${serialJson}, "${pkg}")'>⏹️ Stop</button>
-					</div>
+					${buildGameSessionControls(d.serial, pkg)}
 				</div>
 			</div>
 			`;
@@ -5155,6 +5219,7 @@ window.launchAppMulti = async function(serials, pkg, refreshSerial) {
 			if (res && res.ok) {
 				success += 1;
 				if (!isRemote) {
+					ensureLocalGameSessionRunning(serial, pkg);
 					if (!runningApps[serial]) runningApps[serial] = [];
 					if (!runningApps[serial].includes(pkg)) {
 						runningApps[serial].push(pkg);
@@ -5296,6 +5361,7 @@ window.launchApp = async function(serial, pkg) {
 		incrementStat('appsLaunched');
 		// Add to running apps
 		if (!isRemoteSessionSerial(serial)) {
+			ensureLocalGameSessionRunning(serial, pkg);
 			if (!runningApps[serial]) runningApps[serial] = [];
 			if (!runningApps[serial].includes(pkg)) {
 				runningApps[serial].push(pkg);
@@ -5332,6 +5398,10 @@ window.stopGame = async function(serial, pkg) {
 		// 🔄 Optimistic UI update for immediate feedback
 		if (!isRemote && runningApps[serial]) {
 			runningApps[serial] = runningApps[serial].filter(p => p !== pkg);
+			if (gameSessions[serial]) {
+				delete gameSessions[serial][pkg];
+				if (Object.keys(gameSessions[serial]).length === 0) delete gameSessions[serial];
+			}
 			if (runningApps[serial].length === 0) {
 				delete runningApps[serial];
 			}
@@ -5436,19 +5506,22 @@ window.stopGame = async function(serial, pkg) {
 	}
 };
 
-// Pause game (envoie HOME pour quitter proprement vers Oculus Home sans tuer l'app)
+// Pause réelle Android: l'app passe en arrière-plan (onPause) sans être tuée.
 window.pauseGame = async function(serial, pkg) {
 	try {
 		showToast('⏸️ Pause du jeu...', 'info');
-		const res = await api('/api/adb/command', {
+		const res = await api(`/api/apps/${serial}/pause`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ serial, command: ['shell', 'input', 'keyevent', 'KEYCODE_HOME'] })
+			body: JSON.stringify({ package: pkg })
 		});
 		if (res && res.ok) {
-			showToast('✅ Jeu mis en pause (Home)', 'success');
+			if (res.session) syncGameSession(serial, pkg, res.session);
+			showToast('✅ Jeu réellement mis en pause', 'success');
+			renderDevices();
+			if (isSessionActive()) publishSessionDevices();
 		} else {
-			showToast('⚠️ Impossible de mettre en pause', 'warning');
+			showToast('⚠️ ' + (res?.error || 'Impossible de mettre en pause'), 'warning');
 		}
 	} catch (e) {
 		console.error('[pauseGame]', e);
@@ -5456,10 +5529,30 @@ window.pauseGame = async function(serial, pkg) {
 	}
 };
 
-// Reprendre le jeu (relance l'activité)
+// Reprendre la même tâche Android sans remettre le chronomètre à zéro.
 window.resumeGame = async function(serial, pkg) {
-	showToast('▶️ Reprise du jeu...', 'info');
-	return launchApp(serial, pkg);
+	try {
+		showToast('▶️ Reprise du jeu...', 'info');
+		const res = await api(`/api/apps/${serial}/resume`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ package: pkg })
+		});
+		if (!res?.ok) {
+			showToast('⚠️ ' + (res?.error || 'Impossible de reprendre le jeu'), 'warning');
+			return false;
+		}
+		if (res.session) syncGameSession(serial, pkg, res.session);
+		else ensureLocalGameSessionRunning(serial, pkg);
+		showToast('✅ Jeu repris', 'success');
+		renderDevices();
+		if (isSessionActive()) publishSessionDevices();
+		return true;
+	} catch (e) {
+		console.error('[resumeGame]', e);
+		showToast('⚠️ Erreur reprise', 'error');
+		return false;
+	}
 };
 
 window.toggleFavorite = async function(serial, pkg) {
