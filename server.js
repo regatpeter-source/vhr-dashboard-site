@@ -2060,6 +2060,36 @@ app.get('/download/vhr-voice-apk', (req, res) => {
   }
 });
 
+async function resolveConnectedAdbTarget(requestedSerial) {
+  const readDevices = async () => {
+    const result = await runAdbCommandSafe(null, ['devices', '-l'], 10000);
+    return String(result.stdout || '').split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith('List of devices'))
+      .map(line => {
+        const [serial, status] = line.split(/\s+/);
+        return { serial, status };
+      })
+      .filter(device => device.serial && device.status === 'device');
+  };
+
+  let connected = await readDevices();
+  let exact = connected.find(device => device.serial === requestedSerial);
+  if (exact) return { serial: exact.serial, retargeted: false, devices: connected };
+
+  if (requestedSerial) {
+    await runAdbCommandSafe(requestedSerial, ['reconnect'], 10000);
+    connected = await readDevices();
+    exact = connected.find(device => device.serial === requestedSerial);
+    if (exact) return { serial: exact.serial, retargeted: false, devices: connected };
+  }
+
+  if (connected.length === 1) {
+    return { serial: connected[0].serial, retargeted: true, devices: connected };
+  }
+  return { serial: null, retargeted: false, devices: connected };
+}
+
 // Install VHR Voice APK directly on connected Quest device
 app.post('/api/device/install-voice-app', authMiddleware, requireDashboardAccess, async (req, res) => {
   const { serial } = req.body || {};
@@ -2074,23 +2104,37 @@ app.post('/api/device/install-voice-app', authMiddleware, requireDashboardAccess
   }
 
   try {
-    console.log(`[install-voice-app] Installing VHR Voice on ${serial}...`);
-    
-    // Install APK via ADB
-    const result = await runAdbCommand(serial, ['install', '-r', apkPath]);
-    
+    const target = await resolveConnectedAdbTarget(serial);
+    if (!target.serial) {
+      return res.status(409).json({
+        ok: false,
+        code: 'ADB_DEVICE_UNAVAILABLE',
+        error: target.devices.length > 1
+          ? 'Le casque demandé a changé d’adresse. Rafraîchissez puis sélectionnez le bon casque.'
+          : 'Casque introuvable. Après une réinitialisation, réactivez le mode développeur, branchez-le en USB et acceptez le débogage USB.',
+        devices: target.devices
+      });
+    }
+    const targetSerial = target.serial;
+    console.log(`[install-voice-app] Installing VHR Voice on ${targetSerial}...`);
+    const result = await runAdbCommandSafe(targetSerial, ['install', '-r', apkPath], 60000);
+
     if (result.code === 0 || result.stdout.includes('Success')) {
-      console.log(`[install-voice-app] Successfully installed on ${serial}`);
+      console.log(`[install-voice-app] Successfully installed on ${targetSerial}`);
       res.json({ 
         ok: true, 
         message: 'VHR Voice installed successfully',
-        stdout: result.stdout 
+        stdout: result.stdout,
+        serial: targetSerial,
+        retargeted: targetSerial !== serial
       });
     } else {
       console.error(`[install-voice-app] Failed:`, result.stderr);
       res.status(500).json({ 
         ok: false, 
-        error: result.stderr || 'Installation failed',
+        error: /not found|offline/i.test(`${result.stderr || ''} ${result.stdout || ''}`)
+          ? 'Le casque s’est déconnecté pendant l’installation. Rebranchez-le en USB et acceptez le débogage.'
+          : (result.stderr || 'Installation failed'),
         stdout: result.stdout 
       });
     }

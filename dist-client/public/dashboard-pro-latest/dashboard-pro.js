@@ -2296,11 +2296,12 @@ window.sendVoiceToHeadset = async function(serial, options = {}) {
 							if (installRes && installRes.ok) {
 								installed = true;
 								showToast('✅ VHR Voice installé. Lancement...', 'success');
+								const installedSerial = installRes.serial || serial;
 								const retryRes = await api('/api/device/open-audio-receiver', {
 									method: 'POST',
 									headers: { 'Content-Type': 'application/json' },
 									body: JSON.stringify({
-										serial,
+										serial: installedSerial,
 										serverUrl: resolvedServerUrl,
 										useBackgroundApp: true,
 										noBrowserFallback: true,
@@ -3866,10 +3867,11 @@ function renderDevicesTable() {
 
 		const voiceCell = relay
 			? `<div style='color:#bdc3c7;font-size:12px;'>Voix PC→Casque indisponible en mode relais</div>`
+			: (!['device', 'streaming'].includes(d.status) ? `<div style='color:#e67e22;font-size:11px;'>🔌 Reconnectez le casque<br>pour installer la voix</div>`
 			: `
 			<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='background:#16a085;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;'>🗣️ Voix LAN</button>
 			<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:11px;margin-left:4px;' title='Installer l’émetteur voix sur le casque'>📲 Émetteur</button>
-		`;
+		`);
 
 		const actionsCell = relay
 			? `<div style='color:#bdc3c7;font-size:12px;'>Actions ADB désactivées (relais cloud)</div>`
@@ -3990,10 +3992,11 @@ function renderDevicesCards() {
 
 		const voiceBlock = relay
 			? `<div style='color:#bdc3c7;font-size:12px;margin-bottom:6px;'>Voix PC→Casque indisponible en mode relais</div>`
+			: (!['device', 'streaming'].includes(d.status) ? `<div style='color:#e67e22;font-size:12px;margin-bottom:6px;'>🔌 Reconnectez le casque pour installer VHR Voice</div>`
 			: `<div style='display:flex;gap:6px;margin-bottom:6px;'>
 				<button onclick='sendVoiceToHeadset(${JSON.stringify(d.serial)})' style='flex:1;background:#16a085;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;'>🗣️ Voix LAN</button>
 				<button onclick='showVoiceAppDialog(${JSON.stringify(d.serial)})' style='background:#34495e;color:#fff;border:none;padding:10px 12px;border-radius:6px;cursor:pointer;' title='Installer l’émetteur voix sur le casque'>📲 Émetteur</button>
-			</div>`;
+			</div>`);
 
 		const wifiBlock = relay
 			? ''
@@ -4931,6 +4934,9 @@ window.installVoiceApp = async function(serial) {
 		
 		if (res && res.ok) {
 			updateProgress(100, 'Installation terminée !');
+			if (res.retargeted) {
+				showToast('🔄 Nouvelle adresse du casque détectée automatiquement', 'info');
+			}
 			
 			// Show success message
 			const successHtml = `
@@ -4984,8 +4990,9 @@ window.installVoiceApp = async function(serial) {
 					<div style="background:#34495e; padding: 16px; border-radius: 8px; margin-bottom: 20px; text-align: left;">
 						<h4 style="color:#f39c12; margin-bottom: 8px;">💡 Solutions possibles</h4>
 						<ul style="color:#95a5a6; font-size: 13px; padding-left: 20px; margin: 0;">
-							<li>Vérifiez que le casque est connecté en USB</li>
-							<li>Acceptez la demande de débogage USB sur le casque</li>
+							<li>Après une réinitialisation, réactivez le mode développeur dans l’app Meta Horizon</li>
+							<li>Branchez le casque en USB puis acceptez « Toujours autoriser cet ordinateur »</li>
+							<li>Cliquez sur Rafraîchir avant de recommencer l’installation</li>
 							<li>Essayez de télécharger l'APK et de l'installer manuellement</li>
 						</ul>
 					</div>
