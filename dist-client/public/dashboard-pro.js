@@ -3129,9 +3129,9 @@ function ensureLocalGameSessionRunning(serial, pkg) {
 	const existing = getGameSession(serial, pkg);
 	if (existing?.status === 'running') return;
 	if (existing) {
-		syncGameSession(serial, pkg, { ...existing, status: 'running', activeSince: Date.now() });
+		syncGameSession(serial, pkg, { ...existing, status: 'running', timerStatus: existing.timerStatus || 'running', activeSince: existing.timerStatus === 'stopped' ? null : Date.now() });
 	} else {
-		syncGameSession(serial, pkg, { status: 'running', startedAt: Date.now(), activeSince: Date.now(), elapsedMs: 0 });
+		syncGameSession(serial, pkg, { status: 'running', timerStatus: 'running', startedAt: Date.now(), activeSince: Date.now(), elapsedMs: 0 });
 	}
 }
 
@@ -3139,7 +3139,9 @@ function getGameElapsedMs(serial, pkg) {
 	const session = getGameSession(serial, pkg);
 	if (!session) return 0;
 	const base = Math.max(0, Number(session.elapsedMs) || 0);
-	return session.status === 'running' ? base + Math.max(0, Date.now() - (session.clientSyncedAt || Date.now())) : base;
+	return session.status === 'running' && session.timerStatus !== 'stopped'
+		? base + Math.max(0, Date.now() - (session.clientSyncedAt || Date.now()))
+		: base;
 }
 
 function formatGameDuration(milliseconds) {
@@ -3153,20 +3155,27 @@ function formatGameDuration(milliseconds) {
 function buildGameSessionControls(serial, pkg) {
 	const session = getGameSession(serial, pkg);
 	const paused = session?.status === 'paused';
+	const timerStopped = session?.timerStatus === 'stopped';
 	const encodedSerial = encodeURIComponent(serial);
 	const encodedPackage = encodeURIComponent(pkg);
 	const serialJson = JSON.stringify(serial);
 	const packageJson = JSON.stringify(pkg);
 	return `
-		<div style='display:flex;align-items:center;gap:6px;color:${paused ? '#f1c40f' : '#2ecc71'};font:700 13px monospace;'>
-			<span>${paused ? '⏸️ En pause' : '⏱️ Temps joué'}</span>
+		<div style='display:flex;align-items:center;gap:6px;color:${timerStopped ? '#e67e22' : paused ? '#f1c40f' : '#2ecc71'};font:700 13px monospace;'>
+			<span>${timerStopped ? '⏹️ Chrono arrêté' : paused ? '⏸️ En pause' : '⏱️ Temps joué'}</span>
 			<span class='game-session-timer' data-serial='${encodedSerial}' data-package='${encodedPackage}'>${formatGameDuration(getGameElapsedMs(serial, pkg))}</span>
+		</div>
+		<div style='display:flex;gap:6px;flex-wrap:wrap;'>
+			${timerStopped
+				? `<button class='btn btn-accent btn-compact' onclick='controlGameTimer(${serialJson}, ${packageJson}, "restart")'>▶️ Chrono</button>`
+				: `<button class='btn btn-ghost btn-compact' onclick='controlGameTimer(${serialJson}, ${packageJson}, "stop")'>⏹️ Chrono</button>`}
+			<button class='btn btn-ghost btn-compact' onclick='controlGameTimer(${serialJson}, ${packageJson}, "reset")'>🔄 00:00</button>
 		</div>
 		<div style='display:flex;gap:6px;flex-wrap:wrap;'>
 			${paused
 				? `<button class='btn btn-accent btn-compact' onclick='resumeGame(${serialJson}, ${packageJson})'>▶️ Reprendre</button>`
 				: `<button class='btn btn-ghost btn-compact' onclick='pauseGame(${serialJson}, ${packageJson})'>⏸️ Pause</button>`}
-			<button class='btn btn-danger btn-compact' onclick='stopGame(${serialJson}, ${packageJson})'>⏹️ Stop</button>
+			<button class='btn btn-danger btn-compact' onclick='stopGame(${serialJson}, ${packageJson})'>⏹️ Fermer jeu</button>
 		</div>`;
 }
 
@@ -3937,9 +3946,10 @@ function renderDevicesTable() {
 
 		const wifiCell = relay
 			? `<span style='color:#95a5a6;'>-</span>`
-			: (!d.serial.includes(':') ? `
-				<button onclick='connectWifiAuto(${JSON.stringify(d.serial)})' style='background:#9b59b6;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;'>📶 WiFi Auto</button>
-			` : `<span style='color:#95a5a6;'>-</span>`);
+			: `<div style='display:flex;gap:5px;justify-content:center;flex-wrap:wrap;'>
+				<button onclick='configureHeadsetWifi(${JSON.stringify(d.serial)}, ${JSON.stringify(d.name || '')})' style='background:#8e44ad;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;'>⚙️ Configurer</button>
+				${!d.serial.includes(':') ? `<button onclick='connectWifiAuto(${JSON.stringify(d.serial)})' style='background:#9b59b6;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;'>📡 ADB Auto</button>` : ''}
+			</div>`;
 
 		const appsCell = relay
 			? `<div style='color:#bdc3c7;font-size:12px;'>Apps/Favoris indisponibles en mode relais</div>`
@@ -4081,9 +4091,10 @@ function renderDevicesCards() {
 
 		const wifiBlock = relay
 			? ''
-			: (!d.serial.includes(':') ? `
-				<button onclick='connectWifiAuto(${JSON.stringify(d.serial)})' style='width:100%;background:#9b59b6;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:6px;'>📶 WiFi Auto</button>
-			` : '');
+			: `<div style='display:grid;grid-template-columns:${!d.serial.includes(':') ? '1fr 1fr' : '1fr'};gap:6px;margin-bottom:6px;'>
+				<button onclick='configureHeadsetWifi(${JSON.stringify(d.serial)}, ${JSON.stringify(d.name || '')})' style='background:#8e44ad;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;'>⚙️ Configurer Wi‑Fi</button>
+				${!d.serial.includes(':') ? `<button onclick='connectWifiAuto(${JSON.stringify(d.serial)})' style='background:#9b59b6;color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;'>📡 ADB Auto</button>` : ''}
+			</div>`;
 
 		const actionsBlock = relay
 			? `<div style='color:#bdc3c7;font-size:12px;'>Actions ADB désactivées (relais cloud)</div>`
@@ -4860,6 +4871,39 @@ window.connectWifiAuto = async function(serial) {
 	setTimeout(loadDevices, 1000);
 };
 
+window.configureHeadsetWifi = async function(serial, deviceName = '') {
+	const ssidValue = await showModalInputPrompt({
+		title: 'Configurer le Wi‑Fi du casque',
+		message: `Nom du réseau (SSID) pour ${deviceName || serial}`,
+		placeholder: 'Nom du réseau Wi‑Fi',
+		confirmText: 'Suivant'
+	});
+	if (ssidValue === null) return;
+	const ssid = ssidValue.trim();
+	if (!ssid) return showToast('⚠️ Le nom du réseau est requis', 'warning');
+	const password = await showModalInputPrompt({
+		title: 'Mot de passe Wi‑Fi',
+		message: 'Saisissez le mot de passe (laissez vide pour un réseau ouvert). Il ne sera pas enregistré.',
+		placeholder: 'Mot de passe Wi‑Fi',
+		type: 'password',
+		confirmText: 'Configurer'
+	});
+	if (password === null) return;
+	showToast('📶 Configuration Wi‑Fi en cours...', 'info');
+	const res = await api('/api/adb/wifi-configure', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ serial, ssid, password })
+	});
+	if (res?.configured) {
+		showToast(`✅ Réseau ${ssid} configuré`, 'success');
+	} else if (res?.requiresHeadsetConfirmation) {
+		showToast('🥽 Réglages Wi‑Fi ouverts : terminez la connexion dans le casque', 'info');
+	} else {
+		showToast('❌ ' + (res?.error || 'Configuration Wi‑Fi impossible'), 'error');
+	}
+};
+
 // ========== VOICE TO HEADSET (TTS) ========== 
 window.closeAudioStream = async function(silent = false) {
 	// ALWAYS remove the panel first to ensure UI is responsive
@@ -5597,6 +5641,30 @@ window.stopGame = async function(serial, pkg) {
 	} catch (error) {
 		console.error('[stopGame] Unexpected error:', error);
 		showToast('⚠️ Erreur lors de l\'arrêt du jeu', 'error');
+	}
+};
+
+window.controlGameTimer = async function(serial, pkg, action) {
+	const labels = { stop: 'Chronomètre arrêté', reset: 'Chronomètre réinitialisé', restart: 'Chronomètre relancé' };
+	try {
+		const res = await api(`/api/apps/${serial}/timer`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ package: pkg, action })
+		});
+		if (!res?.ok) {
+			showToast('⚠️ ' + (res?.error || 'Commande chronomètre impossible'), 'warning');
+			return false;
+		}
+		if (res.session) syncGameSession(serial, pkg, res.session);
+		showToast('✅ ' + (labels[action] || 'Chronomètre mis à jour'), 'success');
+		renderDevices();
+		if (isSessionActive()) publishSessionDevices();
+		return true;
+	} catch (e) {
+		console.error('[controlGameTimer]', e);
+		showToast('⚠️ Erreur chronomètre', 'error');
+		return false;
 	}
 };
 

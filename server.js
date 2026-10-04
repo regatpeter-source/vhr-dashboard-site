@@ -4149,10 +4149,10 @@ function markGameSessionRunning(serial, pkg) {
   const now = Date.now();
   const existing = gameSessionState[serial][pkg];
   if (!existing) {
-    gameSessionState[serial][pkg] = { status: 'running', startedAt: now, activeSince: now, elapsedMs: 0 };
+    gameSessionState[serial][pkg] = { status: 'running', timerStatus: 'running', startedAt: now, activeSince: now, elapsedMs: 0 };
   } else if (existing.status !== 'running') {
     existing.status = 'running';
-    existing.activeSince = now;
+    existing.activeSince = existing.timerStatus === 'stopped' ? null : now;
     delete existing.pausedAt;
   }
   return gameSessionState[serial][pkg];
@@ -4168,6 +4168,27 @@ function markGameSessionPaused(serial, pkg) {
   session.status = 'paused';
   session.activeSince = null;
   session.pausedAt = now;
+  return session;
+}
+
+function updateGameTimer(serial, pkg, action) {
+  const session = gameSessionState[serial]?.[pkg];
+  if (!session) return null;
+  const now = Date.now();
+  if (session.activeSince) {
+    session.elapsedMs += Math.max(0, now - session.activeSince);
+  }
+  if (action === 'stop') {
+    session.timerStatus = 'stopped';
+    session.activeSince = null;
+  } else if (action === 'reset') {
+    session.elapsedMs = 0;
+    session.startedAt = now;
+    session.activeSince = session.status === 'running' && session.timerStatus !== 'stopped' ? now : null;
+  } else if (action === 'restart') {
+    session.timerStatus = 'running';
+    session.activeSince = session.status === 'running' ? now : null;
+  }
   return session;
 }
 
@@ -9757,6 +9778,18 @@ app.post('/api/apps/running/mark', authMiddleware, requireDashboardAccess, (req,
   res.json({ ok: true, running: runningAppState, sessions: getGameSessionsSnapshot() });
 });
 
+app.post('/api/apps/:serial/timer', authMiddleware, requireDashboardAccess, (req, res) => {
+  const serial = req.params.serial;
+  const pkg = req.body?.package;
+  const action = req.body?.action;
+  if (!serial || !pkg || !['stop', 'reset', 'restart'].includes(action)) {
+    return res.status(400).json({ ok: false, error: 'serial, package et action requis' });
+  }
+  const session = updateGameTimer(serial, pkg, action);
+  if (!session) return res.status(404).json({ ok: false, error: 'Chronomètre introuvable' });
+  res.json({ ok: true, session: getGameSessionsSnapshot()[serial]?.[pkg] || session });
+});
+
 app.post('/api/apps/:serial/launch', authMiddleware, requireDashboardAccess, async (req, res) => {
   const serial = req.params.serial;
   const pkg = req.body?.package;
@@ -10021,6 +10054,42 @@ app.post('/api/adb/wifi-connect', async (req, res) => {
   } catch (e) {
     console.error('[api] wifi-connect:', e);
     res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+app.post('/api/adb/wifi-configure', authMiddleware, requireDashboardAccess, async (req, res) => {
+  const serial = String(req.body?.serial || '').trim();
+  const ssid = String(req.body?.ssid || '').trim();
+  const password = String(req.body?.password || '');
+  if (!serial || !ssid) return res.status(400).json({ ok: false, error: 'Casque et nom du réseau requis' });
+  if (Buffer.byteLength(ssid, 'utf8') > 32) return res.status(400).json({ ok: false, error: 'Le nom du réseau dépasse 32 octets' });
+  if (password && (password.length < 8 || password.length > 63)) {
+    return res.status(400).json({ ok: false, error: 'Le mot de passe Wi‑Fi doit contenir entre 8 et 63 caractères' });
+  }
+  try {
+    await runAdbCommandSafe(serial, ['shell', 'svc', 'wifi', 'enable']);
+    const security = password ? 'wpa2' : 'open';
+    const args = ['shell', 'cmd', 'wifi', 'connect-network', ssid, security];
+    if (password) args.push(password);
+    const result = await runAdbCommandSafe(serial, args, 20000);
+    const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+    const configured = result.code === 0 && !/security exception|permission denial|not allowed|failure|unknown command/i.test(output);
+    if (configured) return res.json({ ok: true, configured: true, ssid });
+
+    const settings = await runAdbCommandSafe(serial, ['shell', 'am', 'start', '-a', 'android.settings.WIFI_SETTINGS']);
+    if (settings.code === 0) {
+      return res.json({
+        ok: true,
+        configured: false,
+        requiresHeadsetConfirmation: true,
+        ssid,
+        message: 'Réglages Wi‑Fi ouverts dans le casque. Sélectionnez le réseau et confirmez le mot de passe dans le casque.'
+      });
+    }
+    return res.status(500).json({ ok: false, error: 'Meta Quest bloque la configuration Wi‑Fi par ADB et les réglages n’ont pas pu être ouverts' });
+  } catch (e) {
+    console.error('[api] wifi-configure:', e && e.message ? e.message : e);
+    return res.status(500).json({ ok: false, error: 'Impossible d’ouvrir la configuration Wi‑Fi du casque' });
   }
 });
 
