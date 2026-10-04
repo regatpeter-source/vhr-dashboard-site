@@ -8709,7 +8709,7 @@ const runAdbCommand = (serial, args, timeout = 30000) => {
     proc.on('close', code => {
       clearTimeout(timer);
       if (killed) return;
-      if (code === 0) resolve({ stdout, stderr });
+      if (code === 0) resolve({ code, stdout, stderr });
       else reject(new Error(stderr || `adb exited with code ${code}`));
     });
     
@@ -9876,8 +9876,17 @@ app.post('/api/apps/:serial/resume', authMiddleware, requireDashboardAccess, asy
   if (!serial || !pkg) return res.status(400).json({ ok: false, error: 'serial and package required' });
   try {
     await runAdbCommand(serial, ['shell', 'input', 'keyevent', 'KEYCODE_WAKEUP']);
-    const result = await runAdbCommand(serial, ['shell', 'monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1']);
-    const success = result.code === 0 || String(result.stdout || '').includes('Events injected');
+    const dumpsysResult = await runAdbCommand(serial, ['shell', 'dumpsys', 'package', pkg]);
+    const activityMatch = dumpsysResult.stdout.match(new RegExp(`${pkg.replace(/\./g, '\\.')}/(\\S+)\\s+filter`, 'm'));
+    const mainActivity = activityMatch ? activityMatch[1] : null;
+    let result = mainActivity
+      ? await runAdbCommandSafe(serial, ['shell', 'am', 'start', '--activity-reorder-to-front', '-n', `${pkg}/${mainActivity}`])
+      : { code: 1, stdout: '', stderr: 'Activité principale introuvable' };
+    let success = result.code === 0 || /Starting|Activity/i.test(String(result.stdout || ''));
+    if (!success) {
+      result = await runAdbCommandSafe(serial, ['shell', 'monkey', '-p', pkg, '1']);
+      success = result.code === 0 || String(result.stdout || '').includes('Events injected');
+    }
     if (!success) return res.status(500).json({ ok: false, error: result.stderr || 'Impossible de reprendre le jeu' });
     if (!runningAppState[serial]) runningAppState[serial] = [];
     if (!runningAppState[serial].includes(pkg)) runningAppState[serial].push(pkg);
