@@ -3,8 +3,7 @@
     const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
     const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
     const PROD_API = 'https://www.vhr-dashboard-site.com';
-      // Forcer l'API vers la prod pour que les comptes créés en ligne soient reconnus, même si la page est servie en localhost/LAN.
-      const API_BASE = PROD_API;
+      const API_BASE = window.location.origin;
     const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
     const DEFAULT_DEMO_DAYS = 7;
 
@@ -86,7 +85,6 @@
         console.warn(`[API ${url}] Response status: ${res.status}`);
       }
       const data = await res.json();
-      console.log(`[API ${url}] Response:`, data);
       return data;
     } catch(e){ 
       console.error(`[API ${path}] Error:`, e);
@@ -296,8 +294,6 @@
         body: JSON.stringify({ username, password }) 
       });
       
-      console.log('[LOGIN] Response:', res);
-      
       if (res && res.ok) { 
         if (res.token) saveAuthToken(res.token);
         loginMessage.textContent = 'Connexion réussie ✓'; 
@@ -483,11 +479,13 @@
 
       const normalizedStatus = String(sub.status || '').trim().toLowerCase();
       const inactiveStatuses = ['canceled', 'cancelled', 'refunded', 'inactive', 'expired'];
-      const statusOk = ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired'].includes(normalizedStatus);
-      const isActive = Boolean(sub.isActive || statusOk) && !inactiveStatuses.includes(normalizedStatus);
+      const statusOk = ['active', 'trialing'].includes(normalizedStatus);
+      const isActive = Boolean(sub.isActive !== false && statusOk) && !inactiveStatuses.includes(normalizedStatus);
 
       if (!isActive) {
-        let trialHtml = '<p>Pas d\'abonnement actif actuellement.</p>';
+        let trialHtml = ['past_due', 'unpaid', 'incomplete', 'incomplete_expired'].includes(normalizedStatus)
+          ? '<p>Accès suspendu : le paiement de l’abonnement n’est pas actif. Aucune période de grâce n’est configurée.</p>'
+          : '<p>Pas d\'abonnement actif actuellement.</p>';
         try {
           const demoRes = await api('/api/demo/status');
           if (demoRes && demoRes.ok && demoRes.demo) {
@@ -525,6 +523,12 @@
         ? ''
         : `<p><strong>Jours restants:</strong> <span style="color: ${statusColor}; font-weight: bold;">${daysLeftValue} jours</span></p>`;
       
+      const cancelNotice = sub.cancelAtPeriodEnd
+        ? `<p role="status">Résiliation programmée à la fin de la période. L’accès reste disponible jusqu’au ${endDate}.</p>`
+        : `<div id="cancelSubscriptionBox" style="margin-top: 12px;">
+          <button id="cancelSubscriptionBtn" class="cta-secondary" style="background-color: #ff9800; color: white; padding: 10px 16px; border: none; border-radius: 4px; cursor: pointer;">Annuler mon abonnement</button>
+          <div id="cancelSubscriptionMessage" style="margin-top: 12px;"></div>
+        </div>`;
       let html = `
         <div style="background: white; padding: 12px; border-radius: 4px; margin-bottom: 12px;">
           <p><strong>Plan actuel:</strong> ${planName}</p>
@@ -532,10 +536,7 @@
           <p><strong>Renouvellement:</strong> ${endDate}</p>
           ${daysLeftLine}
         </div>
-        <div id="cancelSubscriptionBox" style="margin-top: 12px;">
-          <button id="cancelSubscriptionBtn" class="cta-secondary" style="background-color: #ff9800; color: white; padding: 10px 16px; border: none; border-radius: 4px; cursor: pointer;">Annuler mon abonnement</button>
-          <div id="cancelSubscriptionMessage" style="margin-top: 12px;"></div>
-        </div>
+        ${cancelNotice}
       `;
       subscriptionContent.innerHTML = html;
       
@@ -561,7 +562,10 @@
             });
             
             if (cancelRes && cancelRes.ok) {
-              msgDiv.textContent = '✓ Abonnement annulé avec succès.';
+              const accessUntil = cancelRes.accessUntil
+                ? new Date(cancelRes.accessUntil).toLocaleDateString('fr-FR')
+                : 'la fin de la période en cours';
+              msgDiv.textContent = `✓ Résiliation programmée. Votre accès reste actif jusqu’au ${accessUntil}.`;
               msgDiv.style.color = '#4CAF50';
               document.getElementById('cancelSubscriptionBtn').disabled = true;
               document.getElementById('cancelSubscriptionBtn').style.opacity = '0.5';

@@ -1,32 +1,12 @@
 // Account page client script (moved from inline to comply with CSP)
 (function(){
-  const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
-  const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
-  // Forcer l'API vers la prod pour que les comptes créés en ligne soient reconnus, même si la page est servie en localhost/LAN.
-  const API_BASE = 'https://www.vhr-dashboard-site.com';
-  const DEFAULT_SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
-  let cachedSyncUsersSecret = DEFAULT_SYNC_USERS_SECRET;
-  let syncSecretPromise = null;
-  const DEFAULT_DEMO_DAYS = 7;
-
-  function getSyncUsersSecret() {
-    if (syncSecretPromise) return syncSecretPromise;
-    syncSecretPromise = fetch('/api/admin/sync-config', {
-      credentials: 'include'
-    })
-    .then(async res => {
-      if (!res.ok) throw new Error('sync config unavailable');
-      const payload = await res.json().catch(() => null);
-      return payload?.syncSecret || DEFAULT_SYNC_USERS_SECRET;
-    })
-    .catch(() => DEFAULT_SYNC_USERS_SECRET)
-    .then(secret => {
-      cachedSyncUsersSecret = secret;
-      return cachedSyncUsersSecret;
-    });
-    return syncSecretPromise;
-  }
-  const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
+    const OFFICIAL_HOSTS = ['www.vhr-dashboard-site.com', 'vhr-dashboard-site.com'];
+    const BILLING_URL = 'https://www.vhr-dashboard-site.com/pricing.html#checkout';
+    const PROD_API = 'https://www.vhr-dashboard-site.com';
+      // Forcer l'API vers la prod pour que les comptes créés en ligne soient reconnus, même si la page est servie en localhost/LAN.
+      const API_BASE = PROD_API;
+    const AUTH_TOKEN_STORAGE_KEY = 'vhr_auth_token';
+    const DEFAULT_DEMO_DAYS = 7;
 
   // --- Token bootstrap via querystring (to support redirection depuis le site https) ---
   const params = new URLSearchParams(window.location.search || '');
@@ -82,11 +62,11 @@
         const input = document.getElementById(targetId);
         if (input.type === 'password') {
           input.type = 'text';
-          btn.textContent = '���🗨�';
+          btn.textContent = '👁️‍🗨️';
           btn.style.opacity = '0.6';
         } else {
           input.type = 'password';
-          btn.textContent = '��';
+          btn.textContent = '👁️';
           btn.style.opacity = '1';
         }
       });
@@ -106,12 +86,23 @@
         console.warn(`[API ${url}] Response status: ${res.status}`);
       }
       const data = await res.json();
-      console.log(`[API ${url}] Response:`, data);
       return data;
     } catch(e){ 
       console.error(`[API ${path}] Error:`, e);
       return { ok: false, error: e.message }; 
     }
+  }
+
+  function toFriendlyError(input, fallback = 'Une erreur est survenue. Merci de réessayer.') {
+    const text = typeof input === 'string' ? input.trim() : '';
+    if (!text) return fallback;
+
+    const technicalPattern = /smtp|nodemailer|credential|transporter|eauth|econn|dns|socket|timeout|configuration/i;
+    if (technicalPattern.test(text)) {
+      return 'Impossible d\'envoyer l\'email pour le moment. Merci de réessayer dans quelques minutes.';
+    }
+
+    return text;
   }
 
   const loginForm = document.getElementById('loginForm');
@@ -130,9 +121,14 @@
   const accountName = document.getElementById('accountName');
   const accountRole = document.getElementById('accountRole');
   const logoutBtn = document.getElementById('logoutBtn');
+  const emailVerificationAlert = document.getElementById('emailVerificationAlert');
+  const resendVerificationFromBanner = document.getElementById('resendVerificationFromBanner');
+  const verificationBannerMessage = document.getElementById('verificationBannerMessage');
   const trialStatusSection = document.getElementById('trialStatusSection');
   const trialStatusContent = document.getElementById('trialStatusContent');
+  let pendingVerificationEmail = '';
   let hasRedirected = false;
+  let currentUser = null;
 
   function safeRedirect(target) {
     if (hasRedirected) return;
@@ -155,6 +151,75 @@
       hasRedirected = true;
       window.location.href = url;
     }
+  }
+
+  function renderVerificationPrompt(emailHint) {
+    const guessedEmail = (emailHint || pendingVerificationEmail || document.getElementById('signupEmail')?.value || '').trim();
+    pendingVerificationEmail = guessedEmail;
+    if (!loginMessage) return;
+
+    loginMessage.innerHTML = `
+      <div style="background:#fff4e5;border-left:4px solid #f5a524;padding:12px;border-radius:6px;">
+        <strong>Confirmez votre email${guessedEmail ? ' : ' + guessedEmail : ''}</strong>
+        <p style="margin:6px 0 8px;">Vérifiez votre boîte de réception et cliquez sur le lien de validation.</p>
+        <button id="resendVerificationBtn" class="cta-secondary">Renvoyer l'email</button>
+      </div>`;
+
+    const resendBtn = document.getElementById('resendVerificationBtn');
+    if (resendBtn) {
+      resendBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await resendVerification(undefined, loginMessage);
+      });
+    }
+  }
+
+  async function resendVerification(emailOverride, messageTarget) {
+    let targetEmail = (emailOverride || pendingVerificationEmail || document.getElementById('signupEmail')?.value || document.getElementById('profileEmail')?.value || '').trim();
+    if (!targetEmail) {
+      targetEmail = prompt('Indiquez votre email d\'inscription pour renvoyer la vérification :') || '';
+      targetEmail = targetEmail.trim();
+    }
+    if (!targetEmail) {
+      if (messageTarget) messageTarget.textContent = 'Email requis pour renvoyer la vérification';
+      return;
+    }
+
+    pendingVerificationEmail = targetEmail;
+    const res = await api('/api/auth/resend-verification', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: targetEmail })
+    });
+
+    const ok = res && res.ok;
+    const apiError = toFriendlyError((res && res.error) || '');
+    const msg = ok
+      ? `Email de vérification renvoyé à ${targetEmail}`
+      : `Erreur: ${apiError || 'Impossible d\'envoyer l\'email'}`;
+    if (messageTarget) messageTarget.textContent = msg;
+    if (verificationBannerMessage) verificationBannerMessage.textContent = msg;
+    loginMessage.textContent = msg;
+    return res;
+  }
+
+  function toggleEmailVerificationBanner(user) {
+    if (!emailVerificationAlert) return;
+    const verified = user && (user.emailVerified === true || user.emailVerified === 1);
+    if (!user || verified) {
+      emailVerificationAlert.style.display = 'none';
+      if (verificationBannerMessage) verificationBannerMessage.textContent = '';
+      return;
+    }
+    pendingVerificationEmail = user.email || pendingVerificationEmail;
+    emailVerificationAlert.style.display = 'block';
+  }
+
+  if (resendVerificationFromBanner) {
+    resendVerificationFromBanner.addEventListener('click', async (e) => {
+      e.preventDefault();
+      await resendVerification(currentUser?.email || pendingVerificationEmail || undefined, verificationBannerMessage);
+    });
   }
 
   async function redirectIfAuthenticated() {
@@ -188,6 +253,8 @@
   }
 
   function showLoggedIn(user) {
+    currentUser = user || null;
+    pendingVerificationEmail = (user && user.email) || pendingVerificationEmail;
     loggedOutBox.style.display = 'none';
     loggedInBox.style.display = 'block';
     accountName.textContent = user.username || '(inconnu)';
@@ -196,8 +263,11 @@
     document.getElementById('profileUsername').value = user.username || '';
     document.getElementById('profileEmail').value = user.email || '';
     if (trialStatusSection) trialStatusSection.style.display = 'block';
+    toggleEmailVerificationBanner(user);
   }
   function showLoggedOut() {
+    currentUser = null;
+    pendingVerificationEmail = '';
     clearAuthToken();
     loggedOutBox.style.display = 'block';
     loggedInBox.style.display = 'none';
@@ -225,8 +295,6 @@
         body: JSON.stringify({ username, password }) 
       });
       
-      console.log('[LOGIN] Response:', res);
-      
       if (res && res.ok) { 
         if (res.token) saveAuthToken(res.token);
         loginMessage.textContent = 'Connexion réussie ✓'; 
@@ -242,13 +310,21 @@
           return;
         }
       } else { 
-        const errorMsg = res && res.error ? res.error : 'Erreur inconnue';
-        console.error('[LOGIN] Error:', errorMsg);
-        loginMessage.textContent = 'Erreur: ' + errorMsg; 
+        if (res && res.code === 'email_not_verified') {
+          clearAuthToken();
+          await api('/api/logout', { method: 'POST' });
+          renderVerificationPrompt(res.email);
+        } else if (res && res.code === 'secondary_electron_only') {
+          loginMessage.textContent = 'Compte secondaire non autorisé sur le site vitrine.';
+        } else {
+          const errorMsg = toFriendlyError(res && res.error, 'Erreur inconnue');
+          console.error('[LOGIN] Error:', errorMsg);
+          loginMessage.textContent = 'Erreur: ' + errorMsg;
+        }
       }
     } catch (err) {
       console.error('[LOGIN] Exception:', err);
-      loginMessage.textContent = 'Erreur: ' + err.message;
+      loginMessage.textContent = 'Erreur: ' + toFriendlyError(err && err.message, 'Erreur réseau');
     }
   });
 
@@ -265,19 +341,14 @@
     const res = await api('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: p1, email }) });
     if (res && res.ok) { 
       if (res.token) saveAuthToken(res.token);
+      if (res.verificationRequired && !res.autoLogin) {
+        clearAuthToken();
+        await api('/api/logout', { method: 'POST' });
+        pendingVerificationEmail = email;
+        renderVerificationPrompt(email);
+        return;
+      }
       loginMessage.textContent = 'Compte créé ✓ Vous êtes connecté(e).'; 
-      // Sync vers backend Dashboard PRO (PostgreSQL)
-      try {
-        const syncSecret = await getSyncUsersSecret();
-        fetch(API_BASE + '/api/admin/sync-user', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-sync-secret': syncSecret
-          },
-          body: JSON.stringify({ username, email, role: 'user', password: p1 })
-        }).catch(()=>{});
-      } catch (err) { console.warn('[signup] sync-user failed', err); }
       await loadMe(); 
       // Pour les admins éventuels, rediriger vers l’admin; sinon rester dans l’espace compte sécurisé
       const role = (res.user && res.user.role) || res.role || res.userRole || 'user';
@@ -289,7 +360,7 @@
         }
       }, 1200);
     }
-    else { loginMessage.textContent = 'Erreur: ' + (res && res.error ? res.error : 'Erreur inconnue'); }
+    else { loginMessage.textContent = 'Erreur: ' + toFriendlyError(res && res.error, 'Erreur inconnue'); }
   });
 
   if (logoutBtn) logoutBtn.addEventListener('click', async () => { setToken(null); await api('/api/logout', { method: 'POST' }); showLoggedOut(); });
@@ -409,11 +480,13 @@
 
       const normalizedStatus = String(sub.status || '').trim().toLowerCase();
       const inactiveStatuses = ['canceled', 'cancelled', 'refunded', 'inactive', 'expired'];
-      const statusOk = ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired'].includes(normalizedStatus);
-      const isActive = Boolean(sub.isActive || statusOk) && !inactiveStatuses.includes(normalizedStatus);
+      const statusOk = ['active', 'trialing'].includes(normalizedStatus);
+      const isActive = Boolean(sub.isActive !== false && statusOk) && !inactiveStatuses.includes(normalizedStatus);
 
       if (!isActive) {
-        let trialHtml = '<p>Pas d\'abonnement actif actuellement.</p>';
+        let trialHtml = ['past_due', 'unpaid', 'incomplete', 'incomplete_expired'].includes(normalizedStatus)
+          ? '<p>Accès suspendu : le paiement de l’abonnement n’est pas actif. Aucune période de grâce n’est configurée.</p>'
+          : '<p>Pas d\'abonnement actif actuellement.</p>';
         try {
           const demoRes = await api('/api/demo/status');
           if (demoRes && demoRes.ok && demoRes.demo) {
@@ -451,6 +524,12 @@
         ? ''
         : `<p><strong>Jours restants:</strong> <span style="color: ${statusColor}; font-weight: bold;">${daysLeftValue} jours</span></p>`;
       
+      const cancelNotice = sub.cancelAtPeriodEnd
+        ? `<p role="status">Résiliation programmée à la fin de la période. L’accès reste disponible jusqu’au ${endDate}.</p>`
+        : `<div id="cancelSubscriptionBox" style="margin-top: 12px;">
+          <button id="cancelSubscriptionBtn" class="cta-secondary" style="background-color: #ff9800; color: white; padding: 10px 16px; border: none; border-radius: 4px; cursor: pointer;">Annuler mon abonnement</button>
+          <div id="cancelSubscriptionMessage" style="margin-top: 12px;"></div>
+        </div>`;
       let html = `
         <div style="background: white; padding: 12px; border-radius: 4px; margin-bottom: 12px;">
           <p><strong>Plan actuel:</strong> ${planName}</p>
@@ -458,10 +537,7 @@
           <p><strong>Renouvellement:</strong> ${endDate}</p>
           ${daysLeftLine}
         </div>
-        <div id="cancelSubscriptionBox" style="margin-top: 12px;">
-          <button id="cancelSubscriptionBtn" class="cta-secondary" style="background-color: #ff9800; color: white; padding: 10px 16px; border: none; border-radius: 4px; cursor: pointer;">Annuler mon abonnement</button>
-          <div id="cancelSubscriptionMessage" style="margin-top: 12px;"></div>
-        </div>
+        ${cancelNotice}
       `;
       subscriptionContent.innerHTML = html;
       
@@ -487,17 +563,20 @@
             });
             
             if (cancelRes && cancelRes.ok) {
-              msgDiv.textContent = '✓ Abonnement annulé avec succès.';
+              const accessUntil = cancelRes.accessUntil
+                ? new Date(cancelRes.accessUntil).toLocaleDateString('fr-FR')
+                : 'la fin de la période en cours';
+              msgDiv.textContent = `✓ Résiliation programmée. Votre accès reste actif jusqu’au ${accessUntil}.`;
               msgDiv.style.color = '#4CAF50';
               document.getElementById('cancelSubscriptionBtn').disabled = true;
               document.getElementById('cancelSubscriptionBtn').style.opacity = '0.5';
               setTimeout(() => { loadSubscription(); }, 2000);
             } else {
-              msgDiv.textContent = '� Erreur: ' + (cancelRes && cancelRes.error ? cancelRes.error : 'Impossible d\'annuler l\'abonnement');
+              msgDiv.textContent = '❌ Erreur: ' + (cancelRes && cancelRes.error ? cancelRes.error : 'Impossible d\'annuler l\'abonnement');
               msgDiv.style.color = '#d32f2f';
             }
           } catch (err) {
-            msgDiv.textContent = '� Erreur: ' + err.message;
+            msgDiv.textContent = '❌ Erreur: ' + err.message;
             msgDiv.style.color = '#d32f2f';
           }
         });
@@ -608,7 +687,7 @@
       e.preventDefault();
       
       // Confirmation dialog
-      if (!confirm('⚠� ATTENTION: Êtes-vous sûr de vouloir supprimer votre compte?\n\nCette action est IRRÉVERSIBLE et toutes vos données seront perdues.')) {
+      if (!confirm('⚠️ ATTENTION: Êtes-vous sûr de vouloir supprimer votre compte?\n\nCette action est IRRÉVERSIBLE et toutes vos données seront perdues.')) {
         return;
       }
       
@@ -636,11 +715,11 @@
             window.location.href = '/account.html';
           }, 2000);
         } else {
-          msg.textContent = '� Erreur: ' + (res && res.error ? res.error : 'Impossible de supprimer le compte');
+          msg.textContent = '❌ Erreur: ' + (res && res.error ? res.error : 'Impossible de supprimer le compte');
           msg.style.color = '#d32f2f';
         }
       } catch (err) {
-        msg.textContent = '� Erreur: ' + err.message;
+        msg.textContent = '❌ Erreur: ' + err.message;
         msg.style.color = '#d32f2f';
       }
     });
@@ -663,6 +742,12 @@
     } else if (action === 'subscription_required') {
       const msg = document.getElementById('loginMessage');
       msg.innerHTML = '<div style="background: #e8f5e9; border: 1px solid #4CAF50; color: #1b5e20; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>🔒 Créez un compte pour gérer vos abonnements</strong><br>Connexion sécurisée requise pour accéder à votre espace client.</div>';
+    } else if (action === 'launch_required') {
+      const msg = document.getElementById('loginMessage');
+      msg.innerHTML = '<div style="background: #fff8e1; border: 1px solid #fbc02d; color: #7c4a00; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>🚀 Créez votre compte avant de lancer le dashboard</strong><br>Inscrivez-vous ou connectez-vous ici, puis vous serez redirigé automatiquement vers le lancement.</div>';
+    } else if (action === 'admin_required') {
+      const msg = document.getElementById('loginMessage');
+      msg.innerHTML = '<div style="background: #f3e5f5; border: 1px solid #9c27b0; color: #4a148c; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>🔑 Accès administrateur requis</strong><br>Connectez-vous avec un compte administrateur pour ouvrir le tableau de bord admin. Une fois connecté, vous serez automatiquement redirigé.</div>';
     }
   });
 

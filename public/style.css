@@ -1,4 +1,8 @@
 /* Centrage des descriptifs */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 .centered {
   text-align: center;
   margin-left: auto;
@@ -19,6 +23,7 @@ body {
   font-size: 1.1em;
   font-weight: 400;
   margin: 0;
+  overflow-x: hidden;
 }
 
 header {

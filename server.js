@@ -3,6 +3,7 @@
 // ========== IMPORTS & INIT ========== 
 
 require('dotenv').config();
+const runtimePolicy = require('./services/runtime-policy').configureRuntime();
 const express = require('express');
 const http = require('http');
 const { spawn, execSync } = require('child_process');
@@ -25,41 +26,7 @@ const http_module = require('http');
 const unzipper = require('unzipper');
 const fetch = require('node-fetch');
 const os = require('os');
-
-// ========== SINGLE SERVER INSTANCE ENFORCEMENT ==========
-// Kill any existing server on port 3000 before starting
-(function ensureSingleInstance() {
-  const PORT = process.env.PORT || 3000;
-  const currentPid = process.pid;
-  
-  try {
-    // Windows: Find process using the port
-    const result = execSync(`netstat -ano | findstr ":${PORT}" | findstr "LISTENING"`, { encoding: 'utf8', timeout: 5000 });
-    const lines = result.trim().split('\n');
-    
-    for (const line of lines) {
-      const parts = line.trim().split(/\s+/);
-      const pid = parseInt(parts[parts.length - 1], 10);
-      
-      if (pid && pid !== currentPid && !isNaN(pid)) {
-        console.log(`[Server] Found existing server on port ${PORT} (PID: ${pid}), killing it...`);
-        try {
-          execSync(`taskkill /F /PID ${pid}`, { timeout: 5000 });
-          console.log(`[Server] ✓ Killed previous server (PID: ${pid})`);
-        } catch (killErr) {
-          console.warn(`[Server] Could not kill PID ${pid}:`, killErr.message);
-        }
-      }
-    }
-  } catch (e) {
-    // No process found on port or command failed - this is fine
-    if (!e.message.includes('ENOENT') && !e.status) {
-      // Silent: port is free
-    }
-  }
-  
-  console.log(`[Server] ✓ Port ${PORT} is now available (current PID: ${currentPid})`);
-})();
+const customerPolicy = require('./services/customer-policy');
 
 // PostgreSQL database module
 
@@ -84,10 +51,12 @@ if (RAW_DATABASE_URL) {
       db = require('./db-postgres');
       USE_POSTGRES = true;
     } catch (err) {
+      if (runtimePolicy.hosted) throw err;
       console.error('[DB] Failed to load Postgres module:', err && err.message ? err.message : err);
       console.warn('[DB] Falling back to JSON/SQLite storage. Verify that the Postgres driver is installed and DATABASE_URL is reachable.');
     }
   } else {
+    if (runtimePolicy.hosted) throw new Error('DATABASE_URL must be a valid PostgreSQL URL');
     console.warn('[DB] DATABASE_URL is set but appears invalid. Falling back to JSON/SQLite storage. Please provide a valid PostgreSQL URL.');
   }
 } else {
@@ -302,7 +271,7 @@ const GLOBAL_CONTEXT = (() => {
   return null;
 })();
 
-if (GLOBAL_CONTEXT) {
+if (GLOBAL_CONTEXT && typeof startBundledAdbServer === 'function') {
   try {
     GLOBAL_CONTEXT.startBundledAdbServer = GLOBAL_CONTEXT.startBundledAdbServer || startBundledAdbServer;
   } catch (exposureError) {
@@ -813,13 +782,12 @@ function ensureLocalProperties() {
 }
 
 // === INITIALISER JAVA/GRADLE AU DÉMARRAGE ===
-console.log('[Server] Initialisation des chemins Java/Gradle...');
-configureEnvironmentVariables();
-ensureLocalProperties();
-
 // Démarrer l'installation de Java/Gradle/SDK en arrière-plan SEULEMENT en développement local
 // Sur Render/production, ce n'est pas nécessaire et ralentit le déploiement
-if (process.env.NODE_ENV !== 'production' && process.env.RENDER !== 'true') {
+if (runtimePolicy.setupAndroid) {
+  console.log('[Server] Initialisation des chemins Java/Gradle...');
+  configureEnvironmentVariables();
+  ensureLocalProperties();
   (async () => {
     try {
       await ensureJavaAndGradle();
@@ -1101,7 +1069,7 @@ function normalizeSubscriptionStatus(value) {
 }
 
 function isActiveLikeSubscriptionStatus(value) {
-  return ['active', 'trialing', 'past_due', 'unpaid'].includes(normalizeSubscriptionStatus(value));
+  return customerPolicy.hasSubscriptionAccess(value);
 }
 
 function isAdminGrantedSubscription(user, subscription = null) {
@@ -1172,6 +1140,24 @@ async function resolveLocalSubscriptionAccess(user) {
     };
   }
 
+  const userSubId = String(normalized?.subscriptionId || normalized?.subscriptionid || '').trim();
+  const currentRecord = userSubId
+    ? records.find(subscription =>
+      String(subscription.stripeSubscriptionId || subscription.stripesubscriptionid || '').trim() === userSubId ||
+      String(subscription.id || '').trim() === userSubId
+    )
+    : null;
+  if (currentRecord && !customerPolicy.hasSubscriptionAccess(currentRecord.status)) {
+    return {
+      hasValidSubscription: false,
+      subscriptionStatus: normalizeSubscriptionStatus(currentRecord.status) || currentStatus || 'none',
+      subscriptionExpiresAt: getSubscriptionEndDate(currentRecord)?.toISOString() || null,
+      subscriptionRecord: currentRecord,
+      isAdminGrantedSubscription: false,
+      expired: false
+    };
+  }
+
   if (!isActiveLikeSubscriptionStatus(currentStatus)) {
     return {
       hasValidSubscription: false,
@@ -1184,7 +1170,6 @@ async function resolveLocalSubscriptionAccess(user) {
   }
 
   // Real Stripe subscriptions can remain valid without a local end date; admin placeholders must not.
-  const userSubId = String(normalized?.subscriptionId || normalized?.subscriptionid || '').trim();
   const looksLikeRealStripeSubscription = userSubId.startsWith('sub_') && !isPlaceholderSubscriptionId(userSubId) && !userSubId.startsWith('sub_admin_free_');
   return {
     hasValidSubscription: looksLikeRealStripeSubscription,
@@ -1280,7 +1265,7 @@ function getDemoRemainingDays(user) {
             status: 'all',
             limit: 5
           });
-          const activeLikeStatuses = new Set(['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired']);
+          const activeLikeStatuses = new Set(['active', 'trialing']);
           const stripeSub = (stripeSubs.data || []).find(sub => activeLikeStatuses.has(sub.status));
           if (stripeSub) {
             hasValidSubscription = true;
@@ -1325,6 +1310,7 @@ function getDemoRemainingDays(user) {
   }
 
 const LICENSES_FILE = path.join(__dirname, 'data', 'licenses.json');
+const PURCHASES_FILE = path.join(__dirname, 'data', 'purchases.json');
 
 // ========== EMAIL CONFIGURATION ==========
 // Support Brevo + legacy EMAIL_* + generic SMTP_* configurations
@@ -1341,8 +1327,8 @@ const emailTransporter = nodemailer.createTransport({
     user: emailUser,
     pass: emailPass
   },
-  logger: true,  // Enable logging
-  debug: true    // Show debug info
+  logger: runtimePolicy.smtpDebug,
+  debug: runtimePolicy.smtpDebug
 });
 
 // Email verification settings
@@ -1365,7 +1351,7 @@ if (emailUser && emailPass) {
       console.error('[email] Host:', emailHost, '| Port:', emailPort);
     } else if (success) {
       console.log('[email] ✓ SMTP configuration verified - emails can be sent');
-      console.log('[email] Using:', emailHost, '| User:', emailUser);
+      console.log('[email] SMTP host:', emailHost);
     }
   });
 } else {
@@ -1467,12 +1453,128 @@ function saveLicenses(licenses) {
 function addLicense(username, email, purchaseId) {
   const licenses = loadLicenses();
   const license = generateLicenseKey(username);
-  license.email = email;
+  license.email = email || null;
   license.purchaseId = purchaseId;
+  license.type = 'perpetual';
   license.status = 'active';
   licenses.push(license);
   saveLicenses(licenses);
   return license;
+}
+
+function loadPurchaseHistory() {
+  ensureDataDir();
+  try {
+    if (!fs.existsSync(PURCHASES_FILE)) return [];
+    const parsed = JSON.parse(fs.readFileSync(PURCHASES_FILE, 'utf8') || '[]');
+    if (!Array.isArray(parsed)) throw new Error('Purchase history must be an array');
+    return parsed;
+  } catch (e) {
+    console.error('[purchases] history read failed:', e && e.message ? e.message : e);
+    throw e;
+  }
+}
+
+function savePurchaseHistory(purchases) {
+  ensureDataDir();
+  const temporary = PURCHASES_FILE + '.tmp';
+  fs.writeFileSync(temporary, JSON.stringify(purchases, null, 2), 'utf8');
+  fs.renameSync(temporary, PURCHASES_FILE);
+}
+
+function normalizeStoredPurchase(record) {
+  if (!record) return null;
+  return {
+    id: record.id || record.stripeCheckoutSessionId || record.stripecheckoutsessionid,
+    stripeCheckoutSessionId: record.stripeCheckoutSessionId || record.stripecheckoutsessionid,
+    stripePaymentIntentId: record.stripePaymentIntentId || record.stripepaymentintentid || null,
+    userId: record.userId || record.userid || null,
+    username: record.username,
+    email: record.email || null,
+    purchaseId: record.purchaseId || record.purchaseid,
+    purchaseName: record.purchaseName || record.purchasename,
+    amount: Number(record.amount) || 0,
+    currency: record.currency || 'eur',
+    status: record.status || 'paid',
+    licenseKey: record.licenseKey || record.licensekey,
+    createdAt: record.createdAt || record.createdat || null
+  };
+}
+
+async function recordPaidPerpetualPurchase(user, purchaseKey, purchase, session) {
+  const checkoutSessionId = String(session.id || '').trim();
+  if (!checkoutSessionId) throw new Error('Missing Stripe Checkout session ID');
+  const paymentIntent = typeof session.payment_intent === 'string'
+    ? session.payment_intent
+    : session.payment_intent?.id || null;
+  const createRecord = {
+    stripeCheckoutSessionId: checkoutSessionId,
+    stripePaymentIntentId: paymentIntent,
+    userId: user.id || null,
+    username: user.username,
+    email: normalizeEmailValue(user.email),
+    purchaseId: purchaseKey,
+    purchaseName: purchase.name,
+    amount: Number.isInteger(session.amount_total) ? session.amount_total : 0,
+    currency: String(session.currency || purchase.currency || 'eur').toLowerCase(),
+    status: 'paid',
+    licenseKey: generateLicenseKey(user.username).key,
+    createdAt: new Date((session.created || Math.floor(Date.now() / 1000)) * 1000).toISOString()
+  };
+
+  let result;
+  if (USE_POSTGRES && db && typeof db.recordPurchase === 'function') {
+    result = await db.recordPurchase(createRecord);
+  } else if (dbEnabled && typeof require('./db').recordPurchase === 'function') {
+    result = require('./db').recordPurchase(createRecord);
+  } else {
+    const history = loadPurchaseHistory();
+    const existing = history.find(item =>
+      item.stripeCheckoutSessionId === checkoutSessionId ||
+      (paymentIntent && item.stripePaymentIntentId === paymentIntent)
+    );
+    if (existing) {
+      result = { purchase: existing, created: false };
+    } else {
+      history.push(createRecord);
+      savePurchaseHistory(history);
+      result = { purchase: createRecord, created: true };
+    }
+  }
+
+  const storedPurchase = normalizeStoredPurchase(result && result.purchase);
+  if (!storedPurchase || !storedPurchase.licenseKey) {
+    throw new Error('Could not persist paid purchase and license');
+  }
+
+  const licenses = loadLicenses();
+  if (!licenses.some(item => item.key === storedPurchase.licenseKey)) {
+    const license = {
+      key: storedPurchase.licenseKey,
+      username: storedPurchase.username,
+      email: storedPurchase.email,
+      purchaseId: storedPurchase.purchaseId,
+      purchaseSessionId: storedPurchase.stripeCheckoutSessionId,
+      type: 'perpetual',
+      status: 'active',
+      createdAt: storedPurchase.createdAt || new Date().toISOString()
+    };
+    licenses.push(license);
+    saveLicenses(licenses);
+  }
+  return { purchase: storedPurchase, created: !!result.created };
+}
+
+function updateLicenseIdentityReferences(oldUsername, user) {
+  const licenses = loadLicenses();
+  let changed = false;
+  for (const license of licenses) {
+    if (String(license.username || '').toLowerCase() !== String(oldUsername || '').toLowerCase()) continue;
+    license.username = user.username;
+    license.email = user.email || null;
+    changed = true;
+  }
+  if (changed) saveLicenses(licenses);
 }
 
 function findActiveLicenseByUsername(username) {
@@ -1703,6 +1805,13 @@ async function sendAccountConfirmationEmail(user, options = {}) {
     return { success: false, error: 'no_recipient' };
   }
 
+  const verificationEnforced = shouldEnforceEmailVerification(normalizedUser);
+  const needsVerification = (verificationEnforced || options.forceVerification === true) && !isEmailVerified(normalizedUser);
+  let tokenInfo = null;
+  if (needsVerification) {
+    tokenInfo = issueEmailVerificationToken(normalizedUser, { forceNew: true });
+  }
+
   if (!emailUser || !emailPass) {
     console.warn('[email] SMTP not configured, skip confirmation email');
     return { success: false, error: 'smtp_not_configured' };
@@ -1713,12 +1822,9 @@ async function sendAccountConfirmationEmail(user, options = {}) {
     return { success: false, error: 'transporter_not_initialized' };
   }
 
-  const verificationEnforced = shouldEnforceEmailVerification(normalizedUser);
-  const needsVerification = verificationEnforced && !isEmailVerified(normalizedUser);
   let verificationLink = null;
 
   if (needsVerification) {
-    const tokenInfo = issueEmailVerificationToken(normalizedUser, { forceNew: true });
     if (!tokenInfo || !tokenInfo.token) {
       console.warn('[email] Unable to generate verification token');
     } else {
@@ -1821,13 +1927,18 @@ app.get('/launch-dashboard.html', (req, res) => {
 app.get(['/dashboard-pro.js','/dashboard-pro.css','/vhr-audio-stream.js'], (req, res) => {
   const file = req.path.replace('/', '');
   res.setHeader('Cache-Control', 'no-store, max-age=0');
-  res.sendFile(path.join(__dirname, 'public', file));
+  const primary = path.join(__dirname, 'public', file);
+  res.sendFile(fs.existsSync(primary) ? primary : path.join(__dirname, 'dist-client', 'public', file));
 });
 
 // Alias /dashboard-pro.html -> serve vhr-dashboard-pro.html (main dashboard)
-app.get(['/dashboard-pro.html', '/dashboard-pro'], (req, res) => {
+app.get(['/dashboard-pro.html', '/dashboard-pro', '/vhr-dashboard-pro.html'], (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.sendFile(path.join(__dirname, 'public', 'vhr-dashboard-pro.html'));
+  const primary = path.join(__dirname, 'public', 'vhr-dashboard-pro.html');
+  res.sendFile(fs.existsSync(primary) ? primary : path.join(__dirname, 'dist-client', 'public', 'vhr-dashboard-pro.html'));
+});
+app.get('/conditions.html', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'site-vitrine', 'conditions.html'));
 });
 
 // Redirect vhr-dashboard-app.html to vhr-dashboard-pro.html
@@ -1905,7 +2016,11 @@ app.use('/site-vitrine', express.static(path.join(__dirname, 'site-vitrine'), {
 
 // Health check endpoint for local debugging
 app.get('/ping', (req, res) => {
-  res.json({ ok: true, time: new Date().toISOString() });
+  res.json({
+    ok: true, time: new Date().toISOString(),
+    version: require('./package.json').version,
+    revision: process.env.RENDER_GIT_COMMIT || null
+  });
 });
 
 // Si on FORCE_HTTP explicitement (packs locaux), rediriger les requêtes HTTPS vers HTTP.
@@ -2018,24 +2133,8 @@ app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
 // Route pour le pack complet (Dashboard + Voix) - SANS RESTRICTION
 // Permet d'éviter les 404 GitHub en servant le binaire/zip directement depuis le serveur
 app.get('/download/client-full', (req, res) => {
-  const installerPath = path.join(__dirname, 'VHR.Dashboard.Setup.1.0.1.exe');
-
-  if (!fs.existsSync(installerPath)) {
-    return res.status(404).json({ ok: false, error: 'Installer not found on server' });
-  }
-
-  try {
-    const stats = fs.statSync(installerPath);
-    const filename = path.basename(installerPath);
-    res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Length', stats.size);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-    return res.sendFile(installerPath);
-  } catch (e) {
-    console.error('[download/client-full] error:', e);
-    return res.status(500).json({ ok: false, error: 'Server error while serving installer' });
-  }
+  res.setHeader('Cache-Control', 'no-store');
+  return res.redirect(302, 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.2-client/VHR.Dashboard.Setup.1.0.2.exe');
 });
 
 // Download VHR Voice APK for Quest background audio
@@ -2304,6 +2403,9 @@ app.post('/create-checkout-session', async (req, res) => {
   const { priceId, mode } = req.body || {};
   const origin = req.headers.origin || `http://localhost:${process.env.PORT || 3000}`;
   if (!priceId || !mode) return res.status(400).json({ error: 'priceId et mode sont requis' });
+  if (!['payment', 'subscription'].includes(mode)) {
+    return res.status(400).json({ error: 'mode de paiement invalide' });
+  }
   
   try {
     const decodedUser = tryDecodeUser(req);
@@ -2325,14 +2427,14 @@ app.post('/create-checkout-session', async (req, res) => {
     }
 
     const customerId = await ensureStripeCustomerForUser(requester);
-    console.log('[Stripe] create-checkout-session request:', { priceId, mode, username, userEmail, customerId, origin });
+    console.log('[Stripe] create-checkout-session request:', { priceId, mode, username, origin });
     
     // Validate price exists and is compatible with mode
     let priceInfo = null;
     try {
       priceInfo = await stripe.prices.retrieve(priceId);
     } catch (pErr) {
-      console.error('[Stripe] price retrieve error:', { priceId, err: pErr && pErr.message, raw: pErr && pErr.raw });
+      console.error('[Stripe] price retrieve error:', { priceId, err: pErr && pErr.message });
       // Provide helpful guidance if price not found or using wrong key
       const suggestion = 'Ensure the price exists in your Stripe dashboard and that the server is using a valid secret API key (sk_live_...).';
       const msg = (pErr && pErr.code === 'resource_missing') || (pErr && pErr.statusCode === 404)
@@ -2351,8 +2453,23 @@ app.post('/create-checkout-session', async (req, res) => {
     const metadata = {
       username,
       userEmail,
-      userId: requester.id || username
+      userId: String(requester.id || username)
     };
+    if (mode === 'payment') {
+      const purchaseOptions = purchaseConfig.PURCHASE_OPTIONS || {};
+      const priceOverrides = {};
+      if (purchaseOptions.PERPETUAL) {
+        priceOverrides.PERPETUAL = cleanEnvValue(
+          process.env.STRIPE_PRICE_ID_PERPETUAL || purchaseOptions.PERPETUAL.stripePriceId || ''
+        );
+      }
+      const purchaseKey = customerPolicy.resolvePurchaseIdForPrice(priceId, purchaseOptions, priceOverrides);
+      if (!purchaseKey) {
+        return res.status(400).json({ error: 'Ce tarif de paiement unique n’est pas associé à un achat délivrable' });
+      }
+      metadata.purchaseId = purchaseKey;
+      metadata.purchaseName = String(purchaseOptions[purchaseKey].name || purchaseKey);
+    }
     
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -2370,7 +2487,7 @@ app.post('/create-checkout-session', async (req, res) => {
       customer_email: undefined,
       client_reference_id: requester.id || username,
     });
-    console.log('[Stripe] session created:', { id: session.id, url: session.url, username, customerId });
+    console.log('[Stripe] checkout session created:', { id: session.id, username });
     res.json({ url: session.url });
   } catch (err) {
     console.error('[Stripe] create-checkout-session error:', err);
@@ -2896,17 +3013,8 @@ function isUsernameDeleted(username) {
 }
 
 function normalizeEmailValue(rawEmail) {
-  if (rawEmail === undefined || rawEmail === null) return null;
-  if (typeof rawEmail !== 'string') {
-    try {
-      rawEmail = String(rawEmail);
-    } catch (e) {
-      return null;
-    }
-  }
-  const trimmed = rawEmail.trim();
-  if (!trimmed) return null;
-  return trimmed.toLowerCase();
+  const normalized = customerPolicy.normalizeEmail(rawEmail);
+  return normalized || null;
 }
 
 function normalizeUserRecord(user) {
@@ -2962,6 +3070,7 @@ function saveUsers() {
     ensureDataDir();
     // Sanitize users array to avoid circular references and functions in objects
     const toSave = users.map(u => ({
+      id: u.id || null,
       username: u.username,
       passwordHash: u.passwordHash || null,
       role: u.role || null,
@@ -3212,7 +3321,7 @@ function loadUsers() {
   return [normalizeUserRecord({ id: 'admin', username: 'vhr', passwordHash: '$2b$10$AlrD74akc7cp9EbVLJKzcOlPzJbypzSt7a8Sg85KEjpFGM/ofxdLm', role: 'admin', email: 'admin@example.local', stripeCustomerId: null })];
 }
 
-let users = loadUsers();
+let users = USE_POSTGRES ? [] : loadUsers();
 
 // Warm cache from local tombstones immediately
 for (const entry of loadDeletedUsers()) {
@@ -3220,46 +3329,7 @@ for (const entry of loadDeletedUsers()) {
   addDeletedIdentifierToCache(entry && entry.email);
 }
 
-// In PostgreSQL mode, hydrate in-memory cache from DB for quick lookups
-if (USE_POSTGRES && db && db.getUsers) {
-  (async () => {
-    try {
-      const dbUsers = await db.getUsers();
-      if (Array.isArray(dbUsers)) {
-        users = dbUsers.map(u => normalizeUserRecord({
-          id: u.id || `user_${u.username}`,
-          username: u.username,
-          passwordHash: u.passwordhash || u.passwordHash || null,
-          email: u.email || null,
-          role: u.role || 'user',
-          stripeCustomerId: u.stripecustomerid || u.stripeCustomerId || null,
-          subscriptionStatus: u.subscriptionstatus || u.subscriptionStatus || null,
-          subscriptionId: u.subscriptionid || u.subscriptionId || null,
-          demoStartDate: u.demostartdate || u.demoStartDate || null,
-          demoEndDate: u.demoenddate || u.demoEndDate || null,
-          createdAt: u.createdat || u.createdAt || null,
-          updatedAt: u.updatedat || u.updatedAt || null,
-          emailVerified: u.emailverified ?? u.emailVerified,
-          emailVerificationToken: u.emailverificationtoken || u.emailVerificationToken || null,
-          emailVerificationExpiresAt: u.emailverificationexpiresat || u.emailVerificationExpiresAt || null,
-          emailVerificationSentAt: u.emailverificationsentat || u.emailVerificationSentAt || null,
-          emailVerifiedAt: u.emailverifiedat || u.emailVerifiedAt || null,
-          subscriptionConfirmationSentAt: u.subscriptionconfirmationsentat || u.subscriptionConfirmationSentAt || null
-        }));
-        console.log(`[users] Hydrated ${users.length} user(s) from PostgreSQL`);
-      }
-    } catch (e) {
-      console.error('[users] Failed to hydrate users from PostgreSQL:', e && e.message ? e.message : e);
-    }
-  })();
-}
-
-// Retroactive reconciliation: enforce tombstones for previously deleted users (including legacy records)
-if (USE_POSTGRES) {
-  setTimeout(() => {
-    reconcileDeletedUsersPersistence({ reason: 'startup' }).catch(() => {});
-  }, 1500);
-}
+// Local tombstones still deny access, but are never applied destructively to PostgreSQL at startup.
 
 // --- Messages & Subscriptions (in-memory storage with JSON persistence) ---
 const MESSAGES_FILE = path.join(__dirname, 'data', 'messages.json');
@@ -3524,13 +3594,15 @@ async function initializeApp() {
   if (USE_POSTGRES) {
     console.log('[DB] Initializing PostgreSQL...');
     try {
-      await db.initDatabase();
+      if (!await db.initDatabase()) throw new Error('PostgreSQL initialization did not complete');
+      users = (await db.getUsers()).map(normalizeUserRecord);
       console.log('[DB] PostgreSQL initialized successfully');
       // Skip user migration - users should already be in DB from ensureDefaultUsers()
       // Or they will be added via /api/admin/init-users endpoint if needed
       console.log('[STARTUP] PostgreSQL mode - users managed via database');
     } catch (dbErr) {
       console.error('[DB] PostgreSQL initialization failed:', dbErr && dbErr.message ? dbErr.message : dbErr);
+      if (runtimePolicy.hosted) throw dbErr;
       console.log('[DB] Falling back to JSON/SQLite user store for local boot');
       USE_POSTGRES = false;
       db = null;
@@ -3622,7 +3694,7 @@ function ensureDefaultUsers() {
 
 // --- DB wrapper helpers (use SQLite adapter when enabled) ---
 let dbEnabled = false;
-try {
+if (!USE_POSTGRES) try {
   const dbFile = process.env.DB_SQLITE_FILE || path.join(__dirname, 'data', 'vhr.db');
   dbEnabled = require('./db').initSqlite(dbFile);
   if (dbEnabled) {
@@ -3786,6 +3858,51 @@ function persistUser(user) {
   }
 }
 
+async function persistUserIdentity(oldUsername, user) {
+  const normalized = normalizeUserRecord(user);
+  if (!normalized || !oldUsername) throw new Error('User identity update requires an existing account');
+  normalized.updatedAt = new Date().toISOString();
+
+  if (USE_POSTGRES && db && typeof db.updateUserIdentity === 'function') {
+    const updated = await db.updateUserIdentity(oldUsername, normalized);
+    if (!updated) throw new Error('User identity update did not find the original account');
+    const oldIndex = users.findIndex(entry => String(entry.username || '').toLowerCase() === String(oldUsername).toLowerCase());
+    if (oldIndex >= 0) users.splice(oldIndex, 1);
+    users.push(normalized);
+  } else if (dbEnabled && typeof require('./db').updateUserIdentity === 'function') {
+    const updated = require('./db').updateUserIdentity(oldUsername, normalized);
+    if (!updated) throw new Error('User identity update did not find the original account');
+    users = require('./db').getAllUsers().map(normalizeUserRecord);
+  } else {
+    const oldIndex = users.findIndex(entry => String(entry.username || '').toLowerCase() === String(oldUsername).toLowerCase());
+    if (oldIndex < 0) throw new Error('User identity update did not find the original account');
+    users[oldIndex] = { ...users[oldIndex], ...normalized };
+    saveUsers();
+  }
+
+  for (const subscription of subscriptions) {
+    if (subscription.userId === normalized.id ||
+      String(subscription.username || '').toLowerCase() === String(oldUsername).toLowerCase()) {
+      subscription.username = normalized.username;
+      subscription.email = normalized.email || null;
+    }
+  }
+  if (!USE_POSTGRES && !dbEnabled) saveSubscriptions();
+  updateLicenseIdentityReferences(oldUsername, normalized);
+  if (!USE_POSTGRES && !dbEnabled) {
+    const history = loadPurchaseHistory();
+    let changed = false;
+    for (const item of history) {
+      if (String(item.username || '').toLowerCase() !== String(oldUsername).toLowerCase()) continue;
+      item.username = normalized.username;
+      item.email = normalized.email || null;
+      changed = true;
+    }
+    if (changed) savePurchaseHistory(history);
+  }
+  return normalized;
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function parseDateInput(value) {
@@ -3891,7 +4008,8 @@ function shouldEnforceEmailVerification(user) {
 }
 
 function isEmailVerifiedOrBypassed(user) {
-  return isEmailVerified(user) || !shouldEnforceEmailVerification(user);
+  const hasPendingVerification = !!(user?.emailVerificationToken || user?.emailverificationtoken);
+  return isEmailVerified(user) || (!hasPendingVerification && !shouldEnforceEmailVerification(user));
 }
 
 async function findUserByEmailAsync(email) {
@@ -3996,6 +4114,7 @@ function ensureUserSubscription(user, options = {}) {
     planName: options.planName || 'signup',
     startDate: options.startDate || now,
     endDate: options.endDate || null,
+    cancelAtPeriodEnd: options.cancelAtPeriodEnd === true,
     createdAt: now,
     updatedAt: now
   };
@@ -4025,6 +4144,70 @@ function ensureUserSubscription(user, options = {}) {
     console.error('[subscriptions] save error:', e && e.message);
   }
 
+  return true;
+}
+
+async function upsertStripeSubscriptionRecord(user, options = {}) {
+  const stripeSubscriptionId = String(options.stripeSubscriptionId || '').trim();
+  if (!stripeSubscriptionId) return ensureUserSubscription(user, options);
+  const now = new Date().toISOString();
+  const base = {
+    userId: user.id || null,
+    username: user.username,
+    email: user.email || null,
+    stripeSubscriptionId,
+    stripePriceId: options.stripePriceId || null,
+    status: options.status || 'unknown',
+    planName: options.planName || 'Abonnement',
+    startDate: options.startDate || now,
+    endDate: options.endDate || null,
+    cancelAtPeriodEnd: options.cancelAtPeriodEnd === true
+  };
+
+  if (USE_POSTGRES && db) {
+    const records = await db.getAllSubscriptions();
+    const existing = records.find(record =>
+      String(record.stripesubscriptionid || record.stripeSubscriptionId || '') === stripeSubscriptionId
+    );
+    if (existing) {
+      const updated = await db.updateSubscription(existing.id, {
+        status: base.status,
+        planname: base.planName,
+        startdate: base.startDate,
+        enddate: base.endDate,
+        cancelatperiodend: base.cancelAtPeriodEnd
+      });
+      if (!updated) throw new Error('Unable to update Stripe subscription record');
+    } else {
+      const inserted = await db.addSubscription(base);
+      if (!inserted) throw new Error('Unable to create Stripe subscription record');
+    }
+  } else if (dbEnabled) {
+    const adapter = require('./db');
+    const existing = adapter.findSubscriptionByStripeId(stripeSubscriptionId);
+    if (existing) {
+      const updated = adapter.updateSubscription(existing.id, {
+        status: base.status,
+        planName: base.planName,
+        startDate: base.startDate,
+        endDate: base.endDate,
+        cancelAtPeriodEnd: base.cancelAtPeriodEnd
+      });
+      if (!updated) throw new Error('Unable to update Stripe subscription record');
+    } else if (!adapter.addSubscription(base)) {
+      throw new Error('Unable to create Stripe subscription record');
+    }
+  }
+
+  const memoryIndex = subscriptions.findIndex(record =>
+    String(record.stripeSubscriptionId || record.stripesubscriptionid || '') === stripeSubscriptionId
+  );
+  if (memoryIndex >= 0) {
+    subscriptions[memoryIndex] = { ...subscriptions[memoryIndex], ...base };
+  } else {
+    subscriptions.push({ id: subscriptionIdCounter++, ...base, createdAt: now, updatedAt: now });
+  }
+  if (!USE_POSTGRES && !dbEnabled) saveSubscriptions();
   return true;
 }
 
@@ -4750,7 +4933,8 @@ app.post('/api/login', async (req, res) => {
     });
   }
 
-  const verificationEnforced = shouldEnforceEmailVerification(user);
+  const verificationEnforced = shouldEnforceEmailVerification(user)
+    || !!(user.emailVerificationToken || user.emailverificationtoken);
   if (verificationEnforced && !isEmailVerified(user)) {
     return res.status(403).json({
       ok: false,
@@ -5701,7 +5885,8 @@ app.post('/api/auth/login', async (req, res) => {
     });
   }
 
-  const verificationEnforced = shouldEnforceEmailVerification(user);
+  const verificationEnforced = shouldEnforceEmailVerification(user)
+    || !!(user.emailVerificationToken || user.emailverificationtoken);
   if (verificationEnforced && !isEmailVerified(user)) {
     return res.status(403).json({
       ok: false,
@@ -5759,18 +5944,18 @@ app.post('/api/auth/login', async (req, res) => {
 app.post('/api/auth/register', async (req, res) => {
   console.log('[api/auth/register] request received');
   reloadUsers(); // Reload users from file in case they were modified externally
-  const { username, email, password } = req.body;
+  const { username, email, password } = req.body || {};
   
   if (!username || !email || !password) {
     return res.status(400).json({ ok: false, error: 'Tous les champs sont requis' });
   }
 
-  const normalizedEmail = normalizeEmailValue(email);
-  const normalizedUsername = String(username || '').trim();
-  if (!normalizedUsername) {
-    return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur invalide' });
+  const normalizedEmail = customerPolicy.normalizeEmail(email);
+  const normalizedUsername = customerPolicy.normalizeUsername(username);
+  if (!customerPolicy.isValidUsername(normalizedUsername)) {
+    return res.status(400).json({ ok: false, error: 'Le nom doit contenir 3 à 32 lettres, chiffres, points, tirets ou tirets bas' });
   }
-  if (!normalizedEmail) {
+  if (!customerPolicy.isValidEmail(normalizedEmail)) {
     return res.status(400).json({ ok: false, error: 'Email invalide' });
   }
 
@@ -5778,8 +5963,8 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
   }
   
-  if (password.length < 6) {
-    return res.status(400).json({ ok: false, error: 'Le mot de passe doit contenir au moins 6 caractères' });
+  if (!customerPolicy.isValidPassword(password)) {
+    return res.status(400).json({ ok: false, error: 'Le mot de passe doit contenir de 8 à 72 octets UTF-8' });
   }
   
   // Check duplicates (PostgreSQL vs fallback storage)
@@ -5806,7 +5991,7 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Erreur vérification unicité' });
   }
   
-  console.log('[api/auth/register] registering new user:', normalizedUsername, normalizedEmail);
+  console.log('[api/auth/register] registering account:', normalizedUsername);
   
   try {
     // Hash password
@@ -5833,8 +6018,21 @@ app.post('/api/auth/register', async (req, res) => {
       updatedAt: new Date().toISOString()
     };
     
-    // Persist user (to file or DB)
-    persistUser(newUser);
+    // Persist atomically where the database adapter is active so concurrent duplicate signups are rejected.
+    if (USE_POSTGRES && db) {
+      const created = await db.createUser(
+        newUser.id,
+        newUser.username,
+        newUser.passwordHash,
+        newUser.email,
+        newUser.role,
+        { demoStartDate: newUser.demoStartDate }
+      );
+      if (!created) return res.status(409).json({ ok: false, error: 'Le nom d’utilisateur ou l’email est déjà utilisé' });
+      users.push(newUser);
+    } else {
+      persistUser(newUser);
+    }
     
     console.log('[api/auth/register] user registered successfully:', normalizedUsername);
 
@@ -6606,8 +6804,9 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
 
     // Licence à vie : si un utilisateur possède une licence perpétuelle, retourner immédiatement un statut actif
-    if ((user.licenseType && user.licenseType.toLowerCase() === 'perpetual') || user.licenseKey) {
-      const start = user.licenseGeneratedAt || user.createdAt || new Date().toISOString();
+    const perpetualLicense = findActiveLicenseByUsername(user.username);
+    if (perpetualLicense) {
+      const start = perpetualLicense.createdAt || perpetualLicense.issuedAt || user.createdAt || new Date().toISOString();
       const plan = { name: 'Licence à vie', id: 'lifetime' };
       return res.json({
         ok: true,
@@ -6615,7 +6814,7 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
           isActive: true,
           status: 'active',
           currentPlan: plan,
-          subscriptionId: user.licenseKey || null,
+          subscriptionId: perpetualLicense.key || null,
           startDate: start,
           endDate: null,
           nextBillingDate: null,
@@ -6630,8 +6829,7 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
     const normalizedStatus = String(subscription?.status || user.subscriptionStatus || '').trim().toLowerCase();
     const subscriptionId = subscription?.stripeSubscriptionId || user.subscriptionId || null;
     // Ne considère plus un simple subscriptionId sans statut comme "actif"
-    const activeLikeStatuses = ['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired'];
-    const isActive = activeLikeStatuses.includes(normalizedStatus);
+    const isActive = customerPolicy.hasSubscriptionAccess(normalizedStatus);
     
     // Trouver le plan correspondant
     let currentPlan = null;
@@ -6662,8 +6860,11 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
           limit: 5
         });
 
-        const activeLikeStatuses = new Set(['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired']);
-        const stripeSub = (stripeSubs.data || []).find(s => activeLikeStatuses.has(s.status));
+        const statusCandidates = new Set(['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired']);
+        const stripeSubscriptions = (stripeSubs.data || []).filter(item => statusCandidates.has(item.status));
+        const stripeSub = stripeSubscriptions.find(item => item.id === user.subscriptionId)
+          || stripeSubscriptions.find(item => customerPolicy.hasSubscriptionAccess(item.status))
+          || stripeSubscriptions[0];
 
         if (stripeSub) {
           console.log('[subscriptions] found Stripe subscription for', user.username, 'id:', stripeSub.id, 'status:', stripeSub.status);
@@ -6681,19 +6882,20 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
           user.subscriptionStatus = stripeSub.status;
           user.subscriptionId = stripeSub.id;
           persistUser(user);
-          ensureUserSubscription(user, {
+          await upsertStripeSubscriptionRecord(user, {
             stripeSubscriptionId: stripeSub.id,
             stripePriceId: priceId || null,
             status: stripeSub.status,
             planName: currentPlan?.name || null,
             startDate: stripeSub.current_period_start ? new Date(stripeSub.current_period_start * 1000).toISOString() : undefined,
-            endDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000).toISOString() : undefined
+            endDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000).toISOString() : undefined,
+            cancelAtPeriodEnd: stripeSub.cancel_at_period_end === true
           });
 
           return res.json({
             ok: true,
             subscription: {
-              isActive: activeLikeStatuses.has(stripeSub.status),
+              isActive: customerPolicy.hasSubscriptionAccess(stripeSub.status),
               status: stripeSub.status,
               currentPlan: currentPlan,
               subscriptionId: stripeSub.id,
@@ -6701,6 +6903,7 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
               endDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000) : null,
               nextBillingDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000) : null,
               cancelledAt: stripeSub.canceled_at ? new Date(stripeSub.canceled_at * 1000) : null,
+              cancelAtPeriodEnd: stripeSub.cancel_at_period_end === true,
               daysUntilRenewal: stripeSub.current_period_end ? Math.ceil((new Date(stripeSub.current_period_end * 1000) - new Date()) / (24 * 60 * 60 * 1000)) : null
             }
           });
@@ -6714,10 +6917,10 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
     if (subscriptionId && process.env.STRIPE_SECRET_KEY && String(subscriptionId).startsWith('sub_') && !isPlaceholderSubscriptionId(subscriptionId)) {
       try {
         const stripeSub = await stripe.subscriptions.retrieve(subscriptionId);
-        const activeLikeStatuses = new Set(['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired']);
+        const subscriptionStatuses = new Set(['active', 'trialing', 'past_due', 'unpaid', 'incomplete', 'incomplete_expired']);
         const stripeStatus = String(stripeSub?.status || '').toLowerCase();
 
-        if (activeLikeStatuses.has(stripeStatus)) {
+        if (subscriptionStatuses.has(stripeStatus)) {
           const item = stripeSub.items?.data?.[0];
           const priceId = item?.price?.id;
           for (const [key, plan] of Object.entries(subscriptionConfig.PLANS)) {
@@ -6734,19 +6937,20 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
           }
           persistUser(user);
 
-          ensureUserSubscription(user, {
+          await upsertStripeSubscriptionRecord(user, {
             stripeSubscriptionId: stripeSub.id,
             stripePriceId: priceId || null,
             status: stripeSub.status,
             planName: currentPlan?.name || null,
             startDate: stripeSub.current_period_start ? new Date(stripeSub.current_period_start * 1000).toISOString() : undefined,
-            endDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000).toISOString() : undefined
+            endDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000).toISOString() : undefined,
+            cancelAtPeriodEnd: stripeSub.cancel_at_period_end === true
           });
 
           return res.json({
             ok: true,
             subscription: {
-              isActive: true,
+              isActive: customerPolicy.hasSubscriptionAccess(stripeSub.status),
               status: stripeSub.status,
               currentPlan,
               subscriptionId: stripeSub.id,
@@ -6754,6 +6958,7 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
               endDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000) : null,
               nextBillingDate: stripeSub.current_period_end ? new Date(stripeSub.current_period_end * 1000) : null,
               cancelledAt: stripeSub.canceled_at ? new Date(stripeSub.canceled_at * 1000) : null,
+              cancelAtPeriodEnd: stripeSub.cancel_at_period_end === true,
               daysUntilRenewal: stripeSub.current_period_end ? Math.ceil((new Date(stripeSub.current_period_end * 1000) - new Date()) / (24 * 60 * 60 * 1000)) : null
             }
           });
@@ -6793,6 +6998,7 @@ app.get('/api/subscriptions/my-subscription', authMiddleware, async (req, res) =
         endDate: subscription?.endDate || null,
         nextBillingDate: subscription?.endDate || null,
         cancelledAt: subscription?.cancelledAt || null,
+        cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd || subscription?.cancelatperiodend || false,
         daysUntilRenewal: subscription?.endDate ? Math.ceil((new Date(subscription.endDate) - new Date()) / (24 * 60 * 60 * 1000)) : null
       }
     });
@@ -6833,35 +7039,74 @@ app.post('/api/subscriptions/cancel', authMiddleware, async (req, res) => {
   try {
     const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
-
-    // Chercher l'abonnement actif
-    const subIdx = subscriptions.findIndex(s => s.username === user.username && s.status === 'active');
-    if (subIdx === -1) return res.status(400).json({ ok: false, error: 'No active subscription found' });
-
-    const sub = subscriptions[subIdx];
-    sub.status = 'cancelled';
-    sub.cancelledAt = new Date().toISOString();
-    
-    // Mettre à jour l'utilisateur
-    user.subscriptionStatus = 'cancelled';
-    persistUser(user);
-    
-    if (USE_POSTGRES) {
-      // Save to PostgreSQL
-      db.updateSubscription(sub.id, { status: 'cancelled', cancelledat: sub.cancelledAt })
-        .catch(err => console.error('[db] updateSubscription error:', err && err.message ? err.message : err));
-    } else {
-      saveSubscriptions();
+    if (!process.env.STRIPE_SECRET_KEY || !stripe?.subscriptions?.update) {
+      return res.status(503).json({ ok: false, error: 'Stripe subscription management is unavailable' });
     }
 
-    res.json({ 
-      ok: true, 
-      message: 'Subscription cancelled successfully',
-      subscription: sub
+    const localRecords = await getSubscriptionRecordsForUser(user);
+    const local = localRecords.find(record =>
+      customerPolicy.hasSubscriptionAccess(record.status) &&
+      String(record.stripeSubscriptionId || record.stripesubscriptionid || '').startsWith('sub_')
+    );
+    const stripeSubscriptionId = String(
+      user.subscriptionId || user.subscriptionid ||
+      local?.stripeSubscriptionId || local?.stripesubscriptionid || ''
+    ).trim();
+    if (!stripeSubscriptionId || !stripeSubscriptionId.startsWith('sub_')) {
+      return res.status(400).json({ ok: false, error: 'No active Stripe subscription found' });
+    }
+
+    const current = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+    if (!current || !customerPolicy.hasSubscriptionAccess(current.status)) {
+      return res.status(400).json({ ok: false, error: 'No active subscription found' });
+    }
+    const updated = current.cancel_at_period_end
+      ? current
+      : await stripe.subscriptions.update(stripeSubscriptionId, { cancel_at_period_end: true });
+    if (!updated.cancel_at_period_end) {
+      return res.status(502).json({ ok: false, error: 'Stripe did not schedule cancellation' });
+    }
+
+    const periodEnd = updated.current_period_end || current.current_period_end || null;
+    const accessUntil = periodEnd ? new Date(periodEnd * 1000).toISOString() : null;
+    const localId = local?.id;
+    const localUpdates = {
+      status: updated.status || current.status,
+      endDate: accessUntil,
+      cancelAtPeriodEnd: true
+    };
+    if (localId) {
+      if (USE_POSTGRES && db && typeof db.updateSubscription === 'function') {
+        const pgUpdates = { status: localUpdates.status, enddate: accessUntil, cancelatperiodend: true };
+        const persisted = await db.updateSubscription(localId, pgUpdates);
+        if (!persisted) throw new Error('Unable to persist scheduled cancellation');
+      } else if (dbEnabled) {
+        const persisted = require('./db').updateSubscription(localId, localUpdates);
+        if (!persisted) throw new Error('Unable to persist scheduled cancellation');
+      } else {
+        const memoryRecord = subscriptions.find(record =>
+          record.id === localId || record.stripeSubscriptionId === stripeSubscriptionId
+        );
+        if (memoryRecord) Object.assign(memoryRecord, localUpdates);
+        saveSubscriptions();
+      }
+    }
+
+    res.json({
+      ok: true,
+      message: 'Cancellation scheduled at the end of the current billing period',
+      cancelAtPeriodEnd: true,
+      accessUntil,
+      subscription: {
+        id: stripeSubscriptionId,
+        status: updated.status || current.status,
+        cancelAtPeriodEnd: true,
+        currentPeriodEnd: accessUntil
+      }
     });
   } catch (e) {
     console.error('[subscriptions] cancel error:', e);
-    res.status(500).json({ ok: false, error: 'Server error' });
+    res.status(502).json({ ok: false, error: 'Unable to schedule cancellation with Stripe' });
   }
 });
 
@@ -7196,13 +7441,11 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
     const { purchaseId } = req.body || {};
     if (!purchaseId) return res.status(400).json({ ok: false, error: 'purchaseId required' });
 
-    const normalizedPurchaseId = String(purchaseId || '').trim();
-    const purchaseEntries = Object.entries(purchaseConfig.PURCHASE_OPTIONS || {});
-    const purchase =
-      purchaseConfig.PURCHASE_OPTIONS[normalizedPurchaseId] ||
-      purchaseConfig.PURCHASE_OPTIONS[normalizedPurchaseId.toUpperCase()] ||
-      purchaseEntries.find(([, candidate]) => String(candidate?.id || '').toLowerCase() === normalizedPurchaseId.toLowerCase())?.[1];
-    if (!purchase) return res.status(400).json({ ok: false, error: 'Purchase option not found' });
+    const purchaseKey = customerPolicy.normalizePurchaseId(purchaseId, purchaseConfig.PURCHASE_OPTIONS);
+    const purchase = purchaseKey ? purchaseConfig.PURCHASE_OPTIONS[purchaseKey] : null;
+    if (!purchase || purchase.billingPeriod !== 'once') {
+      return res.status(400).json({ ok: false, error: 'Purchase option not found' });
+    }
 
     const resolvedPerpetualPriceId = cleanEnvValue(
       process.env.STRIPE_PRICE_ID_PERPETUAL ||
@@ -7215,6 +7458,14 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
 
     const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+    if (!customerPolicy.isValidEmail(user.email)) {
+      return res.status(400).json({ ok: false, error: 'Veuillez renseigner un email valide dans votre compte avant de payer' });
+    }
+
+    const priceInfo = await stripe.prices.retrieve(resolvedPerpetualPriceId);
+    if (priceInfo.type !== 'one_time') {
+      return res.status(400).json({ ok: false, error: 'Le tarif configuré pour cet achat doit être un prix à paiement unique' });
+    }
 
     const customerId = await ensureStripeCustomerForUser(user);
 
@@ -7231,15 +7482,17 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
       customer_email: undefined, // force existing customer to avoid cardholder name override
       success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/account.html?purchase=success`,
       cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/pricing.html?purchase=canceled`,
+      client_reference_id: String(user.id || user.username),
       metadata: {
-        userId: user.id || user.username,
+        userId: String(user.id || user.username),
         username: user.username,
-        purchaseId: purchase.id || normalizedPurchaseId,
-        purchaseName: purchase.name
+        userEmail: normalizeEmailValue(user.email),
+        purchaseId: purchaseKey,
+        purchaseName: String(purchase.name || purchaseKey)
       }
     });
 
-    console.log('[purchases] checkout session created:', { id: session.id, user: user.username, purchase: purchase.id || normalizedPurchaseId, priceId: resolvedPerpetualPriceId });
+    console.log('[purchases] checkout session created:', { id: session.id, user: user.username, purchase: purchaseKey });
     res.json({ ok: true, sessionId: session.id, url: session.url });
   } catch (e) {
     console.error('[purchases] create-checkout error:', e);
@@ -7248,27 +7501,39 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
 });
 
 // Get user's purchases history
-app.get('/api/purchases/history', authMiddleware, (req, res) => {
+app.get('/api/purchases/history', authMiddleware, async (req, res) => {
   try {
     const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
 
-    // Chercher les achats dans les subscriptions (achetés comme payment)
-    const purchases = subscriptions.filter(s => 
-      (s.username === user.username || s.userId === user.id) && 
-      s.billingPeriod === 'once'
-    );
+    let history = [];
+    if (USE_POSTGRES && db && typeof db.getPurchasesForUser === 'function') {
+      history = await db.getPurchasesForUser(user.id, user.username);
+    } else if (dbEnabled && typeof require('./db').getPurchasesForUser === 'function') {
+      history = require('./db').getPurchasesForUser(user.id, user.username);
+    } else {
+      history = loadPurchaseHistory().filter(item =>
+        (user.id && String(item.userId || '') === String(user.id)) ||
+        String(item.username || '').toLowerCase() === String(user.username).toLowerCase()
+      );
+    }
 
     res.json({
       ok: true,
-      purchases: purchases.map(p => ({
-        id: p.id,
-        name: p.planName,
-        purchaseDate: p.startDate,
-        price: p.price,
-        licenseKey: p.licenseKey,
-        license: p.license
-      }))
+      purchases: history.map(item => {
+        const purchase = normalizeStoredPurchase(item);
+        return {
+          id: purchase.stripeCheckoutSessionId,
+          name: purchase.purchaseName,
+          purchaseId: purchase.purchaseId,
+          purchaseDate: purchase.createdAt,
+          price: purchase.amount / 100,
+          currency: purchase.currency,
+          status: purchase.status,
+          licenseKey: purchase.licenseKey,
+          license: { type: 'perpetual', status: 'active' }
+        };
+      })
     });
   } catch (e) {
     console.error('[purchases] history error:', e);
@@ -7281,29 +7546,84 @@ app.get('/api/purchases/history', authMiddleware, (req, res) => {
 app.patch('/api/me', authMiddleware, async (req, res) => {
   const { username, email, oldPassword, newPassword } = req.body || {};
   try {
-    const user = getUserByUsername(req.user.username);
-    if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
-    if (username && username !== user.username) {
-      // ensure unique
-        if (getUserByUsername(username)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
-      user.username = username;
+    const existingUser = getUserByUsername(req.user.username);
+    if (!existingUser) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
+    const user = { ...existingUser };
+    const oldUsername = user.username;
+    const proposedUsername = username === undefined ? oldUsername : customerPolicy.normalizeUsername(username);
+    if (username !== undefined && !customerPolicy.isValidUsername(proposedUsername)) {
+      return res.status(400).json({ ok: false, error: 'Le nom doit contenir 3 à 32 lettres, chiffres, points, tirets ou tirets bas' });
     }
-    if (email) user.email = email;
-    if (newPassword) {
+    if (proposedUsername.toLowerCase() !== String(oldUsername).toLowerCase() && getUserByUsername(proposedUsername)) {
+      return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
+    }
+
+    let emailChanged = false;
+    if (email !== undefined) {
+      const normalizedEmail = customerPolicy.normalizeEmail(email);
+      if (!customerPolicy.isValidEmail(normalizedEmail)) {
+        return res.status(400).json({ ok: false, error: 'Email invalide' });
+      }
+      const existingEmailUser = await findUserByEmailAsync(normalizedEmail);
+      if (existingEmailUser && String(existingEmailUser.id || existingEmailUser.username).toLowerCase()
+          !== String(user.id || user.username).toLowerCase()) {
+        return res.status(409).json({ ok: false, error: 'Cet email est déjà utilisé' });
+      }
+      emailChanged = normalizedEmail !== customerPolicy.normalizeEmail(user.email || '');
+      if (emailChanged) {
+        user.email = normalizedEmail;
+        user.emailVerified = false;
+        user.emailVerifiedAt = null;
+        user.emailVerificationToken = null;
+        user.emailVerificationExpiresAt = null;
+        user.emailVerificationSentAt = null;
+      }
+    }
+
+    let passwordChanged = false;
+    if (newPassword !== undefined) {
+      if (!customerPolicy.isValidPassword(newPassword)) {
+        return res.status(400).json({ ok: false, error: 'Le mot de passe doit contenir de 8 à 72 octets UTF-8' });
+      }
       if (!oldPassword) return res.status(400).json({ ok: false, error: 'Ancien mot de passe requis' });
-      const valid = await bcrypt.compare(oldPassword, user.passwordHash);
+      const valid = await bcrypt.compare(oldPassword, user.passwordHash || user.passwordhash);
       if (!valid) return res.status(401).json({ ok: false, error: 'Ancien mot de passe incorrect' });
       user.passwordHash = await bcrypt.hash(newPassword, 10);
+      passwordChanged = true;
+    } else if (oldPassword !== undefined) {
+      return res.status(400).json({ ok: false, error: 'Nouveau mot de passe requis avec l’ancien mot de passe' });
     }
-    // Persist changes via DB adapter or JSON
-    try { console.log('[users] about to persist user', user && user.username); persistUser(user); console.log('[users] persist successful'); } catch (e) { console.error('[users] persist error', e && (e.stack || e.message)); }
-    // If username changed, reissue JWT and cookie
+
+    user.username = proposedUsername;
+    await persistUserIdentity(oldUsername, user);
+    if (emailChanged) {
+      let confirmationResult = null;
+      try {
+        confirmationResult = await sendAccountConfirmationEmail(user, { req, forceVerification: true });
+      } catch (mailErr) {
+        console.error('[api/me] email verification delivery failed:', mailErr && mailErr.message ? mailErr.message : mailErr);
+      }
+      user.emailVerificationSent = !!(confirmationResult && confirmationResult.success !== false);
+    }
+
     const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
     res.cookie('vhr_token', token, buildAuthCookieOptions(req));
-    res.json({ ok: true, token, user: { username: user.username, role: user.role, email: user.email || null } });
+    res.json({
+      ok: true,
+      token,
+      emailVerificationRequired: emailChanged,
+      emailVerificationSent: emailChanged ? !!user.emailVerificationSent : undefined,
+      user: {
+        username: user.username,
+        role: user.role,
+        email: user.email || null,
+        emailVerified: !!user.emailVerified,
+        passwordChanged
+      }
+    });
   } catch (e) {
-    console.error('[api] me patch:', e);
-    res.status(500).json({ ok: false, error: String(e) });
+    console.error('[api] me patch failed:', e && e.message ? e.message : e);
+    res.status(500).json({ ok: false, error: 'Profile update failed' });
   }
 });
 
@@ -10244,11 +10564,11 @@ app.post('/api/tts/send', async (req, res) => {
   }
 });
 
-app.get('/api/games', (req, res) => {
+app.get('/api/games', authMiddleware, requireDashboardAccess, (req, res) => {
   res.json({ ok: true, games: gamesList });
 });
 
-app.post('/api/games/add', (req, res) => {
+app.post('/api/games/add', authMiddleware, requireDashboardAccess, (req, res) => {
   const { name, packageId, icon } = req.body || {};
   if (!name || !packageId) {
     return res.status(400).json({ ok: false, error: 'name and packageId required' });
@@ -10273,7 +10593,7 @@ app.post('/api/games/add', (req, res) => {
   }
 });
 
-app.post('/api/games/remove', (req, res) => {
+app.post('/api/games/remove', authMiddleware, requireDashboardAccess, (req, res) => {
   const { id } = req.body || {};
   if (!id) {
     return res.status(400).json({ ok: false, error: 'id required' });
@@ -10291,7 +10611,7 @@ app.post('/api/games/remove', (req, res) => {
   }
 });
 
-app.get('/api/favorites', (req, res) => {
+app.get('/api/favorites', authMiddleware, requireDashboardAccess, (req, res) => {
   res.json({ ok: true, favorites: favoritesList });
 });
 
@@ -10304,7 +10624,7 @@ app.get('/api/server-info', (req, res) => {
   res.json({ ok: true, host: hostHeader, lanIp, port });
 });
 
-app.post('/api/favorites/add', (req, res) => {
+app.post('/api/favorites/add', authMiddleware, requireDashboardAccess, (req, res) => {
   const { name, packageId, icon } = req.body || {};
   if (!name || !packageId) {
     return res.status(400).json({ ok: false, error: 'name and packageId required' });
@@ -10333,7 +10653,7 @@ app.post('/api/favorites/add', (req, res) => {
   }
 });
 
-app.post('/api/favorites/remove', (req, res) => {
+app.post('/api/favorites/remove', authMiddleware, requireDashboardAccess, (req, res) => {
   const { id } = req.body || {};
   if (!id) {
     return res.status(400).json({ ok: false, error: 'id required' });
@@ -11108,7 +11428,7 @@ io.on('connection', socket => {
   try {
     await verifyStripeKeyAtStartup();
   } catch (e) {
-    if (IS_LOCAL_RUNTIME || process.env.NODE_ENV === 'development' || process.env.NO_ADB === '1') {
+    if (!runtimePolicy.hosted && (IS_LOCAL_RUNTIME || process.env.NODE_ENV === 'development')) {
       console.warn('[server] Stripe indisponible; démarrage local maintenu. Les fonctions de paiement seront désactivées.');
     } else {
       console.error('[server] Stripe verification failed, aborting startup.');
@@ -11149,7 +11469,11 @@ function logServerBanner(initializationFailed = false) {
   }
 
   const protocol = useHttps ? 'https' : 'http';
-  const protocolEmoji = useHttps ? 'ƒôñ' : 'ƒôí';
+  if (runtimePolicy.hosted) {
+    console.log(`[Server] VHR web ${require('./package.json').version} ready on port ${PORT}; ADB and Android builds disabled`);
+    return;
+  }
+  const protocolEmoji = '[Server]';
   const lanIp = getLanIPv4();
   console.log(`\nVHR DASHBOARD - Optimisé Anti-Scintillement`);
   console.log(`${protocolEmoji} Server: ${protocol}://localhost:${PORT}`);
@@ -11158,14 +11482,14 @@ function logServerBanner(initializationFailed = false) {
     console.log(`   • Dashboard Pro: ${protocol}://${lanIp}:${PORT}/vhr-dashboard-pro.html`);
     console.log(`   • Site vitrine: ${protocol}://${lanIp}:${PORT}/site-vitrine/`);
   }
-  console.log(`\nƒôè Profils disponibles (ADB screenrecord - stable):`);
+  console.log(`\nProfils disponibles (ADB screenrecord - stable):`);
   console.log(`   · ultra-low: 320p, 600K (WiFi faible)`);
   console.log(`   · low:       480p, 1.5M`);
   console.log(`   • wifi:      640p, 2M (WiFi optimisé)`);
   console.log(`   · default:   720p, 3M`);
   console.log(`   · high:      1280p, 8M (USB)`);
   console.log(`   · ultra:     1920p, 12M (USB uniquement)`);
-  console.log(`   Ô£à Pas de scintillement avec ADB natif`);
+  console.log(`   Pas de scintillement avec ADB natif`);
   console.log(`\nCrop œil gauche activé par défaut\n`);
 }
 
@@ -11191,41 +11515,7 @@ initializeApp().then(() => {
 }).catch(err => {
   console.error('[FATAL] Initialization failed:', err && err.message ? err.message : err);
   console.error('[FATAL] Stack:', err && err.stack);
-  console.log('[INFO] Server will start anyway, but users table may not be initialized.');
-  console.log('[INFO] To fix: POST to /api/admin/init-users once server is running');
-  startPrimaryServer(true);
-});
-
-// Handler de fermeture propre
-process.on('SIGINT', () => {
-  console.log('\nArrêt du serveur...');
-  
-  // Tuer tous les streams actifs
-  for (const [serial, stream] of streams) {
-    try {
-      if (stream.adbProc) {
-        console.log(`Arrêt adb: ${serial}`);
-        spawn('taskkill', ['/F', '/T', '/PID', String(stream.adbProc.pid)]);
-      }
-      if (stream.ffplayProc) {
-        console.log(`Arrêt ffplay: ${serial}`);
-        spawn('taskkill', ['/F', '/T', '/PID', String(stream.ffplayProc.pid)]);
-      }
-    } catch (e) {}
-  }
-  
-  // Tuer tous les processus restants
-  setTimeout(() => {
-    spawn('taskkill', ['/F', '/IM', 'adb.exe', '/T']);
-    spawn('taskkill', ['/F', '/IM', 'ffplay.exe']);
-    process.exit(0);
-  }, 500);
-});
-
-process.on('SIGTERM', () => {
-  spawn('taskkill', ['/F', '/IM', 'adb.exe', '/T']);
-  spawn('taskkill', ['/F', '/IM', 'ffplay.exe']);
-  process.exit(0);
+  process.exit(1);
 });
 
 // Removed /stripe-prices debug route to avoid exposing price IDs. Use /stripe-check for key validation (local-only).
@@ -11505,13 +11795,14 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
       user.subscriptionId = obj.id;
 
       // Upsert subscription record for admin dashboard
-      ensureUserSubscription(user, {
+      await upsertStripeSubscriptionRecord(user, {
         stripeSubscriptionId: obj.id,
         stripePriceId: obj?.items?.data?.[0]?.price?.id || null,
         status: obj.status || 'unknown',
         planName: obj?.items?.data?.[0]?.price?.nickname || obj?.items?.data?.[0]?.plan?.nickname || 'Abonnement',
         startDate: obj.current_period_start ? new Date(obj.current_period_start * 1000).toISOString() : undefined,
-        endDate: obj.current_period_end ? new Date(obj.current_period_end * 1000).toISOString() : undefined
+        endDate: obj.current_period_end ? new Date(obj.current_period_end * 1000).toISOString() : undefined,
+        cancelAtPeriodEnd: obj.cancel_at_period_end === true
       });
     } else if (type === 'checkout.session.completed') {
       // session completed often delivers: session.customer
@@ -11526,7 +11817,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
           const stripeSub = await stripe.subscriptions.retrieve(obj.subscription);
           user.subscriptionStatus = stripeSub.status || user.subscriptionStatus || 'active';
           user.subscriptionId = stripeSub.id;
-          ensureUserSubscription(user, {
+          await upsertStripeSubscriptionRecord(user, {
             stripeSubscriptionId: stripeSub.id,
             stripePriceId: stripeSub?.items?.data?.[0]?.price?.id || null,
             status: stripeSub.status || 'unknown',
@@ -11554,47 +11845,39 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
       
       // Envoyer un email de confirmation pour un achat/abonnement
       if (obj.mode === 'payment') {
-        // One-time payment - Achat définitif (Licence perpétuelle 499€)
-        const purchaseId = obj.metadata?.purchaseId;
-        const purchase = purchaseId ? purchaseConfig.PURCHASE_OPTIONS[purchaseId] : null;
-        
-        if (purchase && user.email) {
-          console.log('[webhook] Processing payment for user:', user.username, 'purchaseId:', purchaseId);
-          
-          // Generate unique license key for this purchase
-          const licenseKey = emailService.generateLicenseKey();
-          console.log('[webhook] Generated license key:', licenseKey);
-          
-          // Store license key in user record
-          user.licenseKey = licenseKey;
-          user.licenseGeneratedAt = new Date().toISOString();
-          user.licenseType = 'perpetual';
-          user.licensePurchaseId = purchaseId;
-          user.licensePurchaseAmount = (obj.amount_total / 100);
-          
-          // Store in licenses file as well (for backup)
-          const license = addLicense(user.username, user.email, purchaseId);
-          console.log('[webhook] License stored:', license.key);
-          
-          // Send purchase success email with license key
-          try {
-            const purchaseData = {
-              planName: purchase.name,
-              orderId: obj.id,
-              price: (obj.amount_total / 100).toFixed(2),
-              licenseDuration: 'Perpétuel',
-              updatesUntil: 'À jamais',
-              licenseKey: licenseKey // Add license key to email data
-            };
-            
-            const emailResult = await emailService.sendPurchaseSuccessEmail(user, purchaseData);
-            console.log('[webhook] Purchase success email sent:', emailResult);
-            
-            if (!emailResult.success) {
-              console.error('[webhook] Email send failed:', emailResult.error);
+        if (obj.payment_status !== 'paid') {
+          console.log('[webhook] Ignoring unpaid one-time checkout session:', obj.id);
+        } else {
+          const resolvedPurchase = customerPolicy.resolvePaidPurchaseSession(obj, purchaseConfig.PURCHASE_OPTIONS);
+          if (!resolvedPurchase || !customerPolicy.isValidEmail(user.email)) {
+            console.warn('[webhook] Paid Checkout session lacks a valid configured purchase or account email:', obj.id);
+          } else {
+            const { purchaseId: purchaseKey, purchase } = resolvedPurchase;
+            const recorded = await recordPaidPerpetualPurchase(user, purchaseKey, purchase, obj);
+            console.log('[webhook] Paid perpetual purchase recorded:', {
+              sessionId: recorded.purchase.stripeCheckoutSessionId,
+              purchaseId: recorded.purchase.purchaseId,
+              created: recorded.created
+            });
+
+            if (recorded.created) {
+              try {
+                const purchaseData = {
+                  planName: purchase.name,
+                  orderId: obj.id,
+                  price: (recorded.purchase.amount / 100).toFixed(2),
+                  licenseDuration: 'Perpétuel',
+                  updatesUntil: 'À jamais',
+                  licenseKey: recorded.purchase.licenseKey
+                };
+                const emailResult = await emailService.sendPurchaseSuccessEmail(user, purchaseData);
+                if (emailResult && emailResult.success === false) {
+                  console.error('[webhook] Purchase email send failed:', emailResult.error);
+                }
+              } catch (e) {
+                console.error('[webhook] Error sending purchase email:', e && e.message ? e.message : e);
+              }
             }
-          } catch (e) {
-            console.error('[webhook] Error sending purchase email:', e.message);
           }
         }
       } else if (obj.mode === 'subscription') {
@@ -11602,21 +11885,24 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
         if (user.email) {
           console.log('[webhook] Processing subscription for user:', user.username);
           
-          // Mark subscription as active
-          user.subscriptionStatus = 'active';
+          const currentSubscriptionStatus = normalizeSubscriptionStatus(user.subscriptionStatus || 'unknown');
+          user.subscriptionStatus = currentSubscriptionStatus;
           user.subscriptionPurchasedAt = new Date().toISOString();
 
           // Upsert subscription record for admin dashboard visibility
-          ensureUserSubscription(user, {
+          await upsertStripeSubscriptionRecord(user, {
             stripeSubscriptionId: obj.subscription || null,
             stripePriceId: obj?.display_items?.[0]?.price?.id || obj?.line_items?.data?.[0]?.price?.id || null,
-            status: 'active',
+            status: currentSubscriptionStatus,
             planName: obj.metadata?.purchaseName || 'Abonnement Professionnel',
-            startDate: new Date().toISOString()
+            startDate: new Date().toISOString(),
+            cancelAtPeriodEnd: false
           });
 
           const alreadySent = !!user.subscriptionConfirmationSentAt;
-          if (alreadySent) {
+          if (!customerPolicy.hasSubscriptionAccess(currentSubscriptionStatus)) {
+            console.log('[webhook] Subscription is not active/trialing; no access success email sent:', currentSubscriptionStatus);
+          } else if (alreadySent) {
             console.log('[webhook] Subscription confirmation already sent, skipping email for', user.username);
           } else {
             try {
@@ -11645,9 +11931,10 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
       }
     }
 
-    saveUsers();
+    persistUser(user);
   } catch (e) {
     console.error('[Stripe webhook] error handling event', e && e.message);
+    return res.status(500).json({ received: false, error: 'Unable to persist payment event' });
   }
 
   res.json({ received: true });
@@ -11657,10 +11944,11 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 app.post('/api/register', async (req, res) => {
   const { username, password, email } = req.body || {};
   if (!username || !password || !email) return res.status(400).json({ ok: false, error: 'username, password and email required' });
-  const normalizedUsername = String(username || '').trim();
-  if (!normalizedUsername) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur invalide' });
-  const normalizedEmail = normalizeEmailValue(email);
-  if (!normalizedEmail) return res.status(400).json({ ok: false, error: 'Email invalide' });
+  const normalizedUsername = customerPolicy.normalizeUsername(username);
+  if (!customerPolicy.isValidUsername(normalizedUsername)) return res.status(400).json({ ok: false, error: 'Le nom doit contenir 3 à 32 lettres, chiffres, points, tirets ou tirets bas' });
+  const normalizedEmail = customerPolicy.normalizeEmail(email);
+  if (!customerPolicy.isValidEmail(normalizedEmail)) return res.status(400).json({ ok: false, error: 'Email invalide' });
+  if (!customerPolicy.isValidPassword(password)) return res.status(400).json({ ok: false, error: 'Le mot de passe doit contenir de 8 à 72 octets UTF-8' });
   if (isUserDeletedIdentifier(normalizedUsername) || isUserDeletedIdentifier(normalizedEmail)) {
     return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
   }
@@ -11701,9 +11989,10 @@ app.post('/api/register', async (req, res) => {
     initializeDemoForUser(newUser);
     // persist to database
     if (USE_POSTGRES) {
-      await db.createUser(newUser.id, newUser.username, newUser.passwordHash, newUser.email, newUser.role, {
+      const created = await db.createUser(newUser.id, newUser.username, newUser.passwordHash, newUser.email, newUser.role, {
         demoStartDate: newUser.demoStartDate
       });
+      if (!created) return res.status(409).json({ ok: false, error: 'Le nom d’utilisateur ou l’email est déjà utilisé' });
       const idx = users.findIndex(u => u.username === newUser.username);
       if (idx >= 0) users[idx] = newUser; else users.push(newUser);
     } else {

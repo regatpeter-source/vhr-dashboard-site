@@ -33,6 +33,10 @@ const http_module = require('http');
 const unzipper = require('unzipper');
 const fetch = require('node-fetch');
 const os = require('os');
+const customerPolicy = require('./services/customer-policy');
+const normalizeEmailValue = customerPolicy.normalizeEmail;
+const normalizeSubscriptionStatus = value => String(value || '').trim().toLowerCase();
+const { isDisabled, subscriptionGrantsAccess } = require('./services/account-access');
 const REMOTE_AUTH_ORIGIN = process.env.REMOTE_AUTH_ORIGIN || process.env.REMOTE_HOST || process.env.PUBLIC_API_BASE_URL || 'https://www.vhr-dashboard-site.com';
 const REMOTE_AUTH_TIMEOUT_MS = Number(process.env.REMOTE_AUTH_TIMEOUT_MS || '12000');
 const REMOTE_STATUS_LOG_COOLDOWN_MS = Math.max(1000, Number.parseInt(process.env.REMOTE_STATUS_LOG_COOLDOWN_MS || '15000', 10) || 15000);
@@ -43,41 +47,6 @@ const REMOTE_DEMO_CACHE_TTL_MS = Number(process.env.REMOTE_DEMO_CACHE_TTL_MS || 
 const REMOTE_DEMO_SYNC_INTERVAL_MS = Number(process.env.REMOTE_DEMO_SYNC_INTERVAL_MS || '600000');
 const REMOTE_AUTH_TOKEN_TTL_MS = Number(process.env.REMOTE_AUTH_TOKEN_TTL_MS || '7200000');
 const FORCE_REMOTE_DEMO = String(process.env.FORCE_REMOTE_DEMO || '1').trim() !== '0';
-
-// ========== SINGLE SERVER INSTANCE ENFORCEMENT ==========
-// Kill any existing server on port 3000 before starting
-(function ensureSingleInstance() {
-  const PORT = process.env.PORT || 3000;
-  const currentPid = process.pid;
-  
-  try {
-    // Windows: Find process using the port
-    const result = execSync(`netstat -ano | findstr ":${PORT}" | findstr "LISTENING"`, { encoding: 'utf8', timeout: 5000 });
-    const lines = result.trim().split('\n');
-    
-    for (const line of lines) {
-      const parts = line.trim().split(/\s+/);
-      const pid = parseInt(parts[parts.length - 1], 10);
-      
-      if (pid && pid !== currentPid && !isNaN(pid)) {
-        console.log(`[Server] Found existing server on port ${PORT} (PID: ${pid}), killing it...`);
-        try {
-          execSync(`taskkill /F /PID ${pid}`, { timeout: 5000 });
-          console.log(`[Server] ✓ Killed previous server (PID: ${pid})`);
-        } catch (killErr) {
-          console.warn(`[Server] Could not kill PID ${pid}:`, killErr.message);
-        }
-      }
-    }
-  } catch (e) {
-    // No process found on port or command failed - this is fine
-    if (!e.message.includes('ENOENT') && !e.status) {
-      // Silent: port is free
-    }
-  }
-  
-  console.log(`[Server] ✓ Port ${PORT} is now available (current PID: ${currentPid})`);
-})();
 
 // PostgreSQL database module
 
@@ -451,6 +420,16 @@ function elevateAdminIfAllowlisted(user) {
     }
   }
   return user;
+}
+
+function ensureAllowedAdmin(req, res) {
+  const user = req.user;
+  if (!user || isDisabled(user) || user.role !== 'admin' ||
+      !EFFECTIVE_ADMIN_ALLOWLIST.includes(String(user.username || '').toLowerCase())) {
+    res.status(403).json({ ok: false, error: 'Admin access required' });
+    return false;
+  }
+  return true;
 }
 
 // Anti-rafale scrcpy
@@ -1217,7 +1196,7 @@ function getDemoExtensionDays(user) {
 
 // Vérifier si la démo est expirée pour un utilisateur
 function isDemoExpired(user) {
-  if (!user || !user.demoStartDate || user.subscriptionStatus === 'active') {
+  if (!user || !user.demoStartDate) {
     return false; // Pas de limite si abonnement actif
   }
   
@@ -1271,13 +1250,16 @@ function buildUserAccessSummary(user, options = {}) {
 
   const activeLicenses = (licenses || []).filter(license => {
     if (!license || String(license.status || '').toLowerCase() !== 'active') return false;
+    const expiry = license.expiresAt || license.endDate;
+    if (expiry && (!Number.isFinite(new Date(expiry).getTime()) || new Date(expiry).getTime() <= Date.now())) return false;
     const licenseUsername = (license.username || '').toLowerCase();
     const licenseUserId = String(license.userId || '');
     return (licenseUserId && licenseUserId === normalizedId) || (licenseUsername && licenseUsername === normalizedUsername);
   });
 
   const hasPerpetualLicense = activeLicenses.some(l => l.type === 'perpetual');
-  const hasSubscriptionLicense = activeLicenses.some(l => l.type === 'subscription');
+  const hasSubscriptionLicense = activeLicenses.some(l => l.type === 'subscription') &&
+    (!user.subscriptionStatus || subscriptionGrantsAccess(user));
   const subscriptionStatusRaw = String(user.subscriptionStatus || user.subscriptionstatus || 'none').toLowerCase();
   const hasDemo = Boolean(user.demoStartDate || user.demostartdate);
   const demoExtensionDays = getDemoExtensionDays(user);
@@ -1286,7 +1268,7 @@ function buildUserAccessSummary(user, options = {}) {
   const demoExpiresAt = user.demoStartDate
     ? new Date(new Date(user.demoStartDate).getTime() + demoConfig.DEMO_DURATION_MS + (demoExtensionDays * 24 * 60 * 60 * 1000)).toISOString()
     : null;
-  const hasActiveSubscription = (subscriptionStatusRaw === 'active') || hasSubscriptionLicense;
+  const hasActiveSubscription = subscriptionGrantsAccess(user) || hasSubscriptionLicense;
 
   return {
     demoStartDate: user.demoStartDate || user.demostartdate || null,
@@ -1337,6 +1319,7 @@ function resolveWritableDataDir() {
 const DATA_DIR = resolveWritableDataDir();
 
 const LICENSES_FILE = path.join(DATA_DIR, 'licenses.json');
+const PURCHASES_FILE = path.join(DATA_DIR, 'purchases.json');
 
 // ========== EMAIL CONFIGURATION ==========
 // Support both Brevo and Gmail configurations
@@ -1512,6 +1495,187 @@ function addLicense(username, email, purchaseId) {
   licenses.push(license);
   saveLicenses(licenses);
   return license;
+}
+
+function loadPurchaseHistory() {
+  ensureDataDir();
+  try {
+    if (!fs.existsSync(PURCHASES_FILE)) return [];
+    const parsed = JSON.parse(fs.readFileSync(PURCHASES_FILE, 'utf8') || '[]');
+    if (!Array.isArray(parsed)) throw new Error('Purchase history must be an array');
+    return parsed;
+  } catch (e) {
+    console.error('[purchases] history read failed:', e && e.message ? e.message : e);
+    throw e;
+  }
+}
+
+function savePurchaseHistory(purchases) {
+  ensureDataDir();
+  const temporary = PURCHASES_FILE + '.tmp';
+  fs.writeFileSync(temporary, JSON.stringify(purchases, null, 2), 'utf8');
+  fs.renameSync(temporary, PURCHASES_FILE);
+}
+
+function normalizeStoredPurchase(record) {
+  if (!record) return null;
+  return {
+    id: record.id || record.stripeCheckoutSessionId || record.stripecheckoutsessionid,
+    stripeCheckoutSessionId: record.stripeCheckoutSessionId || record.stripecheckoutsessionid,
+    stripePaymentIntentId: record.stripePaymentIntentId || record.stripepaymentintentid || null,
+    userId: record.userId || record.userid || null,
+    username: record.username,
+    email: record.email || null,
+    purchaseId: record.purchaseId || record.purchaseid,
+    purchaseName: record.purchaseName || record.purchasename,
+    amount: Number(record.amount) || 0,
+    currency: record.currency || 'eur',
+    status: record.status || 'paid',
+    licenseKey: record.licenseKey || record.licensekey,
+    createdAt: record.createdAt || record.createdat || null
+  };
+}
+
+async function recordPaidPerpetualPurchase(user, purchaseKey, purchase, session) {
+  const checkoutSessionId = String(session.id || '').trim();
+  if (!checkoutSessionId) throw new Error('Missing Stripe Checkout session ID');
+  const paymentIntent = typeof session.payment_intent === 'string'
+    ? session.payment_intent
+    : session.payment_intent?.id || null;
+  const createRecord = {
+    stripeCheckoutSessionId: checkoutSessionId,
+    stripePaymentIntentId: paymentIntent,
+    userId: user.id || null,
+    username: user.username,
+    email: normalizeEmailValue(user.email),
+    purchaseId: purchaseKey,
+    purchaseName: purchase.name,
+    amount: Number.isInteger(session.amount_total) ? session.amount_total : 0,
+    currency: String(session.currency || purchase.currency || 'eur').toLowerCase(),
+    status: 'paid',
+    licenseKey: generateLicenseKey(user.username).key,
+    createdAt: new Date((session.created || Math.floor(Date.now() / 1000)) * 1000).toISOString()
+  };
+
+  let result;
+  if (USE_POSTGRES && db && typeof db.recordPurchase === 'function') {
+    result = await db.recordPurchase(createRecord);
+  } else if (dbEnabled && typeof require('./db').recordPurchase === 'function') {
+    result = require('./db').recordPurchase(createRecord);
+  } else {
+    const history = loadPurchaseHistory();
+    const existing = history.find(item =>
+      item.stripeCheckoutSessionId === checkoutSessionId ||
+      (paymentIntent && item.stripePaymentIntentId === paymentIntent)
+    );
+    if (existing) {
+      result = { purchase: existing, created: false };
+    } else {
+      history.push(createRecord);
+      savePurchaseHistory(history);
+      result = { purchase: createRecord, created: true };
+    }
+  }
+
+  const storedPurchase = normalizeStoredPurchase(result && result.purchase);
+  if (!storedPurchase || !storedPurchase.licenseKey) {
+    throw new Error('Could not persist paid purchase and license');
+  }
+
+  const licenses = loadLicenses();
+  if (!licenses.some(item => item.key === storedPurchase.licenseKey)) {
+    const license = {
+      key: storedPurchase.licenseKey,
+      username: storedPurchase.username,
+      email: storedPurchase.email,
+      purchaseId: storedPurchase.purchaseId,
+      purchaseSessionId: storedPurchase.stripeCheckoutSessionId,
+      type: 'perpetual',
+      status: 'active',
+      createdAt: storedPurchase.createdAt || new Date().toISOString()
+    };
+    licenses.push(license);
+    saveLicenses(licenses);
+  }
+  return { purchase: storedPurchase, created: !!result.created };
+}
+
+function updateLicenseIdentityReferences(oldUsername, user) {
+  const licenses = loadLicenses();
+  let changed = false;
+  for (const license of licenses) {
+    if (String(license.username || '').toLowerCase() !== String(oldUsername || '').toLowerCase()) continue;
+    license.username = user.username;
+    license.email = user.email || null;
+    changed = true;
+  }
+  if (changed) saveLicenses(licenses);
+}
+
+async function upsertStripeSubscriptionRecord(user, options = {}) {
+  const stripeSubscriptionId = String(options.stripeSubscriptionId || '').trim();
+  if (!stripeSubscriptionId) return ensureUserSubscription(user, options);
+  const now = new Date().toISOString();
+  if (options.endDate) user.subscriptionExpiresAt = options.endDate;
+  user.cancelAtPeriodEnd = options.cancelAtPeriodEnd === true;
+  const base = {
+    userId: user.id || null,
+    username: user.username,
+    email: user.email || null,
+    stripeSubscriptionId,
+    stripePriceId: options.stripePriceId || null,
+    status: options.status || 'unknown',
+    planName: options.planName || 'Abonnement',
+    startDate: options.startDate || now,
+    endDate: options.endDate || null,
+    cancelAtPeriodEnd: options.cancelAtPeriodEnd === true
+  };
+
+  if (USE_POSTGRES && db) {
+    const records = await db.getAllSubscriptions();
+    const existing = records.find(record =>
+      String(record.stripesubscriptionid || record.stripeSubscriptionId || '') === stripeSubscriptionId
+    );
+    if (existing) {
+      const updated = await db.updateSubscription(existing.id, {
+        status: base.status,
+        planname: base.planName,
+        startdate: base.startDate,
+        enddate: base.endDate,
+        cancelatperiodend: base.cancelAtPeriodEnd
+      });
+      if (!updated) throw new Error('Unable to update Stripe subscription record');
+    } else {
+      const inserted = await db.addSubscription(base);
+      if (!inserted) throw new Error('Unable to create Stripe subscription record');
+    }
+  } else if (dbEnabled) {
+    const adapter = require('./db');
+    const existing = adapter.findSubscriptionByStripeId(stripeSubscriptionId);
+    if (existing) {
+      const updated = adapter.updateSubscription(existing.id, {
+        status: base.status,
+        planName: base.planName,
+        startDate: base.startDate,
+        endDate: base.endDate,
+        cancelAtPeriodEnd: base.cancelAtPeriodEnd
+      });
+      if (!updated) throw new Error('Unable to update Stripe subscription record');
+    } else if (!adapter.addSubscription(base)) {
+      throw new Error('Unable to create Stripe subscription record');
+    }
+  }
+
+  const memoryIndex = subscriptions.findIndex(record =>
+    String(record.stripeSubscriptionId || record.stripesubscriptionid || '') === stripeSubscriptionId
+  );
+  if (memoryIndex >= 0) {
+    subscriptions[memoryIndex] = { ...subscriptions[memoryIndex], ...base };
+  } else {
+    subscriptions.push({ id: subscriptionIdCounter++, ...base, createdAt: now, updatedAt: now });
+  }
+  if (!USE_POSTGRES) saveSubscriptions();
+  return true;
 }
 
 function findActiveLicenseByUsername(username) {
@@ -1784,11 +1948,16 @@ app.get('/download/scrcpy-apk', (req, res) => {
 
 // ========== EXPLICIT ROUTES (must come BEFORE express.static middleware) ==========
 
+app.use(['/api/devices', '/api/apps', '/api/games', '/api/favorites', '/api/adb',
+  '/api/stream', '/api/battery', '/api/device', '/api/scrcpy', '/api/scrcpy-gui', '/api/webrtc',
+  '/api/opentalkie', '/api/audio/signal', '/api/audio/session', '/api/tts/send'],
+authMiddleware, requireDashboardAccess);
+
 // Serve launch-dashboard.html for 1-click launcher
 app.get('/launch-dashboard.html', (req, res) => {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.sendFile(path.join(__dirname, 'launch-dashboard.html'));
+  res.redirect(302, '/vhr-dashboard-pro.html');
 });
+app.get(['/dashboard-pro.html', '/dashboard-pro'], (req, res) => res.redirect(302, '/vhr-dashboard-pro.html'));
 
 // Redirect vhr-dashboard-app.html to vhr-dashboard-pro.html
 app.get('/vhr-dashboard-app.html', (req, res) => {
@@ -1965,24 +2134,8 @@ app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
 // Route pour le pack complet (Dashboard + Voix) - SANS RESTRICTION
 // Permet d'éviter les 404 GitHub en servant le binaire/zip directement depuis le serveur
 app.get('/download/client-full', (req, res) => {
-  const installerPath = path.join(__dirname, 'VHR.Dashboard.Setup.1.0.1.exe');
-
-  if (!fs.existsSync(installerPath)) {
-    return res.status(404).json({ ok: false, error: 'Installer not found on server' });
-  }
-
-  try {
-    const stats = fs.statSync(installerPath);
-    const filename = path.basename(installerPath);
-    res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Length', stats.size);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-    return res.sendFile(installerPath);
-  } catch (e) {
-    console.error('[download/client-full] error:', e);
-    return res.status(500).json({ ok: false, error: 'Server error while serving installer' });
-  }
+  res.setHeader('Cache-Control', 'no-store');
+  return res.redirect(302, 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.2-client/VHR.Dashboard.Setup.1.0.2.exe');
 });
 
 // Download VHR Voice APK for Quest background audio
@@ -2299,7 +2452,13 @@ if (!stripeKey) {
   console.error('[Stripe] STRIPE_SECRET_KEY appears to be a publishable key (pk_). Server-side requires a secret key (sk_live_...). Aborting server start.');
   throw new Error('Stripe secret key required: STRIPE_SECRET_KEY must be an sk_ key.');
 }
-const stripe = require('stripe')(stripeKey);
+const stripe = stripeKey ? require('stripe')(stripeKey) : null;
+app.use(['/create-checkout-session', '/api/subscriptions/create-checkout',
+  '/api/purchases/create-checkout', '/api/subscriptions/cancel', '/api/billing', '/webhook'],
+(_req, res, next) => {
+  if (!stripe) return res.status(503).json({ ok: false, error: 'Paiement indisponible sur cette installation. Utilisez votre espace client sur le site VHR.' });
+  return next();
+});
 
 // Verify the Stripe secret key early at startup (fail fast on invalid / publishable key)
 async function verifyStripeKeyAtStartup() {
@@ -2338,6 +2497,9 @@ app.post('/create-checkout-session', async (req, res) => {
   const { priceId, mode } = req.body || {};
   const origin = req.headers.origin || `http://localhost:${process.env.PORT || 3000}`;
   if (!priceId || !mode) return res.status(400).json({ error: 'priceId et mode sont requis' });
+  if (!['payment', 'subscription'].includes(mode)) {
+    return res.status(400).json({ error: 'mode de paiement invalide' });
+  }
   
   try {
     const decodedUser = tryDecodeUser(req);
@@ -2352,21 +2514,21 @@ app.post('/create-checkout-session', async (req, res) => {
     }
 
     const username = String(requester.username || requesterUsername).trim();
-    const userEmail = String(requester.email || '').trim().toLowerCase();
+    const userEmail = normalizeEmailValue(requester.email || '');
     const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(userEmail || '');
     if (!userEmail || !validEmail) {
       return res.status(400).json({ error: 'Veuillez renseigner un email valide dans votre compte avant de payer' });
     }
 
     const customerId = await ensureStripeCustomerForUser(requester);
-    console.log('[Stripe] create-checkout-session request:', { priceId, mode, username, userEmail, customerId, origin });
+    console.log('[Stripe] create-checkout-session request:', { priceId, mode, username, origin });
     
     // Validate price exists and is compatible with mode
     let priceInfo = null;
     try {
       priceInfo = await stripe.prices.retrieve(priceId);
     } catch (pErr) {
-      console.error('[Stripe] price retrieve error:', { priceId, err: pErr && pErr.message, raw: pErr && pErr.raw });
+      console.error('[Stripe] price retrieve error:', { priceId, err: pErr && pErr.message });
       // Provide helpful guidance if price not found or using wrong key
       const suggestion = 'Ensure the price exists in your Stripe dashboard and that the server is using a valid secret API key (sk_live_...).';
       const msg = (pErr && pErr.code === 'resource_missing') || (pErr && pErr.statusCode === 404)
@@ -2385,8 +2547,23 @@ app.post('/create-checkout-session', async (req, res) => {
     const metadata = {
       username,
       userEmail,
-      userId: requester.id || username
+      userId: String(requester.id || username)
     };
+    if (mode === 'payment') {
+      const purchaseOptions = purchaseConfig.PURCHASE_OPTIONS || {};
+      const priceOverrides = {};
+      if (purchaseOptions.PERPETUAL) {
+        priceOverrides.PERPETUAL = cleanEnvValue(
+          process.env.STRIPE_PRICE_ID_PERPETUAL || purchaseOptions.PERPETUAL.stripePriceId || ''
+        );
+      }
+      const purchaseKey = customerPolicy.resolvePurchaseIdForPrice(priceId, purchaseOptions, priceOverrides);
+      if (!purchaseKey) {
+        return res.status(400).json({ error: 'Ce tarif de paiement unique n’est pas associé à un achat délivrable' });
+      }
+      metadata.purchaseId = purchaseKey;
+      metadata.purchaseName = String(purchaseOptions[purchaseKey].name || purchaseKey);
+    }
     
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -2404,7 +2581,7 @@ app.post('/create-checkout-session', async (req, res) => {
       customer_email: undefined,
       client_reference_id: requester.id || username,
     });
-    console.log('[Stripe] session created:', { id: session.id, url: session.url, username, customerId });
+    console.log('[Stripe] checkout session created:', { id: session.id, username });
     res.json({ url: session.url });
   } catch (err) {
     console.error('[Stripe] create-checkout-session error:', err);
@@ -2661,16 +2838,9 @@ function isUserDeletedOrDisabled(user) {
   if (!user) return false;
   const normalizedUsername = String(user.username || '').trim();
   const normalizedEmail = String(user.email || '').trim();
-  const status = String(user.status || user.accountStatus || '').toLowerCase();
-
   return (normalizedUsername && isUserDeletedIdentifier(normalizedUsername))
     || (normalizedEmail && isUserDeletedIdentifier(normalizedEmail))
-    || user.isDeleted === true
-    || user.isDisabled === true
-    || !!user.deletedAt
-    || !!user.disabledAt
-    || status === 'deleted'
-    || status === 'disabled';
+    || isDisabled(user);
 }
 
 function canPersistJsonStore() {
@@ -2690,6 +2860,8 @@ function saveUsers() {
     ensureDataDir();
     // Sanitize users array to avoid circular references and functions in objects
     const toSave = users.map(u => ({
+      ...u,
+      id: u.id,
       username: u.username,
       passwordHash: u.passwordHash || null,
       role: u.role || null,
@@ -2703,7 +2875,26 @@ function saveUsers() {
       demoStartDate: u.demoStartDate || null,
       demoStartSource: u.demoStartSource || null,
       demoStartAt: u.demoStartAt || null,
-      demoStartReason: u.demoStartReason || null
+      demoStartReason: u.demoStartReason || null,
+      demoEndDate: u.demoEndDate || null,
+      demoExtensionDays: u.demoExtensionDays || 0,
+      subscriptionExpiresAt: u.subscriptionExpiresAt || null,
+      cancelAtPeriodEnd: !!u.cancelAtPeriodEnd,
+      status: u.status || null,
+      disabledAt: u.disabledAt || null,
+      deletedAt: u.deletedAt || null,
+      isDisabled: !!u.isDisabled,
+      isDeleted: !!u.isDeleted,
+      isPrimary: u.isPrimary,
+      createdBy: u.createdBy,
+      ownerUsername: u.ownerUsername,
+      createdAt: u.createdAt,
+      updatedAt: u.updatedAt,
+      emailVerified: u.emailVerified,
+      emailVerificationToken: u.emailVerificationToken || null,
+      emailVerificationExpiresAt: u.emailVerificationExpiresAt || null,
+      emailVerificationSentAt: u.emailVerificationSentAt || null,
+      emailVerifiedAt: u.emailVerifiedAt || null
     }));
     fs.writeFileSync(USERS_FILE, JSON.stringify(toSave, null, 2), 'utf8');
     return true;
@@ -3465,11 +3656,19 @@ function getUserByEmail(email) {
     const fromCache = users.find(u => String(u.email || '').trim().toLowerCase() === normalizedEmail);
     if (fromCache) return fromCache;
   }
+
   if (dbEnabled) {
     const u = require('./db').findUserByEmail?.(normalizedEmail);
     return u || null;
   }
   return users.find(u => String(u.email || '').trim().toLowerCase() === normalizedEmail) || null;
+}
+
+async function getSubscriptionRecordsForUser(user) {
+  const list = USE_POSTGRES ? await db.getAllSubscriptions()
+    : dbEnabled ? require('./db').getAllSubscriptions() : subscriptions;
+  return list.filter(record => String(record.username || '').toLowerCase() === String(user.username).toLowerCase() ||
+    (user.id && String(record.userId || record.userid || '') === String(user.id)));
 }
 
 function persistUser(user) {
@@ -3763,7 +3962,7 @@ function authMiddleware(req, res, next) {
       });
       return next();
     }
-    if (isUserDeletedIdentifier(storedUser.username) || (storedUser.email && isUserDeletedIdentifier(storedUser.email))) {
+    if (isDisabled(storedUser) || isUserDeletedIdentifier(storedUser.username) || (storedUser.email && isUserDeletedIdentifier(storedUser.email))) {
       res.clearCookie('vhr_token', getCookieSecurityOptions(req));
       return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
     }
@@ -3771,6 +3970,25 @@ function authMiddleware(req, res, next) {
     next();
   } catch (e) {
     return res.status(401).json({ ok: false, error: 'Token invalide' });
+  }
+}
+
+async function requireDashboardAccess(req, res, next) {
+  try {
+    const user = getUserByUsername(req.user?.username);
+    if (!user || isDisabled(user)) {
+      return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
+    }
+    if (isElectronRequest(req)) ensureElectronTrialStarted(user, { reason: 'dashboard-access' });
+    if (user.role === 'admin' && EFFECTIVE_ADMIN_ALLOWLIST.includes(String(user.username).toLowerCase())) return next();
+    const access = buildUserAccessSummary(user);
+    if (access.demoExpired && !access.hasActiveSubscription && !access.hasPerpetualLicense) {
+      return res.status(403).json({ ok: false, error: 'Essai expiré - abonnement ou licence requis', code: 'demo_expired' });
+    }
+    return next();
+  } catch (error) {
+    console.error('[auth] dashboard access check failed:', error.message);
+    return res.status(500).json({ ok: false, error: 'Erreur de vérification d’accès' });
   }
 }
 
@@ -4235,7 +4453,7 @@ function findLocalGuestUser(identifier) {
 
 // --- Route de login ---
 async function handleApiLogin(req, res) {
-  console.log('[api/login] request received:', req.body);
+  console.log('[api/login] request received');
   const identifier = String(req.body?.username || req.body?.email || '').trim();
   const password = req.body?.password;
   if (!identifier || typeof password !== 'string' || password.length === 0) {
@@ -5067,7 +5285,19 @@ app.get('/api/me', authMiddleware, (req, res) => {
   if (shouldProxyRemoteStatus(req)) {
     return proxyRemoteUserStatus(req, res, req.originalUrl);
   }
-  const user = { username: req.user.username, role: req.user.role, isPrimary: isPrimaryAccount(req.user) };
+  const access = buildUserAccessSummary(req.user);
+  const user = {
+    username: req.user.username, role: req.user.role, email: req.user.email || null,
+    emailVerified: req.user.emailVerified !== false && req.user.emailVerified !== 0,
+    isPrimary: isPrimaryAccount(req.user),
+    demoStartDate: req.user.demoStartDate || null,
+    subscriptionStatus: req.user.subscriptionStatus || 'none',
+    subscriptionId: req.user.subscriptionId || null,
+    accessSummary: {
+      ...access,
+      accessBlocked: access.demoExpired && !access.hasActiveSubscription && !access.hasPerpetualLicense
+    }
+  };
   res.json({ ok: true, user });
 });
 
@@ -5150,33 +5380,9 @@ function checkFeatureAccess(user) {
   const fullUser = getUserByUsername(user.username);
   if (!fullUser) return false;
   
-  // 1. Vérifier abonnement actif
-  if (fullUser.subscriptionStatus === 'active') {
-    return true;
-  }
-  
-  // 2. Vérifier licence perpétuelle
-  const licenses = loadLicenses();
-  const hasPerpetualLicense = licenses.some(l => 
-    l.userId === fullUser.id && 
-    l.type === 'perpetual' && 
-    l.status === 'active'
-  );
-  if (hasPerpetualLicense) {
-    return true;
-  }
-  
-  // 3. Vérifier démo (7 jours)
-  if (fullUser.demoStartDate && demoConfig.MODE === 'database') {
-    const startDate = new Date(fullUser.demoStartDate);
-    const expirationDate = new Date(startDate.getTime() + demoConfig.DEMO_DURATION_MS);
-    const now = new Date();
-    if (now <= expirationDate) {
-      return true;
-    }
-  }
-  
-  return false;
+  if (isDisabled(fullUser)) return false;
+  const access = buildUserAccessSummary(fullUser);
+  return access.hasActiveSubscription || access.hasPerpetualLicense || (access.hasDemo && !access.demoExpired);
 }
 
 /**
@@ -6596,35 +6802,83 @@ app.post('/api/subscriptions/cancel', authMiddleware, async (req, res) => {
   try {
     const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
-
-    // Chercher l'abonnement actif
-    const subIdx = subscriptions.findIndex(s => s.username === user.username && s.status === 'active');
-    if (subIdx === -1) return res.status(400).json({ ok: false, error: 'No active subscription found' });
-
-    const sub = subscriptions[subIdx];
-    sub.status = 'cancelled';
-    sub.cancelledAt = new Date().toISOString();
-    
-    // Mettre à jour l'utilisateur
-    user.subscriptionStatus = 'cancelled';
-    persistUser(user);
-    
-    if (USE_POSTGRES) {
-      // Save to PostgreSQL
-      db.updateSubscription(sub.id, { status: 'cancelled', cancelledat: sub.cancelledAt })
-        .catch(err => console.error('[db] updateSubscription error:', err && err.message ? err.message : err));
-    } else {
-      saveSubscriptions();
+    if (!process.env.STRIPE_SECRET_KEY || !stripe?.subscriptions?.update) {
+      return res.status(503).json({ ok: false, error: 'Stripe subscription management is unavailable' });
     }
 
-    res.json({ 
-      ok: true, 
-      message: 'Subscription cancelled successfully',
-      subscription: sub
+    const localRecords = await getSubscriptionRecordsForUser(user);
+    const local = localRecords.find(record =>
+      customerPolicy.hasSubscriptionAccess(record.status) &&
+      String(record.stripeSubscriptionId || record.stripesubscriptionid || '').startsWith('sub_')
+    );
+    const stripeSubscriptionId = String(
+      user.subscriptionId || user.subscriptionid ||
+      local?.stripeSubscriptionId || local?.stripesubscriptionid || ''
+    ).trim();
+    if (!stripeSubscriptionId || !stripeSubscriptionId.startsWith('sub_')) {
+      return res.status(400).json({ ok: false, error: 'No active Stripe subscription found' });
+    }
+
+    const current = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+    if (!current || !customerPolicy.hasSubscriptionAccess(current.status)) {
+      return res.status(400).json({ ok: false, error: 'No active subscription found' });
+    }
+    const updated = current.cancel_at_period_end
+      ? current
+      : await stripe.subscriptions.update(stripeSubscriptionId, { cancel_at_period_end: true });
+    if (!updated.cancel_at_period_end) {
+      return res.status(502).json({ ok: false, error: 'Stripe did not schedule cancellation' });
+    }
+
+    const periodEnd = updated.current_period_end || current.current_period_end || null;
+    if (!periodEnd) throw new Error('Stripe did not return the end of the current billing period');
+    const accessUntil = periodEnd ? new Date(periodEnd * 1000).toISOString() : null;
+    const localId = local?.id;
+    const localUpdates = {
+      status: updated.status || current.status,
+      endDate: accessUntil,
+      cancelAtPeriodEnd: true
+    };
+    if (localId) {
+      if (USE_POSTGRES && db && typeof db.updateSubscription === 'function') {
+        const pgUpdates = { status: localUpdates.status, enddate: accessUntil, cancelatperiodend: true };
+        const persisted = await db.updateSubscription(localId, pgUpdates);
+        if (!persisted) throw new Error('Unable to persist scheduled cancellation');
+      } else if (dbEnabled) {
+        const persisted = require('./db').updateSubscription(localId, localUpdates);
+        if (!persisted) throw new Error('Unable to persist scheduled cancellation');
+      } else {
+        const memoryRecord = subscriptions.find(record =>
+          record.id === localId || record.stripeSubscriptionId === stripeSubscriptionId
+        );
+        if (memoryRecord) Object.assign(memoryRecord, localUpdates);
+        saveSubscriptions();
+      }
+    }
+    user.subscriptionStatus = updated.status || current.status;
+    user.subscriptionExpiresAt = accessUntil;
+    user.cancelAtPeriodEnd = true;
+    persistUser(user);
+    for (const record of subscriptions) {
+      if (record.stripeSubscriptionId === stripeSubscriptionId) Object.assign(record, localUpdates);
+    }
+    if (!USE_POSTGRES) saveSubscriptions();
+
+    res.json({
+      ok: true,
+      message: 'Cancellation scheduled at the end of the current billing period',
+      cancelAtPeriodEnd: true,
+      accessUntil,
+      subscription: {
+        id: stripeSubscriptionId,
+        status: updated.status || current.status,
+        cancelAtPeriodEnd: true,
+        currentPeriodEnd: accessUntil
+      }
     });
   } catch (e) {
     console.error('[subscriptions] cancel error:', e);
-    res.status(500).json({ ok: false, error: 'Server error' });
+    res.status(502).json({ ok: false, error: 'Unable to schedule cancellation with Stripe' });
   }
 });
 
@@ -7109,13 +7363,11 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
     const { purchaseId } = req.body || {};
     if (!purchaseId) return res.status(400).json({ ok: false, error: 'purchaseId required' });
 
-    const normalizedPurchaseId = String(purchaseId || '').trim();
-    const purchaseEntries = Object.entries(purchaseConfig.PURCHASE_OPTIONS || {});
-    const purchase =
-      purchaseConfig.PURCHASE_OPTIONS[normalizedPurchaseId] ||
-      purchaseConfig.PURCHASE_OPTIONS[normalizedPurchaseId.toUpperCase()] ||
-      purchaseEntries.find(([, candidate]) => String(candidate?.id || '').toLowerCase() === normalizedPurchaseId.toLowerCase())?.[1];
-    if (!purchase) return res.status(400).json({ ok: false, error: 'Purchase option not found' });
+    const purchaseKey = customerPolicy.normalizePurchaseId(purchaseId, purchaseConfig.PURCHASE_OPTIONS);
+    const purchase = purchaseKey ? purchaseConfig.PURCHASE_OPTIONS[purchaseKey] : null;
+    if (!purchase || purchase.billingPeriod !== 'once') {
+      return res.status(400).json({ ok: false, error: 'Purchase option not found' });
+    }
 
     const resolvedPerpetualPriceId = cleanEnvValue(
       process.env.STRIPE_PRICE_ID_PERPETUAL ||
@@ -7128,6 +7380,14 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
 
     const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+    if (!customerPolicy.isValidEmail(user.email)) {
+      return res.status(400).json({ ok: false, error: 'Veuillez renseigner un email valide dans votre compte avant de payer' });
+    }
+
+    const priceInfo = await stripe.prices.retrieve(resolvedPerpetualPriceId);
+    if (priceInfo.type !== 'one_time') {
+      return res.status(400).json({ ok: false, error: 'Le tarif configuré pour cet achat doit être un prix à paiement unique' });
+    }
 
     const customerId = await ensureStripeCustomerForUser(user);
 
@@ -7144,15 +7404,17 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
       customer_email: undefined, // force existing customer to avoid cardholder name override
       success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/account.html?purchase=success`,
       cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/pricing.html?purchase=canceled`,
+      client_reference_id: String(user.id || user.username),
       metadata: {
-        userId: user.id || user.username,
+        userId: String(user.id || user.username),
         username: user.username,
-        purchaseId: purchase.id || normalizedPurchaseId,
-        purchaseName: purchase.name
+        userEmail: normalizeEmailValue(user.email),
+        purchaseId: purchaseKey,
+        purchaseName: String(purchase.name || purchaseKey)
       }
     });
 
-    console.log('[purchases] checkout session created:', { id: session.id, user: user.username, purchase: purchase.id || normalizedPurchaseId, priceId: resolvedPerpetualPriceId });
+    console.log('[purchases] checkout session created:', { id: session.id, user: user.username, purchase: purchaseKey });
     res.json({ ok: true, sessionId: session.id, url: session.url });
   } catch (e) {
     console.error('[purchases] create-checkout error:', e);
@@ -7161,27 +7423,39 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
 });
 
 // Get user's purchases history
-app.get('/api/purchases/history', authMiddleware, (req, res) => {
+app.get('/api/purchases/history', authMiddleware, async (req, res) => {
   try {
     const user = getUserByUsername(req.user.username);
     if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
 
-    // Chercher les achats dans les subscriptions (achetés comme payment)
-    const purchases = subscriptions.filter(s => 
-      (s.username === user.username || s.userId === user.id) && 
-      s.billingPeriod === 'once'
-    );
+    let history = [];
+    if (USE_POSTGRES && db && typeof db.getPurchasesForUser === 'function') {
+      history = await db.getPurchasesForUser(user.id, user.username);
+    } else if (dbEnabled && typeof require('./db').getPurchasesForUser === 'function') {
+      history = require('./db').getPurchasesForUser(user.id, user.username);
+    } else {
+      history = loadPurchaseHistory().filter(item =>
+        (user.id && String(item.userId || '') === String(user.id)) ||
+        String(item.username || '').toLowerCase() === String(user.username).toLowerCase()
+      );
+    }
 
     res.json({
       ok: true,
-      purchases: purchases.map(p => ({
-        id: p.id,
-        name: p.planName,
-        purchaseDate: p.startDate,
-        price: p.price,
-        licenseKey: p.licenseKey,
-        license: p.license
-      }))
+      purchases: history.map(item => {
+        const purchase = normalizeStoredPurchase(item);
+        return {
+          id: purchase.stripeCheckoutSessionId,
+          name: purchase.purchaseName,
+          purchaseId: purchase.purchaseId,
+          purchaseDate: purchase.createdAt,
+          price: purchase.amount / 100,
+          currency: purchase.currency,
+          status: purchase.status,
+          licenseKey: purchase.licenseKey,
+          license: { type: 'perpetual', status: 'active' }
+        };
+      })
     });
   } catch (e) {
     console.error('[purchases] history error:', e);
@@ -7194,22 +7468,63 @@ app.get('/api/purchases/history', authMiddleware, (req, res) => {
 app.patch('/api/me', authMiddleware, async (req, res) => {
   const { username, email, oldPassword, newPassword } = req.body || {};
   try {
-    const user = getUserByUsername(req.user.username);
-    if (!user) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
-    if (username && username !== user.username) {
-      // ensure unique
-        if (getUserByUsername(username)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
-      user.username = username;
+    const existing = getUserByUsername(req.user.username);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
+    const user = { ...existing };
+    const oldUsername = existing.username;
+    if (username !== undefined) {
+      const proposed = customerPolicy.normalizeUsername(username);
+      if (!customerPolicy.isValidUsername(proposed)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur invalide (3 à 32 caractères)' });
+      const duplicate = getUserByUsername(proposed);
+      if (duplicate && duplicate.username.toLowerCase() !== oldUsername.toLowerCase()) return res.status(409).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
+      user.username = proposed;
     }
-    if (email) user.email = email;
-    if (newPassword) {
+    if (email !== undefined) {
+      const proposedEmail = customerPolicy.normalizeEmail(email);
+      if (!customerPolicy.isValidEmail(proposedEmail)) return res.status(400).json({ ok: false, error: 'Email invalide' });
+      const duplicate = getUserByEmail(proposedEmail);
+      if (duplicate && duplicate.username.toLowerCase() !== oldUsername.toLowerCase()) return res.status(409).json({ ok: false, error: 'Cet email est déjà utilisé' });
+      if (proposedEmail !== customerPolicy.normalizeEmail(existing.email)) {
+        return res.status(409).json({ ok: false, code: 'central_profile_required',
+          error: 'Modifiez et vérifiez votre adresse email depuis votre espace client sur le site VHR.' });
+      }
+    }
+    if (newPassword !== undefined) {
+      if (!customerPolicy.isValidPassword(newPassword)) return res.status(400).json({ ok: false, error: 'Mot de passe requis : 8 à 72 octets UTF-8' });
       if (!oldPassword) return res.status(400).json({ ok: false, error: 'Ancien mot de passe requis' });
       const valid = await bcrypt.compare(oldPassword, user.passwordHash);
       if (!valid) return res.status(401).json({ ok: false, error: 'Ancien mot de passe incorrect' });
       user.passwordHash = await bcrypt.hash(newPassword, 10);
     }
-    // Persist changes via DB adapter or JSON
-    try { console.log('[users] about to persist user', user && user.username); persistUser(user); console.log('[users] persist successful'); } catch (e) { console.error('[users] persist error', e && (e.stack || e.message)); }
+    if (USE_POSTGRES) {
+      return res.status(409).json({ ok: false, code: 'central_profile_required',
+        error: 'Modifiez votre profil depuis votre espace client sur le site VHR.' });
+    }
+    if (dbEnabled) {
+      if (!require('./db').updateUserFields(oldUsername, user)) throw new Error('Original user not found');
+      users = require('./db').getAllUsers();
+    } else {
+      const index = users.findIndex(entry => entry.username.toLowerCase() === oldUsername.toLowerCase());
+      if (index < 0) throw new Error('Original user not found');
+      users[index] = user;
+      if (!saveUsers()) throw new Error('Unable to persist profile');
+    }
+    for (const record of subscriptions) {
+      if (String(record.username).toLowerCase() === oldUsername.toLowerCase()) {
+        record.username = user.username;
+        record.email = user.email;
+      }
+    }
+    if (!saveSubscriptions()) throw new Error('Unable to persist subscription references');
+    updateLicenseIdentityReferences(oldUsername, user);
+    const history = loadPurchaseHistory();
+    for (const purchase of history) {
+      if (String(purchase.username).toLowerCase() === oldUsername.toLowerCase()) {
+        purchase.username = user.username;
+        purchase.email = user.email;
+      }
+    }
+    savePurchaseHistory(history);
     // If username changed, reissue JWT and cookie
     const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
     res.cookie('vhr_token', token, buildAuthCookieOptions(req));
@@ -7271,9 +7586,6 @@ app.delete('/api/users/self', authMiddleware, async (req, res) => {
   }
 });
 
-// Note: devices should be visible to unauthenticated clients (dashboard UI)
-// Keep a single public route providing devices: the public route is defined further below.
-
 // --- Exemple de route admin only ---
 app.get('/api/admin', authMiddleware, (req, res) => {
   if (!ensureAllowedAdmin(req, res)) return;
@@ -7306,10 +7618,12 @@ app.get('/api/admin/users', authMiddleware, async (req, res) => {
       }
     }
 
-    const enrichedUsers = (sourceUsers || []).map(u => ({
-      ...u,
-      accessSummary: buildUserAccessSummary(u, { licenses })
-    }));
+    const enrichedUsers = (sourceUsers || []).map(u => {
+      const safe = { ...u };
+      for (const field of ['passwordHash', 'passwordhash', 'remoteAuthToken',
+        'emailVerificationToken', 'resetPasswordToken', 'resetToken']) delete safe[field];
+      return { ...safe, accessSummary: buildUserAccessSummary(u, { licenses }) };
+    });
     res.setHeader('Cache-Control', 'no-store, max-age=0');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
@@ -11092,38 +11406,6 @@ initializeApp().then(() => {
   startPrimaryServer(true);
 });
 
-// Handler de fermeture propre
-process.on('SIGINT', () => {
-  console.log('\nArrêt du serveur...');
-  
-  // Tuer tous les streams actifs
-  for (const [serial, stream] of streams) {
-    try {
-      if (stream.adbProc) {
-        console.log(`Arrêt adb: ${serial}`);
-        spawn('taskkill', ['/F', '/T', '/PID', String(stream.adbProc.pid)]);
-      }
-      if (stream.ffplayProc) {
-        console.log(`Arrêt ffplay: ${serial}`);
-        spawn('taskkill', ['/F', '/T', '/PID', String(stream.ffplayProc.pid)]);
-      }
-    } catch (e) {}
-  }
-  
-  // Tuer tous les processus restants
-  setTimeout(() => {
-    spawn('taskkill', ['/F', '/IM', 'adb.exe', '/T']);
-    spawn('taskkill', ['/F', '/IM', 'ffplay.exe']);
-    process.exit(0);
-  }, 500);
-});
-
-process.on('SIGTERM', () => {
-  spawn('taskkill', ['/F', '/IM', 'adb.exe', '/T']);
-  spawn('taskkill', ['/F', '/IM', 'ffplay.exe']);
-  process.exit(0);
-});
-
 // Removed /stripe-prices debug route to avoid exposing price IDs. Use /stripe-check for key validation (local-only).
 
 // Local-only debug endpoint to verify Stripe key works without creating sessions (enabled only with STRIPE_DEBUG_PRICES=1)
@@ -11299,44 +11581,45 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
     let isNewUser = false;
     if (type === 'checkout.session.completed' && obj.metadata) {
       const { username, userEmail, passwordHash } = obj.metadata;
-      if (username && userEmail && passwordHash) {
-        // Check if user already exists
-        user = users.find(u => u.username === username);
-        if (!user) {
-          // Create new user from registration data
-          console.log('[webhook] Creating new user from checkout metadata:', username);
+      const normalizedUsername = username ? username.trim() : null;
+      const normalizedEmail = normalizeEmailValue(userEmail);
+      if (normalizedUsername) {
+        user = getUserByUsername(normalizedUsername);
+      }
+      if (!user && normalizedEmail) {
+        user = getUserByEmail(normalizedEmail);
+      }
+      if (!user && normalizedUsername && normalizedEmail && passwordHash) {
+        console.log('[webhook] Creating new user from checkout metadata:', normalizedUsername);
+        try {
+          const hashedPassword = await bcrypt.hash(passwordHash, 10);
+          user = {
+            id: crypto.randomUUID(),
+            username: normalizedUsername,
+            email: normalizedEmail,
+            passwordHash: hashedPassword,
+            role: 'user',
+            stripeCustomerId: customerId || null,
+            createdAt: new Date().toISOString(),
+            demoStartDate: new Date().toISOString(),
+            demoExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+          };
+          users.push(user);
+          saveUsers();
+          isNewUser = true;
+          console.log('[webhook] New user created:', { username: normalizedUsername, email: normalizedEmail });
+
           try {
-            const hashedPassword = await bcrypt.hash(passwordHash, 10);
-            user = {
-              id: crypto.randomUUID(),
-              username: username,
-              email: userEmail,
-              passwordHash: hashedPassword,
-              role: 'user',
-              stripeCustomerId: customerId || null,
-              createdAt: new Date().toISOString(),
-              demoStartDate: null,
-              demoExpiresAt: null,
-              demoStartSource: 'pending'
+            const credentialsEmailData = {
+              ...user,
+              plainPassword: passwordHash
             };
-            users.push(user);
-            saveUsers();
-            isNewUser = true;
-            console.log('[webhook] New user created:', { username, email: userEmail });
-            
-            // Send credentials email immediately after user creation
-            try {
-              const credentialsEmailData = {
-                ...user,
-                plainPassword: passwordHash // Include password in email data
-              };
-              await emailService.sendCredentialsEmail(credentialsEmailData);
-            } catch (emailError) {
-              console.error('[webhook] Error sending credentials email:', emailError.message);
-            }
-          } catch (error) {
-            console.error('[webhook] Error creating user:', error.message);
+            await emailService.sendCredentialsEmail(credentialsEmailData);
+          } catch (emailError) {
+            console.error('[webhook] Error sending credentials email:', emailError.message);
           }
+        } catch (error) {
+          console.error('[webhook] Error creating user:', error.message);
         }
       }
     }
@@ -11359,13 +11642,14 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
       user.subscriptionId = obj.id;
 
       // Upsert subscription record for admin dashboard
-      ensureUserSubscription(user, {
+      await upsertStripeSubscriptionRecord(user, {
         stripeSubscriptionId: obj.id,
         stripePriceId: obj?.items?.data?.[0]?.price?.id || null,
         status: obj.status || 'unknown',
         planName: obj?.items?.data?.[0]?.price?.nickname || obj?.items?.data?.[0]?.plan?.nickname || 'Abonnement',
         startDate: obj.current_period_start ? new Date(obj.current_period_start * 1000).toISOString() : undefined,
-        endDate: obj.current_period_end ? new Date(obj.current_period_end * 1000).toISOString() : undefined
+        endDate: obj.current_period_end ? new Date(obj.current_period_end * 1000).toISOString() : undefined,
+        cancelAtPeriodEnd: obj.cancel_at_period_end === true
       });
     } else if (type === 'checkout.session.completed') {
       // session completed often delivers: session.customer
@@ -11380,7 +11664,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
           const stripeSub = await stripe.subscriptions.retrieve(obj.subscription);
           user.subscriptionStatus = stripeSub.status || user.subscriptionStatus || 'active';
           user.subscriptionId = stripeSub.id;
-          ensureUserSubscription(user, {
+          await upsertStripeSubscriptionRecord(user, {
             stripeSubscriptionId: stripeSub.id,
             stripePriceId: stripeSub?.items?.data?.[0]?.price?.id || null,
             status: stripeSub.status || 'unknown',
@@ -11408,47 +11692,39 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
       
       // Envoyer un email de confirmation pour un achat/abonnement
       if (obj.mode === 'payment') {
-        // One-time payment - Achat définitif (Licence perpétuelle 499€)
-        const purchaseId = obj.metadata?.purchaseId;
-        const purchase = purchaseId ? purchaseConfig.PURCHASE_OPTIONS[purchaseId] : null;
-        
-        if (purchase && user.email) {
-          console.log('[webhook] Processing payment for user:', user.username, 'purchaseId:', purchaseId);
-          
-          // Generate unique license key for this purchase
-          const licenseKey = emailService.generateLicenseKey();
-          console.log('[webhook] Generated license key:', licenseKey);
-          
-          // Store license key in user record
-          user.licenseKey = licenseKey;
-          user.licenseGeneratedAt = new Date().toISOString();
-          user.licenseType = 'perpetual';
-          user.licensePurchaseId = purchaseId;
-          user.licensePurchaseAmount = (obj.amount_total / 100);
-          
-          // Store in licenses file as well (for backup)
-          const license = addLicense(user.username, user.email, purchaseId);
-          console.log('[webhook] License stored:', license.key);
-          
-          // Send purchase success email with license key
-          try {
-            const purchaseData = {
-              planName: purchase.name,
-              orderId: obj.id,
-              price: (obj.amount_total / 100).toFixed(2),
-              licenseDuration: 'Perpétuel',
-              updatesUntil: 'À jamais',
-              licenseKey: licenseKey // Add license key to email data
-            };
-            
-            const emailResult = await emailService.sendPurchaseSuccessEmail(user, purchaseData);
-            console.log('[webhook] Purchase success email sent:', emailResult);
-            
-            if (!emailResult.success) {
-              console.error('[webhook] Email send failed:', emailResult.error);
+        if (obj.payment_status !== 'paid') {
+          console.log('[webhook] Ignoring unpaid one-time checkout session:', obj.id);
+        } else {
+          const resolvedPurchase = customerPolicy.resolvePaidPurchaseSession(obj, purchaseConfig.PURCHASE_OPTIONS);
+          if (!resolvedPurchase || !customerPolicy.isValidEmail(user.email)) {
+            console.warn('[webhook] Paid Checkout session lacks a valid configured purchase or account email:', obj.id);
+          } else {
+            const { purchaseId: purchaseKey, purchase } = resolvedPurchase;
+            const recorded = await recordPaidPerpetualPurchase(user, purchaseKey, purchase, obj);
+            console.log('[webhook] Paid perpetual purchase recorded:', {
+              sessionId: recorded.purchase.stripeCheckoutSessionId,
+              purchaseId: recorded.purchase.purchaseId,
+              created: recorded.created
+            });
+
+            if (recorded.created) {
+              try {
+                const purchaseData = {
+                  planName: purchase.name,
+                  orderId: obj.id,
+                  price: (recorded.purchase.amount / 100).toFixed(2),
+                  licenseDuration: 'Perpétuel',
+                  updatesUntil: 'À jamais',
+                  licenseKey: recorded.purchase.licenseKey
+                };
+                const emailResult = await emailService.sendPurchaseSuccessEmail(user, purchaseData);
+                if (emailResult && emailResult.success === false) {
+                  console.error('[webhook] Purchase email send failed:', emailResult.error);
+                }
+              } catch (e) {
+                console.error('[webhook] Error sending purchase email:', e && e.message ? e.message : e);
+              }
             }
-          } catch (e) {
-            console.error('[webhook] Error sending purchase email:', e.message);
           }
         }
       } else if (obj.mode === 'subscription') {
@@ -11456,21 +11732,24 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
         if (user.email) {
           console.log('[webhook] Processing subscription for user:', user.username);
           
-          // Mark subscription as active
-          user.subscriptionStatus = 'active';
+          const currentSubscriptionStatus = normalizeSubscriptionStatus(user.subscriptionStatus || 'unknown');
+          user.subscriptionStatus = currentSubscriptionStatus;
           user.subscriptionPurchasedAt = new Date().toISOString();
 
           // Upsert subscription record for admin dashboard visibility
-          ensureUserSubscription(user, {
+          await upsertStripeSubscriptionRecord(user, {
             stripeSubscriptionId: obj.subscription || null,
             stripePriceId: obj?.display_items?.[0]?.price?.id || obj?.line_items?.data?.[0]?.price?.id || null,
-            status: 'active',
+            status: currentSubscriptionStatus,
             planName: obj.metadata?.purchaseName || 'Abonnement Professionnel',
-            startDate: new Date().toISOString()
+            startDate: new Date().toISOString(),
+            cancelAtPeriodEnd: false
           });
 
           const alreadySent = !!user.subscriptionConfirmationSentAt;
-          if (alreadySent) {
+          if (!customerPolicy.hasSubscriptionAccess(currentSubscriptionStatus)) {
+            console.log('[webhook] Subscription is not active/trialing; no access success email sent:', currentSubscriptionStatus);
+          } else if (alreadySent) {
             console.log('[webhook] Subscription confirmation already sent, skipping email for', user.username);
           } else {
             try {
@@ -11499,9 +11778,10 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
       }
     }
 
-    saveUsers();
+    persistUser(user);
   } catch (e) {
     console.error('[Stripe webhook] error handling event', e && e.message);
+    return res.status(500).json({ received: false, error: 'Unable to persist payment event' });
   }
 
   res.json({ received: true });
@@ -11510,10 +11790,12 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 // --- Route de register / création de compte ---
 app.post('/api/register', async (req, res) => {
   const { username, password, email } = req.body || {};
-  if (!username || !password) return res.status(400).json({ ok: false, error: 'username and password required' });
-  const normalizedUsername = String(username || '').trim();
-  if (!normalizedUsername) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur invalide' });
-  const normalizedEmail = email ? String(email).trim().toLowerCase() : null;
+  if (!username || !password || !email) return res.status(400).json({ ok: false, error: 'username, password and email required' });
+  const normalizedUsername = customerPolicy.normalizeUsername(username);
+  if (!customerPolicy.isValidUsername(normalizedUsername)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur invalide (3 à 32 caractères)' });
+  const normalizedEmail = customerPolicy.normalizeEmail(email);
+  if (!customerPolicy.isValidEmail(normalizedEmail)) return res.status(400).json({ ok: false, error: 'Email invalide' });
+  if (!customerPolicy.isValidPassword(password)) return res.status(400).json({ ok: false, error: 'Mot de passe requis : 8 à 72 octets UTF-8' });
   if (isUserDeletedIdentifier(normalizedUsername) || (normalizedEmail && isUserDeletedIdentifier(normalizedEmail))) {
     return res.status(403).json({ ok: false, error: 'Compte supprimé ou désactivé', code: 'account_deleted' });
   }

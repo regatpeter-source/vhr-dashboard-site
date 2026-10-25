@@ -1,3 +1,13 @@
+*, *::before, *::after { box-sizing: border-box; }
+html, body { max-width: 100%; overflow-wrap: anywhere; }
+input, select, textarea { max-width: 100%; min-width: 0; }
+nav ul { display: flex; flex-wrap: wrap; gap: 12px; padding-left: 0; }
+@media (max-width: 600px) {
+  header nav { padding: 12px; height: auto; flex-wrap: wrap; }
+  header nav ul { width: 100%; margin: 12px 0 0; gap: 12px; }
+  header nav ul li { margin: 0; }
+}
+
 /* Centrage des descriptifs */
 .centered {
   text-align: center;

@@ -1,6 +1,6 @@
 {
   "name": "vhr-dashboard-site",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "VHR Dashboard - Server and site-vitrine",
   "main": "electron-main.js",
   "scripts": {
@@ -8,7 +8,7 @@
     "start:dev": "cross-env NO_ADB=1 LOCAL_APP=1 FORCE_HTTP=1 node server.js",
     "start:local": "dotenv -e .env cross-env LOCAL_APP=1 FORCE_HTTP=1 electron .",
     "dev:electron": "dotenv -e .env cross-env electron .",
-    "build:electron": "set ELECTRON_BUILDER_SKIP_NODE_GYP_REBUILD=1&&dotenv -e .env cross-env electron-builder -w",
+    "build:electron": "cross-env ELECTRON_BUILDER_SKIP_NODE_GYP_REBUILD=1 electron-builder -w",
     "launch": "node launcher.js",
     "build:exe": "pkg launcher.js --target node18-win-x64 --output \"VHR Dashboard.exe\"",
     "fixenc": "node scripts/fix-encodings.js",
@@ -61,6 +61,7 @@
   "build": {
     "appId": "com.vhr.dashboard",
     "productName": "VHR Dashboard",
+    "artifactName": "VHR.Dashboard.Setup.${version}.${ext}",
     "directories": {
       "buildResources": "build",
       "output": "dist"
@@ -85,6 +86,14 @@
     ],
     "files": [
       "**/*",
+      "!.env",
+      "!.env.*",
+      "!data{,/**}",
+      "!key.pem",
+      "!cert.pem",
+      "!**/*.sqlite",
+      "!**/*.sqlite3",
+      "!**/*.db",
       "!dist{,/**}",
       "!dist-client{,/**}",
       "!dist-build{,/**}",
@@ -101,8 +110,9 @@
       "!tmp-pack{,/**}",
       "!node-portable{,/**}",
       "!client-pack{,/**}",
-      "!node_modules/better-sqlite3{,/**}",
-      "!node_modules/better-sqlite3-*{,/**}",
+      "!extracted-app{,/**}",
+      "!locked-release{,/**}",
+      "!public/dashboard-pro-latest{,/**}",
       "!tts-receiver-app{,/**}",
       "!OpenSSL-Win64{,/**}",
       "!android-*{,/**}",
@@ -131,6 +141,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
+      "shortcutName": "VHR Dashboard",
       "include": "build/installer.nsh",
       "allowElevation": true
     }

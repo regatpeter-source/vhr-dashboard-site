@@ -2,28 +2,9 @@ FROM node:18-bullseye@sha256:3a933e69ff5df3650c76226e3563d9d193513e9987325d2edf2
 
 ENV NODE_ENV=production
 ENV PORT=3000
-ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
-ENV PATH=$JAVA_HOME/bin:$PATH
-ENV GRADLE_HOME=/opt/gradle/gradle-8.7
-ENV PATH=$GRADLE_HOME/bin:$PATH
-
-RUN apt-get update && \
-  apt-get install -y --no-install-recommends \
-  adb \
-  ffmpeg \
-  scrcpy \
-  openjdk-11-jdk-headless \
-  wget \
-  unzip \
-  && rm -rf /var/lib/apt/lists/*
-
-# Install Gradle 8.7
-RUN mkdir -p /opt/gradle && \
-  cd /opt/gradle && \
-  wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip && \
-  unzip -q gradle-8.7-bin.zip && \
-  rm gradle-8.7-bin.zip && \
-  ln -s gradle-8.7 current
+ENV VHR_RUNTIME=web
+ENV NO_ADB=1
+ENV SMTP_DEBUG=0
 
 WORKDIR /usr/src/app
 

@@ -140,6 +140,11 @@ async function initDatabase() {
           } else {
             console.log(`[DB] Note: Could not add column ${col.name}:`, colErr && colErr.message);
           }
+          try {
+            await client.query("CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_unique ON users (LOWER(email)) WHERE email IS NOT NULL AND email <> ''");
+          } catch (emailIndexErr) {
+            console.warn('[DB] Email uniqueness index not applied; existing duplicate data may need administrative cleanup.');
+          }
         }
       }
 
@@ -179,7 +184,8 @@ async function initDatabase() {
         { name: 'totalpaid', type: 'NUMERIC DEFAULT 0' },
         { name: 'startdate', type: 'TIMESTAMPTZ' },
         { name: 'enddate', type: 'TIMESTAMPTZ' },
-        { name: 'cancelledat', type: 'TIMESTAMPTZ' }
+        { name: 'cancelledat', type: 'TIMESTAMPTZ' },
+        { name: 'cancelatperiodend', type: 'BOOLEAN DEFAULT FALSE' }
       ];
       for (const col of subscriptionColumnChecks) {
         try {
@@ -193,6 +199,23 @@ async function initDatabase() {
         }
       }
       console.log('[DB] [32m[1m✓[0m Subscriptions table ready');
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS purchases (
+          id BIGSERIAL PRIMARY KEY,
+          stripecheckoutsessionid VARCHAR(255) NOT NULL UNIQUE,
+          stripepaymentintentid VARCHAR(255) UNIQUE,
+          userid VARCHAR(255),
+          username VARCHAR(255) NOT NULL,
+          email VARCHAR(255),
+          purchaseid VARCHAR(255) NOT NULL,
+          purchasename TEXT NOT NULL,
+          amount BIGINT NOT NULL,
+          currency VARCHAR(10) NOT NULL,
+          status VARCHAR(32) NOT NULL,
+          licensekey VARCHAR(255) NOT NULL UNIQUE,
+          createdat TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
 
       await importMessagesIfNeeded(client);
       await ensureDefaultUsers(client);
@@ -556,6 +579,33 @@ async function getUserByUsername(username) {
   }
 }
 
+async function getUserByEmail(email) {
+  try {
+    const result = await pool.query(
+      'SELECT id, username, passwordhash, email, role, emailverified, subscriptionstatus, subscriptionid, stripecustomerid, demostartdate, demoenddate, emailverificationtoken, emailverificationexpiresat, emailverificationsentat, emailverifiedat FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1',
+      [String(email || '').trim()]
+    );
+    const row = result.rows?.[0];
+    return row ? {
+      ...row,
+      passwordHash: row.passwordhash,
+      emailVerified: row.emailverified,
+      subscriptionStatus: row.subscriptionstatus,
+      subscriptionId: row.subscriptionid,
+      stripeCustomerId: row.stripecustomerid,
+      demoStartDate: row.demostartdate,
+      demoEndDate: row.demoenddate,
+      emailVerificationToken: row.emailverificationtoken,
+      emailVerificationExpiresAt: row.emailverificationexpiresat,
+      emailVerificationSentAt: row.emailverificationsentat,
+      emailVerifiedAt: row.emailverifiedat
+    } : null;
+  } catch (err) {
+    console.error('[DB] Error finding user by email:', err && err.message ? err.message : err);
+    return null;
+  }
+}
+
 async function createUser(id, username, passwordHash, email, role = 'user', options = {}) {
   try {
     const columns = ['id', 'username', 'passwordhash', 'email', 'role'];
@@ -620,6 +670,61 @@ async function updateUser(id, updates) {
   } catch (err) {
     console.error('[DB] Error updating user:', err && err.message ? err.message : err);
     return null;
+  }
+}
+
+async function updateUserIdentity(oldUsername, user) {
+  if (!oldUsername || !user || !user.username) return null;
+  let client;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const found = await client.query(
+      'SELECT id, username FROM users WHERE LOWER(username) = LOWER($1) FOR UPDATE',
+      [oldUsername]
+    );
+    const row = found.rows?.[0];
+    if (!row) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const userFields = ['username = $1', 'email = $2', 'updatedat = $3'];
+    const userValues = [user.username, user.email || null, user.updatedAt || new Date().toISOString()];
+    const optionalUpdates = [
+      ['passwordhash', 'passwordHash'],
+      ['emailverified', 'emailVerified'],
+      ['emailverificationtoken', 'emailVerificationToken'],
+      ['emailverificationexpiresat', 'emailVerificationExpiresAt'],
+      ['emailverificationsentat', 'emailVerificationSentAt'],
+      ['emailverifiedat', 'emailVerifiedAt']
+    ];
+    for (const [column, property] of optionalUpdates) {
+      if (!Object.prototype.hasOwnProperty.call(user, property)) continue;
+      userFields.push(`${column} = $${userValues.length + 1}`);
+      userValues.push(user[property] ?? null);
+    }
+    userValues.push(row.id);
+    await client.query(
+      `UPDATE users SET ${userFields.join(', ')} WHERE id = $${userValues.length}`,
+      userValues
+    );
+    await client.query(
+      `UPDATE subscriptions SET username = $1, email = $2, updatedat = CURRENT_TIMESTAMP
+       WHERE userid = $3 OR LOWER(username) = LOWER($4)`,
+      [user.username, user.email || null, row.id, row.username]
+    );
+    await client.query(
+      `UPDATE purchases SET username = $1, email = $2
+       WHERE userid = $3 OR LOWER(username) = LOWER($4)`,
+      [user.username, user.email || null, row.id, row.username]
+    );
+    await client.query('COMMIT');
+    return { id: row.id, username: user.username, email: user.email || null };
+  } catch (err) {
+    try { if (client) await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally {
+    if (client) client.release();
   }
 }
 
@@ -707,6 +812,7 @@ async function addSubscription(subscriptionData) {
       startDate,
       endDate,
       cancelledAt,
+      cancelAtPeriodEnd,
       totalPaid
     } = subscriptionData;
 
@@ -721,6 +827,7 @@ async function addSubscription(subscriptionData) {
       'startdate',
       'enddate',
       'cancelledat',
+      'cancelatperiodend',
       'totalpaid'
     ];
     const baseValues = [
@@ -734,6 +841,7 @@ async function addSubscription(subscriptionData) {
       startDate ? new Date(startDate) : null,
       endDate ? new Date(endDate) : null,
       cancelledAt ? new Date(cancelledAt) : null,
+      cancelAtPeriodEnd === true,
       totalPaid || 0
     ];
 
@@ -797,6 +905,69 @@ async function updateSubscription(id, updates) {
   } catch (err) {
     console.error('[DB] Error updating subscription:', err && err.message ? err.message : err);
     return null;
+  }
+}
+
+async function recordPurchase(purchase) {
+  if (!purchase || !purchase.stripeCheckoutSessionId) return null;
+  let client;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const inserted = await client.query(
+      `INSERT INTO purchases (
+        stripecheckoutsessionid, stripepaymentintentid, userid, username, email,
+        purchaseid, purchasename, amount, currency, status, licensekey, createdat
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'paid',$10,$11)
+      ON CONFLICT DO NOTHING
+      RETURNING *`,
+      [
+        purchase.stripeCheckoutSessionId,
+        purchase.stripePaymentIntentId || null,
+        purchase.userId == null ? null : String(purchase.userId),
+        purchase.username,
+        purchase.email || null,
+        purchase.purchaseId,
+        purchase.purchaseName,
+        purchase.amount,
+        purchase.currency,
+        purchase.licenseKey,
+        purchase.createdAt || new Date().toISOString()
+      ]
+    );
+    if (inserted.rows?.[0]) {
+      await client.query('COMMIT');
+      return { purchase: inserted.rows[0], created: true };
+    }
+    const existing = await client.query(
+      `SELECT * FROM purchases
+       WHERE stripecheckoutsessionid = $1
+          OR ($2::text IS NOT NULL AND stripepaymentintentid = $2)
+       LIMIT 1`,
+      [purchase.stripeCheckoutSessionId, purchase.stripePaymentIntentId || null]
+    );
+    await client.query('COMMIT');
+    return existing.rows?.[0] ? { purchase: existing.rows[0], created: false } : null;
+  } catch (err) {
+    try { if (client) await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally {
+    if (client) client.release();
+  }
+}
+
+async function getPurchasesForUser(userId, username) {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM purchases
+       WHERE ($1::text IS NOT NULL AND userid = $1) OR LOWER(username) = LOWER($2)
+       ORDER BY createdat DESC`,
+      [userId == null ? null : String(userId), String(username || '')]
+    );
+    return result.rows || [];
+  } catch (err) {
+    console.error('[DB] Error getting purchases:', err && err.message ? err.message : err);
+    return [];
   }
 }
 
@@ -878,8 +1049,10 @@ module.exports = {
   // users
   getUsers,
   getUserByUsername,
+  getUserByEmail,
   createUser,
   updateUser,
+  updateUserIdentity,
   deleteUser,
   deleteUserByUsername,
   // subscriptions
@@ -887,6 +1060,8 @@ module.exports = {
   getAllSubscriptions,
   updateSubscription,
   deleteSubscription,
+  recordPurchase,
+  getPurchasesForUser,
   ensureInstallationRecord,
   getInstallationById
 };

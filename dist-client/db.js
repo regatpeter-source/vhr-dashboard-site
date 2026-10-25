@@ -38,9 +38,24 @@ function initSqlite(dbFile) {
       "ALTER TABLE users ADD COLUMN demoStartReason TEXT",
       "ALTER TABLE users ADD COLUMN demoStartAt TEXT",
       "ALTER TABLE users ADD COLUMN demoEndDate TEXT",
-      "ALTER TABLE users ADD COLUMN demoExtensionDays INTEGER"
+      "ALTER TABLE users ADD COLUMN demoExtensionDays INTEGER",
+      "ALTER TABLE users ADD COLUMN status TEXT",
+      "ALTER TABLE users ADD COLUMN disabledAt TEXT",
+      "ALTER TABLE users ADD COLUMN deletedAt TEXT",
+      "ALTER TABLE users ADD COLUMN emailVerified INTEGER",
+      "ALTER TABLE users ADD COLUMN emailVerificationToken TEXT",
+      "ALTER TABLE users ADD COLUMN emailVerificationExpiresAt TEXT",
+      "ALTER TABLE users ADD COLUMN emailVerificationSentAt TEXT",
+      "ALTER TABLE users ADD COLUMN emailVerifiedAt TEXT",
+      "ALTER TABLE users ADD COLUMN subscriptionConfirmationSentAt TEXT",
+      "ALTER TABLE users ADD COLUMN updatedAt TEXT",
+      "ALTER TABLE users ADD COLUMN recordJson TEXT"
     ];
-    alterStatements.forEach(stmt => { try { db.prepare(stmt).run(); } catch (e) {} });
+    for (const statement of alterStatements) {
+      try { db.prepare(statement).run(); } catch (error) {
+        if (!/duplicate column name/i.test(error.message)) throw error;
+      }
+    }
     // Create subscriptions table
     db.prepare(`CREATE TABLE IF NOT EXISTS subscriptions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,6 +73,8 @@ function initSqlite(dbFile) {
       updatedAt TEXT,
       FOREIGN KEY(userId) REFERENCES users(id)
     )`).run();
+    try { db.prepare('ALTER TABLE subscriptions ADD COLUMN cancelAtPeriodEnd INTEGER DEFAULT 0').run(); }
+    catch (error) { if (!/duplicate column name/i.test(error.message)) throw error; }
     // Create messages table
     db.prepare(`CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,75 +101,74 @@ function isEnabled() { return enabled; }
 
 function addOrUpdateUser(user) {
   if (!enabled) return false;
-  // Upsert by username
-  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(user.username);
+  const existing = findUserByUsername(user.username);
+  const merged = { ...existing, ...user };
+  const fields = ['username', 'passwordHash', 'role', 'email', 'stripeCustomerId',
+    'latestInvoiceId', 'lastInvoicePaidAt', 'subscriptionStatus', 'subscriptionId',
+    'demoStartDate', 'demoStartSource', 'demoStartReason', 'demoStartAt', 'demoEndDate',
+    'demoExtensionDays', 'status', 'disabledAt', 'deletedAt', 'emailVerified',
+    'emailVerificationToken', 'emailVerificationExpiresAt', 'emailVerificationSentAt',
+    'emailVerifiedAt', 'subscriptionConfirmationSentAt', 'createdAt', 'updatedAt', 'recordJson'];
+  merged.createdAt = merged.createdAt || new Date().toISOString();
+  merged.updatedAt = new Date().toISOString();
+  delete merged.recordJson;
+  merged.recordJson = JSON.stringify(merged);
+  const values = fields.map(field => {
+    const value = merged[field];
+    if (typeof value === 'boolean') return value ? 1 : 0;
+    return value === undefined ? null : value;
+  });
   if (existing) {
-    db.prepare(`UPDATE users SET passwordHash = ?, role = ?, email = ?, stripeCustomerId = ?, latestInvoiceId = ?, lastInvoicePaidAt = ?, subscriptionStatus = ?, subscriptionId = ?, demoStartDate = ?, demoStartSource = ?, demoStartReason = ?, demoStartAt = ?, demoEndDate = ?, demoExtensionDays = ? WHERE username = ?`).run(
-      user.passwordHash || null,
-      user.role || null,
-      user.email || null,
-      user.stripeCustomerId || null,
-      user.latestInvoiceId || null,
-      user.lastInvoicePaidAt || null,
-      user.subscriptionStatus || null,
-      user.subscriptionId || null,
-      user.demoStartDate || null,
-      user.demoStartSource || null,
-      user.demoStartReason || null,
-      user.demoStartAt || null,
-      user.demoEndDate || null,
-      user.demoExtensionDays ?? null,
-      user.username
-    );
+    db.prepare(`UPDATE users SET ${fields.map(field => `${field} = ?`).join(', ')} WHERE id = ?`)
+      .run(...values, existing.id);
   } else {
-    db.prepare(`INSERT INTO users (username, passwordHash, role, email, stripeCustomerId, latestInvoiceId, lastInvoicePaidAt, subscriptionStatus, subscriptionId, demoStartDate, demoStartSource, demoStartReason, demoStartAt, demoEndDate, demoExtensionDays, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`) 
-      .run(
-        user.username,
-        user.passwordHash || null,
-        user.role || null,
-        user.email || null,
-        user.stripeCustomerId || null,
-        user.latestInvoiceId || null,
-        user.lastInvoicePaidAt || null,
-        user.subscriptionStatus || null,
-        user.subscriptionId || null,
-        user.demoStartDate || null,
-        user.demoStartSource || null,
-        user.demoStartReason || null,
-        user.demoStartAt || null,
-        user.demoEndDate || null,
-        user.demoExtensionDays ?? null,
-        new Date().toISOString()
-      );
+    db.prepare(`INSERT INTO users (${fields.join(', ')}) VALUES (${fields.map(() => '?').join(', ')})`)
+      .run(...values);
   }
   return true;
 }
 
 function getAllUsers() {
   if (!enabled) return [];
-  return db.prepare('SELECT username, role, email, stripeCustomerId, latestInvoiceId, lastInvoicePaidAt, subscriptionStatus, subscriptionId, demoStartDate, demoStartSource, demoStartReason, demoStartAt, demoEndDate, demoExtensionDays FROM users').all();
+  return db.prepare('SELECT * FROM users').all().map(hydrateUser);
+}
+
+function hydrateUser(row) {
+  if (!row) return null;
+  const { recordJson, ...columns } = row;
+  if (columns.emailVerified === null) delete columns.emailVerified;
+  return { ...(recordJson ? JSON.parse(recordJson) : {}), ...columns };
 }
 
 function findUserByUsername(username) {
   if (!enabled) return null;
-  return db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+  return hydrateUser(db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(username));
+}
+
+function findUserByEmail(email) {
+  if (!enabled) return null;
+  return hydrateUser(db.prepare('SELECT * FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM(?))').get(email));
 }
 
 function findUserByStripeCustomerId(customerId) {
   if (!enabled) return null;
-  return db.prepare('SELECT * FROM users WHERE stripeCustomerId = ?').get(customerId);
+  return hydrateUser(db.prepare('SELECT * FROM users WHERE stripeCustomerId = ?').get(customerId));
 }
 
 function updateUserFields(username, fields) {
   if (!enabled) return false;
-  const allowed = ['username', 'passwordHash', 'role', 'email', 'stripeCustomerId', 'latestInvoiceId', 'lastInvoicePaidAt', 'subscriptionStatus', 'subscriptionId', 'demoStartDate', 'demoStartSource', 'demoStartReason', 'demoStartAt', 'demoEndDate', 'demoExtensionDays'];
-  const updates = Object.keys(fields).filter(k => allowed.includes(k)).map(k => `${k} = @${k}`);
-  if (updates.length === 0) return false;
-  const setSql = updates.join(', ');
-  const stmt = db.prepare(`UPDATE users SET ${setSql} WHERE username = @username`);
-  const params = Object.assign({}, fields, { username });
-  stmt.run(params);
-  return true;
+  const existing = findUserByUsername(username);
+  if (!existing) return false;
+  return db.transaction(() => {
+    if (fields.username && fields.username !== existing.username) {
+      const duplicate = findUserByUsername(fields.username);
+      if (duplicate && duplicate.id !== existing.id) throw new Error('Username already exists');
+      db.prepare('UPDATE users SET username = ? WHERE id = ?').run(fields.username, existing.id);
+      db.prepare('UPDATE subscriptions SET username = ? WHERE LOWER(username) = LOWER(?)')
+        .run(fields.username, existing.username);
+    }
+    return addOrUpdateUser({ ...existing, ...fields });
+  })();
 }
 
 function deleteUserByUsername(username) {
@@ -215,7 +231,8 @@ function deleteMessage(messageId) {
 // ===== Subscriptions =====
 function addSubscription(subscriptionData) {
   if (!enabled) return null;
-  const { userId, username, email, stripeSubscriptionId, stripePriceId, status, planName, startDate, endDate } = subscriptionData;
+  const { userId = null, username = null, email = null, stripeSubscriptionId = null,
+    stripePriceId = null, status = null, planName = null, startDate = null, endDate = null } = subscriptionData;
   const stmt = db.prepare(`INSERT INTO subscriptions (userId, username, email, stripeSubscriptionId, stripePriceId, status, planName, startDate, endDate, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const now = new Date().toISOString();
   const result = stmt.run(userId, username, email, stripeSubscriptionId, stripePriceId, status, planName, startDate, endDate, now, now);
@@ -234,12 +251,13 @@ function getActiveSubscriptions() {
 
 function updateSubscription(subscriptionId, updates) {
   if (!enabled) return false;
-  const allowed = ['status', 'planName', 'startDate', 'endDate', 'cancelledAt'];
+  const allowed = ['status', 'planName', 'startDate', 'endDate', 'cancelledAt', 'cancelAtPeriodEnd'];
   const updateFields = Object.keys(updates).filter(k => allowed.includes(k)).map(k => `${k} = @${k}`);
   if (updateFields.length === 0) return false;
   const setSql = updateFields.join(', ');
   const stmt = db.prepare(`UPDATE subscriptions SET ${setSql}, updatedAt = @updatedAt WHERE id = @id`);
   const params = Object.assign({}, updates, { id: subscriptionId, updatedAt: new Date().toISOString() });
+  if (typeof params.cancelAtPeriodEnd === 'boolean') params.cancelAtPeriodEnd = params.cancelAtPeriodEnd ? 1 : 0;
   stmt.run(params);
   return true;
 }
@@ -265,4 +283,4 @@ function deleteSubscriptionByIdentifier(identifier) {
   return tx(key);
 }
 
-module.exports = { initSqlite, isEnabled, addOrUpdateUser, getAllUsers, findUserByUsername, updateUserFields, deleteUserByUsername, deleteSubscriptionsByUsername, addMessage, getAllMessages, getUnreadMessages, updateMessage, deleteMessage, addSubscription, getAllSubscriptions, getActiveSubscriptions, updateSubscription, findSubscriptionByStripeId, deleteSubscriptionByIdentifier, findUserByStripeCustomerId };
+module.exports = { initSqlite, isEnabled, addOrUpdateUser, getAllUsers, findUserByUsername, findUserByEmail, updateUserFields, deleteUserByUsername, deleteSubscriptionsByUsername, addMessage, getAllMessages, getUnreadMessages, updateMessage, deleteMessage, addSubscription, getAllSubscriptions, getActiveSubscriptions, updateSubscription, findSubscriptionByStripeId, deleteSubscriptionByIdentifier, findUserByStripeCustomerId };

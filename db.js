@@ -9,7 +9,7 @@ let enabled = false;
 function initSqlite(dbFile) {
   try {
     const BetterSqlite3 = require('better-sqlite3');
-    const fullPath = path.resolve(dbFile || path.join(__dirname, 'data', 'vhr.db'));
+    const fullPath = dbFile === ':memory:' ? dbFile : path.resolve(dbFile || path.join(__dirname, 'data', 'vhr.db'));
     const dir = path.dirname(fullPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     db = new BetterSqlite3(fullPath);
@@ -81,9 +81,31 @@ function initSqlite(dbFile) {
       startDate TEXT,
       endDate TEXT,
       cancelledAt TEXT,
+      cancelAtPeriodEnd INTEGER DEFAULT 0,
       createdAt TEXT,
       updatedAt TEXT,
       FOREIGN KEY(userId) REFERENCES users(id)
+    )`).run();
+    try {
+      db.prepare('ALTER TABLE subscriptions ADD COLUMN cancelAtPeriodEnd INTEGER DEFAULT 0').run();
+    } catch (e) {}
+    try {
+      db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_unique ON users(LOWER(email)) WHERE email IS NOT NULL AND email <> ''").run();
+    } catch (e) {}
+    db.prepare(`CREATE TABLE IF NOT EXISTS purchases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      stripeCheckoutSessionId TEXT NOT NULL UNIQUE,
+      stripePaymentIntentId TEXT UNIQUE,
+      userId TEXT,
+      username TEXT NOT NULL,
+      email TEXT,
+      purchaseId TEXT NOT NULL,
+      purchaseName TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      currency TEXT NOT NULL,
+      status TEXT NOT NULL,
+      licenseKey TEXT NOT NULL UNIQUE,
+      createdAt TEXT NOT NULL
     )`).run();
     // Create messages table
     db.prepare(`CREATE TABLE IF NOT EXISTS messages (
@@ -198,6 +220,11 @@ function findUserByUsername(username) {
   return db.prepare('SELECT * FROM users WHERE username = ?').get(username);
 }
 
+function findUserByEmail(email) {
+  if (!enabled || !email) return null;
+  return db.prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1').get(String(email).trim());
+}
+
 function findUserByStripeCustomerId(customerId) {
   if (!enabled) return null;
   return db.prepare('SELECT * FROM users WHERE stripeCustomerId = ?').get(customerId);
@@ -213,6 +240,50 @@ function updateUserFields(username, fields) {
   const params = Object.assign({}, fields, { username });
   stmt.run(params);
   return true;
+}
+
+function updateUserIdentity(oldUsername, user) {
+  if (!enabled || !oldUsername || !user || !user.username) return false;
+  const tx = db.transaction(() => {
+    const row = db.prepare('SELECT id, username FROM users WHERE LOWER(username) = LOWER(?)').get(oldUsername);
+    if (!row) return false;
+    const updates = {
+      username: user.username,
+      email: user.email || null,
+      updatedAt: user.updatedAt || new Date().toISOString()
+    };
+    for (const key of [
+      'passwordHash', 'emailVerified', 'emailVerificationToken',
+      'emailVerificationExpiresAt', 'emailVerificationSentAt', 'emailVerifiedAt'
+    ]) {
+      if (Object.prototype.hasOwnProperty.call(user, key)) updates[key] = user[key];
+    }
+    const columns = {
+      username: 'username',
+      email: 'email',
+      updatedAt: 'updatedAt',
+      passwordHash: 'passwordHash',
+      emailVerified: 'emailVerified',
+      emailVerificationToken: 'emailVerificationToken',
+      emailVerificationExpiresAt: 'emailVerificationExpiresAt',
+      emailVerificationSentAt: 'emailVerificationSentAt',
+      emailVerifiedAt: 'emailVerifiedAt'
+    };
+    const fields = Object.keys(updates);
+    const setSql = fields.map(key => `${columns[key]} = @${key}`).join(', ');
+    const params = { ...updates, id: row.id };
+    if (typeof params.emailVerified === 'boolean') params.emailVerified = params.emailVerified ? 1 : 0;
+    db.prepare(`UPDATE users SET ${setSql} WHERE id = @id`).run(params);
+    db.prepare(`UPDATE subscriptions
+      SET username = ?, email = ?, updatedAt = ?
+      WHERE userId = ? OR LOWER(username) = LOWER(?)`)
+      .run(user.username, user.email || null, updates.updatedAt, row.id, row.username);
+    db.prepare(`UPDATE purchases SET username = ?, email = ?
+      WHERE userId = ? OR LOWER(username) = LOWER(?)`)
+      .run(user.username, user.email || null, String(row.id), row.username);
+    return true;
+  });
+  return tx();
 }
 
 function deleteUserByUsername(username) {
@@ -283,10 +354,10 @@ function deleteMessage(messageId) {
 // ===== Subscriptions =====
 function addSubscription(subscriptionData) {
   if (!enabled) return null;
-  const { userId, username, email, stripeSubscriptionId, stripePriceId, status, planName, startDate, endDate } = subscriptionData;
-  const stmt = db.prepare(`INSERT INTO subscriptions (userId, username, email, stripeSubscriptionId, stripePriceId, status, planName, startDate, endDate, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const { userId, username, email, stripeSubscriptionId, stripePriceId, status, planName, startDate, endDate, cancelAtPeriodEnd } = subscriptionData;
+  const stmt = db.prepare(`INSERT INTO subscriptions (userId, username, email, stripeSubscriptionId, stripePriceId, status, planName, startDate, endDate, cancelAtPeriodEnd, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const now = new Date().toISOString();
-  const result = stmt.run(userId, username, email, stripeSubscriptionId, stripePriceId, status, planName, startDate, endDate, now, now);
+  const result = stmt.run(userId, username, email, stripeSubscriptionId, stripePriceId, status, planName, startDate, endDate, cancelAtPeriodEnd ? 1 : 0, now, now);
   return result.lastInsertRowid;
 }
 
@@ -302,7 +373,7 @@ function getActiveSubscriptions() {
 
 function updateSubscription(subscriptionId, updates) {
   if (!enabled) return false;
-  const allowed = ['status', 'planName', 'startDate', 'endDate', 'cancelledAt'];
+  const allowed = ['status', 'planName', 'startDate', 'endDate', 'cancelledAt', 'cancelAtPeriodEnd'];
   const updateFields = Object.keys(updates).filter(k => allowed.includes(k)).map(k => `${k} = @${k}`);
   if (updateFields.length === 0) return false;
   const setSql = updateFields.join(', ');
@@ -310,6 +381,56 @@ function updateSubscription(subscriptionId, updates) {
   const params = Object.assign({}, updates, { id: subscriptionId, updatedAt: new Date().toISOString() });
   stmt.run(params);
   return true;
+}
+
+function recordPurchase(purchase) {
+  if (!enabled || !purchase || !purchase.stripeCheckoutSessionId) return null;
+  const tx = db.transaction(() => {
+    const existing = db.prepare(`SELECT * FROM purchases
+      WHERE stripeCheckoutSessionId = ? OR (? IS NOT NULL AND stripePaymentIntentId = ?)
+      LIMIT 1`).get(
+      purchase.stripeCheckoutSessionId,
+      purchase.stripePaymentIntentId || null,
+      purchase.stripePaymentIntentId || null
+    );
+    if (existing) return { purchase: existing, created: false };
+    const result = db.prepare(`INSERT INTO purchases (
+      stripeCheckoutSessionId, stripePaymentIntentId, userId, username, email,
+      purchaseId, purchaseName, amount, currency, status, licenseKey, createdAt
+    ) VALUES (
+      @stripeCheckoutSessionId, @stripePaymentIntentId, @userId, @username, @email,
+      @purchaseId, @purchaseName, @amount, @currency, @status, @licenseKey, @createdAt
+    )`).run({
+      stripeCheckoutSessionId: purchase.stripeCheckoutSessionId,
+      stripePaymentIntentId: purchase.stripePaymentIntentId || null,
+      userId: purchase.userId == null ? null : String(purchase.userId),
+      username: purchase.username,
+      email: purchase.email || null,
+      purchaseId: purchase.purchaseId,
+      purchaseName: purchase.purchaseName,
+      amount: purchase.amount,
+      currency: purchase.currency,
+      status: 'paid',
+      licenseKey: purchase.licenseKey,
+      createdAt: purchase.createdAt || new Date().toISOString()
+    });
+    return {
+      purchase: db.prepare('SELECT * FROM purchases WHERE id = ?').get(result.lastInsertRowid),
+      created: true
+    };
+  });
+  return tx();
+}
+
+function getPurchasesForUser(userId, username) {
+  if (!enabled) return [];
+  return db.prepare(`SELECT * FROM purchases
+    WHERE (? IS NOT NULL AND userId = ?) OR LOWER(username) = LOWER(?)
+    ORDER BY createdAt DESC`).all(
+    userId == null ? null : String(userId),
+    userId == null ? null : String(userId),
+    String(username || '')
+  );
 }
 
 function findSubscriptionByStripeId(stripeId) {
@@ -390,4 +511,4 @@ function getInstallationRecord(installationId) {
   };
 }
 
-module.exports = { initSqlite, isEnabled, addOrUpdateUser, getAllUsers, findUserByUsername, updateUserFields, deleteUserByUsername, deleteSubscriptionsByUsername, addMessage, getAllMessages, getUnreadMessages, updateMessage, deleteMessage, addSubscription, getAllSubscriptions, getActiveSubscriptions, updateSubscription, findSubscriptionByStripeId, deleteSubscriptionByIdentifier, findUserByStripeCustomerId, ensureInstallationRecord, getInstallationRecord };
+module.exports = { initSqlite, isEnabled, addOrUpdateUser, getAllUsers, findUserByUsername, findUserByEmail, updateUserFields, updateUserIdentity, deleteUserByUsername, deleteSubscriptionsByUsername, addMessage, getAllMessages, getUnreadMessages, updateMessage, deleteMessage, addSubscription, getAllSubscriptions, getActiveSubscriptions, updateSubscription, findSubscriptionByStripeId, deleteSubscriptionByIdentifier, findUserByStripeCustomerId, recordPurchase, getPurchasesForUser, ensureInstallationRecord, getInstallationRecord };

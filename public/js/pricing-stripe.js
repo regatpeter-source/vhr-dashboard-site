@@ -51,12 +51,10 @@
       credentials: 'include',
       body: JSON.stringify(payload)
     }).then(r => r.json()).then(j => {
-      console.log('[pricing-stripe] Checkout response:', j);
       if (j && j.url) {
-        console.log('[pricing-stripe] Redirecting to Stripe:', j.url);
         window.location.href = j.url;
       } else {
-        console.error('[pricing-stripe] checkout session failed', j);
+        console.error('[pricing-stripe] checkout session failed', j && j.error || 'unknown');
         alert('Erreur lors de la création de la session de paiement : ' + (j && j.error || 'unknown'));
       }
     }).catch(err => {
