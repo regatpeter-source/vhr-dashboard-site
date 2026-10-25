@@ -49,7 +49,7 @@ window.botpressWebChat.enableReset = true;
 			{
 				id: 'pricing',
 				keywords: ['tarif', 'prix', 'cout', 'abonnement', 'licence', 'budget'],
-				reply: 'Voici un comparatif clair 👇\n\n• Abonnement mensuel (29€/mois)\n  - idéal pour démarrer vite et rester flexible\n  - résiliable à tout moment\n  - mises à jour + support inclus\n\n• Licence définitive (499€ HT, paiement unique)\n  - idéale pour un usage long terme\n  - 1 an de mises à jour inclus\n  - support prioritaire pendant 1 an\n\nConseil pratique :\n- besoin évolutif / pilote / POC → abonnement\n- parc stable avec visibilité long terme → licence'
+				reply: 'Voici nos tarifs TTC :\n\n• Abonnement mensuel : 19,90 € TTC/mois\n  - sans engagement, résiliable en fin de période\n  - mises à jour et support inclus\n\n• Abonnement annuel : 199 € TTC/an\n  - paiement annuel et renouvellement automatique\n  - 39,80 € économisés par rapport à 12 mensualités\n  - résiliation effective en fin de période annuelle\n\n• Licence définitive : 499 € TTC, paiement unique\n  - 1 an de mises à jour et de support prioritaire inclus\n\nAucune taxe ne s’ajoute aux prix affichés.'
 			},
 			{
 				id: 'trial_demo',

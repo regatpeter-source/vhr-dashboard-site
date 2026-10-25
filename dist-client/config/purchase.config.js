@@ -3,6 +3,8 @@
  * Licence perpétuelle unique: 499€ TTC pour tous
  */
 
+const { OFFERS } = require('./pricing');
+
 module.exports = {
   // Option d'achat définitif unique
   PURCHASE_OPTIONS: {
@@ -14,7 +16,7 @@ module.exports = {
       price: 499.00, // EUR TTC (paiement unique)
       currency: 'EUR',
       billingPeriod: 'once',
-      stripePriceId: process.env.STRIPE_PRICE_ID_PERPETUAL || 'price_1Qa0ZBXXXXXXXXXXXXXXXX', // À remplacer par votre ID réel Stripe
+      stripePriceId: OFFERS.perpetual.stripePriceId,
       features: [
         'Accès perpétuel (jamais expirer)',
         'Accès complet VHR Dashboard',
@@ -48,7 +50,7 @@ module.exports = {
     SMTP_USER: process.env.BREVO_SMTP_USER || process.env.SMTP_USER || '',
     SMTP_PASS: process.env.BREVO_SMTP_PASS || process.env.SMTP_PASS || '',
     ENABLED: process.env.EMAIL_ENABLED === 'true' || false,
-    DOWNLOAD_URL: process.env.DOWNLOAD_URL || 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.2-client/VHR.Dashboard.Setup.1.0.2.exe',
+    DOWNLOAD_URL: process.env.DOWNLOAD_URL || 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.3-client/VHR.Dashboard.Setup.1.0.3.exe',
     SUPPORT_EMAIL: process.env.SUPPORT_EMAIL || 'support@vhr-dashboard-site.com',
     DOCUMENTATION_URL: process.env.DOCUMENTATION_URL || 'https://docs.vhr-dashboard-site.com'
   },

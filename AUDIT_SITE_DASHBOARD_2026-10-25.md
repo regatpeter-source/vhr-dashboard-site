@@ -481,3 +481,28 @@ L'application desktop, ses sources et son installateur ne sont pas modifiés par
 
 Validation locale : **16 tests persistants réussis**, syntaxe des six scripts modifiés vérifiée, sept pages contrôlées dans Chromium aux largeurs 390 et 1440 pixels sans émoticônes ni débordement horizontal. Le basculement des mots de passe et six réponses du chatbot ont également été vérifiés. Les appels externes et API étaient bloqués ou simulés pendant ces contrôles.
 Ces résultats locaux ne constituent pas une preuve de déploiement en production.
+
+## 11. Tarifs TTC et version 1.0.3
+
+Tarifs autorisés le 25/10/2026 : **19,90 euros TTC/mois**, **199 euros TTC/an** et **499 euros TTC** pour la licence définitive.
+Les trois prix Stripe de production sont configurés avec `tax_behavior=inclusive`. Les nouveaux checkouts ne rajoutent pas de taxe aux montants annoncés.
+Le catalogue versionné [pricing](./config/pricing.js), identique dans l'application, remplace les anciennes variables de prix qui pouvaient imposer 29 euros ou remplacer le tarif annuel par le mensuel.
+Les prix récupérés chez Stripe sont contrôlés avant création du checkout : identifiant, montant, devise, périodicité, activité et taxes incluses.
+
+Les pages tarifs racine et vitrine, l'accueil, les conditions, le chatbot, les offres de déblocage de l'application et les comptes ont été harmonisés.
+La formule annuelle possède son propre bouton, plan et prix Stripe. Les emails de confirmation affichent le montant récurrent réel et une facturation mensuelle ou annuelle ; ils ne promettent plus systématiquement un renouvellement à 29 euros par mois.
+
+L'utilisateur a demandé le nouveau tarif au prochain renouvellement sans prorata pour les abonnés existants. La consultation exhaustive Stripe a trouvé **zéro abonnement en cours** : aucune migration, facture ni modification de période existante n'a été nécessaire.
+Aucun lien de paiement Stripe actif ne référençait les anciens tarifs ; les changements de formule par portail Stripe étaient désactivés.
+
+Validation :
+
+- **22 tests persistants**, **147 contrôles métier** et **93 contrôles tarifaires intégrés** réussis sur site JSON, desktop JSON et desktop SQLite.
+- Trois sessions Checkout de production ont confirmé des totaux exacts de 1990, 19900 et 49900 centimes EUR, sans taxe ajoutée. Ces sessions ont été expirées immédiatement, sans paiement ni envoi d'email.
+- Contrôle navigateur des deux pages tarifs, de l'accueil et des conditions à 390 et 1440 pixels, sans débordement horizontal.
+- Paquet Windows 1.0.3 : huit fichiers modifiés identiques aux sources, SQLite natif inclus, secrets et données locales exclus.
+- Installation NSIS silencieuse sur ce PC réussie, exécutable **1.0.3**, archive identique au paquet construit. **279 fichiers utilisateur inchangés** après comparaison des empreintes.
+- Treize contrôles API/ressources et contrôles Chromium du compte réussis sur le paquet puis sur l'installation réelle avec des données synthétiques isolées.
+
+Une sauvegarde privée de l'installation et des données antérieures est conservée dans le répertoire local de maintenance `pre-1.0.3-20261025`. L'installateur demeure non signé.
+Le succès du build et des tests locaux ne constitue pas une preuve du déploiement Render ; la révision publique, les prix servis et le téléchargement doivent être vérifiés après publication.

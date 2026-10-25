@@ -162,9 +162,9 @@ async function sendPurchaseSuccessEmail(user, purchaseData) {
       </div>
 
       <h2 style="color: #2ecc71; margin-top: 30px;">📦 Installer VHR Dashboard</h2>
-      <p>Utilisez l'installateur Windows <strong>VHR.Dashboard.Setup.1.0.2.exe</strong> pour lancer la plateforme sur votre poste.</p>
+      <p>Utilisez l'installateur Windows <strong>VHR.Dashboard.Setup.1.0.3.exe</strong> pour lancer la plateforme sur votre poste.</p>
       <div style="text-align: center; margin: 20px 0;">
-        <a href="${downloadLink}" class="button">Télécharger l'installateur VHR.Dashboard.Setup.1.0.2.exe</a>
+        <a href="${downloadLink}" class="button">Télécharger l'installateur VHR.Dashboard.Setup.1.0.3.exe</a>
       </div>
       <ul style="padding-left: 18px; color: #333; line-height: 1.6;">
         <li>Téléchargez le fichier, lancez-le et validez les avertissements SmartScreen (Informations complémentaires → Exécuter quand même).</li>
@@ -240,6 +240,16 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
   }
 
   try {
+    const amount = Number(subscriptionData.price);
+    const count = subscriptionData.intervalCount || 1;
+    if (!Number.isFinite(amount) || amount < 0 || !['month', 'year'].includes(subscriptionData.billingPeriod)
+      || !Number.isInteger(count) || count < 1) {
+      throw new Error('Montant ou période de facturation invalide pour la confirmation');
+    }
+    const amountLabel = amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const yearly = subscriptionData.billingPeriod === 'year';
+    const periodLabel = count === 1 ? (yearly ? 'an' : 'mois') : `${count} ${yearly ? 'ans' : 'mois'}`;
+    const billingLabel = count === 1 ? (yearly ? 'Annuelle' : 'Mensuelle') : `Tous les ${periodLabel}`;
     const template = (purchaseConfig.EMAIL_TEMPLATES && purchaseConfig.EMAIL_TEMPLATES.SUBSCRIPTION_SUCCESS) || 
                      (purchaseConfig.EMAIL_TEMPLATES && purchaseConfig.EMAIL_TEMPLATES.SUBSCRIPTION_CONFIRMATION) || 
                      { title: 'Abonnement Confirmé', subject: '✅ Votre abonnement VHR Dashboard est actif' };
@@ -284,11 +294,11 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
         </div>
         <div class="info-item">
           <div class="info-label">Tarif</div>
-          <div class="info-value">${subscriptionData.price}€/${subscriptionData.billingPeriod}</div>
+          <div class="info-value">${amountLabel} € TTC / ${periodLabel}</div>
         </div>
         <div class="info-item">
           <div class="info-label">Facturation</div>
-          <div class="info-value">Mensuelle</div>
+          <div class="info-value">${billingLabel}</div>
         </div>
         <div class="info-item">
           <div class="info-label">Statut</div>
@@ -309,8 +319,8 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
       <h2 style="color: #3498db; margin-top: 30px;">🚀 Accès Instantané</h2>
       <p>Votre accès est activé. Voici comment lancer le Dashboard Pro (installateur Windows 64 bits) :</p>
       <ol style="padding-left: 18px; color: #333; line-height: 1.5;">
-        <li>Téléchargez l’installateur <strong>VHR.Dashboard.Setup.1.0.2.exe</strong> depuis votre espace client (ou le lien direct fourni après achat).</li>
-        <li>Lancez le fichier <code>VHR.Dashboard.Setup.1.0.2.exe</code> puis suivez l’assistant (Next → Install → Finish). Un raccourci “VHR Dashboard” est créé sur le Bureau/Start.</li>
+        <li>Téléchargez l’installateur <strong>VHR.Dashboard.Setup.1.0.3.exe</strong> depuis votre espace client (ou le lien direct fourni après achat).</li>
+        <li>Lancez le fichier <code>VHR.Dashboard.Setup.1.0.3.exe</code> puis suivez l’assistant (Next → Install → Finish). Un raccourci “VHR Dashboard” est créé sur le Bureau/Start.</li>
         <li>Ouvrez “VHR Dashboard Pro”. Le serveur embarqué démarre et ouvre automatiquement le Dashboard (http://localhost:3000). Si ce n’est pas le cas, ouvrez manuellement cette URL.</li>
         <li>Connectez-vous avec vos identifiants ci-dessus.</li>
       </ol>
@@ -335,7 +345,7 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
       
       <div class="alert">
         <strong>💡 Renouvellement Automatique</strong>
-        <p style="margin: 8px 0 0 0;">Votre abonnement se renouvelle automatiquement le même jour chaque mois pour 29€ TTC. Vous pouvez l'annuler à tout moment.</p>
+        <p style="margin: 8px 0 0 0;">Votre abonnement se renouvelle automatiquement au tarif de ${amountLabel} € TTC / ${periodLabel}. Vous pouvez le résilier à tout moment pour la fin de la période en cours.</p>
       </div>
       
       <h2 style="color: #3498db; margin-top: 30px;">❓ Questions ?</h2>

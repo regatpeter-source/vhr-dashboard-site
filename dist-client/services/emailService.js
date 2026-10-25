@@ -232,6 +232,16 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
   }
 
   try {
+    const amount = Number(subscriptionData.price);
+    const count = subscriptionData.intervalCount || 1;
+    if (!Number.isFinite(amount) || amount < 0 || !['month', 'year'].includes(subscriptionData.billingPeriod)
+      || !Number.isInteger(count) || count < 1) {
+      throw new Error('Montant ou période de facturation invalide pour la confirmation');
+    }
+    const amountLabel = amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const yearly = subscriptionData.billingPeriod === 'year';
+    const periodLabel = count === 1 ? (yearly ? 'an' : 'mois') : `${count} ${yearly ? 'ans' : 'mois'}`;
+    const billingLabel = count === 1 ? (yearly ? 'Annuelle' : 'Mensuelle') : `Tous les ${periodLabel}`;
     const template = (purchaseConfig.EMAIL_TEMPLATES && purchaseConfig.EMAIL_TEMPLATES.SUBSCRIPTION_SUCCESS) || 
                      (purchaseConfig.EMAIL_TEMPLATES && purchaseConfig.EMAIL_TEMPLATES.SUBSCRIPTION_CONFIRMATION) || 
                      { title: 'Abonnement Confirmé', subject: '✅ Votre abonnement VHR Dashboard est actif' };
@@ -276,11 +286,11 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
         </div>
         <div class="info-item">
           <div class="info-label">Tarif</div>
-          <div class="info-value">${subscriptionData.price}€/${subscriptionData.billingPeriod}</div>
+          <div class="info-value">${amountLabel} € TTC / ${periodLabel}</div>
         </div>
         <div class="info-item">
           <div class="info-label">Facturation</div>
-          <div class="info-value">Mensuelle</div>
+          <div class="info-value">${billingLabel}</div>
         </div>
         <div class="info-item">
           <div class="info-label">Statut</div>
@@ -322,7 +332,7 @@ async function sendSubscriptionSuccessEmail(user, subscriptionData) {
       
       <div class="alert">
         <strong>💡 Renouvellement Automatique</strong>
-        <p style="margin: 8px 0 0 0;">Votre abonnement se renouvelle automatiquement le même jour chaque mois pour 29€ TTC. Vous pouvez l'annuler à tout moment.</p>
+        <p style="margin: 8px 0 0 0;">Votre abonnement se renouvelle automatiquement au tarif de ${amountLabel} € TTC / ${periodLabel}. Vous pouvez le résilier à tout moment pour la fin de la période en cours.</p>
       </div>
       
       <h2 style="color: #3498db; margin-top: 30px;">❓ Questions ?</h2>

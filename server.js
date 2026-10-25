@@ -1016,6 +1016,7 @@ app.use((req, res, next) => {
 
 // ========== CONFIGURATION MANAGEMENT ==========
 const subscriptionConfig = require('./config/subscription.config');
+const pricingPolicy = require('./config/pricing');
 const purchaseConfig = require('./config/purchase.config');
 const demoConfig = require('./config/demo.config');
 const emailService = require('./services/emailService');
@@ -2134,7 +2135,7 @@ app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
 // Permet d'éviter les 404 GitHub en servant le binaire/zip directement depuis le serveur
 app.get('/download/client-full', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  return res.redirect(302, 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.2-client/VHR.Dashboard.Setup.1.0.2.exe');
+  return res.redirect(302, 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.3-client/VHR.Dashboard.Setup.1.0.3.exe');
 });
 
 // Download VHR Voice APK for Quest background audio
@@ -2356,7 +2357,7 @@ app.use(['/api/adb', '/api/adb/*', '/api/stream', '/api/stream/*', '/api/apps', 
 function cleanEnvValue(v) { if (!v) return v; return v.replace(/^['"]|['"]$/g, '').trim(); }
 const stripeKeyRaw = process.env.STRIPE_SECRET_KEY || '';
 const stripeKey = cleanEnvValue(stripeKeyRaw);
-const STRIPE_DEFAULT_PRICE_ID = cleanEnvValue(process.env.STRIPE_SUBSCRIPTION_PRICE_ID || '');
+const STRIPE_DEFAULT_PRICE_ID = subscriptionConfig.PLANS.STANDARD.stripePriceId;
 const STRIPE_TRIAL_DAYS = parseInt(process.env.STRIPE_TRIAL_DAYS || '7', 10);
 if (!stripeKey) {
   console.warn('[Stripe] STRIPE_SECRET_KEY not set. Set STRIPE_SECRET_KEY to your secret key (sk_live_...).');
@@ -2448,6 +2449,12 @@ app.post('/create-checkout-session', async (req, res) => {
     if (mode === 'subscription' && priceInfo.type !== 'recurring') {
       return res.status(400).json({ error: `Price type mismatch: expected a recurring price for mode=subscription (got: ${priceInfo.type})` });
     }
+    try {
+      pricingPolicy.validatePrice(priceInfo, mode);
+    } catch (error) {
+      console.warn('[Stripe] Rejected checkout price:', priceId, error.message);
+      return res.status(400).json({ error: error.message });
+    }
     
     // Build metadata strictly from authenticated account (ignore client-provided identity fields)
     const metadata = {
@@ -2460,7 +2467,7 @@ app.post('/create-checkout-session', async (req, res) => {
       const priceOverrides = {};
       if (purchaseOptions.PERPETUAL) {
         priceOverrides.PERPETUAL = cleanEnvValue(
-          process.env.STRIPE_PRICE_ID_PERPETUAL || purchaseOptions.PERPETUAL.stripePriceId || ''
+          purchaseOptions.PERPETUAL.stripePriceId || ''
         );
       }
       const purchaseKey = customerPolicy.resolvePurchaseIdForPrice(priceId, purchaseOptions, priceOverrides);
@@ -2469,6 +2476,12 @@ app.post('/create-checkout-session', async (req, res) => {
       }
       metadata.purchaseId = purchaseKey;
       metadata.purchaseName = String(purchaseOptions[purchaseKey].name || purchaseKey);
+    }
+    if (mode === 'subscription') {
+      const plan = Object.values(subscriptionConfig.PLANS).find(item => item.stripePriceId === priceId);
+      metadata.planId = plan.id;
+      metadata.planName = plan.name;
+      metadata.billingPeriod = plan.billingPeriod;
     }
     
     const session = await stripe.checkout.sessions.create({
@@ -2480,6 +2493,7 @@ app.post('/create-checkout-session', async (req, res) => {
         },
       ],
       mode: mode, // 'subscription' ou 'payment'
+      automatic_tax: { enabled: false },
       success_url: `${origin}/pricing.html?success=1`,
       cancel_url: `${origin}/pricing.html?canceled=1`,
       metadata: metadata, // Store user registration data in metadata
@@ -3421,17 +3435,13 @@ async function reconcilePendingSubscriptions() {
     const alreadySent = !!user.subscriptionConfirmationSentAt;
     if (status === 'active' && !alreadySent && user.email) {
       try {
-        const priceCents = subscription?.items?.data?.[0]?.price?.unit_amount;
-        const price = priceCents ? (priceCents / 100).toFixed(2) : '—';
         const planName = subscription?.plan?.nickname
           || subscription?.items?.data?.[0]?.price?.nickname
           || 'Abonnement Professionnel';
-        const billingPeriod = subscription?.plan?.interval || 'month';
 
         const emailResult = await emailService.sendSubscriptionSuccessEmail(user, {
           planName,
-          billingPeriod,
-          price,
+          ...pricingPolicy.subscriptionEmailData(subscription),
           subscriptionId: subscription.id,
           userName: user.username
         });
@@ -5805,7 +5815,7 @@ async function requireLicense(req, res, next) {
       reason: 'subscription_required',
       message: 'Vous devez un abonnement VHR Dashboard PRO pour accéder à cette fonctionnalité',
       pricing: {
-        price: '29€',
+        price: '19,90 € TTC',
         frequency: 'par mois',
         description: 'Accès complet à tous les outils VHR Dashboard'
       }
@@ -5827,7 +5837,7 @@ app.get('/api/feature/android-tts/access', authMiddleware, async (req, res) => {
     user: req.user.username,
     reason: !hasAccess ? 'subscription_required' : 'active',
     pricing: {
-      price: '29€',
+      price: '19,90 € TTC',
       frequency: 'par mois',
       description: 'Accès complet à tous les outils VHR Dashboard'
     },
@@ -6231,7 +6241,7 @@ app.post('/api/admin/grant-subscription', authMiddleware, async (req, res) => {
 
 /**
  * POST /api/admin/grant-stripe-trial - Crée une subscription Stripe avec période d'essai
- * Requiert un admin allowlisté et une STRIPE_SUBSCRIPTION_PRICE_ID configurée côté serveur
+ * Requiert un admin allowlisté et utilise le tarif mensuel TTC du catalogue
  */
 app.post('/api/admin/grant-stripe-trial', authMiddleware, async (req, res) => {
   const { targetUsername, trialDays } = req.body || {};
@@ -6251,9 +6261,11 @@ app.post('/api/admin/grant-stripe-trial', authMiddleware, async (req, res) => {
 
     const effectiveTrialDays = Number.isFinite(parseInt(trialDays, 10)) ? Math.max(0, parseInt(trialDays, 10)) : STRIPE_TRIAL_DAYS;
 
+    pricingPolicy.validatePrice(await stripe.prices.retrieve(priceId), 'subscription');
     const sub = await stripe.subscriptions.create({
       customer: customerId,
       items: [{ price: priceId }],
+      automatic_tax: { enabled: false },
       trial_period_days: effectiveTrialDays,
       metadata: {
         username: targetUser.username || '',
@@ -7392,8 +7404,6 @@ app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) 
     if (!plan) return res.status(400).json({ ok: false, error: 'Plan not found' });
 
     const resolvedSubscriptionPriceId = cleanEnvValue(
-      process.env.STRIPE_PRICE_ID_STANDARD ||
-      process.env.STRIPE_SUBSCRIPTION_PRICE_ID ||
       plan.stripePriceId ||
       ''
     );
@@ -7406,6 +7416,7 @@ app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) 
 
     const customerId = await ensureStripeCustomerForUser(user);
 
+    pricingPolicy.validatePrice(await stripe.prices.retrieve(resolvedSubscriptionPriceId), 'subscription');
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [
@@ -7415,6 +7426,7 @@ app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) 
         },
       ],
       mode: 'subscription',
+      automatic_tax: { enabled: false },
       customer: customerId,
       customer_email: undefined, // force the known customer to avoid name drift from cardholder input
       success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/vhr-dashboard-pro.html?subscription=success`,
@@ -7423,7 +7435,8 @@ app.post('/api/subscriptions/create-checkout', authMiddleware, async (req, res) 
         userId: user.id || user.username,
         username: user.username,
         planId: plan.id || normalizedPlanId,
-        planName: plan.name
+        planName: plan.name,
+        billingPeriod: plan.billingPeriod
       }
     });
 
@@ -7448,7 +7461,6 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
     }
 
     const resolvedPerpetualPriceId = cleanEnvValue(
-      process.env.STRIPE_PRICE_ID_PERPETUAL ||
       purchase.stripePriceId ||
       ''
     );
@@ -7466,6 +7478,7 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
     if (priceInfo.type !== 'one_time') {
       return res.status(400).json({ ok: false, error: 'Le tarif configuré pour cet achat doit être un prix à paiement unique' });
     }
+    pricingPolicy.validatePrice(priceInfo, 'payment');
 
     const customerId = await ensureStripeCustomerForUser(user);
 
@@ -7478,6 +7491,7 @@ app.post('/api/purchases/create-checkout', authMiddleware, async (req, res) => {
         },
       ],
       mode: 'payment', // Mode one-time payment
+      automatic_tax: { enabled: false },
       customer: customerId,
       customer_email: undefined, // force existing customer to avoid cardholder name override
       success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/account.html?purchase=success`,
@@ -11881,7 +11895,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
           }
         }
       } else if (obj.mode === 'subscription') {
-        // Subscription - Abonnement mensuel (29€/mois)
+        // Subscription - monthly or annual TTC pricing
         if (user.email) {
           console.log('[webhook] Processing subscription for user:', user.username);
           
@@ -11894,7 +11908,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
             stripeSubscriptionId: obj.subscription || null,
             stripePriceId: obj?.display_items?.[0]?.price?.id || obj?.line_items?.data?.[0]?.price?.id || null,
             status: currentSubscriptionStatus,
-            planName: obj.metadata?.purchaseName || 'Abonnement Professionnel',
+            planName: obj.metadata?.planName || 'Abonnement Professionnel',
             startDate: new Date().toISOString(),
             cancelAtPeriodEnd: false
           });
@@ -11907,9 +11921,8 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
           } else {
             try {
               const subscriptionData = {
-                planName: obj.metadata?.purchaseName || 'Abonnement Professionnel',
-                billingPeriod: 'month',
-                price: (obj.amount_total / 100).toFixed(2),
+                planName: obj.metadata?.planName || 'Abonnement Professionnel',
+                ...pricingPolicy.subscriptionEmailData(await stripe.subscriptions.retrieve(obj.subscription)),
                 subscriptionId: obj.subscription,
                 userName: user.username
               };

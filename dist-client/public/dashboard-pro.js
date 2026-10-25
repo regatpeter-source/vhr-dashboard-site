@@ -1680,7 +1680,7 @@ function getSettingsContent() {
 						: 'Sans abonnement');
 	let planPrice = detail.planPrice || detail.planAmount || detail.priceLabel || detail.price || '';
 	if (!planPrice) {
-		if (detail.subscriptionStatus === 'active') planPrice = 'À partir de 29€/mois';
+		if (detail.subscriptionStatus === 'active') planPrice = 'Offres : 19,90 € TTC/mois ou 199 € TTC/an';
 		else if (detail.subscriptionStatus === 'trial') planPrice = 'Essai gratuit';
 		else if (detail.subscriptionStatus === 'admin') planPrice = 'Accès illimité';
 		else if (detail.hasActiveLicense) planPrice = 'Paiement unique';
@@ -6440,7 +6440,7 @@ window.showUnlockModal = function(status = licenseStatus) {
 	const summaryHtml = buildAccessSummaryHtml(status);
 	
 	modal.innerHTML = `
-		<div style="background:linear-gradient(135deg, #1a1d24, #2c3e50);max-width:700px;width:90%;border-radius:16px;padding:40px;color:#fff;box-shadow:0 8px 32px #000;">
+		<div style="background:linear-gradient(135deg, #1a1d24, #2c3e50);max-width:700px;width:90%;max-height:90vh;overflow-y:auto;border-radius:16px;padding:40px;color:#fff;box-shadow:0 8px 32px #000;">
 			${headerMessage}
 			${bodyMessage}
 			${summaryHtml}
@@ -6449,7 +6449,7 @@ window.showUnlockModal = function(status = licenseStatus) {
 			<div style="background:#2c3e50;padding:24px;border-radius:12px;margin:20px 0;border:2px solid #3498db;">
 				<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
 					<h3 style="color:#3498db;margin:0;">💳 Abonnement Mensuel</h3>
-					<span style="font-size:28px;font-weight:bold;color:#2ecc71;">29€<span style="font-size:14px;color:#95a5a6;">/mois TTC</span></span>
+					<span style="font-size:28px;font-weight:bold;color:#2ecc71;">19,90 €<span style="font-size:14px;color:#95a5a6;"> TTC/mois</span></span>
 				</div>
 				<ul style="color:#ecf0f1;line-height:1.8;margin:12px 0;">
 					<li>✅ Toutes les fonctionnalités</li>
@@ -6462,6 +6462,14 @@ window.showUnlockModal = function(status = licenseStatus) {
 				</button>
 			</div>
 			
+			<div style="background:#2c3e50;padding:24px;border-radius:12px;margin:20px 0;border:2px solid #3498db;">
+				<h3 style="color:#3498db;margin:0 0 12px;">Abonnement Annuel</h3>
+				<p style="font-size:28px;font-weight:bold;color:#2ecc71;margin:0;">199 € <span style="font-size:14px;color:#95a5a6;">TTC/an</span></p>
+				<p>Toutes les fonctionnalités, mises à jour et support inclus. Paiement annuel et renouvellement automatique. Résiliation effective en fin de période annuelle.</p>
+				<p>39,80 € économisés par rapport à 12 mensualités.</p>
+				<button onclick="openOfficialBillingPage()" style="width:100%;background:#3498db;color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-weight:bold;font-size:16px;">Choisir l'abonnement annuel</button>
+			</div>
+
 			<!-- Option 2: Achat définitif -->
 			<div style="background:#2c3e50;padding:24px;border-radius:12px;margin:20px 0;border:2px solid #2ecc71;">
 				<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -7100,4 +7108,3 @@ async function initDashboardPro() {
 }
 
 initDashboardPro();
-

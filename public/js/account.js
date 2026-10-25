@@ -507,6 +507,10 @@
       if (trialStatusSection) trialStatusSection.style.display = 'none';
       
       const planName = sub.currentPlan ? sub.currentPlan.name : 'Abonnement actif';
+      const planPrice = sub.currentPlan?.price;
+      const priceLine = typeof planPrice === 'number' && Number.isFinite(planPrice)
+        ? `<p><strong>Tarif:</strong> ${planPrice.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € TTC/${sub.currentPlan.billingPeriod === 'year' ? 'an' : 'mois'}</p>`
+        : '';
       const startDate = sub.startDate ? new Date(sub.startDate).toLocaleDateString('fr-FR') : '—';
       const renewalDateSource = sub.nextBillingDate || sub.endDate || null;
       const endDate = renewalDateSource ? new Date(renewalDateSource).toLocaleDateString('fr-FR') : '—';
@@ -532,6 +536,7 @@
       let html = `
         <div style="background: white; padding: 12px; border-radius: 4px; margin-bottom: 12px;">
           <p><strong>Plan actuel:</strong> ${planName}</p>
+          ${priceLine}
           <p><strong>Début:</strong> ${startDate}</p>
           <p><strong>Renouvellement:</strong> ${endDate}</p>
           ${daysLeftLine}

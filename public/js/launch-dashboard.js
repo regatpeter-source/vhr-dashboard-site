@@ -2,7 +2,7 @@
 // Now downloads the Windows installer for VHR Dashboard
 
 // Lien direct vers le release GitHub de l'installateur
-const INSTALLER_URL = 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.2-client/VHR.Dashboard.Setup.1.0.2.exe';
+const INSTALLER_URL = 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.3-client/VHR.Dashboard.Setup.1.0.3.exe';
 
 function launchDashboard() {
     const btn = document.getElementById('launchBtn');

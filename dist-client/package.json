@@ -1,6 +1,6 @@
 {
   "name": "vhr-dashboard-site",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "VHR Dashboard - Server and site-vitrine",
   "main": "electron-main.js",
   "scripts": {

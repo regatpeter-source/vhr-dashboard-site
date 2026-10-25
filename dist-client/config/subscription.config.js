@@ -1,20 +1,20 @@
 /**
- * Configuration des plans d'abonnement mensuels
- * Plan unique: 29€ TTC/mois pour tous (pro et particulier)
+ * Abonnements TTC mensuel et annuel.
  */
 
+const { OFFERS } = require('./pricing');
+
 module.exports = {
-  // Plan d'abonnement unique
   PLANS: {
     // Plan Standard - Accès unique pour tous
     STANDARD: {
       id: 'plan_standard',
       name: 'Abonnement Mensuel',
-      description: 'Accès complet VHR Dashboard - 29€ TTC/mois',
-      price: 29.00, // EUR TTC par mois
+      description: 'Accès complet VHR Dashboard - 19,90 € TTC/mois',
+      price: OFFERS.monthly.price,
       currency: 'EUR',
       billingPeriod: 'month',
-      stripePriceId: process.env.STRIPE_PRICE_ID_STANDARD || 'price_1Qa0ZZXXXXXXXXXXXXXXXX', // À remplacer par votre ID réel Stripe
+      stripePriceId: OFFERS.monthly.stripePriceId,
       features: [
         'Accès complet à VHR Dashboard',
         'Gestion de casques VR',
@@ -31,6 +31,17 @@ module.exports = {
         storageGB: -1,
         apiCallsPerDay: -1
       }
+    },
+    ANNUAL: {
+      id: 'plan_annual',
+      name: 'Abonnement Annuel',
+      description: 'Accès complet VHR Dashboard - 199 € TTC/an',
+      price: OFFERS.annual.price,
+      currency: 'EUR',
+      billingPeriod: 'year',
+      stripePriceId: OFFERS.annual.stripePriceId,
+      features: ['Accès complet à VHR Dashboard', 'Gestion de casques VR', 'Streaming vidéo (Scrcpy)', 'WiFi automatique', 'Voix PC → Casque (TTS)', 'Gestion des apps', 'Support utilisateur', 'Mises à jour incluses'],
+      limits: { maxUsers: -1, maxDataPoints: -1, storageGB: -1, apiCallsPerDay: -1 }
     }
   },
 
@@ -41,6 +52,7 @@ module.exports = {
       name: 'Mensuel',
       discountPercent: 0,
       trialDays: 7 // 7 jours d'essai gratuit avant charge
-    }
+    },
+    ANNUAL: { id: 'annual', name: 'Annuel', trialDays: 7 }
   }
 };

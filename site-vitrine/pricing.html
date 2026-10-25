@@ -26,7 +26,7 @@
     </nav>
     <div class="hero hero-small">
       <h1>Tarifs & Abonnement</h1>
-      <p class="centered">Choisissez la formule adaptée à vos besoins : location mensuelle ou achat définitif.</p>
+      <p class="centered">Choisissez votre formule : abonnement mensuel, annuel ou licence définitive. Tous les prix sont TTC.</p>
     </div>
   </header>
   <main>
@@ -34,23 +34,35 @@
       <div class="pricing-cards">
         <div class="pricing-card best">
           <h2>Location mensuelle</h2>
-          <div class="price">29€<span>/mois</span></div>
+          <div class="price">19,90 €<span>TTC/mois</span></div>
           <ul>
             <li>Toutes les fonctionnalités incluses</li>
             <li>Mises à jour & support</li>
             <li>Sans engagement, résiliable à tout moment</li>
           </ul>
-            <button class="cta" id="stripe-sub-btn" data-price-id="price_1SWhBW7g8FcyfmlJZ5rJGh6N" data-mode="subscription" aria-label="Payer l'abonnement mensuel en ligne">Payer l'abonnement</button>
+            <button class="cta" id="stripe-sub-btn" data-price-id="price_1UUYXa7g8FcyfmlJa2P4Criu" data-mode="subscription" aria-label="Payer l'abonnement mensuel en ligne">Choisir le mensuel</button>
+        </div>
+        <div class="pricing-card">
+          <h2>Abonnement annuel</h2>
+          <div class="price">199 €<span>TTC/an</span></div>
+          <ul>
+            <li>Toutes les fonctionnalités incluses</li>
+            <li>Mises à jour & support</li>
+            <li>39,80 € économisés par rapport à 12 mensualités</li>
+            <li>Paiement annuel, renouvellement automatique</li>
+            <li>Résiliation à tout moment, effective en fin de période</li>
+          </ul>
+          <button class="cta" id="stripe-annual-btn" data-price-id="price_1UUYXb7g8FcyfmlJkYEnHk0h" data-mode="subscription" aria-label="Payer l'abonnement annuel en ligne">Choisir l'annuel</button>
         </div>
         <div class="pricing-card">
           <h2>Achat définitif</h2>
-          <div class="price">499€<span>HT</span></div>
+          <div class="price">499 €<span>TTC</span></div>
           <ul>
             <li>Licence perpétuelle</li>
             <li>Mises à jour 1 an incluses</li>
             <li>Support prioritaire 1 an</li>
           </ul>
-            <button class="cta-secondary" id="stripe-onetime-btn" data-price-id="price_1SWhPb7g8FcyfmlJzlquRicj" data-mode="payment" aria-label="Acheter la licence définitive en ligne">Acheter la licence</button>
+            <button class="cta-secondary" id="stripe-onetime-btn" data-price-id="price_1UUYXb7g8FcyfmlJKu60E4Km" data-mode="payment" aria-label="Acheter la licence définitive en ligne">Acheter la licence</button>
         </div>
       </div>
       <div class="payment-note">
@@ -62,7 +74,7 @@
     </section>
     <section class="faq-section">
       <h2 class="centered">FAQ</h2>
-      <div class="faq-item centered"><b class="centered">Comment fonctionne la location ?</b><br>Vous payez chaque mois, sans engagement. Vous pouvez arrêter à tout moment.</div>
+      <div class="faq-item centered"><b class="centered">Comment fonctionne l'abonnement ?</b><br>Vous payez 19,90 € TTC par mois ou 199 € TTC par an. Vous pouvez résilier à tout moment ; l'accès reste disponible jusqu'à la fin de la période payée.</div>
       <div class="faq-item centered"><b class="centered">Peut-on migrer de la location à l'achat ?</b><br>Oui, le montant d'un mois de location est déduit du prix d'achat si vous basculez.</div>
     </section>
   </main>
