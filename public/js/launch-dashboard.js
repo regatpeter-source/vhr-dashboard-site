@@ -10,7 +10,7 @@ function launchDashboard() {
 
     btn.disabled = true;
     btn.classList.add('loading');
-    btn.textContent = '⏳ Téléchargement...';
+    btn.textContent = 'Téléchargement...';
     successMsg.classList.remove('show');
 
     // Ouvre le téléchargement dans un nouvel onglet pour éviter les blocages navigateur
@@ -22,7 +22,7 @@ function launchDashboard() {
     setTimeout(() => {
         btn.disabled = false;
         btn.classList.remove('loading');
-        btn.textContent = '🚀 Télécharger l\'installateur';
+        btn.textContent = 'Télécharger l\'installateur';
     }, 3000);
 }
 

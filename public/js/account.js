@@ -61,12 +61,12 @@
         const input = document.getElementById(targetId);
         if (input.type === 'password') {
           input.type = 'text';
-          btn.textContent = '👁️‍🗨️';
-          btn.style.opacity = '0.6';
+          btn.textContent = 'Masquer';
+          btn.title = 'Masquer le mot de passe';
         } else {
           input.type = 'password';
-          btn.textContent = '👁️';
-          btn.style.opacity = '1';
+          btn.textContent = 'Afficher';
+          btn.title = 'Afficher le mot de passe';
         }
       });
     });
@@ -391,7 +391,7 @@
       if (!isOfficialHost()) {
         const box = document.getElementById('billingBox');
         box.innerHTML = `
-          <h3>💳 Factures & Paiements</h3>
+          <h3>Factures & Paiements</h3>
           <p>Pour consulter vos factures et gérer vos moyens de paiement, rendez-vous sur la page sécurisée :</p>
           <p><a class="cta" href="${BILLING_URL}" target="_blank" rel="noopener">Gérer ma facturation</a></p>
         `;
@@ -402,7 +402,7 @@
       const invoices = (r && r.invoices) || [];
       const box = document.getElementById('billingBox');
       
-      let html = '<h3>💳 Factures</h3>';
+      let html = '<h3>Factures</h3>';
       
       if (invoices.length === 0) {
         html += '<p>Aucune facture pour le moment.</p>';
@@ -448,7 +448,7 @@
     } catch(e) {
       console.error('[Billing] Error loading invoices:', e);
       const box = document.getElementById('billingBox');
-      box.innerHTML = '<h3>💳 Factures</h3><p>Erreur lors du chargement des factures</p>';
+      box.innerHTML = '<h3>Factures</h3><p>Erreur lors du chargement des factures</p>';
     }
   }
 
@@ -571,11 +571,11 @@
               document.getElementById('cancelSubscriptionBtn').style.opacity = '0.5';
               setTimeout(() => { loadSubscription(); }, 2000);
             } else {
-              msgDiv.textContent = '❌ Erreur: ' + (cancelRes && cancelRes.error ? cancelRes.error : 'Impossible d\'annuler l\'abonnement');
+              msgDiv.textContent = 'Erreur: ' + (cancelRes && cancelRes.error ? cancelRes.error : 'Impossible d\'annuler l\'abonnement');
               msgDiv.style.color = '#d32f2f';
             }
           } catch (err) {
-            msgDiv.textContent = '❌ Erreur: ' + err.message;
+            msgDiv.textContent = 'Erreur: ' + err.message;
             msgDiv.style.color = '#d32f2f';
           }
         });
@@ -686,7 +686,7 @@
       e.preventDefault();
       
       // Confirmation dialog
-      if (!confirm('⚠️ ATTENTION: Êtes-vous sûr de vouloir supprimer votre compte?\n\nCette action est IRRÉVERSIBLE et toutes vos données seront perdues.')) {
+      if (!confirm('ATTENTION: Êtes-vous sûr de vouloir supprimer votre compte?\n\nCette action est IRRÉVERSIBLE et toutes vos données seront perdues.')) {
         return;
       }
       
@@ -714,11 +714,11 @@
             window.location.href = '/account.html';
           }, 2000);
         } else {
-          msg.textContent = '❌ Erreur: ' + (res && res.error ? res.error : 'Impossible de supprimer le compte');
+          msg.textContent = 'Erreur: ' + (res && res.error ? res.error : 'Impossible de supprimer le compte');
           msg.style.color = '#d32f2f';
         }
       } catch (err) {
-        msg.textContent = '❌ Erreur: ' + err.message;
+        msg.textContent = 'Erreur: ' + err.message;
         msg.style.color = '#d32f2f';
       }
     });
@@ -737,16 +737,16 @@
     // Show message based on action parameter
     if (action === 'demo_required') {
       const msg = document.getElementById('loginMessage');
-      msg.innerHTML = '<div style="background: #e3f2fd; border: 1px solid #2196F3; color: #0d47a1; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>📥 Créez un compte pour accéder à la démo</strong><br>Vous pouvez vous inscrire gratuitement et accéder à une démo gratuite de 7 jours !</div>';
+      msg.innerHTML = '<div style="background: #e3f2fd; border: 1px solid #2196F3; color: #0d47a1; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>Créez un compte pour accéder à la démo</strong><br>Vous pouvez vous inscrire gratuitement et accéder à une démo gratuite de 7 jours !</div>';
     } else if (action === 'subscription_required') {
       const msg = document.getElementById('loginMessage');
-      msg.innerHTML = '<div style="background: #e8f5e9; border: 1px solid #4CAF50; color: #1b5e20; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>🔒 Créez un compte pour gérer vos abonnements</strong><br>Connexion sécurisée requise pour accéder à votre espace client.</div>';
+      msg.innerHTML = '<div style="background: #e8f5e9; border: 1px solid #4CAF50; color: #1b5e20; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>Créez un compte pour gérer vos abonnements</strong><br>Connexion sécurisée requise pour accéder à votre espace client.</div>';
     } else if (action === 'launch_required') {
       const msg = document.getElementById('loginMessage');
-      msg.innerHTML = '<div style="background: #fff8e1; border: 1px solid #fbc02d; color: #7c4a00; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>🚀 Créez votre compte avant de lancer le dashboard</strong><br>Inscrivez-vous ou connectez-vous ici, puis vous serez redirigé automatiquement vers le lancement.</div>';
+      msg.innerHTML = '<div style="background: #fff8e1; border: 1px solid #fbc02d; color: #7c4a00; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>Créez votre compte avant de lancer le dashboard</strong><br>Inscrivez-vous ou connectez-vous ici, puis vous serez redirigé automatiquement vers le lancement.</div>';
     } else if (action === 'admin_required') {
       const msg = document.getElementById('loginMessage');
-      msg.innerHTML = '<div style="background: #f3e5f5; border: 1px solid #9c27b0; color: #4a148c; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>🔑 Accès administrateur requis</strong><br>Connectez-vous avec un compte administrateur pour ouvrir le tableau de bord admin. Une fois connecté, vous serez automatiquement redirigé.</div>';
+      msg.innerHTML = '<div style="background: #f3e5f5; border: 1px solid #9c27b0; color: #4a148c; padding: 12px; border-radius: 4px; margin-bottom: 16px;"><strong>Accès administrateur requis</strong><br>Connectez-vous avec un compte administrateur pour ouvrir le tableau de bord admin. Une fois connecté, vous serez automatiquement redirigé.</div>';
     }
   });
 

@@ -28,15 +28,15 @@
         <div id="authForms">
           <form id="loginForm" style="margin-bottom:18px;">
             <label>Nom d'utilisateur:<br><input type="text" id="username" required></label><br>
-            <label>Mot de passe:<br><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="password" required style="flex:1;"><button type="button" class="togglePassword" data-target="password" style="background:none;border:none;cursor:pointer;font-size:18px;padding:4px;" title="Afficher/masquer">👁️</button></div></label><br>
+            <label>Mot de passe:<br><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="password" required style="flex:1;"><button type="button" class="togglePassword" data-target="password" style="background:none;border:none;cursor:pointer;font-size:14px;padding:4px;" title="Afficher le mot de passe">Afficher</button></div></label><br>
             <button type="submit" class="cta">Se connecter</button>
           </form>
           <form id="signupForm">
             <h3>Créer un compte</h3>
             <label>Nom d'utilisateur:<br><input type="text" id="signupUsername" required></label><br>
             <label>Email:<br><input type="email" id="signupEmail"></label><br>
-            <label>Mot de passe:<br><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="signupPassword" required style="flex:1;"><button type="button" class="togglePassword" data-target="signupPassword" style="background:none;border:none;cursor:pointer;font-size:18px;padding:4px;" title="Afficher/masquer">👁️</button></div></label><br>
-            <label>Confirmer le mot de passe:<br><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="signupPasswordConfirm" required style="flex:1;"><button type="button" class="togglePassword" data-target="signupPasswordConfirm" style="background:none;border:none;cursor:pointer;font-size:18px;padding:4px;" title="Afficher/masquer">👁️</button></div></label><br>
+            <label>Mot de passe:<br><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="signupPassword" required style="flex:1;"><button type="button" class="togglePassword" data-target="signupPassword" style="background:none;border:none;cursor:pointer;font-size:14px;padding:4px;" title="Afficher le mot de passe">Afficher</button></div></label><br>
+            <label>Confirmer le mot de passe:<br><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="signupPasswordConfirm" required style="flex:1;"><button type="button" class="togglePassword" data-target="signupPasswordConfirm" style="background:none;border:none;cursor:pointer;font-size:14px;padding:4px;" title="Afficher le mot de passe">Afficher</button></div></label><br>
             <button type="submit" class="cta-secondary">Créer un compte</button>
           </form>
         </div>
@@ -47,21 +47,21 @@
         <p>Rôle: <span id="accountRole"></span></p>
         <p>Vous êtes connecté·e. Ici vous pourrez afficher vos abonnements, factures et paramètres.</p>
         <div id="emailVerificationAlert" style="display:none; margin: 16px 0; padding: 14px; background: #fff4e5; border-left: 4px solid #f5a524; border-radius: 6px;">
-          <strong>📧 Email non vérifié.</strong>
+          <strong>Email non vérifié.</strong>
           <p style="margin:8px 0 0 0;">Merci de confirmer votre adresse pour sécuriser votre compte.</p>
           <button id="resendVerificationFromBanner" class="cta-secondary" style="margin-top:10px;">Renvoyer l'email de vérification</button>
           <div id="verificationBannerMessage" style="margin-top:8px;font-size:13px;color:#555;"></div>
         </div>
         
         <section id="subscriptionBox" style="margin: 24px 0; padding: 16px; background: #f0f7ff; border-left: 4px solid #2196F3; border-radius: 4px;">
-          <h3>📦 Mes abonnements</h3>
+          <h3>Mes abonnements</h3>
           <div id="subscriptionContent">
             <p>Chargement...</p>
           </div>
         </section>
 
         <section id="trialStatusSection" style="display:none; margin: 24px 0; padding: 16px; background: #fffbee; border-left: 4px solid #f79f1f; border-radius: 4px;">
-          <h3>⏱️ Essai gratuit & statut</h3>
+          <h3>Essai gratuit & statut</h3>
           <div id="trialStatusContent">
             <p>Chargement des informations d'essai…</p>
           </div>
@@ -79,15 +79,15 @@
           <div id="profileMessage"></div>
           <h3>Changer le mot de passe</h3>
           <form id="passwordForm">
-            <label>Ancien mot de passe:<br><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="oldPassword" style="flex:1;"><button type="button" class="togglePassword" data-target="oldPassword" style="background:none;border:none;cursor:pointer;font-size:18px;padding:4px;" title="Afficher/masquer">👁️</button></div></label><br>
-            <label>Nouveau mot de passe:<br><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="newPassword" style="flex:1;"><button type="button" class="togglePassword" data-target="newPassword" style="background:none;border:none;cursor:pointer;font-size:18px;padding:4px;" title="Afficher/masquer">👁️</button></div></label><br>
+            <label>Ancien mot de passe:<br><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="oldPassword" style="flex:1;"><button type="button" class="togglePassword" data-target="oldPassword" style="background:none;border:none;cursor:pointer;font-size:14px;padding:4px;" title="Afficher le mot de passe">Afficher</button></div></label><br>
+            <label>Nouveau mot de passe:<br><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="newPassword" style="flex:1;"><button type="button" class="togglePassword" data-target="newPassword" style="background:none;border:none;cursor:pointer;font-size:14px;padding:4px;" title="Afficher le mot de passe">Afficher</button></div></label><br>
             <button type="submit" class="cta">Changer le mot de passe</button>
           </form>
           <div id="passwordMessage"></div>
         </section>
 
         <section id="dangerZone" style="margin-top: 32px; padding: 16px; background: #fff3cd; border: 2px solid #ff6b6b; border-radius: 4px;">
-          <h3 style="color: #d32f2f;">⚠️ Zone Dangereuse</h3>
+          <h3 style="color: #d32f2f;">Zone Dangereuse</h3>
           <div id="deleteAccountBox">
             <p>Une fois votre compte supprimé, il ne peut pas être récupéré. Toutes vos données seront perdues.</p>
             <button id="deleteAccountBtn" class="cta-secondary" style="background-color: #d32f2f; color: white;">Supprimer mon compte</button>

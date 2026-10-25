@@ -472,3 +472,12 @@ Pour le site hébergé :
 Validation complémentaire : **15 tests persistants réussis**, nouvelle exécution des **147 contrôles métier**, démarrage simulé Render sans messages ADB/Windows/SMTP debug et refus de démarrer après échec PostgreSQL simulé.
 Ces simulations ne constituent toujours pas une recette Stripe réelle ni une restauration de PostgreSQL.
 La mise à jour du site et la publication de la release sont vérifiées séparément après l'envoi Git ; le seul succès du build n'est pas une preuve de déploiement.
+
+## 10. Présentation du site vitrine sans émoticônes
+
+À la demande de l'utilisateur, les décorations emoji ont été retirées de l'accueil, du guide, des pages compte et téléchargement, ainsi que des messages contact, facturation et assistant de discussion.
+Les commandes de visibilité des mots de passe utilisent désormais les libellés « Afficher » et « Masquer ». Les niveaux d'importance du guide restent présents sous forme de notes numériques.
+L'application desktop, ses sources et son installateur ne sont pas modifiés par cette retouche.
+
+Validation locale : **16 tests persistants réussis**, syntaxe des six scripts modifiés vérifiée, sept pages contrôlées dans Chromium aux largeurs 390 et 1440 pixels sans émoticônes ni débordement horizontal. Le basculement des mots de passe et six réponses du chatbot ont également été vérifiés. Les appels externes et API étaient bloqués ou simulés pendant ces contrôles.
+Ces résultats locaux ne constituent pas une preuve de déploiement en production.

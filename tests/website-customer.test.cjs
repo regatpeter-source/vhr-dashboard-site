@@ -143,3 +143,25 @@ test('cancellation is scheduled with Stripe and profile identity updates preserv
   assert.match(postgresSource, /UPDATE subscriptions[\s\S]*?WHERE userid = \$3 OR LOWER\(username\) = LOWER\(\$4\)/);
   assert.match(serverSource, /updateLicenseIdentityReferences\(oldUsername, normalized\)/);
 });
+
+test('marketing pages and their scripts do not contain emoji decorations', () => {
+  const root = path.join(__dirname, '..');
+  const vitrine = path.join(root, 'site-vitrine');
+  const files = fs.readdirSync(vitrine)
+    .filter(name => /\.(html|js|css)$/.test(name))
+    .map(name => path.join(vitrine, name));
+  files.push(...[
+    'account.html', 'launch-dashboard.html', 'public/script.js',
+    'public/js/account.js', 'public/js/contact-form.js',
+    'public/js/launch-dashboard.js', 'public/js/botpress-config.js',
+    'public/js/pricing-stripe.js'
+  ].map(name => path.join(root, name)));
+
+  for (const file of files) {
+    const source = fs.readFileSync(file, 'utf8').replace(
+      /&#(?:x([0-9a-f]+)|([0-9]+));/gi,
+      (_, hex, decimal) => String.fromCodePoint(parseInt(hex || decimal, hex ? 16 : 10))
+    );
+    assert.doesNotMatch(source, /[\p{Extended_Pictographic}\uFE0F\u20E3]/u, path.relative(root, file));
+  }
+});

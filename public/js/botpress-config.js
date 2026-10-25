@@ -44,22 +44,22 @@ window.botpressWebChat.enableReset = true;
 				id: 'install_trial',
 				keywords: ['installer', 'installation', 'dashboard pro', '7 jours', 'essai', 'trial', 'demo', 'beneficier'],
 				minScore: 2,
-				reply: 'Excellente question ✅ Voici la méthode simple pour installer Dashboard Pro et activer l\'essai 7 jours :\n\n1) Créez votre compte sur la page Mon compte\n2) Téléchargez l\'installateur Dashboard Pro depuis le site vitrine\n3) Installez puis lancez l\'application sur votre PC\n4) Connectez-vous avec le même compte dans l\'app\n5) L\'essai gratuit de 7 jours démarre automatiquement sur votre compte\n\nPendant l\'essai, vous pouvez tester :\n• la détection des casques\n• le streaming\n• le contrôle à distance\n• les fonctions de support opérateur\n\nSi vous voulez, je peux aussi vous donner le parcours exact selon votre casque (Quest, Pico, HTC).'
+				reply: 'Voici la méthode simple pour installer Dashboard Pro et activer l\'essai 7 jours :\n\n1) Créez votre compte sur la page Mon compte\n2) Téléchargez l\'installateur Dashboard Pro depuis le site vitrine\n3) Installez puis lancez l\'application sur votre PC\n4) Connectez-vous avec le même compte dans l\'app\n5) L\'essai gratuit de 7 jours démarre automatiquement sur votre compte\n\nPendant l\'essai, vous pouvez tester :\n• la détection des casques\n• le streaming\n• le contrôle à distance\n• les fonctions de support opérateur\n\nSi vous voulez, je peux aussi vous donner le parcours exact selon votre casque (Quest, Pico, HTC).'
 			},
 			{
 				id: 'pricing',
 				keywords: ['tarif', 'prix', 'cout', 'abonnement', 'licence', 'budget'],
-				reply: 'Voici un comparatif clair 👇\n\n• Abonnement mensuel (29€/mois)\n  - idéal pour démarrer vite et rester flexible\n  - résiliable à tout moment\n  - mises à jour + support inclus\n\n• Licence définitive (499€ HT, paiement unique)\n  - idéale pour un usage long terme\n  - 1 an de mises à jour inclus\n  - support prioritaire pendant 1 an\n\nConseil pratique :\n- besoin évolutif / pilote / POC → abonnement\n- parc stable avec visibilité long terme → licence'
+				reply: 'Voici un comparatif clair :\n\n• Abonnement mensuel (29€/mois)\n  - idéal pour démarrer vite et rester flexible\n  - résiliable à tout moment\n  - mises à jour + support inclus\n\n• Licence définitive (499€ HT, paiement unique)\n  - idéale pour un usage long terme\n  - 1 an de mises à jour inclus\n  - support prioritaire pendant 1 an\n\nConseil pratique :\n- besoin évolutif / pilote / POC → abonnement\n- parc stable avec visibilité long terme → licence'
 			},
 			{
 				id: 'trial_demo',
 				keywords: ['essai', 'trial', 'demo', 'test'],
-				reply: 'Oui ✅ Vous pouvez tester la solution, et c\'est recommandé avant un déploiement large.\n\nPendant la démo, vérifiez surtout :\n• découverte et gestion des casques\n• stabilité du streaming\n• commandes à distance / supervision\n• fluidité du support opérateur\n\nBon process en 3 étapes :\n1) test sur 1–2 casques,\n2) test en conditions réelles (réseau, usage),\n3) extension au reste de la flotte.'
+				reply: 'Vous pouvez tester la solution, et c\'est recommandé avant un déploiement large.\n\nPendant la démo, vérifiez surtout :\n• découverte et gestion des casques\n• stabilité du streaming\n• commandes à distance / supervision\n• fluidité du support opérateur\n\nBon process en 3 étapes :\n1) test sur 1–2 casques,\n2) test en conditions réelles (réseau, usage),\n3) extension au reste de la flotte.'
 			},
 			{
 				id: 'support',
 				keywords: ['support', 'contact', 'email', 'mail', 'assistance', 'aide', 'incident', 'bug'],
-				reply: 'Support VHR Dashboard Pro :\n📧 support@vhr-dashboard-site.com\n\nPour une réponse ultra rapide, envoyez :\n• modèle(s) de casque et version système\n• type de connexion (USB/WiFi)\n• capture du message d’erreur\n• action en cours (streaming, installation, login, etc.)\n• niveau d’urgence\n\nAstuce : plus le contexte est précis, plus la résolution est directe.'
+				reply: 'Support VHR Dashboard Pro :\nsupport@vhr-dashboard-site.com\n\nPour une réponse ultra rapide, envoyez :\n• modèle(s) de casque et version système\n• type de connexion (USB/WiFi)\n• capture du message d’erreur\n• action en cours (streaming, installation, login, etc.)\n• niveau d’urgence\n\nAstuce : plus le contexte est précis, plus la résolution est directe.'
 			},
 			{
 				id: 'compatibility',
@@ -89,10 +89,10 @@ window.botpressWebChat.enableReset = true;
 		];
 
 		if (!q) {
-			return 'Bonjour 👋 Bienvenue chez VHR Dashboard Pro !\n\nJe peux vous aider de façon détaillée sur :\n• les tarifs (abonnement vs licence définitive)\n• la compatibilité des casques (Quest, Pico, HTC…)\n• l’installation pas à pas (USB, ADB, WiFi)\n• le support et les bonnes infos à fournir\n• les cas d’usage (formation, événementiel, support IT)\n\nExemples de questions :\n« Quelle formule est la plus adaptée pour 20 casques ? »\n« Comment démarrer rapidement sur Quest ? »\n« Que faire si ADB ne détecte pas le casque ? »';
+			return 'Bonjour, bienvenue chez VHR Dashboard Pro !\n\nJe peux vous aider de façon détaillée sur :\n• les tarifs (abonnement vs licence définitive)\n• la compatibilité des casques (Quest, Pico, HTC…)\n• l’installation pas à pas (USB, ADB, WiFi)\n• le support et les bonnes infos à fournir\n• les cas d’usage (formation, événementiel, support IT)\n\nExemples de questions :\n« Quelle formule est la plus adaptée pour 20 casques ? »\n« Comment démarrer rapidement sur Quest ? »\n« Que faire si ADB ne détecte pas le casque ? »';
 		}
 		if (hasAny(['bonjour', 'salut', 'hello', 'coucou', 'bonsoir'])) {
-			return 'Bonjour 👋 Ravi de vous aider !\n\nMon rôle : vous donner des réponses concrètes, ici directement, pour avancer vite.\n\nJe peux commencer par :\n1) vous conseiller une formule (abonnement/licence),\n2) vous guider sur l’installation,\n3) vérifier la compatibilité de vos casques,\n4) vous proposer un mini plan de déploiement.';
+			return 'Bonjour, ravi de vous aider !\n\nMon rôle : vous donner des réponses concrètes, ici directement, pour avancer vite.\n\nJe peux commencer par :\n1) vous conseiller une formule (abonnement/licence),\n2) vous guider sur l’installation,\n3) vérifier la compatibilité de vos casques,\n4) vous proposer un mini plan de déploiement.';
 		}
 
 		let bestIntent = null;
@@ -110,7 +110,7 @@ window.botpressWebChat.enableReset = true;
 			return bestIntent.reply;
 		}
 
-		return 'Excellente question 👍\n\nJe peux vous faire une réponse personnalisée si vous me donnez :\n• votre objectif (support, formation, événement, production)\n• le nombre de casques\n• les modèles utilisés\n• votre priorité (coût, rapidité, stabilité, sécurité)\n\nEnsuite, je vous propose une recommandation concrète étape par étape.';
+		return 'Je peux vous faire une réponse personnalisée si vous me donnez :\n• votre objectif (support, formation, événement, production)\n• le nombre de casques\n• les modèles utilisés\n• votre priorité (coût, rapidité, stabilité, sécurité)\n\nEnsuite, je vous propose une recommandation concrète étape par étape.';
 	}
 
 	function createMessage(text, isUser) {
@@ -195,7 +195,7 @@ window.botpressWebChat.enableReset = true;
 		const toggle = document.createElement('button');
 		toggle.type = 'button';
 		toggle.setAttribute('aria-label', 'Ouvrir le chat assistant');
-		toggle.textContent = '💬 Chat';
+		toggle.textContent = 'Chat';
 		toggle.style.padding = '11px 14px';
 		toggle.style.borderRadius = '999px';
 		toggle.style.border = 'none';

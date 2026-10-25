@@ -50,7 +50,7 @@ function setLaunchBlocked(messageHtml) {
   const msg = ensureLaunchGuardMessage();
   msg.style.background = '#fbe9e7';
   msg.style.color = '#c62828';
-  msg.innerHTML = messageHtml || '🔐 Créez votre compte avant de lancer le dashboard.';
+  msg.innerHTML = messageHtml || 'Créez votre compte avant de lancer le dashboard.';
   if (container && !msg.isConnected) {
     container.appendChild(msg);
   }
@@ -69,7 +69,7 @@ function setLaunchAllowed(user) {
   msg.style.background = '#e8f5e9';
   msg.style.color = '#1b5e20';
   const username = (user && (user.username || user.name)) || 'Votre compte';
-  msg.innerHTML = `✅ ${username} est connecté. Vous pouvez lancer le dashboard.`;
+  msg.innerHTML = `${username} est connecté. Vous pouvez lancer le dashboard.`;
   if (!msg.isConnected) {
     const container = btn.closest('.download-block') || btn.parentElement;
     if (container) container.appendChild(msg);
@@ -77,7 +77,7 @@ function setLaunchAllowed(user) {
 }
 
 async function checkLaunchEligibility() {
-  const defaultMessage = '🔐 Créez un compte gratuit avant de lancer le dashboard.<br><a href="/account.html?action=launch_required" style="color:#c62828;text-decoration:underline;">Créer mon compte</a>';
+  const defaultMessage = 'Créez un compte gratuit avant de lancer le dashboard.<br><a href="/account.html?action=launch_required" style="color:#c62828;text-decoration:underline;">Créer mon compte</a>';
   setLaunchBlocked(defaultMessage);
   try {
     const res = await fetch('/api/check-auth', { credentials: 'include' });

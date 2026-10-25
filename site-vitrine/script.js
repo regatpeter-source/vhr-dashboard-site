@@ -24,7 +24,7 @@ if (form) {
       return;
     }
     
-    status.textContent = '📤 Envoi en cours...';
+    status.textContent = 'Envoi en cours...';
     
     try {
       const response = await fetch('/api/contact', {
@@ -52,11 +52,11 @@ if (form) {
         status.innerHTML = '<p style="color: green; font-weight: bold;">Message reçu! Nous vous répondrons très bientôt.</p>';
         form.reset();
       } else {
-        status.innerHTML = `<p style="color: red; font-weight: bold;">❌ Erreur: ${data.error}</p>`;
+        status.innerHTML = `<p style="color: red; font-weight: bold;">Erreur: ${data.error}</p>`;
       }
     } catch (error) {
       console.error('Erreur lors de l\'envoi:', error);
-      status.innerHTML = '<p style="color: red; font-weight: bold;">❌ Erreur lors de l\'envoi du message.</p>';
+      status.innerHTML = '<p style="color: red; font-weight: bold;">Erreur lors de l\'envoi du message.</p>';
     }
   });
 }
