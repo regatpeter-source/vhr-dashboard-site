@@ -1,7 +1,10 @@
 User-agent: *
 Allow: /
-Disallow: /downloads/
+Disallow: /api/
 Disallow: /data/
-Disallow: /temp*
+Disallow: /downloads/
+Disallow: /node_modules/
+Disallow: /scripts/
+Disallow: /temp
 
 Sitemap: https://www.vhr-dashboard-site.com/sitemap.xml

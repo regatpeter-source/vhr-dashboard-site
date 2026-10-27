@@ -1148,6 +1148,7 @@ app.use((req, res, next) => {
 
 // ========== CONFIGURATION MANAGEMENT ==========
 const subscriptionConfig = require('./config/subscription.config');
+const subscriptionFields = require('./services/subscription-fields');
 const pricingPolicy = require('./config/pricing');
 const purchaseConfig = require('./config/purchase.config');
 const demoConfig = require('./config/demo.config');
@@ -2136,7 +2137,7 @@ app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
 // Permet d'éviter les 404 GitHub en servant le binaire/zip directement depuis le serveur
 app.get('/download/client-full', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  return res.redirect(302, 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.3-client/VHR.Dashboard.Setup.1.0.3.exe');
+  return res.redirect(302, 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.4-client/VHR.Dashboard.Setup.1.0.4.exe');
 });
 
 // Download VHR Voice APK for Quest background audio
@@ -3356,7 +3357,8 @@ async function reconcilePendingSubscriptions() {
   if (updatedUsers.size > 0) {
     for (const updatedUser of updatedUsers) {
       try {
-        persistUser(updatedUser);
+        const saved = await persistUser(updatedUser);
+        if (saved === false) throw new Error('Subscription update was not persisted');
       } catch (e) {
         console.error('[subscription] Failed to persist subscription updates:', e && e.message);
       }
@@ -3367,7 +3369,7 @@ async function reconcilePendingSubscriptions() {
 function startSubscriptionReconciler() {
   if (subscriptionReconcileTimer) clearInterval(subscriptionReconcileTimer);
   // initial delayed run to avoid hitting Stripe immediately on boot
-  setTimeout(() => reconcilePendingSubscriptions().catch(() => {}), 10 * 1000);
+  setTimeout(() => reconcilePendingSubscriptions().catch(err => console.error('[subscription] initial reconciliation failed:', err.message)), 10 * 1000);
   subscriptionReconcileTimer = setInterval(() => {
     reconcilePendingSubscriptions().catch(err => console.error('[subscription] reconcile loop error:', err && err.message));
   }, SUBSCRIPTION_RECONCILE_INTERVAL_MS);
@@ -3691,22 +3693,25 @@ function persistUser(user) {
     if (user.email !== undefined) updatePayload.email = user.email;
     if (user.role) updatePayload.role = user.role;
     if (user.stripeCustomerId) updatePayload.stripecustomerid = user.stripeCustomerId;
-    if (user.subscriptionStatus) updatePayload.subscriptionstatus = user.subscriptionStatus;
-    if (user.subscriptionId) updatePayload.subscriptionid = user.subscriptionId;
+    Object.assign(updatePayload, subscriptionFields.subscriptionUpdate(user));
     if (user.demoStartDate) updatePayload.demostartdate = user.demoStartDate;
     if (user.demoExtensionDays !== undefined) updatePayload.demoextensiondays = user.demoExtensionDays;
     if (Object.prototype.hasOwnProperty.call(user, 'subscriptionConfirmationSentAt')) updatePayload.subscriptionconfirmationsentat = user.subscriptionConfirmationSentAt || null;
 
     // Save async to PostgreSQL (fire and forget to avoid blocking)
-    db.getUserByUsername(user.username)
-      .then(existing => {
+    return db.getUserByUsername(user.username)
+      .then(async existing => {
         if (existing && existing.id) {
-          return db.updateUser(existing.id, updatePayload);
+          const saved = await db.updateUser(existing.id, updatePayload);
+          if (!saved) throw new Error('PostgreSQL user update did not persist');
+          return saved;
         }
         return db.createUser(user.id || `user_${user.username}`, user.username, user.passwordHash, user.email, user.role);
       })
-      .catch(err => console.error('[db] persistUser error:', err && err.message ? err.message : err));
-    return true;
+      .catch(err => {
+        console.error('[db] persistUser error:', err && err.message ? err.message : err);
+        return false;
+      });
   } else if (dbEnabled) {
     require('./db').addOrUpdateUser(user);
     // keep in-memory list sync

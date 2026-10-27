@@ -506,3 +506,28 @@ Validation :
 
 Une sauvegarde privée de l'installation et des données antérieures est conservée dans le répertoire local de maintenance `pre-1.0.3-20261025`. L'installateur demeure non signé.
 Le succès du build et des tests locaux ne constitue pas une preuve du déploiement Render ; la révision publique, les prix servis et le téléchargement doivent être vérifiés après publication.
+
+## 12. Journaux, connexions et référencement technique - version 1.0.4
+
+Correctifs du 27/10/2026 :
+
+- Les requêtes de connexion ne journalisent plus leur corps, qui pouvait contenir un mot de passe. Le serveur hébergé ne tente plus de s'authentifier contre lui-même ; l'authentification distante du mode local reste disponible.
+- Le formulaire compte bloque les soumissions simultanées, réactive son bouton après erreur et conserve les espaces des mots de passe, sur le site et dans l'application.
+- La suppression d'un identifiant d'abonnement factice conserve les valeurs `null` lors de la normalisation et dans les champs PostgreSQL. La réconciliation attend l'écriture et signale un échec.
+- Les sessions administrateur émises avant le 27/10/2026 à 19:46:17 UTC sont refusées. Ce seuil ponctuel ne déconnecte pas les clients ni les nouvelles sessions.
+- L'accueil canonique `https://www.vhr-dashboard-site.com/` sert directement le contenu en HTTP 200, sans redirection HTML. Ses anciennes adresses redirigent en 301 vers cette URL, en conservant les paramètres.
+- Les sept pages publiques secondaires ont chacune une balise canonique vers leur adresse sous `/site-vitrine/`. Les anciennes adresses racine redirigent en 301 vers ces pages.
+- Les routes du sitemap et des robots passent avant les fichiers statiques pour éviter de servir des copies périmées. Le sitemap contient uniquement les huit pages publiques canoniques ; les comptes et l'application sont signalés `noindex`.
+
+Validation locale : **27 tests persistants**, **147 contrôles métier** et **93 contrôles tarifaires** réussis. Une requête avec un mot de passe synthétique a confirmé son absence des journaux ; une ancienne session administrateur est refusée tandis qu'une nouvelle session et une session client sont acceptées.
+Dans Chromium, cinq pages ont été contrôlées à 390 et 1440 pixels : styles chargés, aucune image cassée ni débordement horizontal. Une double soumission ne produit qu'un appel de connexion et le bouton est réactivé après rejet.
+
+Le paquet Windows 1.0.4 et l'installation réelle ont chacun passé treize contrôles API/ressources et la vérification navigateur du compte. L'installation silencieuse a conservé les **279 fichiers utilisateur** comparés par empreinte. Leur sauvegarde privée est conservée dans `pre-1.0.4-20261027`, dans le répertoire local de maintenance. L'installateur reste non signé.
+
+### Actions d'exploitation restant à effectuer par le propriétaire
+
+- Remplacer le mot de passe administrateur exposé dans les variables d'environnement Render puis redéployer. `ADMIN_PASSWORD_HASH`, s'il est défini, est prioritaire sur `ADMIN_PASSWORD` : ne pas conserver un ancien hash lorsque le mot de passe est géré par cette dernière variable. La rotation n'a pas été effectuée par ces changements de code.
+- Restreindre l'accès aux anciens journaux contenant le secret. Pour invalider toutes les sessions, remplacer également `JWT_SECRET` dans Render.
+- Soumettre `https://www.vhr-dashboard-site.com/sitemap.xml` dans Google Search Console, inspecter l'accueil canonique et les pages publiques puis demander leur indexation. Les URL redirigées et les pages privées n'ont pas vocation à être indexées.
+
+Les sondes automatisées en 404 ne prouvent ni une intrusion réussie ni une pénalité Google. Le libellé précis d'exclusion Search Console n'a pas été fourni ; la correction technique ne garantit ni l'indexation immédiate ni une position sur des mots-clés. Une vérification de la révision Render, des réponses SEO et de l'installateur public doit suivre la publication.

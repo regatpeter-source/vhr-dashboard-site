@@ -1016,6 +1016,7 @@ app.use((req, res, next) => {
 
 // ========== CONFIGURATION MANAGEMENT ==========
 const subscriptionConfig = require('./config/subscription.config');
+const subscriptionFields = require('./services/subscription-fields');
 const pricingPolicy = require('./config/pricing');
 const purchaseConfig = require('./config/purchase.config');
 const demoConfig = require('./config/demo.config');
@@ -1918,6 +1919,7 @@ async function sendAccountConfirmationEmail(user, options = {}) {
 }
 
 // ========== EXPLICIT ROUTES (must come BEFORE express.static middleware) ==========
+require('./services/seo').installSeoRoutes(app, __dirname);
 
 // Serve launch-dashboard.html for 1-click launcher
 app.get('/launch-dashboard.html', (req, res) => {
@@ -2135,7 +2137,7 @@ app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
 // Permet d'éviter les 404 GitHub en servant le binaire/zip directement depuis le serveur
 app.get('/download/client-full', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  return res.redirect(302, 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.3-client/VHR.Dashboard.Setup.1.0.3.exe');
+  return res.redirect(302, 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.4-client/VHR.Dashboard.Setup.1.0.4.exe');
 });
 
 // Download VHR Voice APK for Quest background audio
@@ -3057,8 +3059,10 @@ function normalizeUserRecord(user) {
   normalized.lastLogin = normalized.lastLogin || normalized.lastlogin || null;
   normalized.lastActivity = normalized.lastActivity || normalized.lastactivity || null;
   normalized.stripeCustomerId = normalized.stripeCustomerId || normalized.stripecustomerid || null;
-  normalized.subscriptionStatus = normalized.subscriptionStatus || normalized.subscriptionstatus || null;
-  normalized.subscriptionId = normalized.subscriptionId || normalized.subscriptionid || null;
+  normalized.subscriptionStatus = subscriptionFields.readSubscriptionField(normalized, 'subscriptionStatus', 'subscriptionstatus');
+  normalized.subscriptionId = subscriptionFields.readSubscriptionField(normalized, 'subscriptionId', 'subscriptionid');
+  normalized.subscriptionstatus = normalized.subscriptionStatus;
+  normalized.subscriptionid = normalized.subscriptionId;
   normalized.lastInvoicePaidAt = normalized.lastInvoicePaidAt || normalized.lastinvoicepaidat || null;
   normalized.latestInvoiceId = normalized.latestInvoiceId || normalized.latestinvoiceid || null;
   normalized.demoStartDate = normalized.demoStartDate || normalized.demostartdate || null;
@@ -3463,7 +3467,8 @@ async function reconcilePendingSubscriptions() {
   if (updatedUsers.size > 0) {
     for (const updatedUser of updatedUsers) {
       try {
-        persistUser(updatedUser);
+        const saved = await persistUser(updatedUser);
+        if (saved === false) throw new Error('Subscription update was not persisted');
       } catch (e) {
         console.error('[subscription] Failed to persist subscription updates:', e && e.message);
       }
@@ -3474,7 +3479,7 @@ async function reconcilePendingSubscriptions() {
 function startSubscriptionReconciler() {
   if (subscriptionReconcileTimer) clearInterval(subscriptionReconcileTimer);
   // initial delayed run to avoid hitting Stripe immediately on boot
-  setTimeout(() => reconcilePendingSubscriptions().catch(() => {}), 10 * 1000);
+  setTimeout(() => reconcilePendingSubscriptions().catch(err => console.error('[subscription] initial reconciliation failed:', err.message)), 10 * 1000);
   subscriptionReconcileTimer = setInterval(() => {
     reconcilePendingSubscriptions().catch(err => console.error('[subscription] reconcile loop error:', err && err.message));
   }, SUBSCRIPTION_RECONCILE_INTERVAL_MS);
@@ -3819,8 +3824,7 @@ function persistUser(user) {
     if (user.email !== undefined) updatePayload.email = user.email;
     if (user.role) updatePayload.role = user.role;
     if (user.stripeCustomerId) updatePayload.stripecustomerid = user.stripeCustomerId;
-    if (user.subscriptionStatus) updatePayload.subscriptionstatus = user.subscriptionStatus;
-    if (user.subscriptionId) updatePayload.subscriptionid = user.subscriptionId;
+    Object.assign(updatePayload, subscriptionFields.subscriptionUpdate(user));
     if (user.lastLogin) updatePayload.lastlogin = user.lastLogin;
     if (user.lastActivity) updatePayload.lastactivity = user.lastActivity;
     if (user.updatedAt) updatePayload.updatedat = user.updatedAt;
@@ -3834,17 +3838,21 @@ function persistUser(user) {
     if (Object.prototype.hasOwnProperty.call(user, 'demoEndDate')) updatePayload.demoenddate = user.demoEndDate || null;
 
     // Save async to PostgreSQL (fire and forget to avoid blocking)
-    db.getUserByUsername(user.username)
-      .then(existing => {
+    return db.getUserByUsername(user.username)
+      .then(async existing => {
         if (existing && existing.id) {
-          return db.updateUser(existing.id, updatePayload);
+          const saved = await db.updateUser(existing.id, updatePayload);
+          if (!saved) throw new Error('PostgreSQL user update did not persist');
+          return saved;
         }
         return db.createUser(user.id || `user_${user.username}`, user.username, user.passwordHash, user.email, user.role, {
           demoStartDate: user.demoStartDate || null
         });
       })
-      .catch(err => console.error('[db] persistUser error:', err && err.message ? err.message : err));
-    return true;
+      .catch(err => {
+        console.error('[db] persistUser error:', err && err.message ? err.message : err);
+        return false;
+      });
   } else if (dbEnabled) {
     require('./db').addOrUpdateUser(user);
     // keep in-memory list sync
@@ -4339,6 +4347,13 @@ function removeUserByUsername(username) {
 }
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change_this_secret';
+function verifySessionToken(token) {
+  const decoded = jwt.verify(token, JWT_SECRET);
+  if (require('./services/admin-sessions').isRevokedAdminSession(decoded, EFFECTIVE_ADMIN_ALLOWLIST)) {
+    throw new Error('Session administrateur révoquée ; reconnectez-vous');
+  }
+  return decoded;
+}
 const JWT_EXPIRES = '2h';
 const DASHBOARD_MAX_USERS_PER_ACCOUNT = Number.parseInt(process.env.DASHBOARD_MAX_USERS_PER_ACCOUNT || '1', 10) || 1;
 const DASHBOARD_MULTI_USERS_ENABLED = (process.env.DASHBOARD_MULTI_USERS_ENABLED || '0') === '1';
@@ -4473,7 +4488,7 @@ async function authMiddleware(req, res, next) {
   }
   if (!token) return res.status(401).json({ ok: false, error: 'Token manquant' });
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = verifySessionToken(token);
     const username = String(decoded?.username || '').trim();
     if (!username) {
       return res.status(401).json({ ok: false, error: 'Token invalide (utilisateur manquant)' });
@@ -4545,7 +4560,7 @@ function tryDecodeUser(req) {
   }
   if (!token) return null;
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = verifySessionToken(token);
     const elevated = elevateAdminIfAllowlisted(decoded);
     if (elevated && elevated.emailVerified === undefined) {
       elevated.emailVerified = true;
@@ -4557,6 +4572,7 @@ function tryDecodeUser(req) {
 }
 
 async function attemptRemoteDashboardLogin(identifier, password) {
+  if (runtimePolicy.hosted) return null;
   if (!AUTH_API_BASE || !identifier || !password) return null;
   const attempts = [
     { path: '/api/login', payload: { username: identifier, password } },
@@ -4748,6 +4764,7 @@ async function proxyRemoteUserStatus(req, res, pathOverride) {
 }
 
 async function syncLocalUserWithRemoteAccess(user, identifier, password) {
+  if (runtimePolicy.hosted) return user;
   if (!user || !password) return user;
   if (isUserDeletedIdentifier(user.username) || (user.email && isUserDeletedIdentifier(user.email))) {
     console.warn(`[remote-sync] skip refresh for deleted account ${user.username}`);
@@ -4868,7 +4885,7 @@ function findLocalGuestUser(identifier) {
 
 // --- Route de login ---
 app.post('/api/login', async (req, res) => {
-  console.log('[api/login] request received:', req.body);
+  console.log('[api/login] request received');
   const { username, password } = req.body;
   const loginIdentifier = (username || '').toString().trim();
   if (!loginIdentifier || typeof password !== 'string' || password.length === 0) {
@@ -5712,7 +5729,7 @@ app.get('/api/check-auth', async (req, res) => {
   }
   
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = verifySessionToken(token);
     let isPrimary = undefined;
     try {
       const storedUser = await findUserByUsernameAsync(decoded.username);
@@ -7156,7 +7173,7 @@ app.post('/api/license/check', async (req, res) => {
 
     if (authToken) {
       try {
-        const decoded = jwt.verify(authToken, JWT_SECRET);
+        const decoded = verifySessionToken(authToken);
         const user = getUserByUsername(decoded.username);
 
         if (user) {

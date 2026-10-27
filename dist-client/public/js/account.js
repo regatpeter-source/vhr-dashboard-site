@@ -275,16 +275,21 @@
     if (trialStatusSection) trialStatusSection.style.display = 'none';
   }
 
+  let loginInProgress = false;
   if (loginForm) loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (loginInProgress) return;
     const username = document.getElementById('username').value.trim();
-    const password = document.getElementById('password').value.trim();
+    const password = document.getElementById('password').value;
     
     if (!username || !password) {
       loginMessage.textContent = 'Erreur: Veuillez remplir tous les champs';
       return;
     }
     
+    loginInProgress = true;
+    const submitButton = loginForm.querySelector('button[type="submit"]');
+    if (submitButton) submitButton.disabled = true;
     loginMessage.textContent = 'Connexion en cours...';
     console.log('[LOGIN] Attempting login for:', username);
     
@@ -325,6 +330,9 @@
     } catch (err) {
       console.error('[LOGIN] Exception:', err);
       loginMessage.textContent = 'Erreur: ' + toFriendlyError(err && err.message, 'Erreur réseau');
+    } finally {
+      loginInProgress = false;
+      if (submitButton) submitButton.disabled = false;
     }
   });
 
