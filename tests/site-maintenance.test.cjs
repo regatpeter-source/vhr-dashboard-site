@@ -124,6 +124,17 @@ test('login never logs request credentials and hosted auth cannot call itself re
   assert.ok(serverSource.indexOf("require('./services/seo').installSeoRoutes") < serverSource.indexOf("app.use(express.static(path.join(__dirname, 'public')))"));
 });
 
+test('desktop refreshes a stale local password from the central account', () => {
+  const desktopServer = fs.readFileSync(path.join(root, 'dist-client/server.js'), 'utf8');
+  const login = desktopServer.slice(
+    desktopServer.indexOf('async function handleApiLogin('),
+    desktopServer.indexOf("app.post('/api/login', handleApiLogin)")
+  );
+  assert.match(login, /if \(!valid && !isGuestAccount\(user\)\) \{[\s\S]*attemptRemoteAuthentication\(identifier, password\)/);
+  assert.match(login, /ensureLocalUserFromRemote\(remoteAuthForSession\.payload, identifier, password\)/);
+  assert.match(login, /user = syncedUser;\s+valid = true;/);
+});
+
 test('website and desktop login ignore duplicate submits, preserve password spaces and recover after errors', async () => {
   for (const prefix of ['', 'dist-client']) {
     const source = fs.readFileSync(path.join(root, prefix, 'public/js/account.js'), 'utf8');

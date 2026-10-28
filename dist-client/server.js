@@ -2137,7 +2137,7 @@ app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
 // Permet d'éviter les 404 GitHub en servant le binaire/zip directement depuis le serveur
 app.get('/download/client-full', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  return res.redirect(302, 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.4-client/VHR.Dashboard.Setup.1.0.4.exe');
+  return res.redirect(302, 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.5-client/VHR.Dashboard.Setup.1.0.5.exe');
 });
 
 // Download VHR Voice APK for Quest background audio
@@ -4573,11 +4573,24 @@ async function handleApiLogin(req, res) {
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
   }
   let valid = false;
+  let remoteAuthForSession = null;
   try {
     valid = await bcrypt.compare(password, storedHash);
   } catch (e) {
     console.error('[api/login] bcrypt.compare failed:', e && e.message ? e.message : e);
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
+  }
+  if (!valid && !isGuestAccount(user)) {
+    console.log('[api/login] local password mismatch, checking central account');
+    remoteAuthForSession = await attemptRemoteAuthentication(identifier, password);
+    if (remoteAuthForSession && remoteAuthForSession.remoteToken) {
+      const syncedUser = await ensureLocalUserFromRemote(remoteAuthForSession.payload, identifier, password);
+      if (syncedUser) {
+        user = syncedUser;
+        valid = true;
+        cacheRemoteAuthToken(user.username, remoteAuthForSession.remoteToken);
+      }
+    }
   }
   if (!valid) {
     console.log('[api/login] password mismatch');
@@ -4585,7 +4598,12 @@ async function handleApiLogin(req, res) {
   }
 
   console.log('[api/login] login successful for:', user.username);
-  if (!isGuestAccount(user) && !IS_LOCAL_RUNTIME) {
+  if (remoteAuthForSession && remoteAuthForSession.remoteToken) {
+    const remoteDemo = await fetchRemoteDemoStatus(remoteAuthForSession.remoteToken, user.username);
+    if (remoteDemo) {
+      applyRemoteDemoToUser(user, remoteDemo, { reason: 'login-password-refresh' });
+    }
+  } else if (!isGuestAccount(user) && !IS_LOCAL_RUNTIME) {
     // Best-effort remote sync to keep demo/subscription aligned with site vitrine
     try {
       const remoteAuth = await attemptRemoteAuthentication(identifier, password);

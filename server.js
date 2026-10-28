@@ -2137,7 +2137,7 @@ app.get('/VHR-Dashboard-Portable.zip', (req, res) => {
 // Permet d'éviter les 404 GitHub en servant le binaire/zip directement depuis le serveur
 app.get('/download/client-full', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  return res.redirect(302, 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.4-client/VHR.Dashboard.Setup.1.0.4.exe');
+  return res.redirect(302, 'https://github.com/regatpeter-source/vhr-dashboard-site/releases/download/v1.0.5-client/VHR.Dashboard.Setup.1.0.5.exe');
 });
 
 // Download VHR Voice APK for Quest background audio
