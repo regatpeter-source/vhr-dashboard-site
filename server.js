@@ -2612,8 +2612,8 @@ async function ensureVitrinePgStoreReady() {
   return vitrinePgStoreReadyPromise;
 }
 
-async function loadVitrineVisitStats() {
-  if (vitrineVisitStatsCache) return vitrineVisitStatsCache;
+async function loadVitrineVisitStats(forceRefresh = false) {
+  if (vitrineVisitStatsCache && !forceRefresh) return vitrineVisitStatsCache;
 
   if (USE_POSTGRES && db && db.pool) {
     try {
@@ -2788,8 +2788,8 @@ function buildVitrineVisitorKey(req) {
   return crypto.createHash('sha256').update(`${ip}|${ua}`).digest('hex').slice(0, 24);
 }
 
-async function registerVitrineVisit(req) {
-  const stats = pruneVitrineVisitors(await loadVitrineVisitStats());
+function addVitrineVisit(statsArg, req) {
+  const stats = pruneVitrineVisitors(statsArg);
   const nowIso = new Date().toISOString();
   const key = buildVitrineVisitorKey(req);
   const pagePath = normalizeVitrinePagePath(req.path || req.originalUrl || '/index.html');
@@ -2802,11 +2802,61 @@ async function registerVitrineVisit(req) {
   stats.lastVisitAt = nowIso;
 
   pruneVitrineVisitors(stats);
+  return stats;
+}
+
+async function registerVitrineVisitInPostgres(req) {
+  await ensureVitrinePgStoreReady();
+  const client = await db.pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO vitrine_analytics (id, payload, updatedat)
+       VALUES ($1, $2::jsonb, CURRENT_TIMESTAMP)
+       ON CONFLICT (id) DO NOTHING`,
+      [VITRINE_STATS_STORE_ID, JSON.stringify(createDefaultVitrineStats())]
+    );
+    const result = await client.query(
+      'SELECT payload FROM vitrine_analytics WHERE id = $1 FOR UPDATE',
+      [VITRINE_STATS_STORE_ID]
+    );
+    const stats = addVitrineVisit(
+      normalizeVitrineStatsShape(result.rows?.[0]?.payload || {}),
+      req
+    );
+    stats.updatedAt = new Date().toISOString();
+    await client.query(
+      `UPDATE vitrine_analytics
+       SET payload = $2::jsonb, updatedat = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [VITRINE_STATS_STORE_ID, JSON.stringify(stats)]
+    );
+    await client.query('COMMIT');
+    vitrineVisitStatsCache = normalizeVitrineStatsShape(stats);
+  } catch (e) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      console.error('[vitrine-stats] postgres rollback error:', rollbackError && rollbackError.message ? rollbackError.message : rollbackError);
+    }
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+async function registerVitrineVisit(req) {
+  if (USE_POSTGRES && db && db.pool) {
+    await registerVitrineVisitInPostgres(req);
+    return;
+  }
+
+  const stats = addVitrineVisit(await loadVitrineVisitStats(), req);
   await saveVitrineVisitStats(stats);
 }
 
 async function getVitrineVisitStatsSnapshot() {
-  const stats = pruneVitrineVisitors(await loadVitrineVisitStats());
+  const stats = pruneVitrineVisitors(await loadVitrineVisitStats(USE_POSTGRES && db && db.pool));
   const recentVisits = Array.isArray(stats.recentVisits) ? stats.recentVisits : [];
   const H24 = 24 * 60 * 60 * 1000;
   const D7 = 7 * DAY_MS;

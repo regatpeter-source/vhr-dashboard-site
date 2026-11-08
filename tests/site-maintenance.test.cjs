@@ -12,6 +12,12 @@ const { isRevokedAdminSession, INCIDENT_CUTOFF } = require('../services/admin-se
 const root = path.join(__dirname, '..');
 const serverSource = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
 
+test('vitrine analytics updates are serialized and admin stats refresh PostgreSQL state', () => {
+  assert.match(serverSource, /SELECT payload FROM vitrine_analytics WHERE id = \$1 FOR UPDATE/);
+  assert.match(serverSource, /await client\.query\('COMMIT'\)/);
+  assert.match(serverSource, /loadVitrineVisitStats\(USE_POSTGRES && db && db\.pool\)/);
+});
+
 test('canonical pages, permanent aliases, sitemap and noindex headers are consistent', async t => {
   const app = express();
   installSeoRoutes(app, root);
