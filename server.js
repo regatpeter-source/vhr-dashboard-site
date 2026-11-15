@@ -829,55 +829,16 @@ function corsOptionsDelegate(req, callback) {
 }
 
 const app = express();
-// Helmet avec CSP custom. HSTS désactivé pour éviter les upgrades HTTPS en LAN.
+// Helmet avec CSP custom (services/csp.js, Google Tag Manager autorisé sur le site vitrine uniquement).
+// HSTS désactivé pour éviter les upgrades HTTPS en LAN.
 app.use(helmet({
   hsts: false,
-  contentSecurityPolicy: {
-    useDefaults: false, // avoid implicit directives like upgrade-insecure-requests
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com', 'https://*.gstatic.com', 'https://cdn.jsdelivr.net'],
-      scriptSrcAttr: ["'unsafe-inline'"],
-      // CSP Level 3: script/style element-specific directives
-      scriptSrcElem: ["'self'", 'https://cdn.botpress.cloud', 'https://js.stripe.com', 'https://*.gstatic.com', 'https://cdn.jsdelivr.net'],
-      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://*.gstatic.com', 'https://*.google.com'],
-      styleSrcElem: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://*.gstatic.com', 'https://*.google.com'],
-      // Allow loading remote fonts (Google Fonts)
-      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-      imgSrc: ["'self'", 'data:', 'https://cdn-icons-png.flaticon.com', 'https://cdn.botpress.cloud'],
-      mediaSrc: ["'self'", 'blob:', 'data:'],
-      connectSrc: [
-        "'self'",
-        'https://api.stripe.com',
-        'https://messaging.botpress.cloud',
-        'https://cdn.botpress.cloud',
-        'https://www.vhr-dashboard-site.com',
-        'https://vhr-dashboard-site.com',
-        'https://vhr-dashboard-site.onrender.com',
-        // Autoriser toutes les cibles HTTP (LAN/clients) pour éviter les blocages CSP sur les nouveaux utilisateurs
-        'http:',
-        // Autoriser le WebSocket local/LAN pour l'audio
-        'ws:', 'wss:',
-        'http://localhost:3000',
-        'http://127.0.0.1:3000',
-        'http://192.168.1.3:3000',
-        'http://192.168.1.3',
-        // Autoriser l'instance locale utilisée par titouille44 pour la voix
-        'http://192.168.1.155:3000',
-        'http://192.168.1.155'
-      ],
-      frameSrc: ["'self'", 'https://messaging.botpress.cloud', 'https://checkout.stripe.com', 'https://js.stripe.com'],
-      objectSrc: ["'none'"],
-      baseUri: ["'self'"],
-      formAction: ["'self'"],
-      // Disable auto HTTPS upgrade to keep LAN HTTP working
-      upgradeInsecureRequests: null
-    }
-  },
+  contentSecurityPolicy: false,
   crossOriginOpenerPolicy: false,
   crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: false
 }));
+app.use(require('./services/csp').contentSecurityPolicy());
 // Set a friendlier referrer policy - allows third-party services like Google Translate
 // to work without CSP warnings
 app.use(helmet.referrerPolicy({ policy: 'no-referrer-when-downgrade' }));

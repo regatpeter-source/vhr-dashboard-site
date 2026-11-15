@@ -2,11 +2,13 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const express = require('express');
 const { installSeoRoutes, ORIGIN, PUBLIC_PAGES } = require('../services/seo');
+const { contentSecurityPolicy, GTM_INLINE_SCRIPT_HASH } = require('../services/csp');
 const fields = require('../services/subscription-fields');
 const { isRevokedAdminSession, INCIDENT_CUTOFF } = require('../services/admin-sessions');
 const root = path.join(__dirname, '..');
@@ -75,6 +77,49 @@ test('canonical pages, permanent aliases, sitemap and noindex headers are consis
   }
   for (const route of ['/.env', '/.git/index', '/wp-admin/install.php']) {
     assert.equal((await get(route)).status, 404, route);
+  }
+});
+
+test('Google Tag Manager is allowed by the CSP on showcase pages only', async t => {
+  const app = express();
+  app.use(contentSecurityPolicy());
+  installSeoRoutes(app, root);
+  app.use('/site-vitrine', express.static(path.join(root, 'site-vitrine')));
+  app.get('/account.html', (_req, res) => res.sendFile(path.join(root, 'account.html')));
+  app.get('/vhr-dashboard-pro.html', (_req, res) => res.send('<p>dashboard</p>'));
+  const server = await new Promise(resolve => {
+    const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
+  });
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const get = route => fetch(`http://127.0.0.1:${server.address().port}${route}`, { redirect: 'manual' });
+  const directivesOf = response => Object.fromEntries(
+    response.headers.get('content-security-policy').split(';')
+      .map(part => part.trim().split(/\s+/))
+      .map(([name, ...sources]) => [name, sources])
+  );
+
+  for (const route of ['/', '/site-vitrine/account.html', ...PUBLIC_PAGES.map(page => '/site-vitrine/' + page)]) {
+    const response = await get(route + '?gtm_debug=1');
+    assert.equal(response.status, 200, route);
+    const directives = directivesOf(response);
+    const inline = (await response.text()).replace(/\r\n?/g, '\n').match(/<script>([^<]*GTM-T9JTQB64[^<]*)<\/script>/);
+    assert.ok(inline, route);
+    assert.equal(`'sha256-${crypto.createHash('sha256').update(inline[1]).digest('base64')}'`, GTM_INLINE_SCRIPT_HASH, route);
+    for (const name of ['script-src', 'script-src-elem']) {
+      assert.ok(directives[name].includes(GTM_INLINE_SCRIPT_HASH), `${route} ${name}`);
+      assert.ok(directives[name].includes('https://www.googletagmanager.com'), `${route} ${name}`);
+      assert.ok(!directives[name].includes("'unsafe-inline'"), `${route} ${name}`);
+    }
+    for (const name of ['img-src', 'connect-src', 'frame-src']) {
+      assert.ok(directives[name].includes('https://www.googletagmanager.com'), `${route} ${name}`);
+    }
+  }
+  for (const route of ['/account.html', '/site-vitrine/account.clean.html', '/vhr-dashboard-pro.html']) {
+    const response = await get(route);
+    assert.equal(response.status, 200, route);
+    const csp = response.headers.get('content-security-policy');
+    assert.ok(directivesOf(response)['script-src-elem'].includes("'self'"), route);
+    assert.doesNotMatch(csp, /googletagmanager|sha256-/, route);
   }
 });
 
