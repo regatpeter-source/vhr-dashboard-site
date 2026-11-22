@@ -109,7 +109,8 @@ function resolveAdminPasswordHash(forceRehash = false) {
 }
 // Shared secret used when syncing users from the prod auth API to the local pack.
 // No hardcoded fallback: if not provided, sync-user is disabled.
-const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
+const integrationAuth = require('./services/integration-auth');
+const SYNC_USERS_SECRET = integrationAuth.configuredSyncSecret(process.env.SYNC_USERS_SECRET);
 const SYNC_TARGET_URLS_RAW = process.env.SYNC_TARGET_URLS || process.env.DASHBOARD_SYNC_TARGETS || '';
 const SYNC_TARGET_BASE_URLS = SYNC_TARGET_URLS_RAW
   .split(/[,;\s]+/)
@@ -3808,7 +3809,7 @@ const DASHBOARD_MAX_USERS_PER_ACCOUNT = Number.parseInt(process.env.DASHBOARD_MA
 const DASHBOARD_MULTI_USERS_ENABLED = (process.env.DASHBOARD_MULTI_USERS_ENABLED || '0') === '1';
 const RELAY_STREAM_ENABLED = (process.env.RELAY_STREAM_ENABLED || '1') !== '0';
 const RELAY_STREAM_BASE_URL = (process.env.RELAY_STREAM_BASE_URL || process.env.RELAY_BASE_URL || 'https://www.vhr-dashboard-site.com').replace(/\/+$/, '');
-const RELAY_STREAM_SECRET = process.env.RELAY_STREAM_SECRET || SYNC_USERS_SECRET || '';
+const RELAY_STREAM_SECRET = process.env.RELAY_STREAM_SECRET || '';
 
 function isPrimaryAccount(user) {
   if (!user) return false;
@@ -5123,21 +5124,9 @@ app.post('/api/admin/init-users', async (req, res) => {
 });
 
 // --- Synchronisation des comptes depuis le site vitrine (HTTPS) vers le backend Dashboard (PostgreSQL/JSON) ---
-// Usage: POST /api/admin/sync-user avec en-tête x-sync-secret ou body.secret = SYNC_USERS_SECRET
+// Réservé aux synchronisations serveur à serveur.
 // Payload attendu: { username, email, role, passwordHash?, password?, stripeCustomerId?, subscriptionStatus? }
-app.post('/api/admin/sync-user', async (req, res) => {
-  const providedSecret = req.headers['x-sync-secret'] || req.body?.secret || req.query?.secret;
-  const secretValid = SYNC_USERS_SECRET && providedSecret === SYNC_USERS_SECRET;
-  if (!secretValid) {
-    if (!SYNC_USERS_SECRET) {
-      if (!isLocalRequest(req)) {
-        return res.status(403).json({ ok: false, error: 'SYNC_USERS_SECRET non configuré' });
-      }
-    } else {
-      return res.status(403).json({ ok: false, error: 'Secret invalide' });
-    }
-  }
-
+app.post('/api/admin/sync-user', integrationAuth.requireSyncSecret(SYNC_USERS_SECRET), async (req, res) => {
   const { username, email, role = 'user', password, passwordHash, stripeCustomerId, subscriptionStatus, demoStartDate, demoExtensionDays, demoStartSource } = req.body || {};
   if (!username) {
     return res.status(400).json({ ok: false, error: 'username requis' });
@@ -5215,21 +5204,6 @@ app.post('/api/admin/sync-user', async (req, res) => {
     console.error('[api/admin/sync-user] error:', e && e.message ? e.message : e);
     return res.status(500).json({ ok: false, error: e.message || 'Server error' });
   }
-});
-
-// Fournit aux clients locaux le secret de synchronisation actif (pour éviter les builds figés)
-app.get('/api/admin/sync-config', (req, res) => {
-  const clientAddress = getRequestAddress(req);
-  if (!isLocalRequest(req)) {
-    console.warn(`[sync-config] blocked request from ${clientAddress}`);
-    return res.status(403).json({ ok: false, error: 'Accessible uniquement depuis localhost' });
-  }
-  console.info(`[sync-config] allowed local request from ${clientAddress}`);
-  res.json({
-    ok: true,
-    syncSecret: SYNC_USERS_SECRET || null,
-    syncUserEndpoint: SYNC_USER_ENDPOINT
-  });
 });
 
 app.get('/.well-known/traffic-advice', (req, res) => {
@@ -8409,6 +8383,8 @@ const runAdbCommand = (serial, args, timeout = 30000) => {
   });
 };
 
+require('./services/headset-apk').mountHeadsetApk(app, authMiddleware, requireDashboardAccess, runAdbCommand);
+
 // Safe ADB command (never throws) for preflight checks
 const runAdbCommandSafe = (serial, args, timeout = 15000) => {
   return new Promise((resolve) => {
@@ -11587,24 +11563,8 @@ app.get('/api/billing/subscriptions', authMiddleware, async (req, res) => {
 });
 
 // Stripe webhook endpoint: persist invoice and subscription events to user record
-const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET_DEV || null;
-app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
-  try {
-    if (stripeWebhookSecret) {
-      // constructEvent expects raw body as string or Buffer
-      if (Buffer.isBuffer(req.body)) event = stripe.webhooks.constructEvent(req.body, sig, stripeWebhookSecret);
-      else event = stripe.webhooks.constructEvent(JSON.stringify(req.body), sig, stripeWebhookSecret);
-    } else {
-      // If no webhook secret set (dev), prefer already-parsed body or parse raw string
-      if (Buffer.isBuffer(req.body)) event = JSON.parse(req.body.toString());
-      else event = req.body;
-    }
-  } catch (e) {
-    console.error('[Stripe] webhook failed to parse/verify:', e && e.message);
-    return res.status(400).send(`Webhook error: ${e && e.message}`);
-  }
+app.post('/webhook', integrationAuth.signedStripeWebhook(stripe, process.env), async (req, res) => {
+  const event = req.stripeEvent;
 
   // Handle a subset of events and persist changes per user
   try {

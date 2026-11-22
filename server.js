@@ -89,10 +89,8 @@ function resolveAdminPasswordHash(forceRehash = false) {
   }
   return cachedAdminPasswordHash;
 }
-// Shared secret used when syncing users from the prod auth API to the local pack.
-// Fallbacks to the same value embedded in dashboard-pro.js to avoid 403 if the
-// environment variable is missing on local installs.
-const SYNC_USERS_SECRET = process.env.SYNC_USERS_SECRET || ADMIN_INIT_SECRET || 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
+const integrationAuth = require('./services/integration-auth');
+const SYNC_USERS_SECRET = integrationAuth.configuredSyncSecret(process.env.SYNC_USERS_SECRET);
 const SYNC_TARGETS_JSON = (process.env.SYNC_TARGETS_JSON || '').trim();
 const SYNC_TARGET_URLS_RAW = process.env.SYNC_TARGET_URLS || process.env.DASHBOARD_SYNC_TARGETS || '';
 const SYNC_TARGET_TIMEOUT_MS = Math.max(2000, Number.parseInt(process.env.SYNC_TARGET_TIMEOUT_MS || '6000', 10) || 6000);
@@ -190,7 +188,7 @@ function normalizeSyncTargetEntry(entry) {
   if (!link) return null;
   const sanitizedUrl = link.replace(/\/+$/g, '');
   const candidateSecret = (entry.secret || entry.syncSecret || entry.accessSecret || entry.authSecret || '').toString().trim();
-  const secret = candidateSecret || SYNC_USERS_SECRET || '';
+  const secret = integrationAuth.configuredSyncSecret(candidateSecret || SYNC_USERS_SECRET);
   if (!secret) {
     console.warn('[sync] Missing secret for target', sanitizedUrl); // Do not log secret
     return null;
@@ -1770,11 +1768,6 @@ async function sendAccountConfirmationEmail(user, options = {}) {
 
   const verificationEnforced = shouldEnforceEmailVerification(normalizedUser);
   const needsVerification = (verificationEnforced || options.forceVerification === true) && !isEmailVerified(normalizedUser);
-  let tokenInfo = null;
-  if (needsVerification) {
-    tokenInfo = issueEmailVerificationToken(normalizedUser, { forceNew: true });
-  }
-
   if (!emailUser || !emailPass) {
     console.warn('[email] SMTP not configured, skip confirmation email');
     return { success: false, error: 'smtp_not_configured' };
@@ -1783,6 +1776,11 @@ async function sendAccountConfirmationEmail(user, options = {}) {
   if (!emailTransporter) {
     console.error('[email] emailTransporter not initialized');
     return { success: false, error: 'transporter_not_initialized' };
+  }
+
+  let tokenInfo = null;
+  if (needsVerification) {
+    tokenInfo = await issueEmailVerificationToken(normalizedUser, { forceNew: true });
   }
 
   let verificationLink = null;
@@ -1867,7 +1865,7 @@ async function sendAccountConfirmationEmail(user, options = {}) {
         if (freshUser) {
           freshUser.emailVerificationSentAt = null;
           freshUser.updatedAt = new Date().toISOString();
-          persistUser(freshUser);
+          await persistUser(freshUser);
         }
       } catch (clearErr) {
         console.warn('[email] Unable to clear emailVerificationSentAt after failure:', clearErr && clearErr.message ? clearErr.message : clearErr);
@@ -4069,7 +4067,51 @@ async function findUserByUsernameAsync(username) {
   return getUserByUsername(username);
 }
 
-function issueEmailVerificationToken(user, { forceNew = false } = {}) {
+async function retryPendingAccountRegistration(req, res, { username, email, password }, existingUser = null) {
+  const user = existingUser ? normalizeUserRecord(existingUser) : await findUserByUsernameAsync(username);
+  if (!user || normalizeEmailValue(user.email) !== email ||
+      !shouldEnforceEmailVerification(user) || AUTO_LOGIN_UNVERIFIED || isEmailVerified(user) ||
+      isUserDeletedIdentifier(user.username) || isUserDeletedIdentifier(user.email)) return false;
+
+  const storedHash = user.passwordhash || user.passwordHash;
+  if (!storedHash || !await bcrypt.compare(password, storedHash)) return false;
+
+  const sentAt = user.emailVerificationSentAt || user.emailverificationsentat;
+  if (sentAt && Date.now() - new Date(sentAt).getTime() < 2 * 60 * 1000) {
+    res.status(409).json({
+      ok: false,
+      code: 'email_verification_pending',
+      verificationPending: true,
+      verificationEmailSent: true,
+      email: user.email,
+      error: 'Un lien de confirmation vient d’être envoyé. Vérifiez votre boîte de réception.'
+    });
+    return true;
+  }
+
+  let result = null;
+  try {
+    result = await sendAccountConfirmationEmail(user, { req, resend: true });
+  } catch (error) {
+    console.error('[registration] confirmation retry failed:', error && error.message);
+  }
+  const sent = !!result && result.success !== false;
+  res.status(sent ? 200 : 202).json({
+    ok: true,
+    code: sent ? 'verification_email_resent' : 'verification_email_pending',
+    verificationRequired: true,
+    verificationPending: true,
+    verificationEmailSent: sent,
+    autoLogin: false,
+    email: user.email,
+    message: sent
+      ? 'Compte déjà créé. Un nouvel email de confirmation a été envoyé.'
+      : 'Compte déjà créé, mais l’email de confirmation n’a pas pu être envoyé. Vous pouvez réessayer.'
+  });
+  return true;
+}
+
+async function issueEmailVerificationToken(user, { forceNew = false } = {}) {
   if (!user || !user.email) return null;
   const normalized = normalizeUserRecord(user);
 
@@ -4095,7 +4137,7 @@ function issueEmailVerificationToken(user, { forceNew = false } = {}) {
   normalized.emailVerificationExpiresAt = new Date(now + EMAIL_VERIFICATION_TTL_MS).toISOString();
   normalized.emailVerificationSentAt = new Date().toISOString();
 
-  persistUser(normalized);
+  await persistUser(normalized);
 
   return {
     token: rawToken,
@@ -4369,7 +4411,7 @@ const JWT_EXPIRES = '2h';
 const DASHBOARD_MAX_USERS_PER_ACCOUNT = Number.parseInt(process.env.DASHBOARD_MAX_USERS_PER_ACCOUNT || '1', 10) || 1;
 const DASHBOARD_MULTI_USERS_ENABLED = (process.env.DASHBOARD_MULTI_USERS_ENABLED || '0') === '1';
 const RELAY_STREAM_ENABLED = (process.env.RELAY_STREAM_ENABLED || '1') !== '0';
-const RELAY_STREAM_SECRET = process.env.RELAY_STREAM_SECRET || SYNC_USERS_SECRET || '';
+const RELAY_STREAM_SECRET = process.env.RELAY_STREAM_SECRET || '';
 
 function isSecureRequest(req) {
   if (!req) return false;
@@ -5475,31 +5517,16 @@ app.post('/api/admin/init-users', async (req, res) => {
 });
 
 // --- Synchronisation des comptes depuis le site vitrine (HTTPS) vers le backend Dashboard (PostgreSQL/JSON) ---
-// Usage: POST /api/admin/sync-user avec en-tête x-sync-secret ou body.secret = SYNC_USERS_SECRET
+// Réservé aux synchronisations serveur à serveur.
 // Payload attendu: { username, email, role, passwordHash?, password?, stripeCustomerId?, subscriptionStatus? }
-app.post('/api/admin/sync-user', async (req, res) => {
-  const providedSecret = req.headers['x-sync-secret'] || req.body?.secret || req.query?.secret;
-  const secretValid = SYNC_USERS_SECRET && providedSecret === SYNC_USERS_SECRET;
-  const authUser = tryDecodeUser(req);
-  if (!secretValid && !authUser) {
-    const msg = SYNC_USERS_SECRET ? 'Secret invalide' : 'SYNC_USERS_SECRET non configuré';
-    return res.status(403).json({ ok: false, error: msg });
-  }
-
+app.post('/api/admin/sync-user', integrationAuth.requireSyncSecret(SYNC_USERS_SECRET), async (req, res) => {
   const payload = req.body || {};
-  const targetUsername = (payload.username || payload.name || authUser?.username || '').toString().trim();
+  const targetUsername = (payload.username || payload.name || '').toString().trim();
   if (!targetUsername) {
     return res.status(400).json({ ok: false, error: 'username requis' });
   }
 
-  if (!secretValid && authUser && authUser.username !== targetUsername && authUser.role !== 'admin') {
-    return res.status(403).json({ ok: false, error: 'Impossible de synchroniser un autre utilisateur' });
-  }
-
   payload.username = targetUsername;
-  if (!secretValid && authUser && !payload.email) {
-    payload.email = authUser.email || null;
-  }
 
   const { email, role = 'user', password, passwordHash, stripeCustomerId, subscriptionStatus, demoStartDate, demoExtensionDays, demoStartSource, isPrimary } = payload;
   const username = payload.username;
@@ -5586,26 +5613,6 @@ app.post('/api/admin/sync-user', async (req, res) => {
   } catch (e) {
     console.error('[api/admin/sync-user] error:', e && e.message ? e.message : e);
     return res.status(500).json({ ok: false, error: e.message || 'Server error' });
-  }
-});
-
-// Fournit aux clients locaux le secret de synchronisation actif (pour éviter les builds figés)
-app.get('/api/admin/sync-config', (req, res) => {
-  try {
-    const clientAddress = getRequestAddress(req);
-    if (!isLocalRequest(req)) {
-      console.warn(`[sync-config] blocked request from ${clientAddress}`);
-      return res.json({ ok: false, error: 'Accessible uniquement depuis localhost' });
-    }
-    console.info(`[sync-config] allowed local request from ${clientAddress}`);
-    return res.json({
-      ok: true,
-      syncSecret: SYNC_USERS_SECRET || null,
-      syncUserEndpoint: SYNC_USER_ENDPOINT
-    });
-  } catch (e) {
-    console.warn('[sync-config] error:', e && e.message ? e.message : e);
-    return res.json({ ok: false, error: 'sync-config unavailable' });
   }
 });
 
@@ -6010,6 +6017,9 @@ app.post('/api/auth/register', async (req, res) => {
     if (USE_POSTGRES && db) {
       const existingUser = await db.getUserByUsername(normalizedUsername);
       if (existingUser) {
+        if (await retryPendingAccountRegistration(req, res, {
+          username: normalizedUsername, email: normalizedEmail, password
+        }, existingUser)) return;
         return res.status(400).json({ ok: false, error: 'Le nom d\'utilisateur existe déjà' });
       }
       const emailCheck = await db.pool.query('SELECT 1 FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [normalizedEmail]);
@@ -6017,7 +6027,11 @@ app.post('/api/auth/register', async (req, res) => {
         return res.status(400).json({ ok: false, error: 'Cet email est déjà utilisé' });
       }
     } else {
-      if (getUserByUsername(normalizedUsername)) {
+      const existingUser = getUserByUsername(normalizedUsername);
+      if (existingUser) {
+        if (await retryPendingAccountRegistration(req, res, {
+          username: normalizedUsername, email: normalizedEmail, password
+        }, existingUser)) return;
         return res.status(400).json({ ok: false, error: 'Le nom d\'utilisateur existe déjà' });
       }
       if (getUserByEmail(normalizedEmail)) {
@@ -6092,9 +6106,7 @@ app.post('/api/auth/register', async (req, res) => {
       console.error('[email] confirmation error:', e && e.message);
     }
 
-    if (verificationEnforced && (!confirmationResult || confirmationResult.success === false)) {
-      return res.status(500).json({ ok: false, error: 'Impossible d\'envoyer l\'email de confirmation pour le moment. Merci de réessayer dans quelques minutes.' });
-    }
+    const verificationEmailSent = !!confirmationResult && confirmationResult.success !== false;
     
     const shouldAutoLogin = !verificationEnforced || AUTO_LOGIN_UNVERIFIED;
     const emailVerifiedFlag = isEmailVerifiedOrBypassed(newUser);
@@ -6107,13 +6119,17 @@ app.post('/api/auth/register', async (req, res) => {
       res.clearCookie('vhr_token', getCookieSecurityOptions(req));
     }
 
-    res.json({ 
+    res.status(verificationEnforced && !verificationEmailSent ? 202 : 200).json({
       ok: true,
       verificationRequired: verificationEnforced,
+      verificationPending: verificationEnforced && !verificationEmailSent,
+      verificationEmailSent,
       autoLogin: shouldAutoLogin,
       token,
       message: verificationEnforced
-        ? 'Compte créé. Merci de confirmer votre adresse email pour activer votre accès.'
+        ? verificationEmailSent
+          ? 'Compte créé. Merci de confirmer votre adresse email pour activer votre accès.'
+          : 'Compte créé, mais l’email de confirmation n’a pas pu être envoyé. Vous pouvez réessayer.'
         : 'Compte créé et connecté.',
       user: {
         name: newUser.username,
@@ -11108,7 +11124,7 @@ function handleRelaySocket(kind, ws, req) {
     return;
   }
 
-  if (role === 'sender' && kind === 'video' && RELAY_STREAM_SECRET && secret !== RELAY_STREAM_SECRET) {
+  if (role === 'sender' && kind === 'video' && (!RELAY_STREAM_SECRET || secret !== RELAY_STREAM_SECRET)) {
     console.warn('[Relay] Video sender rejected (secret mismatch) session=', sessionCode, 'serial=', serial);
     ws.close();
     return;
@@ -11745,24 +11761,8 @@ app.get('/api/billing/subscriptions', authMiddleware, async (req, res) => {
 });
 
 // Stripe webhook endpoint: persist invoice and subscription events to user record
-const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET_DEV || null;
-app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
-  try {
-    if (stripeWebhookSecret) {
-      // constructEvent expects raw body as string or Buffer
-      if (Buffer.isBuffer(req.body)) event = stripe.webhooks.constructEvent(req.body, sig, stripeWebhookSecret);
-      else event = stripe.webhooks.constructEvent(JSON.stringify(req.body), sig, stripeWebhookSecret);
-    } else {
-      // If no webhook secret set (dev), prefer already-parsed body or parse raw string
-      if (Buffer.isBuffer(req.body)) event = JSON.parse(req.body.toString());
-      else event = req.body;
-    }
-  } catch (e) {
-    console.error('[Stripe] webhook failed to parse/verify:', e && e.message);
-    return res.status(400).send(`Webhook error: ${e && e.message}`);
-  }
+app.post('/webhook', integrationAuth.signedStripeWebhook(stripe, process.env), async (req, res) => {
+  const event = req.stripeEvent;
 
   // Handle a subset of events and persist changes per user
   try {
@@ -11997,13 +11997,24 @@ app.post('/api/register', async (req, res) => {
     // unique username/email (PostgreSQL vs fallback storage)
     if (USE_POSTGRES && db) {
       const existingUser = await db.getUserByUsername(normalizedUsername);
-      if (existingUser) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
+      if (existingUser) {
+        if (await retryPendingAccountRegistration(req, res, {
+          username: normalizedUsername, email: normalizedEmail, password
+        }, existingUser)) return;
+        return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
+      }
       if (normalizedEmail) {
         const emailCheck = await db.pool.query('SELECT 1 FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1', [normalizedEmail]);
         if (emailCheck.rowCount > 0) return res.status(400).json({ ok: false, error: 'Cet email est déjà utilisé' });
       }
     } else {
-      if (getUserByUsername(normalizedUsername)) return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
+      const existingUser = getUserByUsername(normalizedUsername);
+      if (existingUser) {
+        if (await retryPendingAccountRegistration(req, res, {
+          username: normalizedUsername, email: normalizedEmail, password
+        }, existingUser)) return;
+        return res.status(400).json({ ok: false, error: 'Nom d\'utilisateur déjà utilisé' });
+      }
       if (getUserByEmail(normalizedEmail)) return res.status(400).json({ ok: false, error: 'Cet email est déjà utilisé' });
     }
     const passwordHash = await bcrypt.hash(password, 10);
@@ -12056,9 +12067,7 @@ app.post('/api/register', async (req, res) => {
     } catch (mailErr) {
       console.error('[api/register] confirmation email error:', mailErr && mailErr.message ? mailErr.message : mailErr);
     }
-    if (verificationEnforced && (!confirmationResult || confirmationResult.success === false)) {
-      return res.status(500).json({ ok: false, error: 'Impossible d\'envoyer l\'email de confirmation pour le moment. Merci de réessayer dans quelques minutes.' });
-    }
+    const verificationEmailSent = !!confirmationResult && confirmationResult.success !== false;
     const shouldAutoLogin = !verificationEnforced || AUTO_LOGIN_UNVERIFIED;
     const emailVerifiedFlag = isEmailVerifiedOrBypassed(newUser);
     let token = null;
@@ -12069,13 +12078,17 @@ app.post('/api/register', async (req, res) => {
       // Prevent stale authenticated cookie from a previous session
       res.clearCookie('vhr_token', getCookieSecurityOptions(req));
     }
-    res.json({ 
+    res.status(verificationEnforced && !verificationEmailSent ? 202 : 200).json({
       ok: true, 
       verificationRequired: verificationEnforced,
+      verificationPending: verificationEnforced && !verificationEmailSent,
+      verificationEmailSent,
       autoLogin: shouldAutoLogin,
       token,
       message: verificationEnforced
-        ? 'Compte créé. Un email de confirmation a été envoyé.'
+        ? verificationEmailSent
+          ? 'Compte créé. Un email de confirmation a été envoyé.'
+          : 'Compte créé, mais l’email de confirmation n’a pas pu être envoyé. Vous pouvez réessayer.'
         : 'Compte créé et connecté.',
       userId: newUser.id, 
       username: newUser.username, 

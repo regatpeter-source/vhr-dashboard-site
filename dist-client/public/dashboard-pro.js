@@ -2915,13 +2915,10 @@ const AUTH_API_BASE = (() => {
 	if (FORCE_PROD_AUTH) return PRODUCTION_AUTH_ORIGIN;
 	return PRODUCTION_AUTH_ORIGIN;
 })();
-const DEFAULT_SYNC_USERS_SECRET = 'yZ2_viQfMWgyUBjBI-1Bb23ez4VyAC_WUju_W2X_X-s';
 const API_BASE = '/api';
 const SESSION_HUB_URL = (localStorage.getItem('vhr_session_hub') || '').trim() || 'https://www.vhr-dashboard-site.com';
 const SESSION_USE_CENTRAL = SESSION_HUB_URL && SESSION_HUB_URL !== window.location.origin;
 const ENABLE_GUEST_DEMO = false;
-let cachedSyncUsersSecret = DEFAULT_SYNC_USERS_SECRET;
-let syncSecretPromise = null;
 const REMOTE_AUTH_STORAGE_KEY = 'vhr_remote_token';
 
 function getRemoteAuthToken() {
@@ -2932,23 +2929,6 @@ function getRemoteAuthToken() {
 	}
 }
 
-function getSyncUsersSecret() {
-	if (syncSecretPromise) return syncSecretPromise;
-	syncSecretPromise = fetch('/api/admin/sync-config', {
-		credentials: 'include'
-	})
-	.then(async res => {
-		if (!res.ok) throw new Error('sync config unavailable');
-		const payload = await res.json().catch(() => null);
-		return payload?.syncSecret || DEFAULT_SYNC_USERS_SECRET;
-	})
-	.catch(() => DEFAULT_SYNC_USERS_SECRET)
-	.then(secret => {
-		cachedSyncUsersSecret = secret;
-		return cachedSyncUsersSecret;
-	});
-	return syncSecretPromise;
-}
 const socket = io({
 	reconnection: true,
 	reconnectionAttempts: 5,
@@ -5913,18 +5893,9 @@ window.uploadDevGameToHeadset = async function(serial, deviceName) {
 		const file = e.target.files[0];
 		if (!file) return;
 		
-		const formData = new FormData();
-		formData.append('serial', serial);
-		formData.append('apk', file);
-		
 		try {
 			showToast('📤 Envoi du fichier en cours...', 'info');
-			const res = await fetch('/api/upload-dev-game', {
-				method: 'POST',
-				body: formData
-			});
-			
-			const data = await res.json();
+			const data = await uploadLocalApk(serial, file);
 			if (data.ok) {
 				showToast(`✅ APK envoyé avec succès: ${file.name}`, 'success');
 				setTimeout(() => showStorageDialog({ serial, name: deviceName }), 1000);
@@ -5939,6 +5910,13 @@ window.uploadDevGameToHeadset = async function(serial, deviceName) {
 	input.click();
 };
 
+function uploadLocalApk(serial, file) {
+	return api('/api/upload-dev-game?serial=' + encodeURIComponent(serial), {
+		method: 'POST', headers: { 'Content-Type': 'application/vnd.android.package-archive' },
+		body: file, timeout: 300000, _skipSessionProxy: true
+	});
+}
+
 window.installDevGameOnHeadsets = async function(serials) {
 	const uniqueSerials = Array.from(new Set((serials || []).filter(Boolean)));
 	if (uniqueSerials.length === 0) {
@@ -5952,23 +5930,13 @@ window.installDevGameOnHeadsets = async function(serials) {
 		const file = e.target.files[0];
 		if (!file) return;
 
-		const uploadUrl = (typeof resolveApiUrl === 'function')
-			? resolveApiUrl('/api/upload-dev-game')
-			: '/api/upload-dev-game';
 		showToast(`📤 Envoi de l'APK vers ${uniqueSerials.length} casque(s)...`, 'info');
 		const uploaded = [];
 		const uploadFailed = [];
 
 		for (const serial of uniqueSerials) {
-			const formData = new FormData();
-			formData.append('serial', serial);
-			formData.append('apk', file);
 			try {
-				const res = await fetch(uploadUrl, {
-					method: 'POST',
-					body: formData
-				});
-				const data = await res.json().catch(() => null);
+				const data = isRemoteSessionSerial(serial) ? null : await uploadLocalApk(serial, file);
 				if (data && data.ok) {
 					uploaded.push(serial);
 				} else {
@@ -6704,20 +6672,6 @@ window.loginUser = async function() {
 				} catch (e) {}
 			}
 			const syncedUsername = data.user?.username || data.user?.name || identifier;
-			const syncedEmail = data.user?.email || identifier;
-			try {
-				const syncSecret = await getSyncUsersSecret();
-				await fetch('/api/admin/sync-user', {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						'x-sync-secret': syncSecret
-					},
-					body: JSON.stringify({ username: syncedUsername, email: syncedEmail, role: 'user', password })
-				});
-			} catch (syncErr) {
-				console.warn('[loginUser] sync-user failed', syncErr);
-			}
 
 			// Obtenir un token local pour les requêtes HTTP/localhost
 			let localTokenApplied = false;

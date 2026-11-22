@@ -152,7 +152,7 @@
     }
   }
 
-  function renderVerificationPrompt(emailHint) {
+  function renderVerificationPrompt(emailHint, { emailSent = true } = {}) {
     const guessedEmail = (emailHint || pendingVerificationEmail || document.getElementById('signupEmail')?.value || '').trim();
     pendingVerificationEmail = guessedEmail;
     if (!loginMessage) return;
@@ -160,7 +160,7 @@
     loginMessage.innerHTML = `
       <div style="background:#fff4e5;border-left:4px solid #f5a524;padding:12px;border-radius:6px;">
         <strong>Confirmez votre email${guessedEmail ? ' : ' + guessedEmail : ''}</strong>
-        <p style="margin:6px 0 8px;">Vérifiez votre boîte de réception et cliquez sur le lien de validation.</p>
+        <p style="margin:6px 0 8px;">${emailSent ? 'Vérifiez votre boîte de réception et cliquez sur le lien de validation.' : 'Votre compte est créé, mais l’email n’a pas pu être envoyé. Vous pouvez réessayer ci-dessous.'}</p>
         <button id="resendVerificationBtn" class="cta-secondary">Renvoyer l'email</button>
       </div>`;
 
@@ -352,7 +352,7 @@
         clearAuthToken();
         await api('/api/logout', { method: 'POST' });
         pendingVerificationEmail = email;
-        renderVerificationPrompt(email);
+        renderVerificationPrompt(email, { emailSent: res.verificationEmailSent !== false });
         return;
       }
       loginMessage.textContent = 'Compte créé ✓ Vous êtes connecté(e).'; 
@@ -367,7 +367,9 @@
         }
       }, 1200);
     }
-    else { loginMessage.textContent = 'Erreur: ' + toFriendlyError(res && res.error, 'Erreur inconnue'); }
+    else if (res && res.code === 'email_verification_pending') {
+      renderVerificationPrompt(email, { emailSent: true });
+    } else { loginMessage.textContent = 'Erreur: ' + toFriendlyError(res && res.error, 'Erreur inconnue'); }
   });
 
   if (logoutBtn) logoutBtn.addEventListener('click', async () => { setToken(null); await api('/api/logout', { method: 'POST' }); showLoggedOut(); });
